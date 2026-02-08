@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { doc, getDoc, collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { db } from "../firebase";
 import { adminAcceptRequest, adminRejectRequest } from "../services/adminrequestservice";
@@ -171,6 +171,13 @@ function formatDT(createdAt) {
 export default function AdminRequestDetailsScreen() {
   const { requestId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+
+const goBackToList = () => {
+  // Preserve the current Admin tab/search when going back
+  const qs = String(location?.search || "");
+  navigate(`/app/admin${qs}`, { replace: true });
+};
 
   const [loading, setLoading] = useState(true);
   const [req, setReq] = useState(null);
@@ -342,7 +349,7 @@ export default function AdminRequestDetailsScreen() {
               <p className="text-sm text-zinc-600">Admin view</p>
             </div>
             <button
-              onClick={() => navigate("/app/admin")}
+              onClick={goBackToList}
               className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
               type="button"
             >
@@ -396,7 +403,7 @@ export default function AdminRequestDetailsScreen() {
           </div>
 
           <button
-            onClick={() => navigate("/app/admin")}
+            onClick={goBackToList}
             className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
             type="button"
           >

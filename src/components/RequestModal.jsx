@@ -1,7 +1,9 @@
 // ✅ RequestModal.jsx (COPY-PASTE)
-// Pay gate + PDF picker (metadata + File[] passed up)
-// - returns: dummyFiles (File[]) so parent can create attachments subcollection
-// - returns: requestUploadMeta (metadata) so admin can see “uploaded docs” info immediately
+// Same logic as your current modal ✅
+// + Sticky CTA (Pay / Send / Cancel) always visible ✅
+// + Apple-like momentum scroll on mobile ✅
+// + Safer scroll behavior: body lock, overscroll containment ✅
+// + enableAttachments prop: hide upload unless enabled ✅
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -142,10 +144,12 @@ export default function RequestModal({
   defaultName = "",
   defaultPhone = "",
   defaultEmail = "",
-  onPay, // optional: parent can navigate to payment screen
+  onPay,
   maxPdfMb = 10,
+  enableAttachments = true, // ✅ NEW: hide upload section unless true
 }) {
   const panelRef = useRef(null);
+  const scrollRef = useRef(null);
 
   const [name, setName] = useState(defaultName);
   const [phone, setPhone] = useState(defaultPhone);
@@ -170,8 +174,29 @@ export default function RequestModal({
       setPaid(false);
       setErr("");
       setLoading(false);
+
+      requestAnimationFrame(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = 0;
+      });
     }
   }, [open, defaultName, defaultPhone, defaultEmail]);
+
+  // ✅ Lock background scroll while modal open
+  useEffect(() => {
+    if (!open) return;
+
+    const prevOverflow = document.body.style.overflow;
+    const prevPaddingRight = document.body.style.paddingRight;
+
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = "hidden";
+    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.style.paddingRight = prevPaddingRight;
+    };
+  }, [open]);
 
   // ESC to close (when not loading)
   useEffect(() => {
@@ -199,8 +224,8 @@ export default function RequestModal({
       return;
     }
     setErr("");
-    setPaid(true); // ✅ dumb gate for now
-    onPay?.(); // optional: parent can route to payment screen
+    setPaid(true);
+    onPay?.();
   };
 
   const submit = async () => {
@@ -215,17 +240,22 @@ export default function RequestModal({
     if (!cleanPhone) return setErr("Please enter your phone / WhatsApp.");
     if (!paid) return setErr("Please press Pay first to unlock sending.");
 
-    // ✅ Validate picked files (PDF only)
-    const maxBytes = maxPdfMb * 1024 * 1024;
+    // ✅ only validate files if attachments enabled
+    let fileMetas = [];
+    if (enableAttachments) {
+      const maxBytes = maxPdfMb * 1024 * 1024;
 
-    const badType = pickedFiles.find((f) => !isPdfFile(f));
-    if (badType) return setErr("Only PDF files are allowed for now.");
+      const badType = pickedFiles.find((f) => !isPdfFile(f));
+      if (badType) return setErr("Only PDF files are allowed for now.");
 
-    const tooBig = pickedFiles.find((f) => (f?.size || 0) > maxBytes);
-    if (tooBig) return setErr(`One file is too large. Max size is ${maxPdfMb}MB.`);
+      const tooBig = pickedFiles.find((f) => (f?.size || 0) > maxBytes);
+      if (tooBig) return setErr(`One file is too large. Max size is ${maxPdfMb}MB.`);
 
-    // ✅ Build metadata for Firestore request doc
-    const fileMetas = Array.isArray(pickedFiles) ? pickedFiles.map(fileToMeta) : [];
+      fileMetas = Array.isArray(pickedFiles) ? pickedFiles.map(fileToMeta) : [];
+    } else {
+      // if attachments disabled, ensure we don't accidentally send files
+      if (pickedFiles.length) setPickedFiles([]);
+    }
 
     setLoading(true);
     try {
@@ -236,12 +266,11 @@ export default function RequestModal({
         city: cleanCity,
         note: String(note || "").trim(),
 
-        // ✅ IMPORTANT: pass real File[] upward (parent writes attachments subcollection)
-        dummyFiles: pickedFiles,
+        // ✅ Only pass files up when enabled
+        dummyFiles: enableAttachments ? pickedFiles : [],
 
-        // ✅ Also pass metadata upward (parent stores on serviceRequests doc)
         requestUploadMeta:
-          fileMetas.length > 0
+          enableAttachments && fileMetas.length > 0
             ? {
                 count: fileMetas.length,
                 files: fileMetas,
@@ -249,7 +278,6 @@ export default function RequestModal({
               }
             : null,
 
-        // Pay gate fields
         paid: true,
         paymentMeta: {
           status: "paid_gate_passed",
@@ -275,219 +303,232 @@ export default function RequestModal({
       className="fixed inset-0 z-50"
       aria-modal="true"
       role="dialog"
-      onMouseDown={(e) => {
-        if (loading) return;
-        if (panelRef.current && !panelRef.current.contains(e.target)) {
-          onClose?.();
-        }
-      }}
+      style={{ overscrollBehavior: "contain" }}
     >
-      {/* overlay */}
-      <div className="absolute inset-0 bg-black/35 backdrop-blur-[2px]" />
+      {/* ✅ overlay (handles click/touch outside) */}
+      <div
+        className="absolute inset-0 bg-black/35 backdrop-blur-[2px]"
+        style={{ touchAction: "none" }}
+        onMouseDown={() => {
+          if (!loading) onClose?.();
+        }}
+        onTouchStart={() => {
+          if (!loading) onClose?.();
+        }}
+      />
 
-      {/* panel */}
+      {/* panel wrapper */}
       <div className="relative min-h-screen flex items-center justify-center p-4">
         <div
           ref={panelRef}
-          className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white/75 shadow-xl backdrop-blur px-5 py-5"
+          // ✅ stop overlay close when touching inside panel
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white/75 shadow-xl backdrop-blur"
         >
           {/* Header */}
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="text-lg font-semibold tracking-tight text-zinc-900">
-                {title}
-              </h2>
-              {subtitle ? (
-                <p className="mt-1 text-sm text-zinc-600">{subtitle}</p>
-              ) : null}
-            </div>
-
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={loading}
-              className="shrink-0 rounded-xl border border-zinc-200 bg-white/60 p-2 text-zinc-700 transition hover:bg-white disabled:opacity-60"
-              aria-label="Close"
-              title="Close"
-            >
-              <IconX className="h-5 w-5" />
-            </button>
-          </div>
-
-          {/* Body */}
-          <div className="mt-4 grid gap-4">
-            {/* Name */}
-            <div>
-              <label className="text-sm font-medium text-zinc-800">
-                Full name
-              </label>
-              <div className={fieldWrap}>
-                <IconUser className="h-5 w-5 text-zinc-500" />
-                <input
-                  className={inputBase}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Your full name"
-                  disabled={loading}
-                  autoComplete="name"
-                />
+          <div className="px-5 pt-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold tracking-tight text-zinc-900">
+                  {title}
+                </h2>
+                {subtitle ? <p className="mt-1 text-sm text-zinc-600">{subtitle}</p> : null}
               </div>
-            </div>
-
-            {/* Phone */}
-            <div>
-              <label className="text-sm font-medium text-zinc-800">
-                Phone / WhatsApp
-              </label>
-              <div className={fieldWrap}>
-                <IconPhone className="h-5 w-5 text-zinc-500" />
-                <input
-                  className={inputBase}
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+2547..."
-                  disabled={loading}
-                  inputMode="tel"
-                  autoComplete="tel"
-                />
-              </div>
-            </div>
-
-            {/* Email */}
-            <div>
-              <label className="text-sm font-medium text-zinc-800">
-                Email (optional)
-              </label>
-              <div className={fieldWrap}>
-                <IconMail className="h-5 w-5 text-zinc-500" />
-                <input
-                  className={inputBase}
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  disabled={loading}
-                  inputMode="email"
-                  autoComplete="email"
-                />
-              </div>
-            </div>
-
-            {/* City */}
-            <div>
-              <label className="text-sm font-medium text-zinc-800">
-                City / Town (optional)
-              </label>
-              <div className={fieldWrap}>
-                <IconPin className="h-5 w-5 text-zinc-500" />
-                <input
-                  className={inputBase}
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  placeholder="Nairobi..."
-                  disabled={loading}
-                />
-              </div>
-            </div>
-
-            {/* Upload PDFs (metadata + File[] passed up) */}
-            <div>
-              <label className="text-sm font-medium text-zinc-800">
-                Upload documents (optional)
-              </label>
-              <div className="mt-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-3">
-                <input
-                  type="file"
-                  multiple
-                  accept="application/pdf"
-                  disabled={loading}
-                  onChange={(e) => {
-                    const arr = Array.from(e.target.files || []);
-                    setPickedFiles(arr);
-                  }}
-                  className="w-full text-sm text-zinc-900"
-                />
-
-                <div className="mt-2 text-xs text-zinc-500">
-                  PDFs only. Max {maxPdfMb}MB each. (No real upload yet — parent
-                  will create attachment records + metadata.)
-                </div>
-
-                {pickedFiles.length ? (
-                  <div className="mt-3 grid gap-2">
-                    {pickedFiles.map((f, idx) => (
-                      <div
-                        key={`${f.name}-${idx}`}
-                        className="rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-xs text-zinc-700"
-                      >
-                        {f.name} • {Math.round((f.size || 0) / 1024)} KB
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-
-            {/* Note */}
-            <div>
-              <label className="text-sm font-medium text-zinc-800">
-                Note (optional)
-              </label>
-              <div className={fieldWrap + " items-start"}>
-                <IconNote className="h-5 w-5 text-zinc-500 mt-0.5" />
-                <textarea
-                  className={inputBase + " min-h-[96px] resize-none"}
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Any extra details to help us assist you..."
-                  disabled={loading}
-                />
-              </div>
-            </div>
-
-            {/* Error */}
-            {err ? (
-              <div className="rounded-2xl border border-rose-100 bg-rose-50/70 px-3 py-2 text-sm text-rose-700">
-                {err}
-              </div>
-            ) : null}
-
-            {/* Actions */}
-            <div className="grid gap-2">
-              <button
-                type="button"
-                onClick={doPay}
-                disabled={!canPay || loading || paid}
-                className={`w-full rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99] disabled:opacity-60 ${
-                  paid
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                    : "border-zinc-200 bg-white/60 text-zinc-900 hover:bg-white"
-                }`}
-              >
-                {paid ? "Payment confirmed ✓" : "Pay to unlock request"}
-              </button>
-
-              <button
-                type="button"
-                onClick={submit}
-                disabled={!canSubmit}
-                className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
-              >
-                {loading ? "Sending..." : "Send request"}
-              </button>
 
               <button
                 type="button"
                 onClick={onClose}
                 disabled={loading}
-                className="w-full rounded-xl border border-zinc-200 bg-white/40 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
+                className="shrink-0 rounded-xl border border-zinc-200 bg-white/60 p-2 text-zinc-700 transition hover:bg-white disabled:opacity-60"
+                aria-label="Close"
+                title="Close"
               >
-                Cancel
+                <IconX className="h-5 w-5" />
               </button>
+            </div>
+          </div>
 
-              <p className="text-center text-xs text-zinc-500">
-                You must press <span className="font-semibold">Pay</span> before
-                sending.
-              </p>
+          {/* ✅ Scroll area */}
+          <div
+            ref={scrollRef}
+            className="px-5 pt-4 pb-[152px] md:pb-[140px] max-h-[78vh] overflow-y-auto"
+            style={{
+              WebkitOverflowScrolling: "touch",
+              overscrollBehavior: "contain",
+              touchAction: "pan-y",
+            }}
+          >
+            <div className="grid gap-4">
+              {/* Name */}
+              <div>
+                <label className="text-sm font-medium text-zinc-800">Full name</label>
+                <div className={fieldWrap}>
+                  <IconUser className="h-5 w-5 text-zinc-500" />
+                  <input
+                    className={inputBase}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Your full name"
+                    disabled={loading}
+                    autoComplete="name"
+                  />
+                </div>
+              </div>
+
+              {/* Phone */}
+              <div>
+                <label className="text-sm font-medium text-zinc-800">Phone / WhatsApp</label>
+                <div className={fieldWrap}>
+                  <IconPhone className="h-5 w-5 text-zinc-500" />
+                  <input
+                    className={inputBase}
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+2547..."
+                    disabled={loading}
+                    inputMode="tel"
+                    autoComplete="tel"
+                  />
+                </div>
+              </div>
+
+              {/* Email */}
+              <div>
+                <label className="text-sm font-medium text-zinc-800">Email (optional)</label>
+                <div className={fieldWrap}>
+                  <IconMail className="h-5 w-5 text-zinc-500" />
+                  <input
+                    className={inputBase}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    disabled={loading}
+                    inputMode="email"
+                    autoComplete="email"
+                  />
+                </div>
+              </div>
+
+              {/* City */}
+              <div>
+                <label className="text-sm font-medium text-zinc-800">City / Town (optional)</label>
+                <div className={fieldWrap}>
+                  <IconPin className="h-5 w-5 text-zinc-500" />
+                  <input
+                    className={inputBase}
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="Nairobi..."
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+
+              {/* ✅ Upload PDFs — only if enabled */}
+              {enableAttachments ? (
+                <div>
+                  <label className="text-sm font-medium text-zinc-800">
+                    Upload documents (optional)
+                  </label>
+                  <div className="mt-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-3">
+                    <input
+                      type="file"
+                      multiple
+                      accept="application/pdf"
+                      disabled={loading}
+                      onChange={(e) => {
+                        const arr = Array.from(e.target.files || []);
+                        setPickedFiles(arr);
+                      }}
+                      className="w-full text-sm text-zinc-900"
+                    />
+
+                    <div className="mt-2 text-xs text-zinc-500">
+                      PDFs only. Max {maxPdfMb}MB each.
+                    </div>
+
+                    {pickedFiles.length ? (
+                      <div className="mt-3 grid gap-2">
+                        {pickedFiles.map((f, idx) => (
+                          <div
+                            key={`${f.name}-${idx}`}
+                            className="rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-xs text-zinc-700"
+                          >
+                            {f.name} • {Math.round((f.size || 0) / 1024)} KB
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Note */}
+              <div>
+                <label className="text-sm font-medium text-zinc-800">Note (optional)</label>
+                <div className={fieldWrap + " items-start"}>
+                  <IconNote className="h-5 w-5 text-zinc-500 mt-0.5" />
+                  <textarea
+                    className={inputBase + " min-h-[96px] resize-none"}
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder="Any extra details to help us assist you..."
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+
+              {/* Error */}
+              {err ? (
+                <div className="rounded-2xl border border-rose-100 bg-rose-50/70 px-3 py-2 text-sm text-rose-700">
+                  {err}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Sticky CTA */}
+          <div className="sticky bottom-0 px-5 pb-5 pt-3">
+            <div className="pointer-events-none -mt-6 h-6 w-full bg-gradient-to-b from-transparent to-white/80 backdrop-blur-[2px]" />
+
+            <div className="rounded-2xl border border-zinc-200 bg-white/80 shadow-lg backdrop-blur px-3 py-3">
+              <div className="grid gap-2">
+                <button
+                  type="button"
+                  onClick={doPay}
+                  disabled={!canPay || loading || paid}
+                  className={`w-full rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99] disabled:opacity-60 ${
+                    paid
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                      : "border-zinc-200 bg-white/60 text-zinc-900 hover:bg-white"
+                  }`}
+                >
+                  {paid ? "Payment confirmed ✓" : "Pay to unlock request"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={submit}
+                  disabled={!canSubmit}
+                  className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                >
+                  {loading ? "Sending..." : "Send request"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={loading}
+                  className="w-full rounded-xl border border-zinc-200 bg-white/40 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+
+                <p className="text-center text-xs text-zinc-500">
+                  You must press <span className="font-semibold">Pay</span> before sending.
+                </p>
+              </div>
             </div>
           </div>
         </div>

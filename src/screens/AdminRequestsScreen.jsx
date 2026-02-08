@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { getRequests } from "../services/adminrequestservice";
 
 // ✅ Only 3 tabs: New / Accepted / Rejected (Accepted maps to status "closed")
@@ -86,15 +86,39 @@ function pill(status) {
   };
 }
 
+function isValidTabKey(key) {
+  const k = String(key || "").toLowerCase();
+  return TABS.some((t) => t.key === k);
+}
+
 export default function AdminRequestsScreen() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // ✅ Restore tab + search from URL so Back remembers where you were
+  const tabFromUrl = searchParams.get("tab");
+  const qFromUrl = searchParams.get("q") || "";
 
   // status is still "new" | "closed" | "rejected" (closed = Accepted)
-  const [status, setStatus] = useState("new");
+  const [status, setStatus] = useState(isValidTabKey(tabFromUrl) ? tabFromUrl : "new");
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(String(qFromUrl));
+
+  // Keep URL in sync when tab/search changes (so the Back button can restore it)
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", status);
+
+    const trimmed = String(search || "").trim();
+    if (trimmed) next.set("q", trimmed);
+    else next.delete("q");
+
+    // replace=true so we don't spam browser history as user types
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, search]);
 
   const load = async () => {
     setLoading(true);
@@ -149,6 +173,15 @@ export default function AdminRequestsScreen() {
   const activeLabel = useMemo(() => {
     return TABS.find((t) => t.key === status)?.label || String(status).toUpperCase();
   }, [status]);
+
+  const openRequest = (id) => {
+    const q = String(search || "").trim();
+    const qs = new URLSearchParams();
+    qs.set("tab", status);
+    if (q) qs.set("q", q);
+
+    navigate(`/app/admin/request/${id}?${qs.toString()}`);
+  };
 
   return (
     <div className="min-h-screen bg-white">
@@ -240,7 +273,7 @@ export default function AdminRequestsScreen() {
                 <button
                   key={r.id}
                   type="button"
-                  onClick={() => navigate(`/app/admin/request/${r.id}`)}
+                  onClick={() => openRequest(r.id)}
                   className="w-full text-left rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-white hover:shadow-md active:scale-[0.99]"
                 >
                   <div className="flex items-start justify-between gap-3">

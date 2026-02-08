@@ -21,8 +21,8 @@ function formatKES(n) {
 }
 
 // ✅ Pricing model
-const BASE_PRICE = 9999; // price when we handle everything
-const MIN_PRICE = 3999; // floor price
+const BASE_PRICE = 9999;
+const MIN_PRICE = 3999;
 
 // ✅ Weighting price not equal
 const ITEM_CREDITS = {
@@ -43,7 +43,6 @@ function useAnimatedNumber(target, { duration = 450 } = {}) {
   const toRef = useRef(target);
 
   useEffect(() => {
-    // cancel any running animation
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
 
     fromRef.current = value;
@@ -53,22 +52,14 @@ function useAnimatedNumber(target, { duration = 450 } = {}) {
     const tick = (now) => {
       const elapsed = now - startRef.current;
       const t = clamp(elapsed / duration, 0, 1);
-
-      // easeOutCubic
       const eased = 1 - Math.pow(1 - t, 3);
-
       const next = fromRef.current + (toRef.current - fromRef.current) * eased;
       setValue(next);
-
       if (t < 1) rafRef.current = requestAnimationFrame(tick);
     };
 
     rafRef.current = requestAnimationFrame(tick);
-
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => rafRef.current && cancelAnimationFrame(rafRef.current);
   }, [target]);
 
   return value;
@@ -77,13 +68,12 @@ function useAnimatedNumber(target, { duration = 450 } = {}) {
 export default function FullPackageDiagnosticModal({
   open,
   onClose,
-  track, // "study" | "work" | "travel"
-  country, // selected country
+  track,
+  country,
 }) {
   const navigate = useNavigate();
   const [checked, setChecked] = useState({});
 
-  // reset checklist each time modal opens
   useEffect(() => {
     if (open) setChecked({});
   }, [open]);
@@ -94,17 +84,20 @@ export default function FullPackageDiagnosticModal({
 
   const total = CHECKLIST.length;
 
-  const haveCount = useMemo(() => {
-    return CHECKLIST.reduce((acc, item) => acc + (checked[item] ? 1 : 0), 0);
-  }, [checked]);
+  const haveCount = useMemo(
+    () => CHECKLIST.reduce((a, i) => a + (checked[i] ? 1 : 0), 0),
+    [checked]
+  );
 
-  const missingItems = useMemo(() => {
-    return CHECKLIST.filter((i) => !checked[i]);
-  }, [checked]);
+  const missingItems = useMemo(
+    () => CHECKLIST.filter((i) => !checked[i]),
+    [checked]
+  );
 
-  const readiness = useMemo(() => {
-    return clamp(Math.round((haveCount / total) * 100), 0, 100);
-  }, [haveCount, total]);
+  const readiness = useMemo(
+    () => clamp(Math.round((haveCount / total) * 100), 0, 100),
+    [haveCount, total]
+  );
 
   const readinessLabel = useMemo(() => {
     if (readiness < 35) return "Low readiness";
@@ -112,27 +105,27 @@ export default function FullPackageDiagnosticModal({
     return "Strong readiness";
   }, [readiness]);
 
-  // ✅ compute discount based on checked items
-  const discount = useMemo(() => {
-    return CHECKLIST.reduce((acc, item) => {
-      if (!checked[item]) return acc;
-      return acc + (ITEM_CREDITS[item] || 0);
-    }, 0);
-  }, [checked]);
+  const discount = useMemo(
+    () =>
+      CHECKLIST.reduce(
+        (acc, item) => acc + (checked[item] ? ITEM_CREDITS[item] || 0 : 0),
+        0
+      ),
+    [checked]
+  );
 
-  // ✅ live price (drops as boxes are checked)
-  const livePrice = useMemo(() => {
-    return clamp(BASE_PRICE - discount, MIN_PRICE, BASE_PRICE);
-  }, [discount]);
+  const livePrice = useMemo(
+    () => clamp(BASE_PRICE - discount, MIN_PRICE, BASE_PRICE),
+    [discount]
+  );
 
-  // ✅ animated display price
   const animatedPrice = useAnimatedNumber(livePrice, { duration: 500 });
+  const saved = useMemo(
+    () => clamp(BASE_PRICE - livePrice, 0, BASE_PRICE),
+    [livePrice]
+  );
 
-  const saved = useMemo(() => clamp(BASE_PRICE - livePrice, 0, BASE_PRICE), [livePrice]);
-
-  const saveText = useMemo(() => {
-    return saved > 0 ? `You save ${formatKES(saved)}` : "Best value bundle";
-  }, [saved]);
+  const saveText = saved > 0 ? `You save ${formatKES(saved)}` : "Best value bundle";
 
   const handleProceed = () => {
     if (!country || country === "Not selected") {
@@ -161,8 +154,9 @@ export default function FullPackageDiagnosticModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-5"
       onMouseDown={onClose}
     >
+      {/* ✅ ONLY CHANGE IS HERE (scrollable modal) */}
       <div
-        className="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white/90 p-5 shadow-lg backdrop-blur"
+        className="w-full max-w-sm max-h-[90vh] overflow-y-auto overscroll-contain rounded-2xl border border-zinc-200 bg-white/90 p-5 shadow-lg backdrop-blur"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold text-zinc-900">
@@ -172,35 +166,28 @@ export default function FullPackageDiagnosticModal({
           Tick what you already have. Price updates instantly.
         </p>
 
-        {/* Pricing teaser (dynamic + animated) */}
         <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-xs font-semibold text-emerald-800">
                 Full package price
               </div>
-
-              {/* ✅ animated number */}
               <div className="mt-0.5 text-lg font-semibold text-zinc-900 tabular-nums">
                 {formatKES(animatedPrice)}
               </div>
-
               <div className="mt-1 text-xs font-semibold text-emerald-800/80">
                 {saveText}
               </div>
-
               <div className="mt-1 text-[11px] text-zinc-600">
                 Starts at {formatKES(BASE_PRICE)} • Minimum {formatKES(MIN_PRICE)}
               </div>
             </div>
-
             <span className="shrink-0 rounded-full border border-emerald-200 bg-white/70 px-2.5 py-1 text-xs font-semibold text-emerald-800">
               Best value
             </span>
           </div>
         </div>
 
-        {/* Progress */}
         <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/70 p-3">
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold text-zinc-900">
@@ -223,7 +210,6 @@ export default function FullPackageDiagnosticModal({
           </div>
         </div>
 
-        {/* Checklist (with per-item deduction tags) */}
         <div className="mt-4 grid gap-3">
           {CHECKLIST.map((item) => (
             <label
@@ -239,7 +225,6 @@ export default function FullPackageDiagnosticModal({
                 />
                 <span className="text-zinc-900">{item}</span>
               </div>
-
               <span className="text-[11px] font-semibold text-emerald-800/80">
                 -{formatKES(ITEM_CREDITS[item] || 0)}
               </span>

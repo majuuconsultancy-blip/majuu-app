@@ -1,7 +1,12 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import { auth } from "../firebase";
+import {
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  signInWithPopup,
+  signInWithRedirect,
+} from "firebase/auth";
+import { auth, googleProvider } from "../firebase";
 import { ensureUserDoc } from "../services/userservice";
 
 function IconMail(props) {
@@ -68,16 +73,45 @@ function IconShield(props) {
   );
 }
 
+function IconGoogle(props) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path
+        fill="currentColor"
+        d="M21.6 12.27c0-.68-.06-1.18-.17-1.7H12v3.21h5.54c-.11.8-.71 2.01-2.04 2.82l-.02.11 2.98 2.31.2.02c1.83-1.69 2.9-4.17 2.9-6.77Z"
+      />
+      <path
+        fill="currentColor"
+        d="M12 22c2.7 0 4.97-.89 6.63-2.43l-3.16-2.45c-.85.59-1.99 1-3.47 1-2.65 0-4.9-1.69-5.71-4.03l-.1.01-3.08 2.4-.03.1C4.74 19.95 8.09 22 12 22Z"
+      />
+      <path
+        fill="currentColor"
+        d="M6.29 14.09A6.02 6.02 0 0 1 6 12c0-.73.13-1.44.29-2.09l-.01-.14-3.11-2.43-.1.05A9.98 9.98 0 0 0 2 12c0 1.61.39 3.13 1.07 4.46l3.22-2.37Z"
+      />
+      <path
+        fill="currentColor"
+        d="M12 5.88c1.7 0 2.85.73 3.5 1.34l2.55-2.48C16.96 3.13 14.7 2 12 2 8.09 2 4.74 4.05 3.07 7.54l3.21 2.37C7.1 7.57 9.35 5.88 12 5.88Z"
+      />
+    </svg>
+  );
+}
+
 function friendlyAuthError(err) {
+  const code = String(err?.code || "").toLowerCase();
   const msg = String(err?.message || "").toLowerCase();
 
-  if (msg.includes("email-already-in-use"))
+  if (code.includes("auth/email-already-in-use") || msg.includes("email-already-in-use"))
     return "That email is already in use. Try logging in instead.";
-  if (msg.includes("invalid-email")) return "Please enter a valid email address.";
-  if (msg.includes("weak-password"))
+  if (code.includes("auth/invalid-email") || msg.includes("invalid-email"))
+    return "Please enter a valid email address.";
+  if (code.includes("auth/weak-password") || msg.includes("weak-password"))
     return "Password is too weak. Use at least 6 characters.";
-  if (msg.includes("network-request-failed"))
+  if (code.includes("auth/network-request-failed") || msg.includes("network-request-failed"))
     return "Network error. Check your connection and try again.";
+  if (code.includes("auth/popup-closed-by-user"))
+    return "Google sign-in was closed.";
+  if (code.includes("auth/popup-blocked"))
+    return "Popup blocked. Trying another method…";
 
   return err?.message || "Signup failed. Try again.";
 }
@@ -105,31 +139,62 @@ export default function SignupScreen() {
     );
   }, [email, password, confirm, passwordOk, matchOk, loading]);
 
+  async function finishLogin(user) {
+    await ensureUserDoc({
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName || "",
+      photoURL: user.photoURL || "",
+      provider: (user.providerData?.[0]?.providerId || "").toString(),
+      lastLoginAt: Date.now(),
+    });
+  }
+
+  const handleGoogle = async () => {
+    setError("");
+    setLoading(true);
+    try {
+      const res = await signInWithPopup(auth, googleProvider);
+      await finishLogin(res.user);
+      // Google accounts are typically verified; go straight in
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      const code = String(err?.code || "").toLowerCase();
+      if (code.includes("auth/popup-blocked") || code.includes("auth/operation-not-supported-in-this-environment")) {
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        } catch (e2) {
+          setError(friendlyAuthError(e2));
+        }
+      } else {
+        setError(friendlyAuthError(err));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSignup = async (e) => {
     e.preventDefault();
     setError("");
 
     const cleanEmail = email.trim();
-    if (!passwordOk) {
-      setError("Password must be at least 6 characters.");
-      return;
-    }
-    if (!matchOk) {
-      setError("Passwords do not match.");
-      return;
-    }
+    if (!passwordOk) return setError("Password must be at least 6 characters.");
+    if (!matchOk) return setError("Passwords do not match.");
 
     setLoading(true);
 
     try {
       const userCred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
 
-      await ensureUserDoc({
-        uid: userCred.user.uid,
-        email: userCred.user.email,
-      });
+      await finishLogin(userCred.user);
 
-      navigate("/dashboard", { replace: true });
+      // Send verification email
+      await sendEmailVerification(userCred.user);
+
+      // Route to verify screen
+      navigate("/verify-email", { replace: true, state: { email: cleanEmail } });
     } catch (err) {
       setError(friendlyAuthError(err));
     } finally {
@@ -147,119 +212,133 @@ export default function SignupScreen() {
               <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
                 Create your account
               </h1>
-              <p className="mt-1 text-sm text-zinc-600">
-                Sign up to start your journey.
-              </p>
+              <p className="mt-1 text-sm text-zinc-600">Sign up to start your journey.</p>
             </div>
             <div className="h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70" />
           </div>
 
           {/* Card */}
           <div className="mt-7 rounded-2xl border border-zinc-200 bg-white/70 p-5 shadow-sm backdrop-blur">
-            <form onSubmit={handleSignup} className="grid gap-4">
-              {/* Email */}
-              <div>
-                <label className="text-sm font-medium text-zinc-800">Email</label>
-                <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
-                  <IconMail className="h-5 w-5 text-zinc-500" />
-                  <input
-                    type="email"
-                    placeholder="name@email.com"
-                    className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    autoComplete="email"
-                    required
-                    disabled={loading}
-                  />
-                </div>
-              </div>
-
-              {/* Password */}
-              <div>
-                <label className="text-sm font-medium text-zinc-800">Password</label>
-                <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
-                  <IconLock className="h-5 w-5 text-zinc-500" />
-                  <input
-                    type="password"
-                    placeholder="At least 6 characters"
-                    className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="new-password"
-                    required
-                    disabled={loading}
-                  />
-                </div>
-                <div className="mt-2 text-xs text-zinc-500">
-                  Use a strong password you can remember.
-                </div>
-              </div>
-
-              {/* Confirm */}
-              <div>
-                <label className="text-sm font-medium text-zinc-800">Confirm password</label>
-                <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
-                  <IconShield className="h-5 w-5 text-zinc-500" />
-                  <input
-                    type="password"
-                    placeholder="Repeat password"
-                    className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
-                    value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)}
-                    autoComplete="new-password"
-                    required
-                    disabled={loading}
-                  />
-                </div>
-
-                {/* inline hints */}
-                {!passwordOk && password.length > 0 ? (
-                  <div className="mt-2 text-xs text-rose-700">
-                    Password must be at least 6 characters.
-                  </div>
-                ) : null}
-                {confirm.length > 0 && !matchOk ? (
-                  <div className="mt-2 text-xs text-rose-700">
-                    Passwords do not match.
-                  </div>
-                ) : null}
-              </div>
-
-              {/* Error */}
-              {error ? (
-                <div className="rounded-xl border border-rose-100 bg-rose-50/70 px-3 py-2 text-sm text-rose-700">
-                  {error}
-                </div>
-              ) : null}
-
-              {/* Submit */}
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
-              >
-                {loading ? "Creating account..." : "Create account"}
-              </button>
-
-              {/* Secondary */}
+            <div className="grid gap-3">
+              {/* Google */}
               <button
                 type="button"
-                onClick={() => navigate("/login")}
+                onClick={handleGoogle}
                 disabled={loading}
-                className="w-full rounded-xl border border-zinc-200 bg-white/40 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
+                className="w-full rounded-xl border border-zinc-200 bg-white/70 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 flex items-center justify-center gap-2"
               >
-                I already have an account
+                <IconGoogle className="h-5 w-5" />
+                Continue with Google
               </button>
 
-              <p className="text-center text-xs text-zinc-500">
-                By continuing, you agree to our terms and privacy policy.
-              </p>
-            </form>
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-zinc-200" />
+                <span className="text-xs text-zinc-500">or</span>
+                <div className="h-px flex-1 bg-zinc-200" />
+              </div>
+
+              <form onSubmit={handleSignup} className="grid gap-4">
+                {/* Email */}
+                <div>
+                  <label className="text-sm font-medium text-zinc-800">Email</label>
+                  <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
+                    <IconMail className="h-5 w-5 text-zinc-500" />
+                    <input
+                      type="email"
+                      placeholder="name@email.com"
+                      className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      autoComplete="email"
+                      required
+                      disabled={loading}
+                    />
+                  </div>
+                </div>
+
+                {/* Password */}
+                <div>
+                  <label className="text-sm font-medium text-zinc-800">Password</label>
+                  <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
+                    <IconLock className="h-5 w-5 text-zinc-500" />
+                    <input
+                      type="password"
+                      placeholder="At least 6 characters"
+                      className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      autoComplete="new-password"
+                      required
+                      disabled={loading}
+                    />
+                  </div>
+                  <div className="mt-2 text-xs text-zinc-500">
+                    Use a strong password you can remember.
+                  </div>
+                </div>
+
+                {/* Confirm */}
+                <div>
+                  <label className="text-sm font-medium text-zinc-800">Confirm password</label>
+                  <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
+                    <IconShield className="h-5 w-5 text-zinc-500" />
+                    <input
+                      type="password"
+                      placeholder="Repeat password"
+                      className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
+                      value={confirm}
+                      onChange={(e) => setConfirm(e.target.value)}
+                      autoComplete="new-password"
+                      required
+                      disabled={loading}
+                    />
+                  </div>
+
+                  {!passwordOk && password.length > 0 ? (
+                    <div className="mt-2 text-xs text-rose-700">
+                      Password must be at least 6 characters.
+                    </div>
+                  ) : null}
+                  {confirm.length > 0 && !matchOk ? (
+                    <div className="mt-2 text-xs text-rose-700">Passwords do not match.</div>
+                  ) : null}
+                </div>
+
+                {/* Error */}
+                {error ? (
+                  <div className="rounded-xl border border-rose-100 bg-rose-50/70 px-3 py-2 text-sm text-rose-700">
+                    {error}
+                  </div>
+                ) : null}
+
+                {/* Submit */}
+                <button
+                  type="submit"
+                  disabled={!canSubmit}
+                  className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                >
+                  {loading ? "Creating account..." : "Create account"}
+                </button>
+
+                {/* Secondary */}
+                <button
+                  type="button"
+                  onClick={() => navigate("/login")}
+                  disabled={loading}
+                  className="w-full rounded-xl border border-zinc-200 bg-white/40 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
+                >
+                  I already have an account
+                </button>
+
+                <p className="text-center text-xs text-zinc-500">
+                  By continuing, you agree to our terms and privacy policy.
+                </p>
+              </form>
+            </div>
           </div>
 
           <div className="mt-6 text-center text-xs text-zinc-500">
-            Tip: Use an email you can access — we may send updates later.
+            Tip: Use an email you can access — we’ll send a verification link.
           </div>
         </div>
       </div>

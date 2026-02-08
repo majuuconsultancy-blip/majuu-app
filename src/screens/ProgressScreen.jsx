@@ -65,35 +65,40 @@ function statusUI(status) {
   if (s === "new")
     return {
       label: "Submitted",
-      badge: "bg-zinc-100 text-zinc-700 border border-zinc-200",
-      dot: "bg-zinc-400",
+      badge:
+        "bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-900/60 dark:text-zinc-200 dark:border-zinc-700",
+      dot: "bg-zinc-400 dark:bg-zinc-500",
     };
 
   if (s === "contacted")
     return {
       label: "Received",
-      badge: "bg-emerald-50 text-emerald-700 border border-emerald-100",
+      badge:
+        "bg-emerald-50 text-emerald-700 border border-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-900/40",
       dot: "bg-emerald-500",
     };
 
   if (s === "closed")
     return {
       label: "Succeeded",
-      badge: "bg-emerald-100 text-emerald-800 border border-emerald-200",
+      badge:
+        "bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/55 dark:text-emerald-200 dark:border-emerald-900/40",
       dot: "bg-emerald-700",
     };
 
   if (s === "rejected")
     return {
       label: "Rejected",
-      badge: "bg-rose-50 text-rose-700 border border-rose-100",
+      badge:
+        "bg-rose-50 text-rose-700 border border-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:border-rose-900/40",
       dot: "bg-rose-500",
     };
 
   return {
     label: s,
-    badge: "bg-zinc-100 text-zinc-700 border border-zinc-200",
-    dot: "bg-zinc-400",
+    badge:
+      "bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-900/60 dark:text-zinc-200 dark:border-zinc-700",
+    dot: "bg-zinc-400 dark:bg-zinc-500",
   };
 }
 
@@ -125,7 +130,9 @@ export default function ProgressScreen() {
     const attRef = collection(db, "serviceRequests", requestId, "attachments");
     const attSnap = await getDocs(attRef);
     for (const d of attSnap.docs) {
-      await deleteDoc(doc(db, "serviceRequests", requestId, "attachments", d.id));
+      await deleteDoc(
+        doc(db, "serviceRequests", requestId, "attachments", d.id)
+      );
     }
     await deleteDoc(doc(db, "serviceRequests", requestId));
   }
@@ -156,7 +163,8 @@ export default function ProgressScreen() {
           (snap) => {
             const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
             data.sort(
-              (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
+              (a, b) =>
+                (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
             );
             setRequests(data);
           },
@@ -207,14 +215,14 @@ export default function ProgressScreen() {
       : "Self-Help";
 
   const cardBase =
-    "rounded-2xl border border-zinc-200 bg-white/70 backdrop-blur p-4 shadow-sm";
+    "rounded-2xl border border-zinc-200 bg-white/70 backdrop-blur p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60";
   const cardHover =
-    "transition hover:border-emerald-200 hover:bg-white hover:shadow-md";
+    "transition hover:border-emerald-200 hover:bg-white hover:shadow-md dark:hover:border-emerald-900/40 dark:hover:bg-zinc-900";
 
   const primaryBtn =
     "w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60";
   const ghostBtn =
-    "rounded-2xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]";
+    "rounded-2xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900";
 
   const requestsCountLabel = useMemo(() => {
     const n = requests.length;
@@ -223,11 +231,11 @@ export default function ProgressScreen() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white">
-        <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white">
+      <div className="min-h-screen bg-white dark:bg-zinc-950">
+        <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
           <div className="max-w-xl mx-auto px-5 py-10">
-            <div className="mx-auto h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70" />
-            <p className="mt-3 text-center text-sm text-zinc-600">
+            <div className="mx-auto h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70 dark:border-zinc-800 dark:bg-zinc-900/60" />
+            <p className="mt-3 text-center text-sm text-zinc-600 dark:text-zinc-300">
               Loading progress…
             </p>
           </div>
@@ -237,33 +245,33 @@ export default function ProgressScreen() {
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-6">
+    <div className="min-h-screen bg-white dark:bg-zinc-950">
+      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-6 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
         <div className="max-w-xl mx-auto px-5 py-6">
           {/* Header */}
           <div className="flex items-end justify-between gap-3">
             <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800">
-                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-100 bg-white/70">
-                  <IconPulse className="h-4 w-4 text-emerald-700" />
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-emerald-200">
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-100 bg-white/70 dark:border-zinc-700 dark:bg-zinc-950/40">
+                  <IconPulse className="h-4 w-4 text-emerald-700 dark:text-emerald-200" />
                 </span>
                 Progress
               </div>
 
-              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900">
+              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Your activity
               </h1>
-              <p className="mt-1 text-sm text-zinc-600">
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 Continue your process and track We-Help requests.
               </p>
             </div>
 
-            <div className="h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70" />
+            <div className="h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70 dark:border-zinc-800 dark:bg-zinc-900/60" />
           </div>
 
           {/* Error */}
           {err ? (
-            <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+            <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
               {err}
             </div>
           ) : null}
@@ -271,8 +279,10 @@ export default function ProgressScreen() {
           {/* Current process */}
           <div className={`mt-6 ${cardBase} ${cardHover}`}>
             <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-zinc-900">Current process</h2>
-              <span className="text-xs text-zinc-500">
+              <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
+                Current process
+              </h2>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
                 {hasActive ? "Live" : "Idle"}
               </span>
             </div>
@@ -281,16 +291,28 @@ export default function ProgressScreen() {
               <div className="mt-4 grid gap-3">
                 <div className="grid gap-2 text-sm">
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-500">Track</span>
-                    <span className="font-medium text-zinc-900">{activeTrack}</span>
+                    <span className="text-zinc-500 dark:text-zinc-400">
+                      Track
+                    </span>
+                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                      {activeTrack}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-500">Country</span>
-                    <span className="font-medium text-zinc-900">{activeCountry}</span>
+                    <span className="text-zinc-500 dark:text-zinc-400">
+                      Country
+                    </span>
+                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                      {activeCountry}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-500">Mode</span>
-                    <span className="font-medium text-zinc-900">{activeMode}</span>
+                    <span className="text-zinc-500 dark:text-zinc-400">
+                      Mode
+                    </span>
+                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                      {activeMode}
+                    </span>
                   </div>
                 </div>
 
@@ -299,10 +321,13 @@ export default function ProgressScreen() {
                 </button>
               </div>
             ) : (
-              <div className="mt-3 text-sm text-zinc-600">
+              <div className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
                 No active process yet. Choose a track to begin.
                 <div className="mt-4">
-                  <button onClick={() => navigate("/dashboard")} className={ghostBtn}>
+                  <button
+                    onClick={() => navigate("/dashboard")}
+                    className={ghostBtn}
+                  >
                     Choose track
                   </button>
                 </div>
@@ -313,20 +338,27 @@ export default function ProgressScreen() {
           {/* Requests */}
           <div className="mt-8">
             <div className="flex items-end justify-between">
-              <h2 className="font-semibold text-zinc-900">We-Help requests</h2>
-              <span className="text-xs text-zinc-500">{requestsCountLabel}</span>
+              <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
+                We-Help requests
+              </h2>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                {requestsCountLabel}
+              </span>
             </div>
 
             {requests.length === 0 ? (
               <div className={`mt-3 ${cardBase}`}>
-                <div className="text-sm font-semibold text-zinc-900">
+                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                   No requests yet
                 </div>
-                <div className="mt-1 text-xs text-zinc-500">
+                <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                   When you submit a We-Help request, it will show up here.
                 </div>
                 <div className="mt-4">
-                  <button onClick={() => navigate("/dashboard")} className={ghostBtn}>
+                  <button
+                    onClick={() => navigate("/dashboard")}
+                    className={ghostBtn}
+                  >
                     Start a request
                   </button>
                 </div>
@@ -339,13 +371,13 @@ export default function ProgressScreen() {
                   const safeTrack =
                     track === "work" || track === "travel" ? track : "study";
 
-                  const countryQS = encodeURIComponent(r.country || "");
                   const st = String(r.status || "new").toLowerCase();
 
                   const canDelete = st === "closed" || st === "rejected";
                   const isDeleting = deletingId === r.id;
 
-                  const isFull = String(r.requestType || "").toLowerCase() === "full";
+                  const isFull =
+                    String(r.requestType || "").toLowerCase() === "full";
 
                   const titleLeft = `${String(r.track || "").toUpperCase()} • ${
                     r.country || "-"
@@ -400,15 +432,19 @@ export default function ProgressScreen() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className={`h-2.5 w-2.5 rounded-full ${ui.dot}`} />
-                            <div className="font-semibold text-zinc-900 truncate">
+                            <span
+                              className={`h-2.5 w-2.5 rounded-full ${ui.dot}`}
+                            />
+                            <div className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">
                               {titleLeft}
                             </div>
                           </div>
 
-                          <div className="mt-1 text-sm text-zinc-600">{subtitle}</div>
+                          <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                            {subtitle}
+                          </div>
 
-                          <div className="mt-2 text-[11px] text-zinc-500">
+                          <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
                             ID: <span className="font-mono">{r.id}</span>
                           </div>
                         </div>
@@ -423,7 +459,8 @@ export default function ProgressScreen() {
                       <div className="mt-4 flex flex-wrap gap-2">
                         <button
                           onClick={() => navigate(`/app/request/${r.id}`)}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-3.5 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.99]"
+                          className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-3.5 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.99]
+                                     dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/55"
                         >
                           View
                           <IconChevronRight className="h-4 w-4" />
@@ -432,7 +469,8 @@ export default function ProgressScreen() {
                         {st === "rejected" && (
                           <button
                             onClick={handleTryAgain}
-                            className="rounded-2xl border border-zinc-200 bg-white/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
+                            className="rounded-2xl border border-zinc-200 bg-white/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
+                                       dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
                           >
                             Try again
                           </button>
@@ -459,7 +497,8 @@ export default function ProgressScreen() {
                                 setDeletingId("");
                               }
                             }}
-                            className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60"
+                            className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60
+                                       dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/55"
                           >
                             <IconTrash className="h-4 w-4" />
                             {isDeleting ? "Deleting…" : "Delete"}
@@ -468,7 +507,7 @@ export default function ProgressScreen() {
                       </div>
 
                       {st === "new" ? (
-                        <div className="mt-3 text-xs text-zinc-500">
+                        <div className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
                           Received — you’ll see updates here as we process it.
                         </div>
                       ) : null}
@@ -479,8 +518,7 @@ export default function ProgressScreen() {
             )}
           </div>
 
-          {/* Pitch note: apps is kept in state but not rendered */}
-          {/* If you want “Applications” visible, paste the shape of apps and I’ll style it. */}
+          {/* apps kept but not rendered */}
         </div>
       </div>
     </div>

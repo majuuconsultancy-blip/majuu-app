@@ -24,14 +24,38 @@ function IconHome(props) {
   );
 }
 
+/* ✅ Minimal uptrend icon for Progress */
 function IconProgress(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      {/* axis */}
       <path
-        d="M7 16V10m5 6V7m5 9v-4M5 20h14a2 2 0 0 0 2-2V6"
+        d="M4.5 19.5V5.5"
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"
+      />
+      <path
+        d="M4.5 19.5H20"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      {/* trend line */}
+      <path
+        d="M7 15l4-4 3 3 5-6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* arrow head */}
+      <path
+        d="M18.8 8H19.9V9.2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );
@@ -141,64 +165,84 @@ export default function AppLayout() {
   const itemBase =
     "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition active:scale-[0.99]";
   const itemOn = "bg-emerald-600 text-white shadow-sm";
-  const itemOff = "text-zinc-700 hover:bg-emerald-50/70";
+  const itemOff =
+    "text-zinc-700 hover:bg-emerald-50/70 dark:text-zinc-200 dark:hover:bg-zinc-900/60";
 
   const iconCls = "h-5 w-5";
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       {/* background wash */}
-      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-28">
+      <div
+        className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-28
+                dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950"
+      >
         <div className="max-w-xl mx-auto min-h-screen">
-  <AnimatePresence mode="wait">
-    <PageTransitions key={location.pathname}>
-      <Outlet />
-    </PageTransitions>
-  </AnimatePresence>
-</div>
+          <AnimatePresence mode="wait">
+            <PageTransitions key={location.pathname}>
+              <Outlet />
+            </PageTransitions>
+          </AnimatePresence>
+        </div>
       </div>
 
       {/* bottom nav */}
-      <nav className="fixed bottom-4 left-0 right-0 z-50 px-4">
+     {uid && hasActiveProcess && activeTrack ? (
+  <div
+    className="fixed left-0 right-0 z-50 px-4 pointer-events-none"
+    style={{
+      bottom: "calc(4rem + env(safe-area-inset-bottom))",
+    }}
+  >
+    <div className="max-w-xl mx-auto text-center">
+      <span className="text-[10px] tracking-wide text-zinc-500 dark:text-zinc-400">
+        Active:{" "}
+        <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+          {activeTrack.toUpperCase()}
+        </span>
+      </span>
+    </div>
+  </div>
+) : null}
+
+
+      <nav className="fixed bottom-4 left-0 right-0 z-50 px-4 pb-[env(safe-area-inset-bottom)]">
         <div className="max-w-xl mx-auto">
-          <div className="rounded-2xl border border-zinc-200 bg-white/70 backdrop-blur shadow-sm px-2 py-2 flex items-center justify-between">
-            <button
-              onClick={goSmartHome}
-              className={`${itemBase} ${homeActive ? itemOn : itemOff}`}
-            >
-              <IconHome className={iconCls} />
-              <span>Home</span>
-            </button>
+          <div
+            className="rounded-2xl border border-zinc-200 bg-white/70 backdrop-blur shadow-sm px-2 py-2
+                dark:border-zinc-800 dark:bg-zinc-900/70"
+          >
 
-            <NavLink
-              to="/app/progress"
-              className={({ isActive }) =>
-                `${itemBase} ${isActive ? itemOn : itemOff}`
-              }
-            >
-              <IconProgress className={iconCls} />
-              <span>Progress</span>
-            </NavLink>
+            <div className="flex items-center justify-between">
+              <button
+                onClick={goSmartHome}
+                className={`${itemBase} ${homeActive ? itemOn : itemOff}`}
+              >
+                <IconHome className={iconCls} />
+                <span>Home</span>
+              </button>
 
-            <NavLink
-              to="/app/profile"
-              className={({ isActive }) =>
-                `${itemBase} ${isActive ? itemOn : itemOff}`
-              }
-            >
-              <IconUser className={iconCls} />
-              <span>Profile</span>
-            </NavLink>
-          </div>
+              <NavLink
+                to="/app/progress"
+                className={({ isActive }) =>
+                  `${itemBase} ${isActive ? itemOn : itemOff}`
+                }
+              >
+                <IconProgress className={iconCls} />
+                <span>Progress</span>
+              </NavLink>
 
-          {uid && hasActiveProcess && activeTrack ? (
-            <div className="mt-2 text-[11px] text-zinc-500 text-center">
-              Active:{" "}
-              <span className="font-semibold text-emerald-700">
-                {activeTrack.toUpperCase()}
-              </span>
+              <NavLink
+                to="/app/profile"
+                className={({ isActive }) =>
+                  `${itemBase} ${isActive ? itemOn : itemOff}`
+                }
+              >
+                <IconUser className={iconCls} />
+                <span>Profile</span>
+              </NavLink>
             </div>
-          ) : null}
+          </div>
         </div>
       </nav>
     </div>

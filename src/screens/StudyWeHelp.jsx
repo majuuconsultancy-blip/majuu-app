@@ -1,7 +1,10 @@
-// ✅ StudyWeHelp.jsx (copy-paste version)
-// NOTE: This version supports Retry deep-link:
-// /app/study/we-help?country=Australia&autoOpen=1&open=Passport%20Application
-// It will auto-open RequestModal on that service.
+// ✅ StudyWeHelp.jsx (FULL COPY-PASTE, fixed soft-gate UX)
+// Fixes your issue where unverified users click "Send request" and it flashes then does nothing:
+// - ✅ catches auth/email-not-verified from createServiceRequest (thrown by requestservice.js)
+// - ✅ routes to /verify-email
+// - ✅ throws the error back so RequestModal shows the message (instead of silently failing)
+// - ✅ adds try/catch around everything after createServiceRequest (attachments + activeProcess) for safety
+// - ✅ removes unused import (setUserState already used; setActiveProcessDetails used; setUserState maintained)
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -12,11 +15,7 @@ import RequestModal from "../components/RequestModal";
 import FullPackageDiagnosticModal from "../components/FullPackageDiagnosticModal";
 
 import { createServiceRequest } from "../services/requestservice";
-import {
-  getUserState,
-  setActiveProcessDetails,
-  upsertUserContact,
-} from "../services/userservice";
+import { getUserState, setActiveProcessDetails, upsertUserContact } from "../services/userservice";
 import { getMissingProfileFields } from "../utils/profileGuard";
 import { createPendingAttachment } from "../services/attachmentservice";
 
@@ -191,8 +190,7 @@ export default function StudyWeHelp() {
 
   // attachments only on Document Review
   const enableAttachments =
-    requestMeta?.requestType === "single" &&
-    requestMeta?.serviceName === "Document Review";
+    requestMeta?.requestType === "single" && requestMeta?.serviceName === "Document Review";
 
   const submitRequest = async ({
     name,
@@ -215,6 +213,7 @@ export default function StudyWeHelp() {
       return;
     }
 
+    // Save contact to user profile (non-blocking)
     try {
       const cleanName = String(name || "").trim();
       const cleanPhone = String(phone || "").trim();
@@ -233,41 +232,51 @@ export default function StudyWeHelp() {
       console.warn("upsertUserContact failed (continuing anyway):", e);
     }
 
-    const requestId = await createServiceRequest({
-      uid,
-      email: String(formEmail || email || "").trim(),
-      track: "study",
-      country,
-      requestType: requestMeta.requestType, // "single"
-      serviceName: requestMeta.serviceName,
-      name,
-      phone,
-      note,
+    try {
+      // ✅ MAIN: Create the request (soft-gate handled here)
+      const requestId = await createServiceRequest({
+        uid,
+        email: String(formEmail || email || "").trim(),
+        track: "study",
+        country,
+        requestType: requestMeta.requestType, // "single"
+        serviceName: requestMeta.serviceName,
+        name,
+        phone,
+        note,
 
-      city: String(city || "").trim(),
-      paid: Boolean(paid),
-      paymentMeta: paymentMeta || null,
-      requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
-    });
+        city: String(city || "").trim(),
+        paid: Boolean(paid),
+        paymentMeta: paymentMeta || null,
+        requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
+      });
 
-    // ✅ create attachment records whenever files exist
-    const picked = Array.isArray(dummyFiles) ? dummyFiles : [];
-    if (picked.length > 0) {
-      for (const file of picked) {
-        await createPendingAttachment({ requestId, file });
+      // ✅ Create attachment records whenever files exist
+      const picked = Array.isArray(dummyFiles) ? dummyFiles : [];
+      if (picked.length > 0) {
+        for (const file of picked) {
+          await createPendingAttachment({ requestId, file });
+        }
       }
+
+      await setActiveProcessDetails(uid, {
+        hasActiveProcess: true,
+        activeTrack: "study",
+        activeCountry: country,
+        activeHelpType: "we",
+        activeRequestId: requestId,
+      });
+
+      setModalOpen(false);
+      navigate(`/app/request/${requestId}`, { replace: true });
+    } catch (err) {
+      // ✅ KEY FIX: route unverified users to verify screen (and show error in modal)
+      if (err?.code === "auth/email-not-verified") {
+        navigate("/verify-email", { replace: false });
+      }
+      // Re-throw so RequestModal catches and displays err.message
+      throw err;
     }
-
-    await setActiveProcessDetails(uid, {
-      hasActiveProcess: true,
-      activeTrack: "study",
-      activeCountry: country,
-      activeHelpType: "we",
-      activeRequestId: requestId,
-    });
-
-    setModalOpen(false);
-    navigate(`/app/request/${requestId}`, { replace: true });
   };
 
   return (
@@ -341,16 +350,12 @@ export default function StudyWeHelp() {
           <div className="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur">
             <div className="flex items-end justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-zinc-900">
-                  Single packages
-                </h2>
+                <h2 className="text-base font-semibold text-zinc-900">Single packages</h2>
                 <p className="mt-1 text-sm text-zinc-600">
                   Choose one service you want help with.
                 </p>
               </div>
-              <span className="text-xs text-zinc-500">
-                {SINGLE_SERVICES.length} options
-              </span>
+              <span className="text-xs text-zinc-500">{SINGLE_SERVICES.length} options</span>
             </div>
 
             <div className="mt-4 grid gap-3">
@@ -365,9 +370,7 @@ export default function StudyWeHelp() {
                       <div className="font-semibold text-zinc-900">{s.title}</div>
                       <div className="mt-1 text-sm text-zinc-600">{s.note}</div>
                       {s.title === "Document Review" ? (
-                        <div className="mt-2 text-xs text-emerald-700">
-                          Attach PDFs when submitting
-                        </div>
+                        <div className="mt-2 text-xs text-emerald-700">Attach PDFs when submitting</div>
                       ) : null}
                     </div>
 
@@ -384,9 +387,7 @@ export default function StudyWeHelp() {
           <div className="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-zinc-900">
-                  Full package
-                </h2>
+                <h2 className="text-base font-semibold text-zinc-900">Full package</h2>
                 <p className="mt-1 text-sm text-zinc-600">
                   End-to-end support at a discounted price.
                 </p>

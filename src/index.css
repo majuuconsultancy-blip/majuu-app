@@ -1,18 +1,19 @@
 @import "tailwindcss";
 
+/* Global base so screens change even if they don't have dark: classes */
+@layer base {
+  html, body {
+    @apply bg-white text-zinc-900;
+  }
+
+  html.dark, html.dark body {
+    @apply bg-zinc-950 text-zinc-100;
+  }
+}
+
 /* Optional: better mobile typography behavior */
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
-svg {
-  display: block;
-}
-@keyframes shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
-}
-
-.animate-shimmer {
-  animation: shimmer 1.2s infinite;
-}
+svg { display: block; }

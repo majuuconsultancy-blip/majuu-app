@@ -1,5 +1,6 @@
+// requestservice.js (REPLACE with this)
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
 
 function cleanStr(x, max = 500) {
   return String(x || "").trim().slice(0, max);
@@ -59,8 +60,36 @@ function cleanPaymentMeta(meta) {
   return hasAny ? cleaned : null;
 }
 
+// Helpers for auth soft gate + safety
+function requireSignedInUser() {
+  const user = auth.currentUser;
+  if (!user) throw new Error("You must be logged in to send a request.");
+  return user;
+}
+
+function ensureVerified(user) {
+  // ✅ Soft gate: block email/password accounts until verified
+  // Google accounts usually come verified, so they pass.
+  if (!user.emailVerified) {
+    const err = new Error("Please verify your email before sending a request.");
+    err.code = "auth/email-not-verified";
+    throw err;
+  }
+}
+
 export async function createServiceRequest(payload) {
-  if (!payload?.uid) throw new Error("Missing uid");
+  // ✅ Ensure we have a signed-in user
+  const user = requireSignedInUser();
+
+  // ✅ Extra safety: payload uid must match current user
+  const payloadUid = cleanStr(payload?.uid, 80);
+  if (!payloadUid) throw new Error("Missing uid");
+  if (payloadUid !== user.uid) {
+    throw new Error("Auth mismatch. Please sign in again and retry.");
+  }
+
+  // ✅ Soft gate here (central enforcement)
+  ensureVerified(user);
 
   const ref = collection(db, "serviceRequests");
 
@@ -93,8 +122,9 @@ export async function createServiceRequest(payload) {
   const requestUploadMeta = cleanUploadMeta(payload?.requestUploadMeta);
 
   const clean = {
-    uid: cleanStr(payload.uid, 80),
-    email: cleanStr(payload.email, 120),
+    uid: user.uid,
+    // prefer auth email (more trustworthy), fallback to payload
+    email: cleanStr(user.email || payload.email, 120),
 
     track: cleanTrack(payload.track),
     country: cleanStr(payload.country, 80),

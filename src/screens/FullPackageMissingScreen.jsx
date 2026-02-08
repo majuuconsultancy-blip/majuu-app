@@ -6,11 +6,7 @@ import { doc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import RequestModal from "../components/RequestModal";
 import { createServiceRequest } from "../services/requestservice";
-import {
-  getUserState,
-  setActiveProcessDetails,
-  upsertUserContact,
-} from "../services/userservice";
+import { getUserState, setActiveProcessDetails, upsertUserContact } from "../services/userservice";
 import { getMissingProfileFields } from "../utils/profileGuard";
 import { createPendingAttachment } from "../services/attachmentservice";
 
@@ -63,14 +59,10 @@ export default function FullPackageMissingScreen() {
     return ["study", "work", "travel"].includes(t) ? t : "travel";
   }, [track]);
 
-  const params = useMemo(
-    () => new URLSearchParams(location.search),
-    [location.search]
-  );
+  const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
 
   const country = params.get("country") || "Not selected";
-  const parentRequestId =
-    params.get("parentRequestId") || params.get("parent") || "";
+  const parentRequestId = params.get("parentRequestId") || params.get("parent") || "";
 
   // ✅ Retry support: auto-open RequestModal from "Try again"
   const shouldAutoOpen = params.get("autoOpen") === "1";
@@ -101,9 +93,7 @@ export default function FullPackageMissingScreen() {
   const [defaultName, setDefaultName] = useState("");
   const [defaultPhone, setDefaultPhone] = useState("");
 
-  const goBack = () => {
-    navigate(-1);
-  };
+  const goBack = () => navigate(-1);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -158,11 +148,9 @@ export default function FullPackageMissingScreen() {
   const missingItems = useMemo(() => {
     // If parent request has remaining list, use it. Otherwise fall back.
     const arr =
-      parentReq?.remainingItems ||
-      parentReq?.missingItems ||
-      parentReq?.remaining ||
-      [];
+      parentReq?.remainingItems || parentReq?.missingItems || parentReq?.remaining || [];
     if (Array.isArray(arr) && arr.length) return arr.map((x) => String(x));
+
     return [
       "Document checklist",
       "SOP / Motivation Letter",
@@ -181,9 +169,7 @@ export default function FullPackageMissingScreen() {
     if (!canContinueHere) return;
 
     const picked =
-      autoItem ||
-      String(missingItems?.[0] || "").trim() ||
-      "Document checklist";
+      autoItem || String(missingItems?.[0] || "").trim() || "Document checklist";
 
     setPickedNeed(picked);
     setModalOpen(true);
@@ -247,7 +233,7 @@ export default function FullPackageMissingScreen() {
     }
 
     const autoContext = [
-      `Full package continuation`,
+      "Full package continuation",
       `ParentRequestId: ${parentRequestId || "-"}`,
       `Track: ${safeTrack}`,
       `Country: ${country}`,
@@ -261,42 +247,54 @@ export default function FullPackageMissingScreen() {
       ? `${String(note).trim()}\n\n---\n${autoContext}`
       : autoContext;
 
-    const requestId = await createServiceRequest({
-      uid,
-      email: String(formEmail || email || "").trim(),
-      track: safeTrack,
-      country,
-      requestType: "full",
-      serviceName: "Full Package",
-      missingItems: Array.isArray(missingItems) ? missingItems : [],
-      name,
-      phone,
-      note: finalNote,
+    try {
+      const requestId = await createServiceRequest({
+        uid,
+        email: String(formEmail || email || "").trim(),
+        track: safeTrack,
+        country,
+        requestType: "full",
+        serviceName: "Full Package",
+        missingItems: Array.isArray(missingItems) ? missingItems : [],
+        name,
+        phone,
+        note: finalNote,
 
-      city: String(city || "").trim(),
-      paid: Boolean(paid),
-      paymentMeta: paymentMeta || null,
+        city: String(city || "").trim(),
+        paid: Boolean(paid),
+        paymentMeta: paymentMeta || null,
 
-      requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
-      parentRequestId: parentRequestId || "",
-      fullPackageItem: pickedNeed || "",
-    });
+        requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
+        parentRequestId: parentRequestId || "",
+        fullPackageItem: pickedNeed || "",
+      });
 
-    const picked = Array.isArray(dummyFiles) ? dummyFiles : [];
-    for (const file of picked) {
-      await createPendingAttachment({ requestId, file });
+      // ✅ only create attachment docs when files exist
+      const picked = Array.isArray(dummyFiles) ? dummyFiles : [];
+      if (picked.length > 0) {
+        for (const file of picked) {
+          await createPendingAttachment({ requestId, file });
+        }
+      }
+
+      await setActiveProcessDetails(uid, {
+        hasActiveProcess: true,
+        activeTrack: safeTrack,
+        activeCountry: country,
+        activeHelpType: "we",
+        activeRequestId: requestId,
+      });
+
+      setModalOpen(false);
+      navigate(`/app/request/${requestId}`, { replace: true });
+    } catch (err) {
+      // ✅ soft-gate: unverified → verify screen
+      if (err?.code === "auth/email-not-verified") {
+        navigate("/verify-email", { replace: false });
+      }
+      // rethrow so RequestModal shows error message
+      throw err;
     }
-
-    await setActiveProcessDetails(uid, {
-      hasActiveProcess: true,
-      activeTrack: safeTrack,
-      activeCountry: country,
-      activeHelpType: "we",
-      activeRequestId: requestId,
-    });
-
-    setModalOpen(false);
-    navigate(`/app/request/${requestId}`, { replace: true });
   };
 
   const cardBase =
@@ -358,12 +356,9 @@ export default function FullPackageMissingScreen() {
 
         <div className="mt-6 grid gap-3">
           <div className={`${cardBase} p-4`}>
-            <div className="text-sm font-semibold text-zinc-900">
-              Remaining items
-            </div>
+            <div className="text-sm font-semibold text-zinc-900">Remaining items</div>
             <div className="mt-1 text-sm text-zinc-600">
-              Country:{" "}
-              <span className="font-medium text-zinc-900">{country}</span>
+              Country: <span className="font-medium text-zinc-900">{country}</span>
             </div>
 
             <div className="mt-4 grid gap-2">

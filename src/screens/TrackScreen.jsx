@@ -189,17 +189,17 @@ export default function TrackScreen({ track }) {
     });
     return () => unsub();
   }, []);
-  
-  useEffect(() => {
-  const params = new URLSearchParams(location.search);
-  const country = params.get("country");
-  const from = params.get("from");
 
-  if (country && from === "choice") {
-    setSelectedCountry(country);
-    setShowModal(true);
-  }
-}, [location.search]);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const country = params.get("country");
+    const from = params.get("from");
+
+    if (country && from === "choice") {
+      setSelectedCountry(country);
+      setShowModal(true);
+    }
+  }, [location.search]);
 
   // Close modal on ESC
   useEffect(() => {
@@ -222,6 +222,12 @@ export default function TrackScreen({ track }) {
   const closeModal = () => {
     if (saving) return;
     setShowModal(false);
+  };
+
+  // ✅ Go back to Track selection hub
+  const goToTracks = () => {
+    if (saving) return;
+    navigate("/dashboard");
   };
 
   const startProcessAndGo = async (helpType) => {
@@ -248,15 +254,13 @@ export default function TrackScreen({ track }) {
       const qs = encodeURIComponent(selectedCountry);
 
       if (helpType === "self") {
-        navigate(
-  `/app/${safeTrack}/self-help?country=${qs}&from=choice`,
-  { replace: true }
-);
+        navigate(`/app/${safeTrack}/self-help?country=${qs}&from=choice`, {
+          replace: true,
+        });
       } else {
-        navigate(
-  `/app/${safeTrack}/we-help?country=${qs}&from=choice`,
-  { replace: true }
-);
+        navigate(`/app/${safeTrack}/we-help?country=${qs}&from=choice`, {
+          replace: true,
+        });
       }
 
       setShowModal(false);
@@ -279,7 +283,8 @@ export default function TrackScreen({ track }) {
 
   return (
     <div className="min-h-screen">
-      <div className="px-5 py-6">
+      {/* ✅ add extra bottom padding so content doesn't hide behind the floating button */}
+      <div className="px-5 py-6 pb-40">
         {/* Header */}
         <div className="flex items-end justify-between gap-3">
           <div>
@@ -339,6 +344,41 @@ export default function TrackScreen({ track }) {
               </button>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* ✅ Floating button: middle of bottom third (above bottom nav) */}
+      <div className="fixed inset-x-0 z-30 flex justify-center pointer-events-none">
+        <div className="pointer-events-auto w-full max-w-sm px-5">
+          <button
+            type="button"
+            onClick={goToTracks}
+            disabled={saving}
+            className="
+              w-full
+              rounded-2xl
+              border border-zinc-200
+              bg-white/85 backdrop-blur
+              px-5 py-3
+              text-sm font-semibold text-zinc-900
+              shadow-lg
+              transition
+              hover:bg-white
+              active:scale-[0.99]
+              disabled:opacity-60
+            "
+            style={{
+              position: "fixed",
+              left: "50%",
+              transform: "translateX(-50%)",
+              // ✅ adjust this number if your bottom nav is taller/shorter
+              bottom: "140px",
+              maxWidth: "24rem",
+              width: "calc(100% - 2.5rem)",
+            }}
+          >
+            Go to Tracks
+          </button>
         </div>
       </div>
 
