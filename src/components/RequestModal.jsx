@@ -4,6 +4,8 @@
 // + Apple-like momentum scroll on mobile ✅
 // + Safer scroll behavior: body lock, overscroll containment ✅
 // + enableAttachments prop: hide upload unless enabled ✅
+// ✅ Email is now REQUIRED + validated ✅
+// ✅ Supports auto-fill via defaultEmail prop ✅
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -120,6 +122,14 @@ function normalizePhone(input) {
   return String(input || "").trim();
 }
 
+// ✅ lightweight email validation (good enough for UI + firebase)
+function isValidEmail(input) {
+  const e = String(input || "").trim();
+  if (!e) return false;
+  // very common safe pattern (not overly strict)
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+}
+
 function isPdfFile(f) {
   const name = String(f?.name || "").toLowerCase();
   const type = String(f?.type || "").toLowerCase();
@@ -146,7 +156,7 @@ export default function RequestModal({
   defaultEmail = "",
   onPay,
   maxPdfMb = 10,
-  enableAttachments = true, // ✅ NEW: hide upload section unless true
+  enableAttachments = true, // ✅ hide upload section unless enabled
 }) {
   const panelRef = useRef(null);
   const scrollRef = useRef(null);
@@ -188,9 +198,11 @@ export default function RequestModal({
     const prevOverflow = document.body.style.overflow;
     const prevPaddingRight = document.body.style.paddingRight;
 
-    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    const scrollbarWidth =
+      window.innerWidth - document.documentElement.clientWidth;
     document.body.style.overflow = "hidden";
-    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+    if (scrollbarWidth > 0)
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
 
     return () => {
       document.body.style.overflow = prevOverflow;
@@ -208,19 +220,35 @@ export default function RequestModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, loading, onClose]);
 
+  // ✅ Email required now (so pay gate also requires it)
   const canPay = useMemo(() => {
-    return name.trim().length > 0 && phone.trim().length > 0 && !loading;
-  }, [name, phone, loading]);
+    return (
+      name.trim().length > 0 &&
+      phone.trim().length > 0 &&
+      isValidEmail(email) &&
+      !loading
+    );
+  }, [name, phone, email, loading]);
 
   const canSubmit = useMemo(() => {
-    return name.trim().length > 0 && phone.trim().length > 0 && paid && !loading;
-  }, [name, phone, paid, loading]);
+    return (
+      name.trim().length > 0 &&
+      phone.trim().length > 0 &&
+      isValidEmail(email) &&
+      paid &&
+      !loading
+    );
+  }, [name, phone, email, paid, loading]);
 
   if (!open) return null;
 
   const doPay = () => {
-    if (!canPay) {
-      setErr("Please fill in name and phone first.");
+    if (!name.trim() || !phone.trim() || !String(email || "").trim()) {
+      setErr("Please fill in name, phone and email first.");
+      return;
+    }
+    if (!isValidEmail(email)) {
+      setErr("Please enter a valid email address.");
       return;
     }
     setErr("");
@@ -233,11 +261,17 @@ export default function RequestModal({
 
     const cleanName = String(name || "").trim();
     const cleanPhone = normalizePhone(phone);
-    const cleanEmail = String(email || "").trim();
+    const cleanEmail = String(email || "").trim().toLowerCase();
     const cleanCity = String(city || "").trim();
 
     if (!cleanName) return setErr("Please enter your full name.");
     if (!cleanPhone) return setErr("Please enter your phone / WhatsApp.");
+
+    // ✅ Email required
+    if (!cleanEmail) return setErr("Please enter your email address.");
+    if (!isValidEmail(cleanEmail))
+      return setErr("Please enter a valid email address.");
+
     if (!paid) return setErr("Please press Pay first to unlock sending.");
 
     // ✅ only validate files if attachments enabled
@@ -249,11 +283,13 @@ export default function RequestModal({
       if (badType) return setErr("Only PDF files are allowed for now.");
 
       const tooBig = pickedFiles.find((f) => (f?.size || 0) > maxBytes);
-      if (tooBig) return setErr(`One file is too large. Max size is ${maxPdfMb}MB.`);
+      if (tooBig)
+        return setErr(`One file is too large. Max size is ${maxPdfMb}MB.`);
 
-      fileMetas = Array.isArray(pickedFiles) ? pickedFiles.map(fileToMeta) : [];
+      fileMetas = Array.isArray(pickedFiles)
+        ? pickedFiles.map(fileToMeta)
+        : [];
     } else {
-      // if attachments disabled, ensure we don't accidentally send files
       if (pickedFiles.length) setPickedFiles([]);
     }
 
@@ -266,7 +302,6 @@ export default function RequestModal({
         city: cleanCity,
         note: String(note || "").trim(),
 
-        // ✅ Only pass files up when enabled
         dummyFiles: enableAttachments ? pickedFiles : [],
 
         requestUploadMeta:
@@ -305,7 +340,7 @@ export default function RequestModal({
       role="dialog"
       style={{ overscrollBehavior: "contain" }}
     >
-      {/* ✅ overlay (handles click/touch outside) */}
+      {/* overlay */}
       <div
         className="absolute inset-0 bg-black/35 backdrop-blur-[2px]"
         style={{ touchAction: "none" }}
@@ -321,19 +356,24 @@ export default function RequestModal({
       <div className="relative min-h-screen flex items-center justify-center p-4">
         <div
           ref={panelRef}
-          // ✅ stop overlay close when touching inside panel
           onMouseDown={(e) => e.stopPropagation()}
           onTouchStart={(e) => e.stopPropagation()}
-          className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white/75 shadow-xl backdrop-blur"
+          className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white/75 shadow-xl backdrop-blur flex flex-col"
+          style={{
+            height: "75vh",
+            maxHeight: "75vh",
+          }}
         >
           {/* Header */}
-          <div className="px-5 pt-5">
+          <div className="px-5 pt-5 shrink-0">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold tracking-tight text-zinc-900">
                   {title}
                 </h2>
-                {subtitle ? <p className="mt-1 text-sm text-zinc-600">{subtitle}</p> : null}
+                {subtitle ? (
+                  <p className="mt-1 text-sm text-zinc-600">{subtitle}</p>
+                ) : null}
               </div>
 
               <button
@@ -349,147 +389,167 @@ export default function RequestModal({
             </div>
           </div>
 
-          {/* ✅ Scroll area */}
-          <div
-            ref={scrollRef}
-            className="px-5 pt-4 pb-[152px] md:pb-[140px] max-h-[78vh] overflow-y-auto"
-            style={{
-              WebkitOverflowScrolling: "touch",
-              overscrollBehavior: "contain",
-              touchAction: "pan-y",
-            }}
-          >
-            <div className="grid gap-4">
-              {/* Name */}
-              <div>
-                <label className="text-sm font-medium text-zinc-800">Full name</label>
-                <div className={fieldWrap}>
-                  <IconUser className="h-5 w-5 text-zinc-500" />
-                  <input
-                    className={inputBase}
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Your full name"
-                    disabled={loading}
-                    autoComplete="name"
-                  />
-                </div>
-              </div>
-
-              {/* Phone */}
-              <div>
-                <label className="text-sm font-medium text-zinc-800">Phone / WhatsApp</label>
-                <div className={fieldWrap}>
-                  <IconPhone className="h-5 w-5 text-zinc-500" />
-                  <input
-                    className={inputBase}
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+2547..."
-                    disabled={loading}
-                    inputMode="tel"
-                    autoComplete="tel"
-                  />
-                </div>
-              </div>
-
-              {/* Email */}
-              <div>
-                <label className="text-sm font-medium text-zinc-800">Email (optional)</label>
-                <div className={fieldWrap}>
-                  <IconMail className="h-5 w-5 text-zinc-500" />
-                  <input
-                    className={inputBase}
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    disabled={loading}
-                    inputMode="email"
-                    autoComplete="email"
-                  />
-                </div>
-              </div>
-
-              {/* City */}
-              <div>
-                <label className="text-sm font-medium text-zinc-800">City / Town (optional)</label>
-                <div className={fieldWrap}>
-                  <IconPin className="h-5 w-5 text-zinc-500" />
-                  <input
-                    className={inputBase}
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    placeholder="Nairobi..."
-                    disabled={loading}
-                  />
-                </div>
-              </div>
-
-              {/* ✅ Upload PDFs — only if enabled */}
-              {enableAttachments ? (
+          {/* Scroll area */}
+          <div className="px-5 pt-4 flex-1 min-h-0">
+            <div
+              ref={scrollRef}
+              className="h-full pb-[152px] md:pb-[140px] overflow-y-auto"
+              style={{
+                WebkitOverflowScrolling: "touch",
+                overscrollBehavior: "contain",
+                touchAction: "pan-y",
+              }}
+            >
+              <div className="grid gap-4">
+                {/* Name */}
                 <div>
                   <label className="text-sm font-medium text-zinc-800">
-                    Upload documents (optional)
+                    Full name
                   </label>
-                  <div className="mt-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-3">
+                  <div className={fieldWrap}>
+                    <IconUser className="h-5 w-5 text-zinc-500" />
                     <input
-                      type="file"
-                      multiple
-                      accept="application/pdf"
+                      className={inputBase}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Your full name"
                       disabled={loading}
-                      onChange={(e) => {
-                        const arr = Array.from(e.target.files || []);
-                        setPickedFiles(arr);
-                      }}
-                      className="w-full text-sm text-zinc-900"
+                      autoComplete="name"
                     />
-
-                    <div className="mt-2 text-xs text-zinc-500">
-                      PDFs only. Max {maxPdfMb}MB each.
-                    </div>
-
-                    {pickedFiles.length ? (
-                      <div className="mt-3 grid gap-2">
-                        {pickedFiles.map((f, idx) => (
-                          <div
-                            key={`${f.name}-${idx}`}
-                            className="rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-xs text-zinc-700"
-                          >
-                            {f.name} • {Math.round((f.size || 0) / 1024)} KB
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
                   </div>
                 </div>
-              ) : null}
 
-              {/* Note */}
-              <div>
-                <label className="text-sm font-medium text-zinc-800">Note (optional)</label>
-                <div className={fieldWrap + " items-start"}>
-                  <IconNote className="h-5 w-5 text-zinc-500 mt-0.5" />
-                  <textarea
-                    className={inputBase + " min-h-[96px] resize-none"}
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="Any extra details to help us assist you..."
-                    disabled={loading}
-                  />
+                {/* Phone */}
+                <div>
+                  <label className="text-sm font-medium text-zinc-800">
+                    Phone / WhatsApp
+                  </label>
+                  <div className={fieldWrap}>
+                    <IconPhone className="h-5 w-5 text-zinc-500" />
+                    <input
+                      className={inputBase}
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="+2547..."
+                      disabled={loading}
+                      inputMode="tel"
+                      autoComplete="tel"
+                    />
+                  </div>
                 </div>
+
+                {/* ✅ Email (required) */}
+                <div>
+                  <label className="text-sm font-medium text-zinc-800">
+                    Email <span className="text-rose-600">*</span>
+                  </label>
+                  <div className={fieldWrap}>
+                    <IconMail className="h-5 w-5 text-zinc-500" />
+                    <input
+                      className={inputBase}
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@example.com"
+                      disabled={loading}
+                      inputMode="email"
+                      autoComplete="email"
+                    />
+                  </div>
+
+                  {/* tiny inline hint (only when user typed something invalid) */}
+                  {String(email || "").trim().length > 0 &&
+                  !isValidEmail(email) ? (
+                    <div className="mt-1 text-xs text-rose-600">
+                      Enter a valid email (example: you@gmail.com)
+                    </div>
+                  ) : null}
+                </div>
+
+                {/* City */}
+                <div>
+                  <label className="text-sm font-medium text-zinc-800">
+                    City / Town (optional)
+                  </label>
+                  <div className={fieldWrap}>
+                    <IconPin className="h-5 w-5 text-zinc-500" />
+                    <input
+                      className={inputBase}
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      placeholder="Nairobi..."
+                      disabled={loading}
+                    />
+                  </div>
+                </div>
+
+                {/* Upload PDFs — only if enabled */}
+                {enableAttachments ? (
+                  <div>
+                    <label className="text-sm font-medium text-zinc-800">
+                      Upload documents (optional)
+                    </label>
+                    <div className="mt-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-3">
+                      <input
+                        type="file"
+                        multiple
+                        accept="application/pdf"
+                        disabled={loading}
+                        onChange={(e) => {
+                          const arr = Array.from(e.target.files || []);
+                          setPickedFiles(arr);
+                        }}
+                        className="w-full text-sm text-zinc-900"
+                      />
+
+                      <div className="mt-2 text-xs text-zinc-500">
+                        PDFs only. Max {maxPdfMb}MB each.
+                      </div>
+
+                      {pickedFiles.length ? (
+                        <div className="mt-3 grid gap-2">
+                          {pickedFiles.map((f, idx) => (
+                            <div
+                              key={`${f.name}-${idx}`}
+                              className="rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-xs text-zinc-700"
+                            >
+                              {f.name} • {Math.round((f.size || 0) / 1024)} KB
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Note */}
+                <div>
+                  <label className="text-sm font-medium text-zinc-800">
+                    Note (optional)
+                  </label>
+                  <div className={fieldWrap + " items-start"}>
+                    <IconNote className="h-5 w-5 text-zinc-500 mt-0.5" />
+                    <textarea
+                      className={inputBase + " min-h-[96px] resize-none"}
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="Any extra details to help us assist you..."
+                      disabled={loading}
+                    />
+                  </div>
+                </div>
+
+                {/* Error */}
+                {err ? (
+                  <div className="rounded-2xl border border-rose-100 bg-rose-50/70 px-3 py-2 text-sm text-rose-700">
+                    {err}
+                  </div>
+                ) : null}
               </div>
-
-              {/* Error */}
-              {err ? (
-                <div className="rounded-2xl border border-rose-100 bg-rose-50/70 px-3 py-2 text-sm text-rose-700">
-                  {err}
-                </div>
-              ) : null}
             </div>
           </div>
 
           {/* Sticky CTA */}
-          <div className="sticky bottom-0 px-5 pb-5 pt-3">
+          <div className="sticky bottom-0 px-5 pb-5 pt-3 shrink-0">
             <div className="pointer-events-none -mt-6 h-6 w-full bg-gradient-to-b from-transparent to-white/80 backdrop-blur-[2px]" />
 
             <div className="rounded-2xl border border-zinc-200 bg-white/80 shadow-lg backdrop-blur px-3 py-3">
@@ -526,7 +586,8 @@ export default function RequestModal({
                 </button>
 
                 <p className="text-center text-xs text-zinc-500">
-                  You must press <span className="font-semibold">Pay</span> before sending.
+                  You must press <span className="font-semibold">Pay</span>{" "}
+                  before sending.
                 </p>
               </div>
             </div>

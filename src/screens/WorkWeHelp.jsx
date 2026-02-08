@@ -185,7 +185,7 @@ export default function WorkWeHelp() {
   const openFull = () => setDiagnosticOpen(true);
   const goToProfile = () => navigate("/app/profile");
 
-  const enableAttachments =
+  const enableAttachments = true; 
     requestMeta?.requestType === "single" && requestMeta?.serviceName === "Document Review";
 
   const submitRequest = async ({
@@ -419,6 +419,7 @@ export default function WorkWeHelp() {
           subtitle={modalSubtitle}
           defaultName={defaultName}
           defaultPhone={defaultPhone}
+          defaultEmail={auth.currentUser?.email || userProfile?.email || ""}
           enableAttachments={enableAttachments}
           maxPdfMb={10}
         />

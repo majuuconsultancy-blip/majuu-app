@@ -189,7 +189,7 @@ export default function StudyWeHelp() {
   const goToProfile = () => navigate("/app/profile");
 
   // attachments only on Document Review
-  const enableAttachments =
+  const enableAttachments = true; // requestMeta?.serviceName === "Document Review";
     requestMeta?.requestType === "single" && requestMeta?.serviceName === "Document Review";
 
   const submitRequest = async ({
@@ -432,6 +432,7 @@ export default function StudyWeHelp() {
           subtitle={modalSubtitle}
           defaultName={defaultName}
           defaultPhone={defaultPhone}
+          defaultEmail={auth.currentUser?.email || userProfile?.email || ""}
           enableAttachments={enableAttachments}
           maxPdfMb={10}
         />

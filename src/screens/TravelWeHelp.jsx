@@ -181,7 +181,7 @@ export default function TravelWeHelp() {
   const openFull = () => setDiagnosticOpen(true);
   const goToProfile = () => navigate("/app/profile");
 
-  const enableAttachments =
+  const enableAttachments = true; // Always allow attachments for travel services, as many require PDFs (e.g. Document Review)
     requestMeta?.requestType === "single" && requestMeta?.serviceName === "Document Review";
 
   const submitRequest = async ({
@@ -415,6 +415,7 @@ export default function TravelWeHelp() {
           subtitle={modalSubtitle}
           defaultName={defaultName}
           defaultPhone={defaultPhone}
+          defaultEmail={auth.currentUser?.email || userProfile?.email || ""}
           enableAttachments={enableAttachments}
           maxPdfMb={10}
         />

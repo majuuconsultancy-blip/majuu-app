@@ -1,57 +1,136 @@
+// ✅ src/services/adminrequestservice.js
 import {
   collection,
-  getDocs,
   query,
-  orderBy,
   where,
-  limit,
+  orderBy,
+  limit as qLimit,
+  getDocs,
+  getDoc,
   doc,
   updateDoc,
+  addDoc,
   serverTimestamp,
 } from "firebase/firestore";
+
 import { db } from "../firebase";
 
-export async function getRequests({ status = "new", max = 50 }) {
-  const cleanStatus = String(status || "new").toLowerCase();
-  const cleanMax = Math.max(1, Math.min(Number(max || 50), 250)); // safety cap
-
+/**
+ * ✅ Admin: fetch requests list
+ * - optional filters: status, track, uid
+ */
+export async function getRequests({
+  status = "",     // "new" | "contacted" | "closed" | "rejected"
+  track = "",      // "study" | "work" | "travel"
+  uid = "",        // user uid filter
+  limit = 50,
+} = {}) {
   const ref = collection(db, "serviceRequests");
-  const q = query(
-    ref,
-    where("status", "==", cleanStatus),
-    orderBy("createdAt", "desc"),
-    limit(cleanMax)
-  );
 
-  const snap = await getDocs(q);
+  const clauses = [];
+
+  if (status) clauses.push(where("status", "==", String(status).toLowerCase()));
+  if (track) clauses.push(where("track", "==", String(track).toLowerCase()));
+  if (uid) clauses.push(where("uid", "==", String(uid)));
+
+  // ✅ orderBy createdAt desc (recommended)
+  const qy = query(ref, ...clauses, orderBy("createdAt", "desc"), qLimit(limit));
+
+  const snap = await getDocs(qy);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
-export async function adminAcceptRequest({ requestId, note = "" }) {
-  const id = String(requestId || "").trim();
-  if (!id) throw new Error("Missing requestId");
+/**
+ * ✅ Internal helper: create in-app notification
+ * Writes to: users/{uid}/notifications
+ */
+async function createUserNotification(uid, payload) {
+  if (!uid) return;
 
-  await updateDoc(doc(db, "serviceRequests", id), {
-    status: "closed", // ✅ keep Firestore value; UI shows "Accepted"
-    adminDecision: "accepted",
-    adminDecisionNote: String(note || "").trim(),
-    reviewedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+  const nRef = collection(db, "users", uid, "notifications");
+  await addDoc(nRef, {
+    ...payload,
+    uid,
+    createdAt: serverTimestamp(),
+    readAt: null,
   });
 }
 
-export async function adminRejectRequest({ requestId, note }) {
-  const id = String(requestId || "").trim();
-  if (!id) throw new Error("Missing requestId");
+/**
+ * ✅ Admin: Accept a request
+ * - sets status to "closed"
+ * - stores note
+ * - creates notification
+ */
+export async function adminAcceptRequest({ requestId, note = "" }) {
+  if (!requestId) throw new Error("Missing requestId");
 
-  const clean = String(note || "").trim();
-  if (!clean) throw new Error("Rejection note is required.");
+  const reqRef = doc(db, "serviceRequests", requestId);
+  const snap = await getDoc(reqRef);
 
-  await updateDoc(doc(db, "serviceRequests", id), {
-    status: "rejected",
-    adminDecision: "rejected",
-    adminDecisionNote: clean,
-    reviewedAt: serverTimestamp(),
+  if (!snap.exists()) throw new Error("Request not found");
+
+  const req = snap.data();
+  const uid = req?.uid;
+
+  // ✅ update request status
+  await updateDoc(reqRef, {
+    status: "closed",
+    adminDecisionNote: String(note || "").trim(),
+    decidedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+
+  // ✅ notify user
+  await createUserNotification(uid, {
+    type: "request",
+    event: "accepted",
+    title: `${String(req?.track || "Request").toUpperCase()} accepted`,
+    body:
+      String(note || "").trim() ||
+      "Your request was accepted. Open Progress to view details.",
+    link: `/app/request/${requestId}`,
+    requestId,
+  });
+
+  return true;
+}
+
+/**
+ * ✅ Admin: Reject a request
+ * - sets status to "rejected"
+ * - stores note
+ * - creates notification
+ */
+export async function adminRejectRequest({ requestId, note = "" }) {
+  if (!requestId) throw new Error("Missing requestId");
+  if (!String(note || "").trim()) throw new Error("Note is required for rejection");
+
+  const reqRef = doc(db, "serviceRequests", requestId);
+  const snap = await getDoc(reqRef);
+
+  if (!snap.exists()) throw new Error("Request not found");
+
+  const req = snap.data();
+  const uid = req?.uid;
+
+  // ✅ update request status
+  await updateDoc(reqRef, {
+    status: "rejected",
+    adminDecisionNote: String(note || "").trim(),
+    decidedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  // ✅ notify user
+  await createUserNotification(uid, {
+    type: "request",
+    event: "rejected",
+    title: `${String(req?.track || "Request").toUpperCase()} needs changes`,
+    body: String(note || "").trim(),
+    link: `/app/request/${requestId}`,
+    requestId,
+  });
+
+  return true;
 }

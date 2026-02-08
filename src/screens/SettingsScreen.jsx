@@ -113,7 +113,6 @@ function Tile({ title, subtitle, children }) {
 
 function isEmailPasswordUser(user) {
   const providers = user?.providerData || [];
-  // If user signed up with email/password, providerId includes "password"
   return providers.some((p) => p?.providerId === "password");
 }
 
@@ -132,7 +131,14 @@ export default function SettingsScreen() {
   // Change email
   const [newEmail, setNewEmail] = useState("");
 
-  const [busy, setBusy] = useState(false);
+  // ✅ separate loading flags (fixes your issue)
+  const [busyPw, setBusyPw] = useState(false);
+  const [busyEmail, setBusyEmail] = useState(false);
+  const [busyReset, setBusyReset] = useState(false);
+  const [busyOut, setBusyOut] = useState(false);
+
+  const anyBusy = busyPw || busyEmail || busyReset || busyOut;
+
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
 
@@ -151,45 +157,22 @@ export default function SettingsScreen() {
 
   const canChangePassword = useMemo(() => {
     if (!isPasswordUser) return false;
-    if (busy) return false;
+    if (anyBusy) return false;
     if (currentPassword.trim().length < 4) return false;
     if (newPassword.trim().length < 6) return false;
     if (newPassword !== newPassword2) return false;
     return true;
-  }, [isPasswordUser, busy, currentPassword, newPassword, newPassword2]);
+  }, [isPasswordUser, anyBusy, currentPassword, newPassword, newPassword2]);
 
   const canChangeEmail = useMemo(() => {
     if (!isPasswordUser) return false;
-    if (busy) return false;
+    if (anyBusy) return false;
     if (!newEmail.trim()) return false;
     if (!newEmail.includes("@")) return false;
     return true;
-  }, [isPasswordUser, busy, newEmail]);
+  }, [isPasswordUser, anyBusy, newEmail]);
 
   const goBack = () => navigate("/app/profile");
-
-  const doSignOut = async () => {
-    setErr("");
-    setOk("");
-    await signOut(auth);
-    navigate("/login", { replace: true });
-  };
-
-  const doResetPassword = async () => {
-    setErr("");
-    setOk("");
-    if (!userEmail) return setErr("No email found on this account.");
-
-    setBusy(true);
-    try {
-      await sendPasswordResetEmail(auth, userEmail);
-      setOk("Password reset email sent. Check your inbox/spam.");
-    } catch (e) {
-      setErr(e?.message || "Failed to send reset email.");
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const reauth = async (email, password) => {
     const user = auth.currentUser;
@@ -198,18 +181,48 @@ export default function SettingsScreen() {
     await reauthenticateWithCredential(user, cred);
   };
 
+  const doSignOut = async () => {
+    setErr("");
+    setOk("");
+    setBusyOut(true);
+    try {
+      await signOut(auth);
+      navigate("/login", { replace: true });
+    } finally {
+      setBusyOut(false);
+    }
+  };
+
+  const doResetPassword = async () => {
+    setErr("");
+    setOk("");
+    if (!userEmail) return setErr("No email found on this account.");
+
+    setBusyReset(true);
+    try {
+      await sendPasswordResetEmail(auth, userEmail);
+      setOk("Password reset email sent. Check your inbox/spam.");
+    } catch (e) {
+      setErr(e?.message || "Failed to send reset email.");
+    } finally {
+      setBusyReset(false);
+    }
+  };
+
   const doChangePassword = async () => {
     setErr("");
     setOk("");
 
     const user = auth.currentUser;
     if (!user) return setErr("Not signed in.");
-    if (!isPasswordUser) return setErr("This account does not use password login.");
+    if (!isPasswordUser)
+      return setErr("This account does not use password login.");
 
     if (newPassword !== newPassword2) return setErr("Passwords do not match.");
-    if (newPassword.trim().length < 6) return setErr("Password must be at least 6 characters.");
+    if (newPassword.trim().length < 6)
+      return setErr("Password must be at least 6 characters.");
 
-    setBusy(true);
+    setBusyPw(true);
     try {
       await reauth(userEmail, currentPassword);
       await updatePassword(user, newPassword.trim());
@@ -220,13 +233,12 @@ export default function SettingsScreen() {
 
       setOk("Password updated successfully.");
     } catch (e) {
-      // Common: requires recent login
       setErr(
         e?.message ||
           "Failed to update password. Try the reset email option if needed."
       );
     } finally {
-      setBusy(false);
+      setBusyPw(false);
     }
   };
 
@@ -236,14 +248,14 @@ export default function SettingsScreen() {
 
     const user = auth.currentUser;
     if (!user) return setErr("Not signed in.");
-    if (!isPasswordUser) return setErr("This account does not use email/password login.");
+    if (!isPasswordUser)
+      return setErr("This account does not use email/password login.");
 
     const clean = String(newEmail || "").trim().toLowerCase();
     if (!clean.includes("@")) return setErr("Enter a valid email.");
 
-    setBusy(true);
+    setBusyEmail(true);
     try {
-      // For security, reauth is usually required
       await reauth(userEmail, currentPassword);
       await updateEmail(user, clean);
 
@@ -253,7 +265,7 @@ export default function SettingsScreen() {
     } catch (e) {
       setErr(e?.message || "Failed to update email.");
     } finally {
-      setBusy(false);
+      setBusyEmail(false);
     }
   };
 
@@ -290,7 +302,8 @@ export default function SettingsScreen() {
 
           <button
             onClick={goBack}
-            className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-white
+            disabled={anyBusy}
+            className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-white disabled:opacity-60
                        dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
           >
             <IconBack className="h-5 w-5" />
@@ -324,7 +337,10 @@ export default function SettingsScreen() {
                 {userEmail || "—"}
               </div>
               <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                Provider: {isPasswordUser ? "Email/Password" : "Other (Google/Phone/etc.)"}
+                {" "}
+                {isPasswordUser
+                  ? "Email/Password"
+                  : "Other (Google/Phone/etc.)"}
               </div>
             </div>
           </div>
@@ -348,7 +364,7 @@ export default function SettingsScreen() {
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
                   placeholder="Current password"
-                  disabled={!isPasswordUser || busy}
+                  disabled={!isPasswordUser || anyBusy}
                   className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
                 />
               </div>
@@ -358,7 +374,7 @@ export default function SettingsScreen() {
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="New password (min 6 chars)"
-                disabled={!isPasswordUser || busy}
+                disabled={!isPasswordUser || anyBusy}
                 className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
               />
 
@@ -367,7 +383,7 @@ export default function SettingsScreen() {
                 value={newPassword2}
                 onChange={(e) => setNewPassword2(e.target.value)}
                 placeholder="Confirm new password"
-                disabled={!isPasswordUser || busy}
+                disabled={!isPasswordUser || anyBusy}
                 className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
               />
 
@@ -376,15 +392,15 @@ export default function SettingsScreen() {
                 disabled={!canChangePassword}
                 className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
               >
-                {busy ? "Saving..." : "Update password"}
+                {busyPw ? "Saving..." : "Update password"}
               </button>
 
               <button
                 onClick={doResetPassword}
-                disabled={busy || !userEmail}
+                disabled={anyBusy || !userEmail}
                 className="w-full rounded-xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
               >
-                {busy ? "Please wait..." : "Send password reset email"}
+                {busyReset ? "Please wait..." : "Send password reset email"}
               </button>
 
               <div className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -394,7 +410,7 @@ export default function SettingsScreen() {
           </Tile>
         </div>
 
-        {/* Change email (optional) */}
+        {/* Change email */}
         <div className="mt-3">
           <Tile
             title="Change email"
@@ -409,7 +425,7 @@ export default function SettingsScreen() {
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}
                 placeholder="New email address"
-                disabled={!isPasswordUser || busy}
+                disabled={!isPasswordUser || anyBusy}
                 className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
               />
 
@@ -418,11 +434,11 @@ export default function SettingsScreen() {
                 disabled={!canChangeEmail}
                 className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
               >
-                {busy ? "Saving..." : "Update email"}
+                {busyEmail ? "Saving..." : "Update email"}
               </button>
 
               <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                Note: Changing email may require re-verification depending on Firebase settings.
+                Note: Changing email requires re-verification.
               </div>
             </div>
           </Tile>
@@ -430,14 +446,15 @@ export default function SettingsScreen() {
 
         {/* Sign out */}
         <div className="mt-3">
-          <Tile title="Sign out" subtitle="Ends your session on this device.">
+          <Tile title="Sign out" subtitle>
             <button
               onClick={doSignOut}
-              className="w-full rounded-xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-white active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
+              disabled={anyBusy}
+              className="w-full rounded-xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
             >
               <span className="inline-flex items-center justify-center gap-2">
                 <IconLogout className="h-5 w-5" />
-                Sign out
+                {busyOut ? "Signing out..." : "Sign out"}
               </span>
             </button>
           </Tile>

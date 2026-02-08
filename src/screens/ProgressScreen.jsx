@@ -9,13 +9,19 @@ import {
   doc,
   deleteDoc,
   getDocs,
+
+  // ✅ notifications
+  orderBy,
+  limit,
+  updateDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 
 import { auth, db } from "../firebase";
 import { getUserState } from "../services/userservice";
 import { getMyApplications } from "../services/progressservice";
 
-/* ---------- Minimal icons (no emojis) ---------- */
+/* ---------- Minimal icons (no emojis) --------- */
 function IconPulse(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
@@ -52,6 +58,26 @@ function IconTrash(props) {
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/* ✅ notifications icon */
+function IconBell(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M12 22a2.2 2.2 0 0 0 2.2-2.2H9.8A2.2 2.2 0 0 0 12 22Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M18 16.8H6c.9-1 1.5-2 1.5-3.7V10a4.5 4.5 0 1 1 9 0v3.1c0 1.7.6 2.7 1.5 3.7Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
         strokeLinejoin="round"
       />
     </svg>
@@ -116,6 +142,40 @@ function parseMissingItemsFromNote(note) {
   return Array.from(new Set(parts));
 }
 
+/* ✅ NEW: safe createdAt formatter (Firestore Timestamp / Date / number / string) */
+function formatCreatedAt(createdAt) {
+  if (!createdAt) return "";
+
+  let d = null;
+
+  if (typeof createdAt?.toDate === "function") {
+    d = createdAt.toDate();
+  } else if (typeof createdAt?.seconds === "number") {
+    d = new Date(createdAt.seconds * 1000);
+  } else if (createdAt instanceof Date) {
+    d = createdAt;
+  } else if (typeof createdAt === "number") {
+    d = new Date(createdAt);
+  } else if (typeof createdAt === "string") {
+    const parsed = new Date(createdAt);
+    if (!isNaN(parsed.getTime())) d = parsed;
+  }
+
+  if (!d || isNaN(d.getTime())) return "";
+
+  const dateStr = d.toLocaleDateString(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+  const timeStr = d.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  return `${dateStr} • ${timeStr}`;
+}
+
 export default function ProgressScreen() {
   const navigate = useNavigate();
 
@@ -126,19 +186,21 @@ export default function ProgressScreen() {
   const [err, setErr] = useState("");
   const [deletingId, setDeletingId] = useState("");
 
+  // ✅ notifications
+  const [notifs, setNotifs] = useState([]);
+
   async function deleteRequestDeep(requestId) {
     const attRef = collection(db, "serviceRequests", requestId, "attachments");
     const attSnap = await getDocs(attRef);
     for (const d of attSnap.docs) {
-      await deleteDoc(
-        doc(db, "serviceRequests", requestId, "attachments", d.id)
-      );
+      await deleteDoc(doc(db, "serviceRequests", requestId, "attachments", d.id));
     }
     await deleteDoc(doc(db, "serviceRequests", requestId));
   }
 
   useEffect(() => {
     let unsubReq = null;
+    let unsubNotifs = null;
 
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
       if (!user) {
@@ -153,6 +215,7 @@ export default function ProgressScreen() {
         const s = await getUserState(user.uid);
         setState(s);
 
+        // ✅ Requests (existing)
         const reqRef = collection(db, "serviceRequests");
         const reqQ = query(reqRef, where("uid", "==", user.uid));
 
@@ -163,14 +226,31 @@ export default function ProgressScreen() {
           (snap) => {
             const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
             data.sort(
-              (a, b) =>
-                (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
+              (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
             );
             setRequests(data);
           },
           (error) => {
             console.error("Realtime requests error:", error);
             setErr(error?.message || "Failed to listen for requests");
+          }
+        );
+
+        // ✅ Notifications (NEW)
+        if (unsubNotifs) unsubNotifs();
+        const nRef = collection(db, "users", user.uid, "notifications");
+        const nQ = query(nRef, orderBy("createdAt", "desc"), limit(50));
+
+        unsubNotifs = onSnapshot(
+          nQ,
+          (snap) => {
+            const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            setNotifs(data);
+          },
+          (error) => {
+            console.error("Realtime notifications error:", error);
+            // don’t wipe your existing err, but do show it if empty
+            setErr((prev) => prev || error?.message || "Failed to load notifications");
           }
         );
 
@@ -187,6 +267,7 @@ export default function ProgressScreen() {
     return () => {
       unsubAuth();
       if (unsubReq) unsubReq();
+      if (unsubNotifs) unsubNotifs();
     };
   }, [navigate]);
 
@@ -228,6 +309,38 @@ export default function ProgressScreen() {
     const n = requests.length;
     return n === 1 ? "1 request" : `${n} requests`;
   }, [requests.length]);
+
+  // ✅ notifications derived
+  const unreadCount = useMemo(() => {
+    return notifs.filter((n) => !n.readAt).length;
+  }, [notifs]);
+
+  const openNotification = async (n) => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      // mark as read
+      if (!n.readAt) {
+        await updateDoc(
+          doc(db, "users", user.uid, "notifications", n.id),
+          { readAt: serverTimestamp() }
+        );
+      }
+
+      const link = String(n.link || "").trim();
+      if (!link) return;
+
+      if (link.startsWith("/")) {
+        navigate(link);
+      } else {
+        window.open(link, "_blank", "noopener,noreferrer");
+      }
+    } catch (e) {
+      console.error("Open notification failed:", e);
+      setErr(e?.message || "Failed to open notification.");
+    }
+  };
 
   if (loading) {
     return (
@@ -276,8 +389,112 @@ export default function ProgressScreen() {
             </div>
           ) : null}
 
+          {/* ✅ Notifications (NEW) */}
+          <div className="mt-6">
+            <div className="flex items-end justify-between">
+              <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
+                Notifications
+              </h2>
+
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                {unreadCount ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-600 px-2 text-[11px] font-semibold text-white">
+                      {unreadCount}
+                    </span>
+                    unread
+                  </span>
+                ) : (
+                  "All caught up"
+                )}
+              </span>
+            </div>
+
+            {notifs.length === 0 ? (
+              <div className={`mt-3 ${cardBase}`}>
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60 text-emerald-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
+                    <IconBell className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      No notifications yet
+                    </div>
+                    <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      When the team updates your request, you’ll see it here.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 grid gap-3">
+                {notifs.map((n) => {
+                  const unread = !n.readAt;
+                  const title = String(n.title || n.type || "Update");
+                  const body = String(n.body || "");
+                  const when = formatCreatedAt(n.createdAt);
+
+                  return (
+                    <button
+                      key={n.id}
+                      onClick={() => openNotification(n)}
+                      className={`${cardBase} ${cardHover} text-left`}
+                      style={{ cursor: "pointer" }}
+                      type="button"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`h-2.5 w-2.5 rounded-full ${
+                                unread ? "bg-rose-500" : "bg-zinc-300 dark:bg-zinc-600"
+                              }`}
+                            />
+                            <div className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">
+                              {title}
+                            </div>
+                          </div>
+
+                          {body ? (
+                            <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                              {body}
+                            </div>
+                          ) : null}
+
+                          {when ? (
+                            <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+                              {when}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <span
+                          className={`shrink-0 rounded-full px-2.5 py-1 text-xs border ${
+                            unread
+                              ? "bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:border-rose-900/40"
+                              : "bg-zinc-100 text-zinc-700 border-zinc-200 dark:bg-zinc-900/60 dark:text-zinc-200 dark:border-zinc-700"
+                          }`}
+                        >
+                          {unread ? "New" : "Read"}
+                        </span>
+                      </div>
+
+                      {String(n.link || "").trim() ? (
+                        <div className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-3.5 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.99]
+                                     dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/55">
+                          Open
+                          <IconChevronRight className="h-4 w-4" />
+                        </div>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Current process */}
-          <div className={`mt-6 ${cardBase} ${cardHover}`}>
+          <div className={`mt-8 ${cardBase} ${cardHover}`}>
             <div className="flex items-center justify-between">
               <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
                 Current process
@@ -386,7 +603,8 @@ export default function ProgressScreen() {
                     ? "Full package"
                     : `Single: ${r.serviceName || "-"}`;
 
-                  // ✅ Try again routing EXACTLY like RequestStatusScreen
+                  const createdLabel = formatCreatedAt(r.createdAt);
+
                   const handleTryAgain = () => {
                     const country = r.country || "Not selected";
                     const countryQS2 = encodeURIComponent(country);
@@ -432,9 +650,7 @@ export default function ProgressScreen() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span
-                              className={`h-2.5 w-2.5 rounded-full ${ui.dot}`}
-                            />
+                            <span className={`h-2.5 w-2.5 rounded-full ${ui.dot}`} />
                             <div className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">
                               {titleLeft}
                             </div>
@@ -444,9 +660,11 @@ export default function ProgressScreen() {
                             {subtitle}
                           </div>
 
-                          <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-                            ID: <span className="font-mono">{r.id}</span>
-                          </div>
+                          {createdLabel ? (
+                            <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+                              Created: <span className="font-medium">{createdLabel}</span>
+                            </div>
+                          ) : null}
                         </div>
 
                         <span

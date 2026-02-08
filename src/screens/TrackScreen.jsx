@@ -10,6 +10,7 @@ import { useLocation } from "react-router-dom";
 /* ---------- Minimal icons ---------- */
 function IconStudy(props) {
   return (
+  
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
       <path
         d="M3.5 8.5 12 4l8.5 4.5L12 13 3.5 8.5Z"

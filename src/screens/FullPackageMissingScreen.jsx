@@ -192,7 +192,7 @@ export default function FullPackageMissingScreen() {
   const goToProfile = () => navigate("/app/profile");
 
   // Allow users to attach PDFs for any selected full-package item
-  const enableAttachments = Boolean(pickedNeed);
+  const enableAttachments = true;
 
   const submitFullPackage = async ({
     name,
@@ -397,6 +397,7 @@ export default function FullPackageMissingScreen() {
           subtitle={`${titleText} • ${country}`}
           defaultName={defaultName}
           defaultPhone={defaultPhone}
+          defaultEmail={auth.currentUser?.email || userProfile?.email || ""}
           enableAttachments={enableAttachments}
           maxPdfMb={10}
         />
