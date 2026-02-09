@@ -1,8 +1,7 @@
-// ✅ App.jsx (FULL COPY-PASTE, fixed)
+// ✅ App.jsx (FULL COPY-PASTE)
 // Fixes:
-// - ✅ Proper nesting/closing tags
-// - ✅ GA page view tracker mounted correctly (SPA pageviews)
-// - ✅ Your routes kept as-is + a clean fallback
+// - ✅ Staff routes correctly added (no invalid JSX comments)
+// - ✅ Keeps AdminGate routes as-is
 
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
@@ -38,11 +37,18 @@ import AdminRequestDocumentsScreen from "./screens/AdminRequestDocumentsScreen";
 import SettingsScreen from "./screens/SettingsScreen";
 
 import GAPageView from "./components/GAPageView";
+import NotificationsScreen from "./screens/NotificationsScreen";
+
+// ✅ Staff
+import StaffGate from "./components/StaffGate";
+import StaffHomeScreen from "./screens/StaffHomeScreen";
+import StaffOnboardingScreen from "./screens/StaffOnboardingScreen";
+import StaffTasksScreen from "./screens/StaffTasksScreen";
+import StaffRequestDetailsScreen from "./screens/StaffRequestDetailsScreen";
 
 export default function App() {
   return (
     <BrowserRouter>
-      {/* ✅ GA SPA pageviews */}
       <GAPageView />
 
       <Routes>
@@ -57,9 +63,42 @@ export default function App() {
         {/* Track selection hub */}
         <Route path="/dashboard" element={<TrackSelectScreen />} />
 
+        {/* ✅ Staff (same level as /app) */}
+        <Route
+          path="/staff"
+          element={
+            <StaffGate>
+              <StaffHomeScreen />
+            </StaffGate>
+          }
+        />
+        <Route
+          path="/staff/onboarding"
+          element={
+            <StaffGate>
+              <StaffOnboardingScreen />
+            </StaffGate>
+          }
+        />
+        <Route
+          path="/staff/tasks"
+          element={
+            <StaffGate>
+              <StaffTasksScreen />
+            </StaffGate>
+          }
+        />
+        <Route
+          path="/staff/request/:requestId"
+          element={
+            <StaffGate>
+              <StaffRequestDetailsScreen />
+            </StaffGate>
+          }
+        />
+
         {/* App shell */}
         <Route path="/app" element={<AppLayout />}>
-          {/* default /app -> /app/home */}
           <Route index element={<Navigate to="home" replace />} />
 
           <Route path="home" element={<SmartHome />} />
@@ -72,13 +111,8 @@ export default function App() {
 
           <Route path="request/:requestId" element={<RequestStatusScreen />} />
 
-          {/* Full package missing screen */}
-          <Route
-            path="full-package/:track"
-            element={<FullPackageMissingScreen />}
-          />
+          <Route path="full-package/:track" element={<FullPackageMissingScreen />} />
 
-          {/* Self-help / We-help */}
           <Route path="study/self-help" element={<StudySelfHelp />} />
           <Route path="study/we-help" element={<StudyWeHelp />} />
 
@@ -88,8 +122,8 @@ export default function App() {
           <Route path="travel/self-help" element={<TravelSelfHelp />} />
           <Route path="travel/we-help" element={<TravelWeHelp />} />
 
-          //settings screen can be added here as well, e.g. 
           <Route path="settings" element={<SettingsScreen />} />
+          <Route path="notifications" element={<NotificationsScreen />} />
 
           {/* Admin */}
           <Route

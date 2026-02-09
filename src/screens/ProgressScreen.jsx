@@ -1,3 +1,8 @@
+// ✅ ProgressScreen.jsx (FULL COPY-PASTE)
+// - Progress stays clean: ONLY one Notifications banner (no list here)
+// - Banner shows unread count and navigates to /app/notifications
+// - (Delete button per-notification is implemented in NotificationsScreen, not here)
+
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
@@ -13,8 +18,6 @@ import {
   // ✅ notifications
   orderBy,
   limit,
-  updateDoc,
-  serverTimestamp,
 } from "firebase/firestore";
 
 import { auth, db } from "../firebase";
@@ -142,7 +145,7 @@ function parseMissingItemsFromNote(note) {
   return Array.from(new Set(parts));
 }
 
-/* ✅ NEW: safe createdAt formatter (Firestore Timestamp / Date / number / string) */
+/* ✅ safe createdAt formatter (Firestore Timestamp / Date / number / string) */
 function formatCreatedAt(createdAt) {
   if (!createdAt) return "";
 
@@ -186,8 +189,8 @@ export default function ProgressScreen() {
   const [err, setErr] = useState("");
   const [deletingId, setDeletingId] = useState("");
 
-  // ✅ notifications
-  const [notifs, setNotifs] = useState([]);
+  // ✅ unread notifications count (no list shown here)
+  const [unreadCount, setUnreadCount] = useState(0);
 
   async function deleteRequestDeep(requestId) {
     const attRef = collection(db, "serviceRequests", requestId, "attachments");
@@ -236,7 +239,7 @@ export default function ProgressScreen() {
           }
         );
 
-        // ✅ Notifications (NEW)
+        // ✅ Notifications count only (for badge + banner)
         if (unsubNotifs) unsubNotifs();
         const nRef = collection(db, "users", user.uid, "notifications");
         const nQ = query(nRef, orderBy("createdAt", "desc"), limit(50));
@@ -244,12 +247,16 @@ export default function ProgressScreen() {
         unsubNotifs = onSnapshot(
           nQ,
           (snap) => {
-            const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            setNotifs(data);
+            let count = 0;
+            snap.forEach((d) => {
+              const data = d.data();
+              if (!data?.readAt) count += 1;
+            });
+            setUnreadCount(count);
           },
           (error) => {
             console.error("Realtime notifications error:", error);
-            // don’t wipe your existing err, but do show it if empty
+            setUnreadCount(0);
             setErr((prev) => prev || error?.message || "Failed to load notifications");
           }
         );
@@ -310,38 +317,6 @@ export default function ProgressScreen() {
     return n === 1 ? "1 request" : `${n} requests`;
   }, [requests.length]);
 
-  // ✅ notifications derived
-  const unreadCount = useMemo(() => {
-    return notifs.filter((n) => !n.readAt).length;
-  }, [notifs]);
-
-  const openNotification = async (n) => {
-    try {
-      const user = auth.currentUser;
-      if (!user) return;
-
-      // mark as read
-      if (!n.readAt) {
-        await updateDoc(
-          doc(db, "users", user.uid, "notifications", n.id),
-          { readAt: serverTimestamp() }
-        );
-      }
-
-      const link = String(n.link || "").trim();
-      if (!link) return;
-
-      if (link.startsWith("/")) {
-        navigate(link);
-      } else {
-        window.open(link, "_blank", "noopener,noreferrer");
-      }
-    } catch (e) {
-      console.error("Open notification failed:", e);
-      setErr(e?.message || "Failed to open notification.");
-    }
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen bg-white dark:bg-zinc-950">
@@ -389,108 +364,45 @@ export default function ProgressScreen() {
             </div>
           ) : null}
 
-          {/* ✅ Notifications (NEW) */}
+          {/* ✅ Notifications (single banner) */}
           <div className="mt-6">
-            <div className="flex items-end justify-between">
-              <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
-                Notifications
-              </h2>
-
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                {unreadCount ? (
-                  <span className="inline-flex items-center gap-2">
-                    <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-600 px-2 text-[11px] font-semibold text-white">
-                      {unreadCount}
-                    </span>
-                    unread
-                  </span>
-                ) : (
-                  "All caught up"
-                )}
-              </span>
-            </div>
-
-            {notifs.length === 0 ? (
-              <div className={`mt-3 ${cardBase}`}>
-                <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate("/app/notifications")}
+              className={`${cardBase} ${cardHover} w-full text-left`}
+              style={{ cursor: "pointer" }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60 text-emerald-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
                     <IconBell className="h-5 w-5" />
                   </span>
-                  <div>
+
+                  <div className="min-w-0">
                     <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                      No notifications yet
+                      Notifications
                     </div>
                     <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      When the team updates your request, you’ll see it here.
+                      {unreadCount ? "Tap to view new updates" : "Tap to view history"}
                     </div>
                   </div>
                 </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {unreadCount ? (
+                    <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-rose-600 px-2 text-[11px] font-semibold text-white">
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      All caught up
+                    </span>
+                  )}
+
+                  <IconChevronRight className="h-4 w-4 text-zinc-400 dark:text-zinc-500" />
+                </div>
               </div>
-            ) : (
-              <div className="mt-3 grid gap-3">
-                {notifs.map((n) => {
-                  const unread = !n.readAt;
-                  const title = String(n.title || n.type || "Update");
-                  const body = String(n.body || "");
-                  const when = formatCreatedAt(n.createdAt);
-
-                  return (
-                    <button
-                      key={n.id}
-                      onClick={() => openNotification(n)}
-                      className={`${cardBase} ${cardHover} text-left`}
-                      style={{ cursor: "pointer" }}
-                      type="button"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`h-2.5 w-2.5 rounded-full ${
-                                unread ? "bg-rose-500" : "bg-zinc-300 dark:bg-zinc-600"
-                              }`}
-                            />
-                            <div className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">
-                              {title}
-                            </div>
-                          </div>
-
-                          {body ? (
-                            <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                              {body}
-                            </div>
-                          ) : null}
-
-                          {when ? (
-                            <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-                              {when}
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <span
-                          className={`shrink-0 rounded-full px-2.5 py-1 text-xs border ${
-                            unread
-                              ? "bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:border-rose-900/40"
-                              : "bg-zinc-100 text-zinc-700 border-zinc-200 dark:bg-zinc-900/60 dark:text-zinc-200 dark:border-zinc-700"
-                          }`}
-                        >
-                          {unread ? "New" : "Read"}
-                        </span>
-                      </div>
-
-                      {String(n.link || "").trim() ? (
-                        <div className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-3.5 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.99]
-                                     dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/55">
-                          Open
-                          <IconChevronRight className="h-4 w-4" />
-                        </div>
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            </button>
           </div>
 
           {/* Current process */}
@@ -508,25 +420,19 @@ export default function ProgressScreen() {
               <div className="mt-4 grid gap-3">
                 <div className="grid gap-2 text-sm">
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 dark:text-zinc-400">
-                      Track
-                    </span>
+                    <span className="text-zinc-500 dark:text-zinc-400">Track</span>
                     <span className="font-medium text-zinc-900 dark:text-zinc-100">
                       {activeTrack}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 dark:text-zinc-400">
-                      Country
-                    </span>
+                    <span className="text-zinc-500 dark:text-zinc-400">Country</span>
                     <span className="font-medium text-zinc-900 dark:text-zinc-100">
                       {activeCountry}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 dark:text-zinc-400">
-                      Mode
-                    </span>
+                    <span className="text-zinc-500 dark:text-zinc-400">Mode</span>
                     <span className="font-medium text-zinc-900 dark:text-zinc-100">
                       {activeMode}
                     </span>
@@ -541,10 +447,7 @@ export default function ProgressScreen() {
               <div className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
                 No active process yet. Choose a track to begin.
                 <div className="mt-4">
-                  <button
-                    onClick={() => navigate("/dashboard")}
-                    className={ghostBtn}
-                  >
+                  <button onClick={() => navigate("/dashboard")} className={ghostBtn}>
                     Choose track
                   </button>
                 </div>
@@ -572,10 +475,7 @@ export default function ProgressScreen() {
                   When you submit a We-Help request, it will show up here.
                 </div>
                 <div className="mt-4">
-                  <button
-                    onClick={() => navigate("/dashboard")}
-                    className={ghostBtn}
-                  >
+                  <button onClick={() => navigate("/dashboard")} className={ghostBtn}>
                     Start a request
                   </button>
                 </div>
@@ -593,8 +493,7 @@ export default function ProgressScreen() {
                   const canDelete = st === "closed" || st === "rejected";
                   const isDeleting = deletingId === r.id;
 
-                  const isFull =
-                    String(r.requestType || "").toLowerCase() === "full";
+                  const isFull = String(r.requestType || "").toLowerCase() === "full";
 
                   const titleLeft = `${String(r.track || "").toUpperCase()} • ${
                     r.country || "-"
@@ -610,9 +509,7 @@ export default function ProgressScreen() {
                     const countryQS2 = encodeURIComponent(country);
 
                     if (isFull) {
-                      let missingItems = Array.isArray(r.missingItems)
-                        ? r.missingItems
-                        : [];
+                      let missingItems = Array.isArray(r.missingItems) ? r.missingItems : [];
                       if (!missingItems.length)
                         missingItems = parseMissingItemsFromNote(r.note);
 
@@ -662,14 +559,13 @@ export default function ProgressScreen() {
 
                           {createdLabel ? (
                             <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-                              Created: <span className="font-medium">{createdLabel}</span>
+                              Created:{" "}
+                              <span className="font-medium">{createdLabel}</span>
                             </div>
                           ) : null}
                         </div>
 
-                        <span
-                          className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${ui.badge}`}
-                        >
+                        <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${ui.badge}`}>
                           {ui.label}
                         </span>
                       </div>

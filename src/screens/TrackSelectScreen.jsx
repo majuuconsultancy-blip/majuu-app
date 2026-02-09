@@ -1,8 +1,15 @@
+// ✅ TrackSelectScreen.jsx (FULL COPY-PASTE)
+// Adds:
+// - ✅ "Staff Portal" button on /dashboard ONLY if user is staff (staff/{uid}.active === true)
+// - ✅ Safe Firestore check (fails closed => hides button)
+// - ✅ Button goes to /staff/tasks
+
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 
-import { auth } from "../firebase";
+import { auth, db } from "../firebase";
 import { getUserState, setSelectedTrack } from "../services/userservice";
 
 /* Minimal icons (no libs) */
@@ -76,6 +83,27 @@ function IconArrowRight(props) {
   );
 }
 
+/* ✅ New: small badge icon for Staff button */
+function IconShield(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M12 3l7 4v6c0 5-3.5 8.7-7 9-3.5-.3-7-4-7-9V7l7-4Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.5 12l1.8 1.8L14.8 10"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function TrackSelectScreen() {
   const navigate = useNavigate();
 
@@ -85,6 +113,9 @@ export default function TrackSelectScreen() {
   const [loading, setLoading] = useState(true);
   const [softMsg, setSoftMsg] = useState("Loading…");
   const [going, setGoing] = useState(""); // track being clicked
+
+  // ✅ NEW: staff check
+  const [isStaff, setIsStaff] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -102,6 +133,15 @@ export default function TrackSelectScreen() {
       }
 
       setUid(user.uid);
+
+      // ✅ staff role check (fails closed)
+      try {
+        const staffSnap = await getDoc(doc(db, "staff", user.uid));
+        const ok = staffSnap.exists() && Boolean(staffSnap.data()?.active);
+        setIsStaff(ok);
+      } catch (e) {
+        setIsStaff(false);
+      }
 
       try {
         const state = await getUserState(user.uid);
@@ -127,7 +167,8 @@ export default function TrackSelectScreen() {
     const helpType = String(userState?.activeHelpType || "").toLowerCase();
     const track = String(userState?.activeTrack || "").toUpperCase();
     if (!showSkip) return "";
-    if (helpType === "we") return `Continue your request${track ? ` (${track})` : ""}`;
+    if (helpType === "we")
+      return `Continue your request${track ? ` (${track})` : ""}`;
     return `Continue your process${track ? ` (${track})` : ""}`;
   }, [showSkip, userState]);
 
@@ -208,11 +249,7 @@ export default function TrackSelectScreen() {
       </div>
 
       {/* subtle “loading” hint when clicking */}
-      {active ? (
-        <div className="mt-3 text-xs text-emerald-700">
-          Opening…
-        </div>
-      ) : null}
+      {active ? <div className="mt-3 text-xs text-emerald-700">Opening…</div> : null}
     </button>
   );
 
@@ -226,13 +263,35 @@ export default function TrackSelectScreen() {
               <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
                 Choose your path
               </h1>
-              <p className="mt-1 text-sm text-zinc-600">
-                Study-Work-Travel.
-              </p>
+              <p className="mt-1 text-sm text-zinc-600">Study-Work-Travel.</p>
             </div>
 
             <div className="h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/60" />
           </div>
+
+          {/* ✅ Staff Portal button (ONLY for staff) */}
+          {isStaff ? (
+            <div className="mt-5">
+              <button
+                type="button"
+                onClick={() => navigate("/staff/tasks")}
+                className="w-full rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm font-semibold text-emerald-900 transition hover:bg-emerald-100 active:scale-[0.99]
+                           dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-100 dark:hover:bg-emerald-950/55"
+              >
+                <span className="inline-flex items-center justify-center gap-2">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-xl border border-emerald-200 bg-white/70 text-emerald-800">
+                    <IconShield className="h-4 w-4" />
+                  </span>
+                  Staff Portal
+                  <IconArrowRight className="h-5 w-5 text-emerald-700" />
+                </span>
+              </button>
+
+              <div className="mt-2 text-[11px] text-zinc-500">
+                Visible to staff accounts only.
+              </div>
+            </div>
+          ) : null}
 
           {/* Tiles */}
           <div className="mt-6 grid gap-3">
@@ -267,9 +326,7 @@ export default function TrackSelectScreen() {
               <div className="text-sm font-semibold text-zinc-900">
                 You have something in progress
               </div>
-              <div className="mt-1 text-sm text-zinc-600">
-                {skipLabel}
-              </div>
+              <div className="mt-1 text-sm text-zinc-600">{skipLabel}</div>
 
               <div className="mt-4 grid gap-2">
                 <button

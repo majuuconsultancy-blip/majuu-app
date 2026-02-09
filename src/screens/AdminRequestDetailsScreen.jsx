@@ -8,6 +8,7 @@ import {
   deleteStagedAdminFile,
   publishStagedAdminFiles,
 } from "../services/adminfileservice";
+import AssignStaffPanel from "../components/AssignStaffPanel";
 
 /* ---------- Minimal icons ---------- */
 function IconBack(props) {
@@ -173,11 +174,11 @@ export default function AdminRequestDetailsScreen() {
   const navigate = useNavigate();
   const location = useLocation();
 
-const goBackToList = () => {
-  // Preserve the current Admin tab/search when going back
-  const qs = String(location?.search || "");
-  navigate(`/app/admin${qs}`, { replace: true });
-};
+  const goBackToList = () => {
+    // Preserve the current Admin tab/search when going back
+    const qs = String(location?.search || "");
+    navigate(`/app/admin${qs}`, { replace: true });
+  };
 
   const [loading, setLoading] = useState(true);
   const [req, setReq] = useState(null);
@@ -204,8 +205,7 @@ const goBackToList = () => {
       ? "border-emerald-200 bg-emerald-600 text-white"
       : "border-rose-200 bg-rose-600 text-white";
 
-  const card =
-    "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur";
+  const card = "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur";
   const pageBg = "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white";
 
   const load = async () => {
@@ -381,8 +381,6 @@ const goBackToList = () => {
       ? "Decision complete. This request was rejected."
       : "Review the applicant details and documents, then make a decision.";
 
-  const dangerNoteRequired = "Note is required for rejection.";
-
   return (
     <div className={pageBg}>
       <div className="max-w-xl mx-auto px-5 py-6">
@@ -437,6 +435,15 @@ const goBackToList = () => {
             <div className="mt-1 text-sm text-zinc-600">{actionHint}</div>
           </div>
         </div>
+
+       {/* ✅ STAFF ASSIGNMENT (only when NOT finalized) */}
+        {req && !decisionLocked ? (
+          <AssignStaffPanel request={req} />
+        ) : (
+          <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+            Staff assignment is disabled because this request is already finalized.
+          </div>
+        )}
 
         {/* Applicant (documents button inside) */}
         <div className={`mt-6 ${card} p-5`}>
@@ -581,10 +588,7 @@ const goBackToList = () => {
               </div>
             ) : (
               drafts.map((d) => (
-                <div
-                  key={d.id}
-                  className="rounded-2xl border border-zinc-200 bg-white/60 p-4"
-                >
+                <div key={d.id} className="rounded-2xl border border-zinc-200 bg-white/60 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="font-semibold text-sm text-zinc-900 break-words">

@@ -259,7 +259,7 @@ export default function AppLayout() {
                   {/* ✅ NEW: unread badge */}
                   {unreadCount > 0 ? (
                     <span
-                      className={`absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full ${
+                      className={`absolute -top-2 -right-19 h-2.5 w-2.5 rounded-full ${
                         progressActive ? "bg-white" : "bg-rose-600"
                       }`}
                       aria-label={`${unreadCount} unread notifications`}
