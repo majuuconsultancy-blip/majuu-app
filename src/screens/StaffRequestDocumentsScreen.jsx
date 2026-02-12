@@ -1,0 +1,343 @@
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { onAuthStateChanged } from "firebase/auth";
+import {
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  orderBy,
+  query,
+} from "firebase/firestore";
+import { auth, db } from "../firebase";
+
+/* ---------- Minimal icons ---------- */
+function IconBack(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M15.5 5.5 9 12l6.5 6.5"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconFile(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M8 3.8h6.6L19.2 8.4v12a1.8 1.8 0 0 1-1.8 1.8H8A3.2 3.2 0 0 1 4.8 18.8V7A3.2 3.2 0 0 1 8 3.8Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14.6 3.8v4.6h4.6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconDownload(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path d="M12 3.8v10.2" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+      <path
+        d="M8.5 10.8 12 14.3l3.5-3.5"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5.5 19.5a2.5 2.5 0 0 0 2.5 2.5h8A2.5 2.5 0 0 0 18.5 19.5"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/* ---------- Helpers ---------- */
+function bytesToLabel(bytes) {
+  const b = Number(bytes || 0);
+  if (b <= 0) return "—";
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${Math.round(b / 1024)} KB`;
+  return `${Math.round((b / 1024 / 1024) * 10) / 10} MB`;
+}
+
+function attStatusLabel(status) {
+  const s = String(status || "pending_upload").toLowerCase();
+  if (s === "pending_upload") return "Received";
+  if (s === "uploaded") return "Uploaded";
+  if (s === "approved") return "Approved";
+  if (s === "rejected") return "Rejected";
+  return s;
+}
+
+function safeStr(x) {
+  return String(x || "").trim();
+}
+
+export default function StaffRequestDocumentsScreen() {
+  const navigate = useNavigate();
+  const { requestId } = useParams();
+
+  const validId = useMemo(() => {
+    const id = String(requestId || "").trim();
+    return id ? id : null;
+  }, [requestId]);
+
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [uid, setUid] = useState("");
+
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [attachments, setAttachments] = useState([]);
+
+  const [allowed, setAllowed] = useState(false);
+
+  // ✅ Auth guard
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        navigate("/login", { replace: true });
+        return;
+      }
+      setUid(user.uid);
+      setCheckingAuth(false);
+    });
+    return () => unsub();
+  }, [navigate]);
+
+  // ✅ Permission check: staff must be assigned to this request
+  useEffect(() => {
+    (async () => {
+      if (!validId || !uid) return;
+
+      try {
+        setErr("");
+        setAllowed(false);
+
+        const reqSnap = await getDoc(doc(db, "serviceRequests", validId));
+        if (!reqSnap.exists()) throw new Error("Request not found");
+
+        const req = reqSnap.data();
+        const assignedTo = safeStr(req?.assignedTo);
+
+        // allow if request is assigned to this staff
+        if (assignedTo && assignedTo === uid) {
+          setAllowed(true);
+          return;
+        }
+
+        // fallback allow if staff task doc exists
+        const taskSnap = await getDoc(doc(db, "staff", uid, "tasks", validId));
+        if (taskSnap.exists()) {
+          setAllowed(true);
+          return;
+        }
+
+        setAllowed(false);
+        setErr("You are not assigned to this request.");
+      } catch (e) {
+        console.error(e);
+        setAllowed(false);
+        setErr(e?.message || "Access check failed.");
+      }
+    })();
+  }, [validId, uid]);
+
+  // ✅ Live attachments list (only if allowed)
+  useEffect(() => {
+    if (!validId || !allowed) return;
+
+    setLoading(true);
+    setErr("");
+
+    const colRef = collection(db, "serviceRequests", validId, "attachments");
+    const qy = query(colRef, orderBy("createdAt", "desc"));
+
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        setAttachments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      },
+      (e) => {
+        console.error("attachments snapshot error:", e);
+        setErr(e?.message || "Failed to load uploaded documents.");
+        setLoading(false);
+      }
+    );
+
+    return () => unsub();
+  }, [validId, allowed]);
+
+  const cardBase = "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur";
+  const softBg = "bg-gradient-to-b from-emerald-50/40 via-white to-white";
+
+  if (checkingAuth) {
+    return (
+      <div className={`min-h-screen ${softBg}`}>
+        <div className="px-5 py-6 max-w-xl mx-auto">
+          <div className={`${cardBase} p-4 text-sm text-zinc-600`}>Preparing…</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`min-h-screen ${softBg}`}>
+      <div className="px-5 py-6 max-w-xl mx-auto">
+        {/* Header */}
+        <div className="flex items-end justify-between gap-3">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-emerald-100 bg-white/70">
+                <IconFile className="h-4 w-4 text-emerald-700" />
+              </span>
+              Applicant uploads
+            </div>
+
+            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900">
+              Uploaded documents
+            </h1>
+
+            <p className="mt-1 text-sm text-zinc-600">
+              Request ID: <span className="font-mono break-all">{validId || "-"}</span>
+            </p>
+          </div>
+
+          <button
+            onClick={() => navigate(-1)}
+            className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
+            type="button"
+          >
+            <IconBack className="h-5 w-5 text-emerald-700" />
+            Back
+          </button>
+        </div>
+
+        {err ? (
+          <div className="mt-6 rounded-2xl border border-rose-100 bg-rose-50/70 p-4 text-sm text-rose-700">
+            {err}
+          </div>
+        ) : null}
+
+        {!allowed ? (
+          <div className={`mt-6 ${cardBase} p-5`}>
+            <div className="text-sm text-zinc-600">
+              You can only view documents for requests assigned to you.
+            </div>
+          </div>
+        ) : (
+          <div className={`mt-6 ${cardBase} p-5`}>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-semibold text-zinc-900">Files</div>
+                <div className="text-xs text-zinc-500">attachments subcollection</div>
+              </div>
+              <span className="text-xs text-zinc-500">{attachments.length} files</span>
+            </div>
+
+            {loading ? (
+              <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+                Loading…
+              </div>
+            ) : attachments.length === 0 ? (
+              <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+                No documents uploaded yet.
+              </div>
+            ) : (
+              <div className="mt-4 grid gap-2">
+                {attachments.map((a) => {
+                  const url = safeStr(a?.url || a?.downloadUrl || a?.fileUrl);
+                  const hasLink = url.startsWith("http");
+
+                  const contentType = safeStr(a?.contentType || a?.type || "file");
+                  const name = safeStr(a?.name || a?.filename || "Document");
+
+                  const label = safeStr(a?.label);
+                  const metaNote = safeStr(a?.metaNote || a?.note);
+                  const kind = safeStr(a?.kind);
+
+                  return (
+                    <div
+                      key={a.id}
+                      className="rounded-2xl border border-zinc-200 bg-white/60 p-4 transition hover:border-emerald-200 hover:bg-white"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm text-zinc-900 break-words">{name}</div>
+
+                          <div className="mt-1 text-xs text-zinc-600">
+                            {bytesToLabel(a.size)} · {contentType}
+                          </div>
+
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <span className="inline-flex rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-700">
+                              {attStatusLabel(a.status)}
+                            </span>
+
+                            {label ? (
+                              <span className="inline-flex rounded-full border border-emerald-100 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
+                                {label}
+                              </span>
+                            ) : null}
+
+                            {kind ? (
+                              <span className="inline-flex rounded-full border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
+                                {kind}
+                              </span>
+                            ) : null}
+                          </div>
+
+                          {metaNote ? (
+                            <div className="mt-2 text-xs text-zinc-600 whitespace-pre-wrap">{metaNote}</div>
+                          ) : null}
+
+                          {hasLink ? (
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+                            >
+                              <IconDownload className="h-5 w-5" />
+                              Open / Download
+                            </a>
+                          ) : (
+                            <div className="mt-3 text-sm font-semibold text-zinc-400">
+                              Download link not available yet
+                            </div>
+                          )}
+                        </div>
+
+                        <span className="shrink-0 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 text-xs font-semibold text-emerald-800">
+                          Applicant
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="h-10" />
+      </div>
+    </div>
+  );
+}

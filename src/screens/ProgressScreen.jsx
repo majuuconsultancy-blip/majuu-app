@@ -2,8 +2,9 @@
 // - Progress stays clean: ONLY one Notifications banner (no list here)
 // - Banner shows unread count and navigates to /app/notifications
 // - (Delete button per-notification is implemented in NotificationsScreen, not here)
+// ✅ Added: per-request chat unread badge (from request chat system)
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import {
@@ -82,6 +83,26 @@ function IconBell(props) {
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/* ✅ chat icon */
+function IconChat(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M7 18.5l-2.6 1.4.9-3.1A7.8 7.8 0 0 1 4.2 13c0-4.2 3.6-7.6 8-7.6s8 3.4 8 7.6-3.6 7.6-8 7.6c-1.7 0-3.2-.4-4.6-1.1Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8.6 12.8h.01M12 12.8h.01M15.4 12.8h.01"
+        stroke="currentColor"
+        strokeWidth="2.6"
+        strokeLinecap="round"
       />
     </svg>
   );
@@ -192,6 +213,10 @@ export default function ProgressScreen() {
   // ✅ unread notifications count (no list shown here)
   const [unreadCount, setUnreadCount] = useState(0);
 
+  // ✅ chat unread per requestId
+  const [chatUnreadByRequest, setChatUnreadByRequest] = useState({});
+  const chatUnsubsRef = useRef({}); // { [requestId]: () => void }
+
   async function deleteRequestDeep(requestId) {
     const attRef = collection(db, "serviceRequests", requestId, "attachments");
     const attSnap = await getDocs(attRef);
@@ -200,6 +225,91 @@ export default function ProgressScreen() {
     }
     await deleteDoc(doc(db, "serviceRequests", requestId));
   }
+
+  // ✅ helper to compute unread
+  const setChatUnread = (requestId, isUnread) => {
+    setChatUnreadByRequest((prev) => {
+      const curr = !!prev[requestId];
+      const next = !!isUnread;
+      if (curr === next) return prev;
+      return { ...prev, [requestId]: next };
+    });
+  };
+
+  // ✅ attach per-request listeners for chat (latest message + readState)
+  const attachChatUnreadListeners = (requestIds) => {
+    const existing = chatUnsubsRef.current || {};
+
+    // cleanup removed requests
+    Object.keys(existing).forEach((rid) => {
+      if (!requestIds.includes(rid)) {
+        try {
+          existing[rid]?.();
+        } catch {}
+        delete existing[rid];
+        setChatUnread(rid, false);
+      }
+    });
+
+    // attach for new ones
+    requestIds.forEach((rid) => {
+      if (existing[rid]) return;
+
+      let latestMsgSec = 0;
+      let lastReadSec = 0;
+
+      const recompute = () => {
+        if (!latestMsgSec) {
+          setChatUnread(rid, false);
+          return;
+        }
+        setChatUnread(rid, latestMsgSec > lastReadSec);
+      };
+
+      // latest message (only 1)
+      const msgRef = collection(db, "serviceRequests", rid, "messages");
+      const msgQ = query(msgRef, orderBy("createdAt", "desc"), limit(1));
+      const unsubMsg = onSnapshot(
+        msgQ,
+        (snap) => {
+          const d = snap.docs?.[0]?.data?.() || null;
+          latestMsgSec = d?.createdAt?.seconds || 0;
+          recompute();
+        },
+        () => {
+          // if fails, don't block UI
+          latestMsgSec = 0;
+          recompute();
+        }
+      );
+
+      // read state (user)
+      const rsDoc = doc(db, "serviceRequests", rid, "readState", "user");
+      const unsubRead = onSnapshot(
+        rsDoc,
+        (snap) => {
+          const d = snap.exists() ? snap.data() : null;
+          lastReadSec = d?.lastReadAt?.seconds || 0;
+          recompute();
+        },
+        () => {
+          lastReadSec = 0;
+          recompute();
+        }
+      );
+
+      existing[rid] = () => {
+        try {
+          unsubMsg?.();
+        } catch {}
+        try {
+          unsubRead?.();
+        } catch {}
+      };
+    });
+
+    chatUnsubsRef.current = existing;
+  };
 
   useEffect(() => {
     let unsubReq = null;
@@ -232,6 +342,9 @@ export default function ProgressScreen() {
               (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
             );
             setRequests(data);
+
+            // ✅ attach chat unread listeners
+            attachChatUnreadListeners(data.map((x) => String(x.id)));
           },
           (error) => {
             console.error("Realtime requests error:", error);
@@ -275,6 +388,15 @@ export default function ProgressScreen() {
       unsubAuth();
       if (unsubReq) unsubReq();
       if (unsubNotifs) unsubNotifs();
+
+      // ✅ cleanup chat listeners
+      const m = chatUnsubsRef.current || {};
+      Object.keys(m).forEach((rid) => {
+        try {
+          m[rid]?.();
+        } catch {}
+      });
+      chatUnsubsRef.current = {};
     };
   }, [navigate]);
 
@@ -504,6 +626,8 @@ export default function ProgressScreen() {
 
                   const createdLabel = formatCreatedAt(r.createdAt);
 
+                  const hasChatUnread = Boolean(chatUnreadByRequest?.[r.id]);
+
                   const handleTryAgain = () => {
                     const country = r.country || "Not selected";
                     const countryQS2 = encodeURIComponent(country);
@@ -551,6 +675,14 @@ export default function ProgressScreen() {
                             <div className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">
                               {titleLeft}
                             </div>
+
+                            {/* ✅ Chat unread badge (per request) */}
+                            {hasChatUnread ? (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50/70 px-2 py-0.5 text-[11px] font-semibold text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
+                                <IconChat className="h-4 w-4" />
+                                New message
+                              </span>
+                            ) : null}
                           </div>
 
                           <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">

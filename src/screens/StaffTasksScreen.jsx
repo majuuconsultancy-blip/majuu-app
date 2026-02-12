@@ -9,18 +9,15 @@
 // - ✅ Counters per tab + total
 // - ✅ Recommendation pill (only shows when staffDecision is recommend_*)
 // - ✅ Safer loading + map fetch
+//
+// ✅ FIX (Start Work modal):
+// - New tasks -> /staff/request/:rid/start
+// - Ongoing/Done -> /staff/request/:rid
 
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import {
-  collection,
-  doc,
-  getDoc,
-  onSnapshot,
-  orderBy,
-  query,
-} from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, orderBy, query } from "firebase/firestore";
 
 import { auth, db } from "../firebase";
 
@@ -66,12 +63,7 @@ function IconLogout(props) {
         strokeWidth="1.8"
         strokeLinecap="round"
       />
-      <path
-        d="M4 12h10"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+      <path d="M4 12h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       <path
         d="M7 9l-3 3 3 3"
         stroke="currentColor"
@@ -147,7 +139,7 @@ export default function StaffTasksScreen() {
   const [err, setErr] = useState("");
 
   const [tasks, setTasks] = useState([]);
-  const [requestsMap, setRequestsMap] = useState({}); // requestId -> request data
+  const [requestsMap, setRequestsMap] = useState({});
   const [uid, setUid] = useState("");
   const [busy, setBusy] = useState("");
 
@@ -188,7 +180,6 @@ export default function StaffTasksScreen() {
           const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           setTasks(list);
 
-          // fetch serviceRequests for each task (OK for small scale)
           const nextMap = {};
           await Promise.all(
             list.map(async (t) => {
@@ -228,17 +219,7 @@ export default function StaffTasksScreen() {
         const staffStatus = String(req?.staffStatus || "assigned");
         const staffTab = normalizeStaffTab(staffStatus);
 
-        // NOTE: "New" means staff hasn't started work yet.
-        // If you ever want "New" to ONLY include req.status === "new", add:
-        // const statusOk = String(req?.status || "new").toLowerCase() === "new";
-        // and filter on statusOk as well.
-        return {
-          task: t,
-          rid,
-          req,
-          staffStatus,
-          staffTab,
-        };
+        return { task: t, rid, req, staffStatus, staffTab };
       })
       .filter((x) => x.rid);
   }, [tasks, requestsMap]);
@@ -357,7 +338,11 @@ export default function StaffTasksScreen() {
               >
                 {t.label}
                 <span className="ml-2 rounded-full border border-zinc-200 bg-white/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700">
-                  {t.key === "new" ? counts.new : t.key === "ongoing" ? counts.ongoing : counts.done}
+                  {t.key === "new"
+                    ? counts.new
+                    : t.key === "ongoing"
+                    ? counts.ongoing
+                    : counts.done}
                 </span>
               </button>
             ))}
@@ -427,11 +412,17 @@ export default function StaffTasksScreen() {
                     : `Single: ${req.serviceName || req.requestType || "-"}`
                   : "Loading request details…";
 
+                const sNorm = String(req?.staffStatus || "assigned").toLowerCase();
+                const goTo =
+                  sNorm === "in_progress" || sNorm === "done"
+                    ? `/staff/request/${rid}`
+                    : `/staff/request/${rid}/start`;
+
                 return (
                   <button
                     key={task.id}
                     type="button"
-                    onClick={() => navigate(`/staff/request/${rid}`)}
+                    onClick={() => navigate(goTo)}
                     className="w-full text-left rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-white hover:shadow-md active:scale-[0.99]"
                   >
                     <div className="flex items-start justify-between gap-3">

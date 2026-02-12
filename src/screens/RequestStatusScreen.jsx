@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import {
+  doc,
+  collection,
+  onSnapshot,
+  query,
+  orderBy,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
+import RequestChatLauncher from "../components/RequestChatLauncher";
 
 import { auth, db } from "../firebase";
 import { clearActiveProcess } from "../services/userservice";
@@ -170,6 +179,21 @@ export default function RequestStatusScreen() {
     return id.length > 0 ? id : null;
   }, [requestId]);
 
+  // ✅ Mark chat read when viewing this screen so Progress "New message" badge clears
+  const markChatRead = async () => {
+    if (!validRequestId) return;
+    try {
+      await setDoc(
+        doc(db, "serviceRequests", validRequestId, "readState", "user"),
+        { lastReadAt: serverTimestamp() },
+        { merge: true }
+      );
+    } catch (e) {
+      // silent on purpose (rules may block; don't break screen)
+      console.warn("markChatRead failed:", e);
+    }
+  };
+
   useEffect(() => {
     let unsubDoc = null;
     let unsubAtt = null;
@@ -198,6 +222,9 @@ export default function RequestStatusScreen() {
 
       setLoading(true);
       setErr("");
+
+      // ✅ mark chat read once user opens this screen
+      markChatRead();
 
       // Request doc
       const ref = doc(db, "serviceRequests", validRequestId);
@@ -232,12 +259,7 @@ export default function RequestStatusScreen() {
       );
 
       // User submitted docs
-      const attRef = collection(
-        db,
-        "serviceRequests",
-        validRequestId,
-        "attachments"
-      );
+      const attRef = collection(db, "serviceRequests", validRequestId, "attachments");
       const attQ = query(attRef, orderBy("createdAt", "desc"));
       unsubAtt = onSnapshot(
         attQ,
@@ -252,12 +274,7 @@ export default function RequestStatusScreen() {
       );
 
       // Admin -> User docs (downloadable)
-      const afRef = collection(
-        db,
-        "serviceRequests",
-        validRequestId,
-        "adminFiles"
-      );
+      const afRef = collection(db, "serviceRequests", validRequestId, "adminFiles");
       const afQ = query(afRef, orderBy("createdAt", "desc"));
       unsubAdminFiles = onSnapshot(
         afQ,
@@ -278,10 +295,10 @@ export default function RequestStatusScreen() {
       if (unsubAdminFiles) unsubAdminFiles();
       unsubAuth();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate, validRequestId]);
 
-  const cardBase =
-    "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur";
+  const cardBase = "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur";
   const softBg = "bg-gradient-to-b from-emerald-50/40 via-white to-white";
 
   if (loading) {
@@ -319,7 +336,6 @@ export default function RequestStatusScreen() {
   const ui = statusUI(req?.status);
   const track = String(req?.track || "").toLowerCase();
   const safeTrack = track === "work" || track === "travel" ? track : "study";
-  const countryQS = encodeURIComponent(req?.country || "");
   const st = String(req?.status || "new").toLowerCase();
 
   const adminNote = String(
@@ -338,10 +354,7 @@ export default function RequestStatusScreen() {
     if (!missingItems.length) missingItems = parseMissingItemsFromNote(req?.note);
 
     try {
-      sessionStorage.setItem(
-        `fp_missing_${safeTrack}`,
-        JSON.stringify(missingItems)
-      );
+      sessionStorage.setItem(`fp_missing_${safeTrack}`, JSON.stringify(missingItems));
     } catch {}
 
     if (!missingItems.length) {
@@ -369,10 +382,7 @@ export default function RequestStatusScreen() {
       if (!missingItems.length) missingItems = parseMissingItemsFromNote(req?.note);
 
       try {
-        sessionStorage.setItem(
-          `fp_missing_${safeTrack}`,
-          JSON.stringify(missingItems)
-        );
+        sessionStorage.setItem(`fp_missing_${safeTrack}`, JSON.stringify(missingItems));
       } catch {}
 
       const picked =
@@ -467,8 +477,7 @@ export default function RequestStatusScreen() {
             ) : null}
           </div>
 
-          {(st === "rejected" || st === "closed" || st === "contacted") &&
-          adminNote ? (
+          {(st === "rejected" || st === "closed" || st === "contacted") && adminNote ? (
             <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
               <div className="flex items-center gap-2 text-xs font-semibold text-amber-900">
                 <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-amber-200 bg-white/70">
@@ -484,8 +493,7 @@ export default function RequestStatusScreen() {
 
           {st === "new" ? (
             <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-700">
-              We’ve received your request. Our team will review it and update you
-              here.
+              We’ve received your request. Our team will review it and update you here.
               <div className="mt-2 text-xs text-zinc-500">
                 Tip: You can always check Progress for updates.
               </div>
@@ -513,6 +521,11 @@ export default function RequestStatusScreen() {
           ) : null}
         </div>
 
+        {/* ✅ Chat (safe modal) */}
+        <div className="mt-5">
+          <RequestChatLauncher requestId={validRequestId} />
+        </div>
+
         {/* ✅ Documents from MAJUU (downloadable) */}
         <div className={`mt-5 ${cardBase} p-5`}>
           <div className="flex items-center justify-between">
@@ -521,9 +534,7 @@ export default function RequestStatusScreen() {
                 <IconFile className="h-5 w-5 text-emerald-800" />
               </span>
               <div>
-                <div className="font-semibold text-zinc-900">
-                  Documents from MAJUU
-                </div>
+                <div className="font-semibold text-zinc-900">Documents from MAJUU</div>
                 <div className="text-xs text-zinc-500">SOPs, templates, forms</div>
               </div>
             </div>
@@ -556,9 +567,7 @@ export default function RequestStatusScreen() {
                         <div className="font-semibold text-sm text-zinc-900 break-words">
                           {name}
                         </div>
-                        <div className="mt-1 text-xs text-zinc-600">
-                          Tap Open to download
-                        </div>
+                        <div className="mt-1 text-xs text-zinc-600">Tap Open to download</div>
                       </div>
 
                       <a
@@ -589,9 +598,7 @@ export default function RequestStatusScreen() {
                 <IconFile className="h-5 w-5 text-emerald-800" />
               </span>
               <div>
-                <div className="font-semibold text-zinc-900">
-                  Submitted documents
-                </div>
+                <div className="font-semibold text-zinc-900">Submitted documents</div>
                 <div className="text-xs text-zinc-500">
                   Visible when you upload documents.
                 </div>

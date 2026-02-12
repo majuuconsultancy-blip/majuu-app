@@ -1,14 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { doc, getDoc, collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  updateDoc,
+  serverTimestamp,
+} from "firebase/firestore";
 import { db } from "../firebase";
-import { adminAcceptRequest, adminRejectRequest } from "../services/adminrequestservice";
+import {
+  adminAcceptRequest,
+  adminRejectRequest,
+} from "../services/adminrequestservice";
 import {
   stageAdminFile,
   deleteStagedAdminFile,
   publishStagedAdminFiles,
+  markStaffDraftStaged,
 } from "../services/adminfileservice";
 import AssignStaffPanel from "../components/AssignStaffPanel";
+import AdminRequestChatLauncher from "../components/AdminRequestChatLauncher";
 
 /* ---------- Minimal icons ---------- */
 function IconBack(props) {
@@ -145,20 +159,29 @@ function IconTrash(props) {
 function pill(status) {
   const s = String(status || "new").toLowerCase();
   if (s === "new")
-    return { label: "New", cls: "bg-zinc-100 text-zinc-700 border border-zinc-200" };
+    return {
+      label: "New",
+      cls: "bg-zinc-100 text-zinc-700 border border-zinc-200",
+    };
   if (s === "closed")
     return {
       label: "Accepted",
       cls: "bg-emerald-100 text-emerald-800 border border-emerald-200",
     };
   if (s === "rejected")
-    return { label: "Rejected", cls: "bg-rose-50 text-rose-700 border border-rose-100" };
+    return {
+      label: "Rejected",
+      cls: "bg-rose-50 text-rose-700 border border-rose-100",
+    };
   if (s === "contacted")
     return {
       label: "In Progress",
       cls: "bg-emerald-50 text-emerald-800 border border-emerald-100",
     };
-  return { label: s, cls: "bg-zinc-100 text-zinc-700 border border-zinc-200" };
+  return {
+    label: s,
+    cls: "bg-zinc-100 text-zinc-700 border border-zinc-200",
+  };
 }
 
 function formatDT(createdAt) {
@@ -169,13 +192,21 @@ function formatDT(createdAt) {
   return d.toLocaleString();
 }
 
+function safeStr(x) {
+  return String(x || "").trim();
+}
+
+function isHttp(url) {
+  const u = safeStr(url);
+  return u.startsWith("http://") || u.startsWith("https://");
+}
+
 export default function AdminRequestDetailsScreen() {
   const { requestId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
 
   const goBackToList = () => {
-    // Preserve the current Admin tab/search when going back
     const qs = String(location?.search || "");
     navigate(`/app/admin${qs}`, { replace: true });
   };
@@ -195,18 +226,26 @@ export default function AdminRequestDetailsScreen() {
   const [draftName, setDraftName] = useState("");
   const [draftUrl, setDraftUrl] = useState("");
 
+  // ✅ staff proposed links (staffFileDrafts)
+  const [staffDrafts, setStaffDrafts] = useState([]);
+  const [staffDraftErr, setStaffDraftErr] = useState("");
+  const [stagingStaffDrafts, setStagingStaffDrafts] = useState(false);
+
   const status = String(req?.status || "new").toLowerCase();
   const statusPill = useMemo(() => pill(status), [status]);
 
   const decisionLocked = status === "closed" || status === "rejected";
-  const lockedLabel = status === "closed" ? "Accepted" : status === "rejected" ? "Rejected" : "";
+  const lockedLabel =
+    status === "closed" ? "Accepted" : status === "rejected" ? "Rejected" : "";
   const lockedCls =
     status === "closed"
       ? "border-emerald-200 bg-emerald-600 text-white"
       : "border-rose-200 bg-rose-600 text-white";
 
-  const card = "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur";
-  const pageBg = "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white";
+  const card =
+    "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur";
+  const pageBg =
+    "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white";
 
   const load = async () => {
     setLoading(true);
@@ -220,9 +259,9 @@ export default function AdminRequestDetailsScreen() {
         const data = { id: snap.id, ...snap.data() };
         setReq(data);
 
-        const existing = String(
+        const existing = safeStr(
           data?.adminDecisionNote || data?.decisionNote || data?.adminNote || ""
-        ).trim();
+        );
 
         setNote((prev) => (prev.trim().length ? prev : existing));
       }
@@ -239,7 +278,7 @@ export default function AdminRequestDetailsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestId]);
 
-  // ✅ live drafts list
+  // ✅ live drafts list (adminFileDrafts)
   useEffect(() => {
     if (!requestId) return;
 
@@ -261,12 +300,83 @@ export default function AdminRequestDetailsScreen() {
     return () => unsub();
   }, [requestId]);
 
+  // ✅ live staff drafts list (staffFileDrafts)
+  useEffect(() => {
+    if (!requestId) return;
+
+    const ref = collection(db, "serviceRequests", requestId, "staffFileDrafts");
+    const qy = query(ref, orderBy("createdAt", "desc"));
+
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        setStaffDrafts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setStaffDraftErr("");
+      },
+      (e) => {
+        console.error("staffFileDrafts snapshot error:", e);
+        setStaffDraftErr(e?.message || "Failed to load staff staged files.");
+      }
+    );
+
+    return () => unsub();
+  }, [requestId]);
+
+  // ✅ AUTO-STAGE: when staff recommends accept and has links, auto-fill admin drafts
+  useEffect(() => {
+    if (!requestId) return;
+    if (decisionLocked) return;
+
+    const staffDecision = String(req?.staffDecision || "").toLowerCase();
+    const staffStatus = String(req?.staffStatus || "").toLowerCase();
+
+    // only when staff finished and recommended accept
+    const okToAutofill =
+      staffStatus === "done" && staffDecision === "recommend_accept";
+
+    if (!okToAutofill) return;
+    if (!Array.isArray(staffDrafts) || staffDrafts.length === 0) return;
+
+    // stage only ones not staged yet
+    const pending = staffDrafts.filter((d) => !d?.stagedAt && isHttp(d?.url));
+    if (pending.length === 0) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        setStagingStaffDrafts(true);
+
+        for (const d of pending) {
+          if (cancelled) break;
+
+          await stageAdminFile({
+            requestId,
+            name: safeStr(d?.name || "Staff file"),
+            url: safeStr(d?.url),
+          });
+
+          await markStaffDraftStaged({ requestId, draftId: d.id });
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (!cancelled) setStagingStaffDrafts(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [requestId, decisionLocked, req?.staffDecision, req?.staffStatus, staffDrafts]);
+
   const addDraft = async () => {
-    const name = String(draftName || "").trim();
-    const url = String(draftUrl || "").trim();
+    const name = safeStr(draftName);
+    const url = safeStr(draftUrl);
 
     if (!name) return alert("Enter a file name.");
     if (!url) return alert("Paste a file link (URL).");
+    if (!isHttp(url)) return alert("Link must start with http:// or https://");
 
     setAddingDraft(true);
     try {
@@ -289,18 +399,30 @@ export default function AdminRequestDetailsScreen() {
     }
   };
 
+  const stageOneStaffDraftNow = async (d) => {
+    try {
+      if (decisionLocked) return;
+      const name = safeStr(d?.name || "Staff file");
+      const url = safeStr(d?.url);
+      if (!isHttp(url)) return alert("This staff link is invalid.");
+
+      await stageAdminFile({ requestId, name, url });
+      await markStaffDraftStaged({ requestId, draftId: d.id });
+    } catch (e) {
+      alert(e?.message || "Failed to stage staff file.");
+    }
+  };
+
   const accept = async () => {
     if (!req) return;
 
     setSaving(true);
     try {
-      // 1) accept request (updates status + note)
       await adminAcceptRequest({
         requestId: req.id,
-        note: String(note || "").trim(),
+        note: safeStr(note),
       });
 
-      // 2) publish any staged files so user can download them
       await publishStagedAdminFiles({ requestId: req.id });
 
       await load();
@@ -319,13 +441,26 @@ export default function AdminRequestDetailsScreen() {
     try {
       await adminRejectRequest({
         requestId: req.id,
-        note: String(note || "").trim(),
+        note: safeStr(note),
       });
       await load();
     } catch (e) {
       alert(e?.message || "Reject failed");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ✅ optional: allow admin to quickly mark request "contacted" if needed (safe)
+  const setContacted = async () => {
+    try {
+      await updateDoc(doc(db, "serviceRequests", requestId), {
+        status: "contacted",
+        updatedAt: serverTimestamp(),
+      });
+      await load();
+    } catch (e) {
+      alert(e?.message || "Failed to update status.");
     }
   };
 
@@ -366,7 +501,9 @@ export default function AdminRequestDetailsScreen() {
     );
   }
 
-  const headerLeft = `${String(req?.track || "").toUpperCase()} • ${req?.country || "-"}`;
+  const headerLeft = `${String(req?.track || "").toUpperCase()} • ${
+    req?.country || "-"
+  }`;
   const headerRight =
     req?.requestType === "full"
       ? "Full Package"
@@ -400,14 +537,19 @@ export default function AdminRequestDetailsScreen() {
             <p className="mt-1 text-sm text-zinc-600">{headerRight}</p>
           </div>
 
-          <button
-            onClick={goBackToList}
-            className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
-            type="button"
-          >
-            <IconBack className="h-5 w-5 text-emerald-700" />
-            Back
-          </button>
+          <div className="shrink-0 flex items-center gap-2">
+            {/* ✅ Chat launcher (opens scrollable modal) */}
+            <AdminRequestChatLauncher requestId={requestId} />
+
+            <button
+              onClick={goBackToList}
+              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
+              type="button"
+            >
+              <IconBack className="h-5 w-5 text-emerald-700" />
+              Back
+            </button>
+          </div>
         </div>
 
         {/* Meta */}
@@ -415,47 +557,70 @@ export default function AdminRequestDetailsScreen() {
           <div className={`${card} p-4`}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-xs font-semibold text-zinc-500">Request ID</div>
-                <div className="mt-1 font-mono text-sm text-zinc-900 break-words">{req?.id}</div>
+                <div className="text-xs font-semibold text-zinc-500">
+                  Request ID
+                </div>
+                <div className="mt-1 font-mono text-sm text-zinc-900 break-words">
+                  {req?.id}
+                </div>
                 {createdLabel ? (
                   <div className="mt-2 text-xs text-zinc-500">
                     Submitted:{" "}
-                    <span className="font-medium text-zinc-700">{createdLabel}</span>
+                    <span className="font-medium text-zinc-700">
+                      {createdLabel}
+                    </span>
                   </div>
                 ) : null}
               </div>
-              <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${statusPill.cls}`}>
+              <span
+                className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${statusPill.cls}`}
+              >
                 {statusPill.label}
               </span>
             </div>
           </div>
 
           <div className={`${card} p-4`}>
-            <div className="text-sm font-semibold text-zinc-900">Review status</div>
+            <div className="text-sm font-semibold text-zinc-900">
+              Review status
+            </div>
             <div className="mt-1 text-sm text-zinc-600">{actionHint}</div>
+
+            {!decisionLocked && status === "new" ? (
+              <button
+                type="button"
+                onClick={setContacted}
+                className="mt-3 inline-flex items-center justify-center rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
+              >
+                Mark In Progress
+              </button>
+            ) : null}
           </div>
         </div>
 
-       {/* ✅ STAFF ASSIGNMENT (only when NOT finalized) */}
+        {/* ✅ STAFF ASSIGNMENT */}
         {req && !decisionLocked ? (
           <AssignStaffPanel request={req} />
         ) : (
           <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
-            Staff assignment is disabled because this request is already finalized.
+            Staff assignment is disabled because this request is already
+            finalized.
           </div>
         )}
 
-        {/* Applicant (documents button inside) */}
+        {/* Applicant */}
         <div className={`mt-6 ${card} p-5`}>
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-zinc-900">Applicant</h2>
-              <p className="mt-1 text-sm text-zinc-600">Basic details and uploaded files.</p>
+              <p className="mt-1 text-sm text-zinc-600">
+                Basic details and uploaded files.
+              </p>
             </div>
 
             <button
               type="button"
-              onClick={() => navigate(`/app/admin/request/${req?.id}/documents`)}
+              onClick={() => navigate(`/app/admin/request/${requestId}/documents`)}
               className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
             >
               Applicant docs
@@ -470,19 +635,27 @@ export default function AdminRequestDetailsScreen() {
             </div>
 
             <div className="grid gap-1">
-              <div className="text-xs font-semibold text-zinc-500">Phone / WhatsApp</div>
+              <div className="text-xs font-semibold text-zinc-500">
+                Phone / WhatsApp
+              </div>
               <div className="font-semibold text-zinc-900">{req?.phone || "-"}</div>
             </div>
 
             <div className="grid gap-1">
               <div className="text-xs font-semibold text-zinc-500">Email</div>
-              <div className="font-semibold text-zinc-900 break-words">{req?.email || "-"}</div>
+              <div className="font-semibold text-zinc-900 break-words">
+                {req?.email || "-"}
+              </div>
             </div>
 
             {req?.note ? (
               <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4">
-                <div className="text-xs font-semibold text-zinc-500">Applicant note</div>
-                <div className="mt-1 text-sm text-zinc-800 whitespace-pre-wrap">{req.note}</div>
+                <div className="text-xs font-semibold text-zinc-500">
+                  Applicant note
+                </div>
+                <div className="mt-1 text-sm text-zinc-800 whitespace-pre-wrap">
+                  {req.note}
+                </div>
               </div>
             ) : (
               <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
@@ -492,13 +665,16 @@ export default function AdminRequestDetailsScreen() {
           </div>
         </div>
 
-        {/* Note to user */}
+        {/* Note */}
         <div className={`mt-6 ${card} p-5`}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-zinc-900">Message to applicant</h2>
+              <h2 className="text-sm font-semibold text-zinc-900">
+                Message to applicant
+              </h2>
               <p className="mt-1 text-sm text-zinc-600">
-                This shows on the applicant’s Request Details. Required if rejecting.
+                This shows on the applicant’s Request Details. Required if
+                rejecting.
               </p>
             </div>
 
@@ -516,13 +692,111 @@ export default function AdminRequestDetailsScreen() {
           />
         </div>
 
-        {/* ✅ Staged uploads (RIGHT ABOVE actions) */}
+        {/* ✅ Staff proposed links (auto-fill source) */}
         <div className={`mt-6 ${card} p-5`}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-zinc-900">Attach files for applicant</h2>
+              <h2 className="text-sm font-semibold text-zinc-900">
+                Staff suggested files
+              </h2>
               <p className="mt-1 text-sm text-zinc-600">
-                Add links (Google Drive / Dropbox). Files are sent only after you accept.
+                These are links staff added. If staff recommended accept, they
+                auto-fill your “Attach files” section.
+              </p>
+            </div>
+
+            {stagingStaffDrafts ? (
+              <span className="rounded-full border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
+                Autofilling…
+              </span>
+            ) : (
+              <span className="rounded-full border border-zinc-200 bg-white/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700">
+                {staffDrafts.length} items
+              </span>
+            )}
+          </div>
+
+          {staffDraftErr ? (
+            <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+              {staffDraftErr}
+            </div>
+          ) : null}
+
+          {staffDrafts.length === 0 ? (
+            <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+              No staff file links yet.
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-2">
+              {staffDrafts.map((d) => {
+                const url = safeStr(d?.url);
+                const hasLink = isHttp(url);
+                const staged = Boolean(d?.stagedAt);
+
+                return (
+                  <div
+                    key={d.id}
+                    className="rounded-2xl border border-zinc-200 bg-white/60 p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm text-zinc-900 break-words">
+                          {safeStr(d?.name) || "Staff file"}
+                        </div>
+
+                        {hasLink ? (
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+                          >
+                            Open link
+                          </a>
+                        ) : (
+                          <div className="mt-2 text-sm text-zinc-500">
+                            No valid link
+                          </div>
+                        )}
+
+                        {staged ? (
+                          <div className="mt-2 text-xs font-semibold text-emerald-800">
+                            ✅ Already staged to applicant
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-xs text-zinc-500">
+                            Not staged yet
+                          </div>
+                        )}
+                      </div>
+
+                      {!decisionLocked && hasLink && !staged ? (
+                        <button
+                          type="button"
+                          onClick={() => stageOneStaffDraftNow(d)}
+                          className="shrink-0 inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
+                        >
+                          Stage
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ✅ Attach files for applicant (adminFileDrafts) */}
+        <div className={`mt-6 ${card} p-5`}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-900">
+                Attach files for applicant
+              </h2>
+              <p className="mt-1 text-sm text-zinc-600">
+                Add links (Google Drive / Dropbox). Files are sent only after
+                you accept.
               </p>
             </div>
 
@@ -572,7 +846,8 @@ export default function AdminRequestDetailsScreen() {
               </div>
 
               <div className="text-xs text-zinc-500">
-                Tip: Make sure the link access is set to “Anyone with the link can view”.
+                Tip: Make sure the link access is set to “Anyone with the link can
+                view”.
               </div>
             </div>
           ) : (
@@ -588,18 +863,23 @@ export default function AdminRequestDetailsScreen() {
               </div>
             ) : (
               drafts.map((d) => (
-                <div key={d.id} className="rounded-2xl border border-zinc-200 bg-white/60 p-4">
+                <div
+                  key={d.id}
+                  className="rounded-2xl border border-zinc-200 bg-white/60 p-4"
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="font-semibold text-sm text-zinc-900 break-words">
                         {d.name || "File"}
                       </div>
+
                       {d.url ? (
                         <a
                           href={d.url}
                           target="_blank"
                           rel="noreferrer"
                           className="mt-2 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+                          title="Open in new tab"
                         >
                           Open link
                         </a>

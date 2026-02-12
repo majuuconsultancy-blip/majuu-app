@@ -1,9 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+  serverTimestamp,
+  updateDoc,
+  writeBatch,
+  onSnapshot,
+  addDoc,
+} from "firebase/firestore";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { auth, db } from "../firebase";
+
+import StaffRequestChatPanel from "../components/StaffRequestChatPanel";
 
 /* ---------- Minimal icons ---------- */
 function IconChevronLeft(props) {
@@ -41,14 +56,6 @@ function IconDoc(props) {
   );
 }
 
-function IconPlay(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path d="M9 7.5v9l8-4.5-8-4.5Z" fill="currentColor" />
-    </svg>
-  );
-}
-
 function IconCheck(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
@@ -68,6 +75,64 @@ function IconX(props) {
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
       <path
         d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconChevronRight(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M9 5.5 15.5 12 9 18.5"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconLink(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M10.6 13.4 9.2 14.8a3.6 3.6 0 0 1-5.1 0 3.6 3.6 0 0 1 0-5.1l1.8-1.8a3.6 3.6 0 0 1 5.1 0"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+      />
+      <path
+        d="M13.4 10.6 14.8 9.2a3.6 3.6 0 0 1 5.1 0 3.6 3.6 0 0 1 0 5.1l-1.8 1.8a3.6 3.6 0 0 1-5.1 0"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+      />
+      <path
+        d="M9.8 14.2 14.2 9.8"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconTrash(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M6.8 7.5h10.4M10 7.5V6.2A1.5 1.5 0 0 1 11.5 4.7h1A1.5 1.5 0 0 1 14 6.2v1.3"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8.2 7.5 9 19a1.8 1.8 0 0 0 1.8 1.6h2.4A1.8 1.8 0 0 0 15 19l.8-11.5"
         stroke="currentColor"
         strokeWidth="1.9"
         strokeLinecap="round"
@@ -98,9 +163,7 @@ function pill(status) {
 }
 
 function safeMinutesBetween(startTs, endMs) {
-  // startTs may be Firestore Timestamp or ms number
   let startMs = 0;
-
   if (typeof startTs === "number") startMs = startTs;
   else if (startTs?.seconds) startMs = startTs.seconds * 1000;
 
@@ -110,7 +173,7 @@ function safeMinutesBetween(startTs, endMs) {
   if (!Number.isFinite(diff) || diff <= 0) return null;
 
   const mins = Math.round(diff / 60000);
-  return Math.max(1, mins); // minimum 1 minute
+  return Math.max(1, mins);
 }
 
 export default function StaffRequestDetailsScreen() {
@@ -126,8 +189,14 @@ export default function StaffRequestDetailsScreen() {
 
   const [req, setReq] = useState(null);
   const [note, setNote] = useState("");
-  const [decision, setDecision] = useState("recommend_accept"); // recommend_accept | recommend_reject
+  const [decision, setDecision] = useState("recommend_accept");
   const [busy, setBusy] = useState("");
+
+  const [drafts, setDrafts] = useState([]);
+  const [draftErr, setDraftErr] = useState("");
+  const [addingDraft, setAddingDraft] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [draftUrl, setDraftUrl] = useState("");
 
   const card = "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur";
   const pageBg = "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white";
@@ -150,7 +219,7 @@ export default function StaffRequestDetailsScreen() {
   }, [req]);
 
   const status = String(req?.status || "new").toLowerCase();
-  const staffStatus = String(req?.staffStatus || "assigned").toLowerCase(); // assigned|in_progress|done
+  const staffStatus = String(req?.staffStatus || "assigned").toLowerCase();
   const statusPill = useMemo(() => pill(status), [status]);
 
   const createdLabel = formatDT(req?.createdAt);
@@ -189,6 +258,27 @@ export default function StaffRequestDetailsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestId]);
 
+  useEffect(() => {
+    if (!requestId) return;
+
+    const ref = collection(db, "serviceRequests", requestId, "staffFileDrafts");
+    const qy = query(ref, orderBy("createdAt", "desc"));
+
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        setDrafts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setDraftErr("");
+      },
+      (e) => {
+        console.error("staffFileDrafts snapshot error:", e);
+        setDraftErr(e?.message || "Failed to load your attached links.");
+      }
+    );
+
+    return () => unsub();
+  }, [requestId]);
+
   const updateRequest = async (patch) => {
     if (!uid) throw new Error("Not signed in");
     await updateDoc(doc(db, "serviceRequests", requestId), {
@@ -197,55 +287,72 @@ export default function StaffRequestDetailsScreen() {
     });
   };
 
-  const updateTask = async (patch) => {
-    if (!uid) throw new Error("Not signed in");
-    await updateDoc(doc(db, "staff", uid, "tasks", requestId), patch);
-  };
+  const addDraft = async () => {
+    const name = String(draftName || "").trim();
+    const url = String(draftUrl || "").trim();
 
-  const startWork = async () => {
+    if (!name) return alert("Enter a file name.");
+    if (!url) return alert("Paste a file link (URL).");
+
     try {
-      setBusy("start");
-      setErr("");
+      setAddingDraft(true);
+      setDraftErr("");
 
-      const nowMs = Date.now();
+      const ref = collection(db, "serviceRequests", requestId, "staffFileDrafts");
+      await addDoc(ref, { name, url, staffUid: uid, createdAt: serverTimestamp() });
 
-      await updateRequest({
-        status: status === "new" ? "contacted" : status,
-        staffStatus: "in_progress",
-        staffDecision: "none",
-        staffCompletedAt: null,
-
-        staffStartedAt: serverTimestamp(), // admin will see (server)
-        staffStartedAtMs: nowMs,          // fallback for duration calc
-        staffStartedBy: uid,              // who started
-
-        staffNote: String(note || "").trim(),
-      });
-
-      await updateTask({
-        status: "active",
-        startedAt: serverTimestamp(),
-        startedAtMs: nowMs,
-      });
-
-      await load();
+      setDraftName("");
+      setDraftUrl("");
     } catch (e) {
       console.error(e);
-      setErr(e?.message || "Start work failed (check rules).");
+      alert(e?.message || "Failed to add file link.");
     } finally {
-      setBusy("");
+      setAddingDraft(false);
     }
+  };
+
+  const removeDraft = async (d) => {
+    if (!confirm("Remove this file link?")) return;
+    try {
+      await deleteDoc(doc(db, "serviceRequests", requestId, "staffFileDrafts", d.id));
+    } catch (e) {
+      alert(e?.message || "Failed to remove file.");
+    }
+  };
+
+  const syncDraftsToAdmin = async () => {
+    const staffRef = collection(db, "serviceRequests", requestId, "staffFileDrafts");
+    const staffSnap = await getDocs(staffRef);
+    if (staffSnap.empty) return;
+
+    const batch = writeBatch(db);
+
+    staffSnap.docs.forEach((sd) => {
+      const data = sd.data() || {};
+      const adminDocRef = doc(db, "serviceRequests", requestId, "adminFileDrafts", sd.id);
+
+      batch.set(
+        adminDocRef,
+        {
+          name: String(data?.name || "File").trim(),
+          url: String(data?.url || "").trim(),
+          fromStaff: true,
+          staffUid: String(data?.staffUid || uid || "").trim(),
+          createdAt: data?.createdAt || serverTimestamp(),
+          syncedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+
+    await batch.commit();
   };
 
   const saveNote = async () => {
     try {
       setBusy("save");
       setErr("");
-
-      await updateRequest({
-        staffNote: String(note || "").trim(),
-      });
-
+      await updateRequest({ staffNote: String(note || "").trim() });
       await load();
     } catch (e) {
       console.error(e);
@@ -268,7 +375,8 @@ export default function StaffRequestDetailsScreen() {
 
       const nowMs = Date.now();
 
-      // ✅ duration from staffStartedAt -> now (prefer server timestamp)
+      await syncDraftsToAdmin();
+
       const startTs = req?.staffStartedAt || req?.staffStartedAtMs;
       const workMinutes = safeMinutesBetween(startTs, nowMs);
 
@@ -281,11 +389,12 @@ export default function StaffRequestDetailsScreen() {
         staffCompletedAtMs: nowMs,
         staffCompletedBy: uid,
 
-        staffWorkMinutes: workMinutes, // ✅ used later by admin to update performance
+        staffWorkMinutes: workMinutes,
         staffNote: String(note || "").trim(),
       });
 
-      await updateTask({
+      // ✅ Task doc update (admin created it)
+      await updateDoc(doc(db, "staff", uid, "tasks", requestId), {
         status: "done",
         doneAt: serverTimestamp(),
         doneAtMs: nowMs,
@@ -325,6 +434,11 @@ export default function StaffRequestDetailsScreen() {
           Back
         </button>
 
+        {/* ✅ Request Chat (Staff → Admin moderation) */}
+       <div className={`mt-6 ${card} p-5`}>
+       <StaffRequestChatPanel requestId={requestId} />
+      </div>
+
         {err ? (
           <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
             {err}
@@ -341,7 +455,6 @@ export default function StaffRequestDetailsScreen() {
           </div>
         ) : (
           <>
-            {/* Header */}
             <div className={`mt-4 ${card} p-5`}>
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800">
                 <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 border border-emerald-100">
@@ -376,13 +489,30 @@ export default function StaffRequestDetailsScreen() {
                 <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
                   Admin already finalized this request. You can view only.
                 </div>
+              ) : staffStatus !== "in_progress" && staffStatus !== "done" ? (
+                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-900">
+                  Work not started. Go back to tasks and tap the request to start.
+                </div>
               ) : null}
             </div>
 
             {/* Applicant summary */}
             <div className={`mt-6 ${card} p-5`}>
-              <div className="text-sm font-semibold text-zinc-900">Applicant</div>
-              <div className="mt-1 text-sm text-zinc-600">Contact details are hidden in staff view.</div>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-zinc-900">Applicant</div>
+                  <div className="mt-1 text-sm text-zinc-600">Contact details are hidden in staff view.</div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => navigate(`/staff/request/${req?.id}/documents`)}
+                  className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
+                >
+                  Applicant docs
+                  <IconChevronRight className="h-5 w-5 text-emerald-700" />
+                </button>
+              </div>
 
               <div className="mt-4 grid gap-3 text-sm">
                 <div className="grid gap-1">
@@ -399,6 +529,114 @@ export default function StaffRequestDetailsScreen() {
                   <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
                     No note provided.
                   </div>
+                )}
+              </div>
+            </div>
+
+            {/* Staff attachments */}
+            <div className={`mt-6 ${card} p-5`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-zinc-900">Attach files for applicant</h2>
+                  <p className="mt-1 text-sm text-zinc-600">
+                    Add links (Google Drive / Dropbox). When you mark done, these auto-fill admin’s staged files.
+                  </p>
+                </div>
+
+                <span className="rounded-full border border-emerald-100 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
+                  Auto-fills Admin
+                </span>
+              </div>
+
+              {draftErr ? (
+                <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+                  {draftErr}
+                </div>
+              ) : null}
+
+              {!canWork || isDone ? (
+                <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+                  Attachments are locked after you submit.
+                </div>
+              ) : (
+                <div className="mt-4 grid gap-3">
+                  <input
+                    value={draftName}
+                    onChange={(e) => setDraftName(e.target.value)}
+                    placeholder="File name (e.g. SOP Template)"
+                    className="w-full rounded-2xl border border-zinc-200 bg-white/60 p-3 text-sm text-zinc-900 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                    disabled={addingDraft || busy}
+                  />
+
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400">
+                        <IconLink className="h-5 w-5" />
+                      </span>
+                      <input
+                        value={draftUrl}
+                        onChange={(e) => setDraftUrl(e.target.value)}
+                        placeholder="Paste file link (https://...)"
+                        className="w-full rounded-2xl border border-zinc-200 bg-white/60 pl-11 pr-3 py-3 text-sm text-zinc-900 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                        disabled={addingDraft || busy}
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={addDraft}
+                      disabled={addingDraft || busy}
+                      className="shrink-0 inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                    >
+                      {addingDraft ? "Adding…" : "Add"}
+                    </button>
+                  </div>
+
+                  <div className="text-xs text-zinc-500">
+                    Tip: Make sure the link access is set to “Anyone with the link can view”.
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-4 grid gap-2">
+                {drafts.length === 0 ? (
+                  <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+                    No files added yet.
+                  </div>
+                ) : (
+                  drafts.map((d) => (
+                    <div key={d.id} className="rounded-2xl border border-zinc-200 bg-white/60 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm text-zinc-900 break-words">{d.name || "File"}</div>
+                          {d.url ? (
+                            <a
+                              href={d.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-2 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+                            >
+                              Open link
+                            </a>
+                          ) : (
+                            <div className="mt-2 text-sm text-zinc-500">No link</div>
+                          )}
+                        </div>
+
+                        {!canWork || isDone ? null : (
+                          <button
+                            type="button"
+                            onClick={() => removeDraft(d)}
+                            disabled={busy}
+                            className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60"
+                          >
+                            <IconTrash className="h-5 w-5" />
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
                 )}
               </div>
             </div>
@@ -431,32 +669,16 @@ export default function StaffRequestDetailsScreen() {
               />
             </div>
 
-            {/* Staff actions */}
+            {/* Staff actions (no Start/Continue here anymore) */}
             <div className={`mt-6 ${card} p-5`}>
               <div className="text-sm font-semibold text-zinc-900">Staff actions</div>
               <div className="mt-1 text-sm text-zinc-600">
-                Start work, then mark done with a recommendation (admin decides final).
+                Mark done with a recommendation (admin decides final).
               </div>
 
               <div className="mt-4 grid gap-3">
-                <button
-                  type="button"
-                  onClick={startWork}
-                  disabled={!canWork || isDone || busy}
-                  className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
-                >
-                  <IconPlay className="h-5 w-5 text-white" />
-                  {busy === "start"
-                    ? "Starting…"
-                    : staffStatus === "in_progress"
-                    ? "Continue work"
-                    : "Start work"}
-                </button>
-
                 <div className="grid gap-2 rounded-2xl border border-zinc-200 bg-white/60 p-4">
-                  <div className="text-xs font-semibold text-zinc-500">
-                    Recommendation (required to mark done)
-                  </div>
+                  <div className="text-xs font-semibold text-zinc-500">Recommendation (required to mark done)</div>
 
                   <div className="grid grid-cols-2 gap-2">
                     <button
@@ -498,8 +720,9 @@ export default function StaffRequestDetailsScreen() {
                 <button
                   type="button"
                   onClick={markDone}
-                  disabled={!canWork || isDone || busy}
+                  disabled={!canWork || isDone || busy || staffStatus !== "in_progress"}
                   className="w-full rounded-2xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] disabled:opacity-60"
+                  title={staffStatus !== "in_progress" ? "Start work from the modal first" : ""}
                 >
                   {busy === "done" ? "Submitting…" : "Mark done (send to admin)"}
                 </button>

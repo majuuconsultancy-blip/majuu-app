@@ -1,5 +1,7 @@
 // ✅ StaffGate.jsx (FULL COPY-PASTE)
-// Protects /staff/* routes so normal users can't access them.
+// Improvements:
+// - ✅ Treats onboarded missing/undefined as NOT onboarded (safer)
+// - ✅ Avoids onboarding redirect loops by allowing onboarding path
 
 import { useEffect, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
@@ -27,26 +29,28 @@ export default function StaffGate({ children }) {
         const staffSnap = await getDoc(staffRef);
 
         if (!staffSnap.exists()) {
-          // not staff -> kick to normal app
           navigate("/dashboard", { replace: true });
           return;
         }
 
         const staff = staffSnap.data() || {};
-        if (!staff.active) {
+
+        // must be active
+        if (staff.active !== true) {
           navigate("/dashboard", { replace: true });
           return;
         }
 
-        // ✅ Optional: force onboarding first
-        if (staff.onboarded === false && location.pathname !== "/staff/onboarding") {
+        // ✅ Force onboarding if onboarded is NOT true (false or missing)
+        const isOnboardingRoute = location.pathname.startsWith("/staff/onboarding");
+        if (staff.onboarded !== true && !isOnboardingRoute) {
           navigate("/staff/onboarding", { replace: true });
           return;
         }
 
         setChecking(false);
       } catch (e) {
-        // if something fails, fail closed
+        // fail closed (but keep it deterministic)
         navigate("/dashboard", { replace: true });
       }
     });

@@ -89,11 +89,7 @@ export default function StaffOnboardingScreen() {
       const ref = doc(db, "staff", uid);
 
       // in case doc doesn't exist (admin usually creates it, but safe)
-      await setDoc(
-        ref,
-        { uid, active: true },
-        { merge: true }
-      );
+      await setDoc(ref, { uid }, { merge: true });
 
       await updateDoc(ref, {
         name: String(name || "").trim() || "Staff",

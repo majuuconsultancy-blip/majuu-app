@@ -1,7 +1,8 @@
 // ✅ App.jsx (FULL COPY-PASTE)
 // Fixes:
-// - ✅ Staff routes correctly added (no invalid JSX comments)
-// - ✅ Keeps AdminGate routes as-is
+// - ✅ Adds StaffRequestDocumentsScreen route
+// - ✅ Adds StaffStartWorkModalScreen route (THIS was missing)
+// - ✅ Staff can open applicant docs + start modal without touching AdminGate routes
 
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
@@ -46,6 +47,12 @@ import StaffOnboardingScreen from "./screens/StaffOnboardingScreen";
 import StaffTasksScreen from "./screens/StaffTasksScreen";
 import StaffRequestDetailsScreen from "./screens/StaffRequestDetailsScreen";
 
+// ✅ Existing
+import StaffRequestDocumentsScreen from "./screens/StaffRequestDocumentsScreen";
+
+// ✅ NEW: Start Work modal screen (create this file in /screens)
+import StaffStartWorkModalScreen from "./screens/StaffStartWorkModalScreen";
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -88,11 +95,32 @@ export default function App() {
             </StaffGate>
           }
         />
+
+        {/* ✅ NEW: Start Work modal route (THIS fixes the intro redirect) */}
+        <Route
+          path="/staff/request/:requestId/start"
+          element={
+            <StaffGate>
+              <StaffStartWorkModalScreen />
+            </StaffGate>
+          }
+        />
+
         <Route
           path="/staff/request/:requestId"
           element={
             <StaffGate>
               <StaffRequestDetailsScreen />
+            </StaffGate>
+          }
+        />
+
+        {/* ✅ Staff applicant docs */}
+        <Route
+          path="/staff/request/:requestId/documents"
+          element={
+            <StaffGate>
+              <StaffRequestDocumentsScreen />
             </StaffGate>
           }
         />
