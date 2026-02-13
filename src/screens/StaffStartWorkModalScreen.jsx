@@ -1,3 +1,10 @@
+// ✅ StaffStartWorkModalScreen.jsx (FULL COPY-PASTE)
+// Mobile-first polish + subtle animations (no functionality changes)
+// - Cleaner modal sheet on mobile, centered card on desktop
+// - Smooth fade/slide + button micro-interactions
+// - Better spacing + visual hierarchy
+// - Safe-area padding for phones
+
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
@@ -27,6 +34,19 @@ function IconPlay(props) {
   );
 }
 
+function IconBolt(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M13 2 4 14h7l-1 8 10-14h-7l0-6Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function safeStr(x) {
   return String(x || "").trim();
 }
@@ -48,7 +68,8 @@ export default function StaffStartWorkModalScreen() {
   const [req, setReq] = useState(null);
 
   const card = "rounded-2xl border border-zinc-200 bg-white/80 shadow-sm backdrop-blur";
-  const pageBg = "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white";
+  const pageBg =
+    "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white";
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -164,6 +185,9 @@ export default function StaffStartWorkModalScreen() {
     );
   }
 
+  const title =
+    req ? `${String(req.track || "").toUpperCase()} • ${req.country || "-"}` : "";
+
   return (
     <div className={pageBg}>
       <div className="max-w-xl mx-auto px-5 py-6">
@@ -176,65 +200,130 @@ export default function StaffStartWorkModalScreen() {
         {loading ? (
           <div className={`${card} p-5 text-sm text-zinc-600`}>Loading…</div>
         ) : !req ? (
-          <div className={`${card} p-5 text-sm text-zinc-600`}>Request not available.</div>
+          <div className={`${card} p-5 text-sm text-zinc-600`}>
+            Request not available.
+          </div>
         ) : (
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
-            <div className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white shadow-xl">
-              <div className="flex items-start justify-between gap-3 p-5">
-                <div>
-                  <div className="text-sm font-semibold text-zinc-900">Start work?</div>
-                  <div className="mt-1 text-sm text-zinc-600">
-                    You’re about to start this request. Timer fields will be set and the task moves to Ongoing.
+          <div
+            className="fixed inset-0 z-50"
+            style={{
+              // subtle fade-in
+              animation: "ssw_fadeIn 160ms ease-out both",
+            }}
+          >
+            {/* overlay */}
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/50"
+              onClick={() => navigate("/staff/tasks", { replace: true })}
+              aria-label="Close"
+            />
+
+            {/* sheet/card */}
+            <div
+              className="absolute inset-x-0 bottom-0 top-0 flex items-end justify-center p-3 sm:items-center sm:p-6"
+              style={{
+                // slide up on mobile / scale on desktop
+                animation: "ssw_slideUp 220ms cubic-bezier(.2,.8,.2,1) both",
+              }}
+            >
+              <div className="w-full max-w-md overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl">
+                {/* header */}
+                <div className="p-5 sm:p-6">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-emerald-100 bg-white/80">
+                          <IconBolt className="h-4 w-4 text-emerald-700" />
+                        </span>
+                        Start work
+                      </div>
+
+                      <div className="mt-3 text-xl font-semibold tracking-tight text-zinc-900">
+                        Ready to begin?
+                      </div>
+                      <div className="mt-1 text-sm text-zinc-600">
+                        This will move the task to <span className="font-semibold">Ongoing</span>{" "}
+                        and start the timer fields.
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => navigate("/staff/tasks", { replace: true })}
+                      className="shrink-0 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 transition hover:bg-zinc-50 active:scale-[0.98]"
+                      title="Close"
+                    >
+                      <IconX className="h-5 w-5" />
+                    </button>
                   </div>
-                </div>
 
-                <button
-                  type="button"
-                  onClick={() => navigate("/staff/tasks", { replace: true })}
-                  className="shrink-0 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/70 text-zinc-700 hover:bg-zinc-50"
-                  title="Close"
-                >
-                  <IconX className="h-5 w-5" />
-                </button>
-              </div>
-
-              <div className="px-5 pb-5">
-                <div className="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4">
-                  <div className="text-xs font-semibold text-zinc-500">Request</div>
-                  <div className="mt-1 text-sm font-semibold text-zinc-900">
-                    {String(req.track || "").toUpperCase()} • {req.country || "-"}
+                  {/* request card */}
+                  <div className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4">
+                    <div className="text-[11px] font-semibold text-zinc-500">
+                      Request
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-zinc-900">
+                      {title}
+                    </div>
+                    <div className="mt-1 text-xs text-zinc-600">
+                      ID: <span className="font-mono">{rid}</span>
+                    </div>
                   </div>
-                  <div className="mt-1 text-xs text-zinc-600">
-                    ID: <span className="font-mono">{rid}</span>
+
+                  {/* actions */}
+                  <div className="mt-5 grid gap-2">
+                    <button
+                      type="button"
+                      onClick={startWork}
+                      disabled={busy}
+                      className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                    >
+                      <span
+                        className={[
+                          "inline-flex h-9 w-9 items-center justify-center rounded-2xl",
+                          "bg-white/15 border border-white/15",
+                        ].join(" ")}
+                      >
+                        <IconPlay className="h-5 w-5 text-white" />
+                      </span>
+                      {busy ? "Starting…" : "Start work"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => navigate("/staff/tasks", { replace: true })}
+                      disabled={busy}
+                      className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] disabled:opacity-60"
+                    >
+                      Not now
+                    </button>
                   </div>
-                </div>
 
-                <div className="mt-4 grid gap-2">
-                  <button
-                    type="button"
-                    onClick={startWork}
-                    disabled={busy}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
-                  >
-                    <IconPlay className="h-5 w-5 text-white" />
-                    {busy ? "Starting…" : "Start work"}
-                  </button>
+                  <div className="mt-3 text-xs text-zinc-500">
+                    If you choose “Not now”, the request stays in New.
+                  </div>
 
-                  <button
-                    type="button"
-                    onClick={() => navigate("/staff/tasks", { replace: true })}
-                    disabled={busy}
-                    className="w-full rounded-2xl border border-zinc-200 bg-white/70 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] disabled:opacity-60"
-                  >
-                    Not now
-                  </button>
-                </div>
-
-                <div className="mt-3 text-xs text-zinc-500">
-                  If you click “Not now”, the request stays in New.
+                  {/* safe-area spacer for iOS bottom bars */}
+                  <div className="h-[max(0px,env(safe-area-inset-bottom))]" />
                 </div>
               </div>
             </div>
+
+            {/* tiny scoped animations */}
+            <style>{`
+              @keyframes ssw_fadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
+              }
+              @keyframes ssw_slideUp {
+                from { transform: translateY(14px) scale(0.995); opacity: 0; }
+                to { transform: translateY(0) scale(1); opacity: 1; }
+              }
+              @media (prefers-reduced-motion: reduce) {
+                * { animation: none !important; transition: none !important; }
+              }
+            `}</style>
           </div>
         )}
       </div>

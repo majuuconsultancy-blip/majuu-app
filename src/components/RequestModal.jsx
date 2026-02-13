@@ -586,8 +586,8 @@ export default function RequestModal({
                 </button>
 
                 <p className="text-center text-xs text-zinc-500">
-                  You must press <span className="font-semibold">Pay</span>{" "}
-                  before sending.
+                  You must <span className="font-semibold">Pay</span>{" "}
+                  before sending an application.
                 </p>
               </div>
             </div>

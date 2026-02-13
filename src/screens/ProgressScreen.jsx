@@ -3,6 +3,11 @@
 // - Banner shows unread count and navigates to /app/notifications
 // - (Delete button per-notification is implemented in NotificationsScreen, not here)
 // ✅ Added: per-request chat unread badge (from request chat system)
+//
+// ✅ FIX (your exact issue):
+// When user taps View (goes to RequestStatusScreen then opens chat),
+// immediately clear that request’s "New message" pill AND persist it in sessionStorage.
+// It stays cleared until a NEWER message arrives.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
@@ -200,6 +205,26 @@ function formatCreatedAt(createdAt) {
   return `${dateStr} • ${timeStr}`;
 }
 
+/* ✅ local-read persistence helpers (sessionStorage) */
+function localReadKey(rid) {
+  return `chat_localRead_user_${String(rid || "")}`;
+}
+function getLocalReadSec(rid) {
+  try {
+    const v = sessionStorage.getItem(localReadKey(rid));
+    const n = Number(v || 0) || 0;
+    return n;
+  } catch {
+    return 0;
+  }
+}
+function setLocalReadSec(rid, sec) {
+  try {
+    const n = Number(sec || 0) || 0;
+    sessionStorage.setItem(localReadKey(rid), String(n));
+  } catch {}
+}
+
 export default function ProgressScreen() {
   const navigate = useNavigate();
 
@@ -259,11 +284,14 @@ export default function ProgressScreen() {
       let lastReadSec = 0;
 
       const recompute = () => {
+        const localRead = getLocalReadSec(rid);
+        const effectiveRead = Math.max(lastReadSec || 0, localRead || 0);
+
         if (!latestMsgSec) {
           setChatUnread(rid, false);
           return;
         }
-        setChatUnread(rid, latestMsgSec > lastReadSec);
+        setChatUnread(rid, latestMsgSec > effectiveRead);
       };
 
       // latest message (only 1)
@@ -277,7 +305,6 @@ export default function ProgressScreen() {
           recompute();
         },
         () => {
-          // if fails, don't block UI
           latestMsgSec = 0;
           recompute();
         }
@@ -338,9 +365,7 @@ export default function ProgressScreen() {
           reqQ,
           (snap) => {
             const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            data.sort(
-              (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
-            );
+            data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
             setRequests(data);
 
             // ✅ attach chat unread listeners
@@ -420,9 +445,7 @@ export default function ProgressScreen() {
   const activeTrack = String(state?.activeTrack || "-");
   const activeCountry = String(state?.activeCountry || "-");
   const activeMode =
-    String(state?.activeHelpType || "").toLowerCase() === "we"
-      ? "We-Help"
-      : "Self-Help";
+    String(state?.activeHelpType || "").toLowerCase() === "we" ? "We-Help" : "Self-Help";
 
   const cardBase =
     "rounded-2xl border border-zinc-200 bg-white/70 backdrop-blur p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60";
@@ -607,8 +630,7 @@ export default function ProgressScreen() {
                 {requests.map((r) => {
                   const ui = statusUI(r.status);
                   const track = String(r.track || "").toLowerCase();
-                  const safeTrack =
-                    track === "work" || track === "travel" ? track : "study";
+                  const safeTrack = track === "work" || track === "travel" ? track : "study";
 
                   const st = String(r.status || "new").toLowerCase();
 
@@ -617,12 +639,8 @@ export default function ProgressScreen() {
 
                   const isFull = String(r.requestType || "").toLowerCase() === "full";
 
-                  const titleLeft = `${String(r.track || "").toUpperCase()} • ${
-                    r.country || "-"
-                  }`;
-                  const subtitle = isFull
-                    ? "Full package"
-                    : `Single: ${r.serviceName || "-"}`;
+                  const titleLeft = `${String(r.track || "").toUpperCase()} • ${r.country || "-"}`;
+                  const subtitle = isFull ? "Full package" : `Single: ${r.serviceName || "-"}`;
 
                   const createdLabel = formatCreatedAt(r.createdAt);
 
@@ -634,8 +652,7 @@ export default function ProgressScreen() {
 
                     if (isFull) {
                       let missingItems = Array.isArray(r.missingItems) ? r.missingItems : [];
-                      if (!missingItems.length)
-                        missingItems = parseMissingItemsFromNote(r.note);
+                      if (!missingItems.length) missingItems = parseMissingItemsFromNote(r.note);
 
                       try {
                         sessionStorage.setItem(
@@ -664,6 +681,26 @@ export default function ProgressScreen() {
                         serviceName
                       )}`
                     );
+                  };
+
+                  // ✅ FIX: when user opens request, clear pill and persist as "read up to latest"
+                  const openRequestAndClearChatPill = () => {
+                    const rid = String(r.id || "");
+
+                    // We can safely set local-read to "now-ish" using latest known message sec from storage recompute.
+                    // But we want accuracy: we already have latestMsgSec in the listener closure per request.
+                    // Since this handler is outside that closure, we just read what we previously persisted in sessionStorage.
+                    // If there was unread, localRead should jump to current latest by setting it to a big value:
+                    // better: set it to current epoch seconds so it always clears until next message arrives.
+                    const nowSec = Math.floor(Date.now() / 1000);
+
+                    // mark locally read up to now (covers latest message that triggered the pill)
+                    setLocalReadSec(rid, nowSec);
+
+                    // instantly hide badge
+                    setChatUnread(rid, false);
+
+                    navigate(`/app/request/${rid}`);
                   };
 
                   return (
@@ -704,7 +741,7 @@ export default function ProgressScreen() {
 
                       <div className="mt-4 flex flex-wrap gap-2">
                         <button
-                          onClick={() => navigate(`/app/request/${r.id}`)}
+                          onClick={openRequestAndClearChatPill}
                           className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-3.5 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.99]
                                      dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/55"
                         >
@@ -726,9 +763,7 @@ export default function ProgressScreen() {
                           <button
                             disabled={isDeleting}
                             onClick={async () => {
-                              const ok = window.confirm(
-                                "Delete this request? This cannot be undone."
-                              );
+                              const ok = window.confirm("Delete this request? This cannot be undone.");
                               if (!ok) return;
 
                               setErr("");

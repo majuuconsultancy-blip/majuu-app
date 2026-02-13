@@ -219,9 +219,9 @@ function StaffAccessPanel() {
     <div className="mt-6">
       <div className={cardBase}>
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-zinc-900">Staff access (by email)</div>
+          <div className="text-sm font-semibold text-zinc-900">Staff Hire System</div>
           <div className="mt-1 text-xs text-zinc-500">
-            The staff member must have already signed up in the app.
+            The staff member must be already signed up in the App to be activated.
           </div>
         </div>
 
@@ -415,8 +415,8 @@ export default function AdminRequestsScreen() {
         {/* Header */}
         <div className="flex items-end justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">Admin Requests</h1>
-            <p className="mt-1 text-sm text-zinc-600">Manage incoming requests and decisions.</p>
+            <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Admin Page</h1>
+            <p className="mt-1 text-sm text-zinc-600">Manage incoming application requests and decisions.</p>
           </div>
 
           <button

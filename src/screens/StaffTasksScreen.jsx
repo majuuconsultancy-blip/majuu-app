@@ -1,18 +1,6 @@
 // ✅ StaffTasksScreen.jsx (FULL COPY-PASTE)
-// Adds:
-// - ✅ Logout button (top right)
-// - ✅ Tabs: New / Ongoing / Done
-//    - New: staffStatus !== "in_progress" && !== "done"  (not started)
-//    - Ongoing: staffStatus === "in_progress"            (started, not done)
-//    - Done: staffStatus === "done"                      (sent to admin)
-// - ✅ Search
-// - ✅ Counters per tab + total
-// - ✅ Recommendation pill (only shows when staffDecision is recommend_*)
-// - ✅ Safer loading + map fetch
-//
-// ✅ FIX (Start Work modal):
-// - New tasks -> /staff/request/:rid/start
-// - Ongoing/Done -> /staff/request/:rid
+// FIX: Back button should ALWAYS go to "/dashboard" (not navigate(-1))
+// Everything else unchanged.
 
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -291,7 +279,7 @@ export default function StaffTasksScreen() {
             <div>
               <button
                 type="button"
-                onClick={() => navigate(-1)}
+                onClick={() => navigate("/dashboard", { replace: true })}
                 className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/60 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
                            dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100"
               >

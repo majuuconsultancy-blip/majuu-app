@@ -1,3 +1,14 @@
+// ✅ ProfileScreen.jsx (FULL COPY-PASTE)
+// NOTES (what changed - UI only, NO backend touched):
+// 1) Moved Admin tools + Settings + Logout out of the top-right row.
+// 2) Kept ONLY ThemeToggle on the top-right (cleaner, mobile-first).
+// 3) Added a new "Quick actions" stack right BELOW the Phone tile:
+//    - Admin tools (only if admin)
+//    - Settings
+//    - Logout (last)
+// 4) Added subtle "apple-ish" entrance animation + tap feedback on action tiles (CSS-only, no deps).
+// 5) Logout now shows a small loading state to prevent double taps (UI only).
+
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
@@ -85,12 +96,7 @@ function IconPhone(props) {
 function IconFlag(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M6 22V3.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+      <path d="M6 22V3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       <path
         d="M6 4h10l-1.4 3L16 10H6"
         stroke="currentColor"
@@ -143,12 +149,7 @@ function IconLogout(props) {
         strokeWidth="1.8"
         strokeLinecap="round"
       />
-      <path
-        d="M3 12h10"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+      <path d="M3 12h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       <path
         d="M6.5 9.5 3 12l3.5 2.5"
         stroke="currentColor"
@@ -174,6 +175,25 @@ function IconShield(props) {
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/* ✅ settings icon (minimal) */
+function IconSettings(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M19.4 12a7.9 7.9 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a8.5 8.5 0 0 0-2-.9l-.4-2.6H9.5l-.4 2.6a8.5 8.5 0 0 0-2 .9l-2.4-1-2 3.4 2 1.6A7.9 7.9 0 0 0 4.6 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1c.6.4 1.3.7 2 .9l.4 2.6h4.9l.4-2.6c.7-.2 1.4-.5 2-.9l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
         strokeLinejoin="round"
       />
     </svg>
@@ -273,6 +293,17 @@ export default function ProfileScreen() {
   // ✅ phone drafts (new)
   const [draftPhoneLocal, setDraftPhoneLocal] = useState(""); // for Kenya (9 digits)
   const [draftPhoneAny, setDraftPhoneAny] = useState(""); // for non-Kenya (full)
+
+  // ✅ subtle entrance animation (apple-ish)
+  const [enter, setEnter] = useState(false);
+
+  // ✅ logout UI busy
+  const [busy, setBusy] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => setEnter(true), 10);
+    return () => clearTimeout(t);
+  }, []);
 
   const isAdmin = useMemo(() => {
     return (email || "").toLowerCase() === ADMIN_EMAIL.toLowerCase();
@@ -398,8 +429,13 @@ export default function ProfileScreen() {
   };
 
   const logout = async () => {
-    await signOut(auth);
-    navigate("/login", { replace: true });
+    try {
+      setBusy("logout");
+      await signOut(auth);
+      navigate("/login", { replace: true });
+    } finally {
+      setBusy("");
+    }
   };
 
   const cancelEdit = () => {
@@ -470,51 +506,35 @@ export default function ProfileScreen() {
   const topBg =
     "bg-gradient-to-b from-emerald-50 via-white to-zinc-50 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
 
+  const enterWrap = "transition duration-500 ease-out will-change-transform will-change-opacity";
+  const enterCls = enter ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2";
+
+  // ✅ action tile styles (mobile-first)
+  const actionCard =
+    "rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-white active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:bg-zinc-900";
+  const actionRow = "flex items-center justify-between gap-3";
+  const actionLeft = "flex items-center gap-3 min-w-0";
+  const actionTitle = "text-sm font-semibold text-zinc-900 dark:text-zinc-100";
+  const actionSub = "mt-0.5 text-xs text-zinc-500 dark:text-zinc-400";
+  const actionIconWrap =
+    "inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60 text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200";
+  const chevron =
+    "text-zinc-400 dark:text-zinc-500";
+
   return (
     <div className={`min-h-screen ${topBg}`}>
-      <div className="mx-auto max-w-xl px-5 pb-10 pt-6">
+      <div className={`mx-auto max-w-xl px-5 pb-10 pt-6 ${enterWrap} ${enterCls}`}>
         {/* Top bar */}
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
               Profile
             </h1>
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              Keep your details updated so we can support you faster.
-            </p>
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {/* ✅ Theme toggle */}
+          {/* ✅ Keep only theme toggle on top-right */}
+          <div className="flex items-center justify-end gap-2">
             <ThemeToggle />
-
-            {isAdmin ? (
-              <button
-                onClick={() => navigate("/app/admin")}
-                className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-sm font-semibold text-emerald-800 shadow-sm transition hover:bg-emerald-100
-                           dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-emerald-200 dark:hover:bg-zinc-900"
-              >
-                <IconShield className="h-5 w-5" />
-                Admin tools
-              </button>
-            ) : null}
-
-            <button
-             onClick={() => navigate("/app/settings")}
-             className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-white
-             dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
-            >
-             Settings
-           </button>
-
-            <button
-              onClick={logout}
-              className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-white
-                         dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
-            >
-              <IconLogout className="h-5 w-5" />
-              Logout
-            </button>
           </div>
         </div>
 
@@ -672,6 +692,71 @@ export default function ProfileScreen() {
               </div>
             )}
           </FieldShell>
+
+          {/* ✅ NEW: Admin tools / Settings / Logout moved here (below phone tile) */}
+          {!isEditing ? (
+            <div className="grid gap-2">
+              {isAdmin ? (
+                <button
+                  type="button"
+                  onClick={() => navigate("/app/admin")}
+                  className={`${actionCard} text-left`}
+                >
+                  <div className={actionRow}>
+                    <div className={actionLeft}>
+                      <span className={actionIconWrap}>
+                        <IconShield className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className={actionTitle}>Admin tools</div>
+                        <div className={actionSub}>Manage requests, users, and staff.</div>
+                      </div>
+                    </div>
+                    <span className={chevron}>›</span>
+                  </div>
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={() => navigate("/app/settings")}
+                className={`${actionCard} text-left`}
+              >
+                <div className={actionRow}>
+                  <div className={actionLeft}>
+                    <span className={actionIconWrap}>
+                      <IconSettings className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className={actionTitle}>Settings</div>
+                      <div className={actionSub}>Preferences and app options.</div>
+                    </div>
+                  </div>
+                  <span className={chevron}>›</span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={logout}
+                disabled={busy === "logout"}
+                className={`${actionCard} text-left disabled:opacity-60`}
+              >
+                <div className={actionRow}>
+                  <div className={actionLeft}>
+                    <span className={actionIconWrap}>
+                      <IconLogout className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className={actionTitle}>{busy === "logout" ? "Logging out…" : "Logout"}</div>
+                      <div className={actionSub}>Sign out of your account.</div>
+                    </div>
+                  </div>
+                  <span className={chevron}>›</span>
+                </div>
+              </button>
+            </div>
+          ) : null}
         </div>
 
         {/* Actions tile (scrolls normally) */}

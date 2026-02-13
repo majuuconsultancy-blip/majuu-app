@@ -174,6 +174,13 @@ export default function RequestStatusScreen() {
   const [adminFilesErr, setAdminFilesErr] = useState("");
   const [adminFiles, setAdminFiles] = useState([]);
 
+  // subtle "apple-ish" entrance animation (CSS-only, no deps)
+  const [enter, setEnter] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setEnter(true), 10);
+    return () => clearTimeout(t);
+  }, []);
+
   const validRequestId = useMemo(() => {
     const id = String(requestId || "").trim();
     return id.length > 0 ? id : null;
@@ -193,6 +200,11 @@ export default function RequestStatusScreen() {
       console.warn("markChatRead failed:", e);
     }
   };
+
+  // ✅ IMPORTANT: ensure any modal/portal chat always sits on top
+  // (same trick as staff area: create a top-layer stacking context + isolate)
+  // This prevents "chat under screen" when parents create their own stacking contexts.
+  const TOP_LAYER_CLS = "relative isolate z-0";
 
   useEffect(() => {
     let unsubDoc = null;
@@ -298,12 +310,17 @@ export default function RequestStatusScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate, validRequestId]);
 
-  const cardBase = "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur";
+  const cardBase =
+    "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur transition duration-300 ease-out";
   const softBg = "bg-gradient-to-b from-emerald-50/40 via-white to-white";
+
+  const enterWrap =
+    "transition duration-500 ease-out will-change-transform will-change-opacity";
+  const enterCls = enter ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2";
 
   if (loading) {
     return (
-      <div className={`min-h-screen ${softBg}`}>
+      <div className={`min-h-screen ${softBg} ${TOP_LAYER_CLS}`}>
         <div className="max-w-xl mx-auto px-5 py-10">
           <div className={`${cardBase} p-5`}>
             <p className="text-sm text-zinc-600">Loading request…</p>
@@ -315,14 +332,14 @@ export default function RequestStatusScreen() {
 
   if (err) {
     return (
-      <div className={`min-h-screen ${softBg}`}>
+      <div className={`min-h-screen ${softBg} ${TOP_LAYER_CLS}`}>
         <div className="max-w-xl mx-auto px-5 py-10">
           <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-5 text-sm text-rose-700">
             {err}
           </div>
 
           <button
-            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-white"
+            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-white active:scale-[0.99]"
             onClick={() => navigate("/app/progress")}
           >
             <IconArrowLeft className="h-4 w-4" />
@@ -371,12 +388,10 @@ export default function RequestStatusScreen() {
     );
   };
 
-  // ✅ UPDATED: Retry now deep-links into the correct RequestModal
   const handleTryAgain = () => {
     const country = req?.country || "Not selected";
     const countryQS2 = encodeURIComponent(country);
 
-    // FULL PACKAGE → go to FullPackageMissingScreen + auto-open modal
     if (isFull) {
       let missingItems = Array.isArray(req?.missingItems) ? req.missingItems : [];
       if (!missingItems.length) missingItems = parseMissingItemsFromNote(req?.note);
@@ -399,7 +414,6 @@ export default function RequestStatusScreen() {
       return;
     }
 
-    // SINGLE SERVICE → go to WeHelp + auto-open modal on that service
     const serviceName = String(req?.serviceName || "").trim();
     navigate(
       `/app/${safeTrack}/we-help?country=${countryQS2}&autoOpen=1&open=${encodeURIComponent(
@@ -408,26 +422,27 @@ export default function RequestStatusScreen() {
     );
   };
 
+  const serviceTitle = `${String(req?.track || "").toUpperCase()} • ${req?.country || "-"}`;
+  const serviceSub = isFull ? "Full package" : `Single service: ${req?.serviceName || "-"}`;
+
   return (
-    <div className={`min-h-screen ${softBg}`}>
-      <div className="max-w-xl mx-auto px-5 py-6 pb-10">
+    <div className={`min-h-screen ${softBg} ${TOP_LAYER_CLS}`}>
+      {/* ✅ this fixed, high z-index layer guarantees chat modal can sit above */}
+      <div className="relative z-[9999]">
+        {/* RequestChatLauncher may portal to body; this ensures parent stacking doesn't bury it */}
+      </div>
+
+      <div className={`max-w-xl mx-auto px-5 py-6 pb-10 ${enterWrap} ${enterCls}`}>
         {/* Header */}
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800">
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-emerald-100 bg-white/70">
-                <IconReceipt className="h-4 w-4 text-emerald-700" />
-              </span>
-              Request
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60">
+              <IconReceipt className="h-5 w-5 text-emerald-800" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-zinc-900">Application Request</div>
+              <div className="text-xs text-zinc-500">Details & documents</div>
             </div>
-
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900">
-              Request details
-            </h1>
-
-            <p className="mt-1 text-sm text-zinc-600">
-              {String(req?.track || "").toUpperCase()} · {req?.country || "-"}
-            </p>
           </div>
 
           <span
@@ -437,18 +452,42 @@ export default function RequestStatusScreen() {
           </span>
         </div>
 
-        {/* Main card */}
-        <div className={`mt-5 ${cardBase} p-5`}>
-          <div className="text-sm text-zinc-600">
-            {isFull ? "Full package" : `Single service: ${req?.serviceName || "-"}`}
+        {/* ✅ Chat row (FORCED ABOVE by high z-index wrapper around launcher) */}
+        <div className="mt-5">
+          <div className={`${cardBase} p-4 hover:border-emerald-200`}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-zinc-900">Chat with MAJUU team</div>
+                <div className="mt-1 text-xs text-zinc-500">
+                  Ask questions, follow up, and get updates.
+                </div>
+              </div>
+
+              {/* ✅ KEY FIX: keep launcher in its own top stacking context */}
+              <div className="shrink-0 relative z-[9999]">
+                <RequestChatLauncher requestId={validRequestId} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Service + contact details */}
+        <div className={`mt-4 ${cardBase} p-5`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-base font-semibold tracking-tight text-zinc-900">
+                {serviceTitle}
+              </div>
+              <div className="mt-1 text-sm font-semibold text-zinc-700">{serviceSub}</div>
+            </div>
+
+            <div className="shrink-0 text-right">
+              <div className="text-[11px] text-zinc-500">Request ID</div>
+              <div className="mt-1 font-mono text-[12px] text-zinc-800">{req?.id}</div>
+            </div>
           </div>
 
           <div className="mt-4 grid gap-2 text-sm">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-zinc-500">Request ID</span>
-              <span className="font-mono text-zinc-900">{req?.id}</span>
-            </div>
-
             <div className="flex items-center justify-between gap-3">
               <span className="text-zinc-500">Full name</span>
               <span className="font-medium text-zinc-900">{req?.name || "-"}</span>
@@ -483,7 +522,7 @@ export default function RequestStatusScreen() {
                 <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-amber-200 bg-white/70">
                   <IconNote className="h-4 w-4 text-amber-800" />
                 </span>
-                Note from the MAJUU team
+                Note from MAJUU
               </div>
               <div className="mt-2 text-sm text-amber-900 whitespace-pre-wrap">
                 {adminNote}
@@ -493,119 +532,42 @@ export default function RequestStatusScreen() {
 
           {st === "new" ? (
             <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-700">
-              We’ve received your request. Our team will review it and update you here.
-              <div className="mt-2 text-xs text-zinc-500">
-                Tip: You can always check Progress for updates.
-              </div>
+              Received. We’ll review and update you here.
             </div>
           ) : null}
 
           {st === "contacted" ? (
             <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 text-sm text-emerald-900">
-              Your request is being processed. Please check back later.
+              In progress. Please check back later.
             </div>
           ) : null}
 
           {st === "closed" ? (
             <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-900">
-              {isFull
-                ? "Your full package was approved. Continue with the next steps."
-                : "Your request has been completed."}
+              {isFull ? "Approved. Continue with the next steps." : "Completed successfully."}
             </div>
           ) : null}
 
           {st === "rejected" ? (
             <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-800">
-              This request needs correction. Please follow the team note above.
+              Needs correction. Follow the note above.
             </div>
           ) : null}
         </div>
 
-        {/* ✅ Chat (safe modal) */}
-        <div className="mt-5">
-          <RequestChatLauncher requestId={validRequestId} />
-        </div>
-
-        {/* ✅ Documents from MAJUU (downloadable) */}
+        {/* Submitted documents by user */}
         <div className={`mt-5 ${cardBase} p-5`}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60">
                 <IconFile className="h-5 w-5 text-emerald-800" />
               </span>
-              <div>
-                <div className="font-semibold text-zinc-900">Documents from MAJUU</div>
-                <div className="text-xs text-zinc-500">SOPs, templates, forms</div>
-              </div>
-            </div>
-            <span className="text-xs text-zinc-500">{adminFiles.length} files</span>
-          </div>
-
-          {adminFilesErr ? (
-            <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-              {adminFilesErr}
-            </div>
-          ) : null}
-
-          <div className="mt-4 grid gap-2">
-            {adminFiles.length === 0 ? (
-              <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
-                No documents sent yet.
-              </div>
-            ) : (
-              adminFiles.map((f) => {
-                const name = String(f.name || "Document");
-                const url = String(f.url || "").trim();
-
-                return (
-                  <div
-                    key={f.id}
-                    className="rounded-2xl border border-zinc-200 bg-white/60 p-4 transition hover:border-emerald-200 hover:bg-white"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="font-semibold text-sm text-zinc-900 break-words">
-                          {name}
-                        </div>
-                        <div className="mt-1 text-xs text-zinc-600">Tap Open to download</div>
-                      </div>
-
-                      <a
-                        href={url || "#"}
-                        target="_blank"
-                        rel="noreferrer"
-                        className={`shrink-0 inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] ${
-                          url
-                            ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
-                            : "border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed pointer-events-none"
-                        }`}
-                      >
-                        Open
-                      </a>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* User submitted docs */}
-        <div className={`mt-5 ${cardBase} p-5`}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60">
-                <IconFile className="h-5 w-5 text-emerald-800" />
-              </span>
-              <div>
+              <div className="min-w-0">
                 <div className="font-semibold text-zinc-900">Submitted documents</div>
-                <div className="text-xs text-zinc-500">
-                  Visible when you upload documents.
-                </div>
+                <div className="text-xs text-zinc-500">Your uploads for this request.</div>
               </div>
             </div>
-
-            <span className="text-xs text-zinc-500">{attachments.length} files</span>
+            <span className="text-xs text-zinc-500 shrink-0">{attachments.length} files</span>
           </div>
 
           {fileErr ? (
@@ -617,13 +579,13 @@ export default function RequestStatusScreen() {
           <div className="mt-4 grid gap-2">
             {attachments.length === 0 ? (
               <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
-                No documents submitted.
+                No documents submitted yet.
               </div>
             ) : (
               attachments.map((a) => (
                 <div
                   key={a.id}
-                  className="rounded-2xl border border-zinc-200 bg-white/60 p-4 transition hover:border-emerald-200 hover:bg-white"
+                  className="rounded-2xl border border-zinc-200 bg-white/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -649,7 +611,71 @@ export default function RequestStatusScreen() {
           </div>
         </div>
 
-        {/* ✅ Bottom action button (NOT fixed) */}
+        {/* Documents from MAJUU */}
+        <div className={`mt-5 ${cardBase} p-5`}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60">
+                <IconFile className="h-5 w-5 text-emerald-800" />
+              </span>
+              <div className="min-w-0">
+                <div className="font-semibold text-zinc-900">Documents from MAJUU</div>
+                <div className="text-xs text-zinc-500">Templates, SOPs, forms.</div>
+              </div>
+            </div>
+            <span className="text-xs text-zinc-500 shrink-0">{adminFiles.length} files</span>
+          </div>
+
+          {adminFilesErr ? (
+            <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+              {adminFilesErr}
+            </div>
+          ) : null}
+
+          <div className="mt-4 grid gap-2">
+            {adminFiles.length === 0 ? (
+              <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+                No documents sent yet.
+              </div>
+            ) : (
+              adminFiles.map((f) => {
+                const name = String(f.name || "Document");
+                const url = String(f.url || "").trim();
+
+                return (
+                  <div
+                    key={f.id}
+                    className="rounded-2xl border border-zinc-200 bg-white/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm text-zinc-900 break-words">
+                          {name}
+                        </div>
+                        <div className="mt-1 text-xs text-zinc-600">Open to download</div>
+                      </div>
+
+                      <a
+                        href={url || "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={`shrink-0 inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] ${
+                          url
+                            ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
+                            : "border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed pointer-events-none"
+                        }`}
+                      >
+                        Open
+                      </a>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Bottom action buttons */}
         {canContinue || canStartNew || canTryAgain ? (
           <div className="mt-5">
             {canContinue ? (
