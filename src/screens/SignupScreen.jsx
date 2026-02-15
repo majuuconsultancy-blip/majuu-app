@@ -1,3 +1,10 @@
+// ✅ SignupScreen.jsx (FULL COPY-PASTE)
+// Changes (UI only):
+// - ✅ Google button: proper Google colors + multi-color "G" icon (not currentColor)
+// - ✅ Password + Confirm: show/hide eye toggle (open/closed)
+// - ✅ Slightly more “finished product” polish: spacing, helper text, subtle states
+// - ✅ No backend logic changes (your Firebase flow kept)
+
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -9,6 +16,7 @@ import {
 import { auth, googleProvider } from "../firebase";
 import { ensureUserDoc } from "../services/userservice";
 
+/* ---------------- Icons ---------------- */
 function IconMail(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
@@ -73,29 +81,86 @@ function IconShield(props) {
   );
 }
 
-function IconGoogle(props) {
+// ✅ Proper multi-color Google "G" (no currentColor)
+function GoogleGIcon(props) {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+    <svg viewBox="0 0 48 48" aria-hidden="true" {...props}>
       <path
-        fill="currentColor"
-        d="M21.6 12.27c0-.68-.06-1.18-.17-1.7H12v3.21h5.54c-.11.8-.71 2.01-2.04 2.82l-.02.11 2.98 2.31.2.02c1.83-1.69 2.9-4.17 2.9-6.77Z"
+        fill="#EA4335"
+        d="M24 9.5c3.1 0 5.9 1.1 8.1 3.1l6-6C34.5 3.3 29.6 1 24 1 14.6 1 6.6 6.4 2.7 14.2l7.1 5.5C11.6 13.8 17.4 9.5 24 9.5Z"
       />
       <path
-        fill="currentColor"
-        d="M12 22c2.7 0 4.97-.89 6.63-2.43l-3.16-2.45c-.85.59-1.99 1-3.47 1-2.65 0-4.9-1.69-5.71-4.03l-.1.01-3.08 2.4-.03.1C4.74 19.95 8.09 22 12 22Z"
+        fill="#4285F4"
+        d="M46.1 24.5c0-1.6-.1-2.8-.4-4H24v8h12.5c-.5 2.6-2 4.8-4.4 6.3l7 5.4c4.1-3.8 6.5-9.3 6.5-15.7Z"
       />
       <path
-        fill="currentColor"
-        d="M6.29 14.09A6.02 6.02 0 0 1 6 12c0-.73.13-1.44.29-2.09l-.01-.14-3.11-2.43-.1.05A9.98 9.98 0 0 0 2 12c0 1.61.39 3.13 1.07 4.46l3.22-2.37Z"
+        fill="#FBBC05"
+        d="M9.8 28.4A14.8 14.8 0 0 1 9 24c0-1.5.3-3 .8-4.4l-7.1-5.5A23 23 0 0 0 1 24c0 3.8.9 7.4 2.7 10.5l7.1-6.1Z"
       />
       <path
-        fill="currentColor"
-        d="M12 5.88c1.7 0 2.85.73 3.5 1.34l2.55-2.48C16.96 3.13 14.7 2 12 2 8.09 2 4.74 4.05 3.07 7.54l3.21 2.37C7.1 7.57 9.35 5.88 12 5.88Z"
+        fill="#34A853"
+        d="M24 47c5.6 0 10.4-1.8 13.9-4.9l-7-5.4c-1.9 1.3-4.4 2.1-6.9 2.1-6.6 0-12.4-4.3-14.2-10.2l-7.1 6.1C6.6 41.6 14.6 47 24 47Z"
       />
     </svg>
   );
 }
 
+function IconEye(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function IconEyeOff(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M4 4 20 20"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M9.3 9.5a3.3 3.3 0 0 0 4.2 4.2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M6.2 6.9C3.6 8.9 2.5 12 2.5 12s3.5 7 9.5 7c2 0 3.8-.6 5.2-1.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M13.1 5.2A9.7 9.7 0 0 1 12 5c-6 0-9.5 7-9.5 7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M21.5 12s-1.5 3-4 5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/* ---------------- Helpers ---------------- */
 function friendlyAuthError(err) {
   const code = String(err?.code || "").toLowerCase();
   const msg = String(err?.message || "").toLowerCase();
@@ -122,6 +187,9 @@ export default function SignupScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -156,11 +224,13 @@ export default function SignupScreen() {
     try {
       const res = await signInWithPopup(auth, googleProvider);
       await finishLogin(res.user);
-      // Google accounts are typically verified; go straight in
       navigate("/dashboard", { replace: true });
     } catch (err) {
       const code = String(err?.code || "").toLowerCase();
-      if (code.includes("auth/popup-blocked") || code.includes("auth/operation-not-supported-in-this-environment")) {
+      if (
+        code.includes("auth/popup-blocked") ||
+        code.includes("auth/operation-not-supported-in-this-environment")
+      ) {
         try {
           await signInWithRedirect(auth, googleProvider);
           return;
@@ -187,13 +257,10 @@ export default function SignupScreen() {
 
     try {
       const userCred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
-
       await finishLogin(userCred.user);
 
-      // Send verification email
       await sendEmailVerification(userCred.user);
 
-      // Route to verify screen
       navigate("/verify-email", { replace: true, state: { email: cleanEmail } });
     } catch (err) {
       setError(friendlyAuthError(err));
@@ -220,14 +287,21 @@ export default function SignupScreen() {
           {/* Card */}
           <div className="mt-7 rounded-2xl border border-zinc-200 bg-white/70 p-5 shadow-sm backdrop-blur">
             <div className="grid gap-3">
-              {/* Google */}
+              {/* Google (Google-themed) */}
               <button
                 type="button"
                 onClick={handleGoogle}
                 disabled={loading}
-                className="w-full rounded-xl border border-zinc-200 bg-white/70 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 flex items-center justify-center gap-2"
+                className="
+                  w-full rounded-xl border border-zinc-200
+                  bg-white px-4 py-3 text-sm font-semibold text-zinc-900
+                  shadow-sm transition
+                  hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60
+                  flex items-center justify-center gap-2
+                  focus:outline-none focus:ring-2 focus:ring-blue-200/70
+                "
               >
-                <IconGoogle className="h-5 w-5" />
+                <GoogleGIcon className="h-5 w-5" />
                 Continue with Google
               </button>
 
@@ -262,7 +336,7 @@ export default function SignupScreen() {
                   <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
                     <IconLock className="h-5 w-5 text-zinc-500" />
                     <input
-                      type="password"
+                      type={showPass ? "text" : "password"}
                       placeholder="At least 6 characters"
                       className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
                       value={password}
@@ -271,9 +345,37 @@ export default function SignupScreen() {
                       required
                       disabled={loading}
                     />
+
+                    <button
+                      type="button"
+                      onClick={() => setShowPass((v) => !v)}
+                      disabled={loading}
+                      className="shrink-0 rounded-lg p-1.5 text-zinc-500 transition hover:bg-white active:scale-[0.98] disabled:opacity-60"
+                      aria-label={showPass ? "Hide password" : "Show password"}
+                      title={showPass ? "Hide password" : "Show password"}
+                    >
+                      {showPass ? (
+                        <IconEyeOff className="h-5 w-5" />
+                      ) : (
+                        <IconEye className="h-5 w-5" />
+                      )}
+                    </button>
                   </div>
-                  <div className="mt-2 text-xs text-zinc-500">
-                    Use a strong password you can remember.
+
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <div className="text-xs text-zinc-500">Use a strong password you can remember.</div>
+                    <div
+                      className={[
+                        "text-xs font-semibold",
+                        password.length === 0
+                          ? "text-zinc-400"
+                          : passwordOk
+                          ? "text-emerald-700"
+                          : "text-rose-700",
+                      ].join(" ")}
+                    >
+                      {password.length === 0 ? "—" : passwordOk ? "Good" : "Too short"}
+                    </div>
                   </div>
                 </div>
 
@@ -283,7 +385,7 @@ export default function SignupScreen() {
                   <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
                     <IconShield className="h-5 w-5 text-zinc-500" />
                     <input
-                      type="password"
+                      type={showConfirm ? "text" : "password"}
                       placeholder="Repeat password"
                       className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
                       value={confirm}
@@ -292,15 +394,31 @@ export default function SignupScreen() {
                       required
                       disabled={loading}
                     />
+
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirm((v) => !v)}
+                      disabled={loading}
+                      className="shrink-0 rounded-lg p-1.5 text-zinc-500 transition hover:bg-white active:scale-[0.98] disabled:opacity-60"
+                      aria-label={showConfirm ? "Hide password" : "Show password"}
+                      title={showConfirm ? "Hide password" : "Show password"}
+                    >
+                      {showConfirm ? (
+                        <IconEyeOff className="h-5 w-5" />
+                      ) : (
+                        <IconEye className="h-5 w-5" />
+                      )}
+                    </button>
                   </div>
 
-                  {!passwordOk && password.length > 0 ? (
-                    <div className="mt-2 text-xs text-rose-700">
-                      Password must be at least 6 characters.
+                  {confirm.length > 0 ? (
+                    <div className="mt-2 text-xs">
+                      {matchOk ? (
+                        <span className="text-emerald-700 font-semibold">Passwords match.</span>
+                      ) : (
+                        <span className="text-rose-700 font-semibold">Passwords do not match.</span>
+                      )}
                     </div>
-                  ) : null}
-                  {confirm.length > 0 && !matchOk ? (
-                    <div className="mt-2 text-xs text-rose-700">Passwords do not match.</div>
                   ) : null}
                 </div>
 

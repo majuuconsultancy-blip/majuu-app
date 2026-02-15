@@ -1,3 +1,13 @@
+// ✅ StaffRequestDetailsScreen.jsx (FULL COPY-PASTE)
+// UI POLISHES (backend untouched):
+// - ✅ Apple-ish entrance animation (fade + lift)
+// - ✅ Sticky header (Back + status pills stay visible while scrolling)
+// - ✅ Floaty cards (softer shadow + hover lift)
+// - ✅ Better spacing / typography (cleaner hierarchy)
+// - ✅ “Chat” card styled as primary block
+// - ✅ Buttons + inputs get smoother focus rings + disabled states
+// - ✅ Keeps ALL your Firestore logic EXACTLY the same
+
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -198,8 +208,26 @@ export default function StaffRequestDetailsScreen() {
   const [draftName, setDraftName] = useState("");
   const [draftUrl, setDraftUrl] = useState("");
 
-  const card = "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur";
-  const pageBg = "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white";
+  // ✅ polish tokens
+  const softBg = "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white";
+  const card =
+    "rounded-3xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60";
+
+  const floatCard =
+    "rounded-3xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur transition duration-300 ease-out hover:-translate-y-[2px] hover:shadow-md hover:border-emerald-200 active:translate-y-0 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/60";
+
+  const inputBase =
+    "w-full rounded-2xl border border-zinc-200 bg-white/70 px-3 py-3 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-emerald-300/20";
+
+  // ✅ entrance animation
+  const [enter, setEnter] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setEnter(true), 10);
+    return () => clearTimeout(t);
+  }, []);
+  const enterWrap =
+    "transition duration-500 ease-out will-change-transform will-change-opacity";
+  const enterCls = enter ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2";
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -414,148 +442,191 @@ export default function StaffRequestDetailsScreen() {
 
   if (checkingAuth) {
     return (
-      <div className={pageBg}>
+      <div className={softBg}>
         <div className="max-w-xl mx-auto px-5 py-6">
-          <div className={`${card} p-4 text-sm text-zinc-600`}>Preparing…</div>
+          <div className={`${card} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>Preparing…</div>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className={pageBg}>
-      <div className="max-w-xl mx-auto px-5 py-6">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/60 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
-        >
-          <IconChevronLeft className="h-4 w-4" />
-          Back
-        </button>
+  const warnBox =
+    "rounded-3xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300";
+  const warnAmber =
+    "rounded-3xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-900 shadow-sm";
+  const btnGhost =
+    "inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100";
+  const btnPrimary =
+    "inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60";
+  const btnDanger =
+    "inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60";
 
-        {/* ✅ Request Chat (Staff → Admin moderation) */}
-       <div className={`mt-6 ${card} p-5`}>
-       <StaffRequestChatPanel requestId={requestId} />
-      </div>
+  return (
+    <div className={softBg}>
+      <div className={`max-w-xl mx-auto px-5 py-6 ${enterWrap} ${enterCls}`}>
+        {/* Sticky top header */}
+        <div className="sticky top-0 z-10 -mx-5 px-5 pb-3 pt-2 backdrop-blur supports-[backdrop-filter]:bg-white/50 dark:supports-[backdrop-filter]:bg-zinc-950/40">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <button type="button" onClick={() => navigate(-1)} className={btnGhost}>
+                <IconChevronLeft className="h-4 w-4" />
+                Back
+              </button>
+
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 border border-emerald-100 dark:bg-zinc-900/60 dark:border-zinc-700">
+                    <IconDoc className="h-4 w-4 text-emerald-700 dark:text-emerald-200" />
+                  </span>
+                  Staff review
+                </span>
+
+                {req ? (
+                  <>
+                    <span className={`rounded-full px-2.5 py-1 text-xs ${statusPill.cls}`}>
+                      {statusPill.label}
+                    </span>
+                    <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold border border-zinc-200 bg-white/60 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">
+                      Staff: {staffStatus.replace("_", " ")}
+                    </span>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 h-px w-full bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent dark:via-zinc-700/70" />
+        </div>
+
+        {/* Chat first (primary block) */}
+        <div className={`mt-4 ${floatCard} p-5`}>
+          <StaffRequestChatPanel requestId={requestId} />
+        </div>
 
         {err ? (
-          <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+          <div className="mt-4 rounded-3xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 shadow-sm dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
             {err}
           </div>
         ) : null}
 
         {loading ? (
           <div className={`mt-4 ${card} p-4`}>
-            <p className="text-sm text-zinc-600">Loading request…</p>
+            <p className="text-sm text-zinc-600 dark:text-zinc-300">Loading request…</p>
           </div>
         ) : !req ? (
           <div className={`mt-4 ${card} p-4`}>
-            <p className="text-sm text-zinc-600">Request not found.</p>
+            <p className="text-sm text-zinc-600 dark:text-zinc-300">Request not found.</p>
           </div>
         ) : (
           <>
-            <div className={`mt-4 ${card} p-5`}>
-              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 border border-emerald-100">
-                  <IconDoc className="h-4 w-4 text-emerald-700" />
-                </span>
-                Staff review
-              </div>
-
-              <div className="mt-3 flex items-start justify-between gap-3">
+            {/* Overview */}
+            <div className={`mt-4 ${floatCard} p-5`}>
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-2xl font-semibold tracking-tight text-zinc-900">{title}</div>
-                  <div className="mt-1 text-sm text-zinc-600">{typeLabel}</div>
+                  <div className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                    {title}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{typeLabel}</div>
 
                   {createdLabel ? (
-                    <div className="mt-2 text-xs text-zinc-500">
+                    <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
                       Submitted: <span className="font-medium">{createdLabel}</span>
                     </div>
                   ) : null}
                 </div>
 
                 <div className="shrink-0 flex flex-col items-end gap-2">
-                  <span className={`rounded-full px-2.5 py-1 text-xs ${statusPill.cls}`}>
-                    {statusPill.label}
-                  </span>
-                  <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold border border-zinc-200 bg-white/60 text-zinc-700">
+                  <span className="rounded-full border border-zinc-200 bg-white/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">
                     Staff: {staffStatus.replace("_", " ")}
                   </span>
                 </div>
               </div>
 
               {!canWork ? (
-                <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+                <div className="mt-4 rounded-3xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
                   Admin already finalized this request. You can view only.
                 </div>
               ) : staffStatus !== "in_progress" && staffStatus !== "done" ? (
-                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-900">
+                <div className={`mt-4 ${warnAmber}`}>
                   Work not started. Go back to tasks and tap the request to start.
                 </div>
               ) : null}
             </div>
 
             {/* Applicant summary */}
-            <div className={`mt-6 ${card} p-5`}>
+            <div className={`mt-6 ${floatCard} p-5`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold text-zinc-900">Applicant</div>
-                  <div className="mt-1 text-sm text-zinc-600">Contact details are hidden in staff view.</div>
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    Applicant
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                    Contact details are hidden in staff view.
+                  </div>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => navigate(`/staff/request/${req?.id}/documents`)}
-                  className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
+                  className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
+                             dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 dark:hover:bg-zinc-900"
                 >
                   Applicant docs
-                  <IconChevronRight className="h-5 w-5 text-emerald-700" />
+                  <IconChevronRight className="h-5 w-5 text-emerald-700 dark:text-emerald-200" />
                 </button>
               </div>
 
               <div className="mt-4 grid gap-3 text-sm">
                 <div className="grid gap-1">
-                  <div className="text-xs font-semibold text-zinc-500">Full name</div>
-                  <div className="font-semibold text-zinc-900">{req?.name || "-"}</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    Full name
+                  </div>
+                  <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                    {req?.name || "-"}
+                  </div>
                 </div>
 
                 {req?.note ? (
-                  <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4">
-                    <div className="text-xs font-semibold text-zinc-500">Applicant note</div>
-                    <div className="mt-1 text-sm text-zinc-800 whitespace-pre-wrap">{req.note}</div>
+                  <div className="rounded-3xl border border-zinc-200 bg-white/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                      Applicant note
+                    </div>
+                    <div className="mt-1 text-sm text-zinc-800 whitespace-pre-wrap dark:text-zinc-100">
+                      {req.note}
+                    </div>
                   </div>
                 ) : (
-                  <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
-                    No note provided.
-                  </div>
+                  <div className={warnBox}>No note provided.</div>
                 )}
               </div>
             </div>
 
             {/* Staff attachments */}
-            <div className={`mt-6 ${card} p-5`}>
+            <div className={`mt-6 ${floatCard} p-5`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-semibold text-zinc-900">Attach files for applicant</h2>
-                  <p className="mt-1 text-sm text-zinc-600">
-                    Add links (Google Drive / Dropbox). When you mark done, these auto-fill admin’s staged files.
+                  <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    Attach files for applicant
+                  </h2>
+                  <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                    Add links (Google Drive / Dropbox). When you mark done, these auto-fill admin’s staged
+                    files.
                   </p>
                 </div>
 
-                <span className="rounded-full border border-emerald-100 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
+                <span className="rounded-full border border-emerald-100 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
                   Auto-fills Admin
                 </span>
               </div>
 
               {draftErr ? (
-                <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+                <div className="mt-4 rounded-3xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 shadow-sm dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
                   {draftErr}
                 </div>
               ) : null}
 
               {!canWork || isDone ? (
-                <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+                <div className="mt-4 rounded-3xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
                   Attachments are locked after you submit.
                 </div>
               ) : (
@@ -564,7 +635,7 @@ export default function StaffRequestDetailsScreen() {
                     value={draftName}
                     onChange={(e) => setDraftName(e.target.value)}
                     placeholder="File name (e.g. SOP Template)"
-                    className="w-full rounded-2xl border border-zinc-200 bg-white/60 p-3 text-sm text-zinc-900 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                    className={inputBase}
                     disabled={addingDraft || busy}
                   />
 
@@ -577,7 +648,7 @@ export default function StaffRequestDetailsScreen() {
                         value={draftUrl}
                         onChange={(e) => setDraftUrl(e.target.value)}
                         placeholder="Paste file link (https://...)"
-                        className="w-full rounded-2xl border border-zinc-200 bg-white/60 pl-11 pr-3 py-3 text-sm text-zinc-900 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                        className={`${inputBase} pl-11`}
                         disabled={addingDraft || busy}
                       />
                     </div>
@@ -586,40 +657,45 @@ export default function StaffRequestDetailsScreen() {
                       type="button"
                       onClick={addDraft}
                       disabled={addingDraft || busy}
-                      className="shrink-0 inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                      className={btnPrimary}
                     >
                       {addingDraft ? "Adding…" : "Add"}
                     </button>
                   </div>
 
-                  <div className="text-xs text-zinc-500">
-                    Tip: Make sure the link access is set to “Anyone with the link can view”.
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Tip: set access to “Anyone with the link can view”.
                   </div>
                 </div>
               )}
 
               <div className="mt-4 grid gap-2">
                 {drafts.length === 0 ? (
-                  <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
-                    No files added yet.
-                  </div>
+                  <div className={warnBox}>No files added yet.</div>
                 ) : (
                   drafts.map((d) => (
-                    <div key={d.id} className="rounded-2xl border border-zinc-200 bg-white/60 p-4">
+                    <div
+                      key={d.id}
+                      className="rounded-3xl border border-zinc-200 bg-white/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="font-semibold text-sm text-zinc-900 break-words">{d.name || "File"}</div>
+                          <div className="font-semibold text-sm text-zinc-900 break-words dark:text-zinc-100">
+                            {d.name || "File"}
+                          </div>
+
                           {d.url ? (
                             <a
                               href={d.url}
                               target="_blank"
                               rel="noreferrer"
-                              className="mt-2 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+                              className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800 dark:text-emerald-200 dark:hover:text-emerald-100"
                             >
+                              <IconLink className="h-4 w-4" />
                               Open link
                             </a>
                           ) : (
-                            <div className="mt-2 text-sm text-zinc-500">No link</div>
+                            <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">No link</div>
                           )}
                         </div>
 
@@ -628,7 +704,7 @@ export default function StaffRequestDetailsScreen() {
                             type="button"
                             onClick={() => removeDraft(d)}
                             disabled={busy}
-                            className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60"
+                            className={btnDanger}
                           >
                             <IconTrash className="h-5 w-5" />
                             Remove
@@ -642,18 +718,20 @@ export default function StaffRequestDetailsScreen() {
             </div>
 
             {/* Staff note */}
-            <div className={`mt-6 ${card} p-5`}>
+            <div className={`mt-6 ${floatCard} p-5`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold text-zinc-900">Staff note</div>
-                  <div className="mt-1 text-sm text-zinc-600">Internal note for admin. Save anytime.</div>
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Staff note</div>
+                  <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                    Internal note for admin. Save anytime.
+                  </div>
                 </div>
 
                 <button
                   type="button"
                   onClick={saveNote}
                   disabled={!canWork || busy}
-                  className="shrink-0 rounded-2xl border border-zinc-200 bg-white/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] disabled:opacity-60"
+                  className={btnGhost}
                 >
                   {busy === "save" ? "Saving…" : "Save note"}
                 </button>
@@ -665,20 +743,23 @@ export default function StaffRequestDetailsScreen() {
                 rows={5}
                 placeholder="What did you find? What’s missing? Next steps?"
                 disabled={!canWork || isDone}
-                className="mt-4 w-full rounded-2xl border border-zinc-200 bg-white/60 p-3 text-sm text-zinc-900 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 min-h-[120px] disabled:opacity-70"
+                className="mt-4 w-full rounded-2xl border border-zinc-200 bg-white/70 p-3 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 min-h-[120px] disabled:opacity-70
+                           dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-emerald-300/20"
               />
             </div>
 
-            {/* Staff actions (no Start/Continue here anymore) */}
-            <div className={`mt-6 ${card} p-5`}>
-              <div className="text-sm font-semibold text-zinc-900">Staff actions</div>
-              <div className="mt-1 text-sm text-zinc-600">
+            {/* Staff actions */}
+            <div className={`mt-6 ${floatCard} p-5`}>
+              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Staff actions</div>
+              <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 Mark done with a recommendation (admin decides final).
               </div>
 
               <div className="mt-4 grid gap-3">
-                <div className="grid gap-2 rounded-2xl border border-zinc-200 bg-white/60 p-4">
-                  <div className="text-xs font-semibold text-zinc-500">Recommendation (required to mark done)</div>
+                <div className="grid gap-2 rounded-3xl border border-zinc-200 bg-white/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    Recommendation
+                  </div>
 
                   <div className="grid grid-cols-2 gap-2">
                     <button
@@ -688,14 +769,17 @@ export default function StaffRequestDetailsScreen() {
                       className={[
                         "rounded-2xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60",
                         decision === "recommend_accept"
-                          ? "border-emerald-200 bg-emerald-50/70 text-emerald-800"
-                          : "border-zinc-200 bg-white/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60",
+                          ? "border-emerald-200 bg-emerald-50/70 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+                          : "border-zinc-200 bg-white/70 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900",
                       ].join(" ")}
                     >
                       <span className="inline-flex items-center gap-2">
                         <IconCheck className="h-5 w-5" />
-                        Recommend accept
+                        Accept
                       </span>
+                      <div className="mt-0.5 text-[11px] font-normal text-zinc-500 dark:text-zinc-400">
+                        Recommend accept
+                      </div>
                     </button>
 
                     <button
@@ -705,14 +789,17 @@ export default function StaffRequestDetailsScreen() {
                       className={[
                         "rounded-2xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60",
                         decision === "recommend_reject"
-                          ? "border-rose-200 bg-rose-50/70 text-rose-700"
-                          : "border-zinc-200 bg-white/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60",
+                          ? "border-rose-200 bg-rose-50/70 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200"
+                          : "border-zinc-200 bg-white/70 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900",
                       ].join(" ")}
                     >
                       <span className="inline-flex items-center gap-2">
                         <IconX className="h-5 w-5" />
-                        Recommend reject
+                        Reject
                       </span>
+                      <div className="mt-0.5 text-[11px] font-normal text-zinc-500 dark:text-zinc-400">
+                        Recommend reject
+                      </div>
                     </button>
                   </div>
                 </div>
@@ -721,13 +808,15 @@ export default function StaffRequestDetailsScreen() {
                   type="button"
                   onClick={markDone}
                   disabled={!canWork || isDone || busy || staffStatus !== "in_progress"}
-                  className="w-full rounded-2xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] disabled:opacity-60"
+                  className="w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                   title={staffStatus !== "in_progress" ? "Start work from the modal first" : ""}
                 >
                   {busy === "done" ? "Submitting…" : "Mark done (send to admin)"}
                 </button>
 
-                <div className="text-xs text-zinc-500">Final Accept/Reject is done by admin.</div>
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Final Accept/Reject is done by admin.
+                </div>
               </div>
             </div>
 

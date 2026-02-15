@@ -1,16 +1,21 @@
-// ✅ src/components/RequestChatPanel.jsx
+// ✅ src/components/RequestChatPanel.jsx (FULL COPY-PASTE)
 // ChatGPT-like:
 // - Published messages: /messages
 // - Pending instantly shown: optimistic + /pendingMessages(fromUid==me)
 // - + button picks PDF (metadata-only demo)
-// - Single send sends text, pdf, or both
+// - ✅ When user sends BOTH pdf + text: backend still writes 2 docs (safe),
+//   but UI groups them into ONE combined bubble.
+// - ✅ FIXED: no more double texts (optimistic dedupe for text/pdf/combo)
+// - ✅ Optimistic is persisted in sessionStorage until Firestore round trip replaces it
 // - Status dots: pending (•), delivered (••), rejected
+// - ✅ Textbox auto-expands vertically like ChatGPT (textarea autosize)
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onSnapshot, collection, query, orderBy, where } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { sendPendingText, sendPendingPdf, markRequestChatRead } from "../services/chatservice";
 
+/* ---------------- helpers ---------------- */
 function safeStr(x) {
   return String(x || "").trim();
 }
@@ -102,43 +107,189 @@ function StatusDots({ status }) {
   );
 }
 
-// ✅ Match optimistic to real pending by content + time window
-function samePending(a, b) {
-  const at = String(a?.type || "text").toLowerCase();
-  const bt = String(b?.type || "text").toLowerCase();
-  if (at !== bt) return false;
+// ✅ autosize textarea like ChatGPT
+function useAutosizeTextArea(textareaRef, value, { maxRows = 6 } = {}) {
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
 
-  if (at === "text") {
-    return safeStr(a?.text) !== "" && safeStr(a?.text) === safeStr(b?.text);
-  }
+    const computed = window.getComputedStyle(el);
+    const lineHeight = parseFloat(computed.lineHeight || "20") || 20;
+    const paddingTop = parseFloat(computed.paddingTop || "0") || 0;
+    const paddingBottom = parseFloat(computed.paddingBottom || "0") || 0;
+    const maxHeight = maxRows * lineHeight + paddingTop + paddingBottom;
 
-  // pdf
-  const an = safeStr(a?.pdfMeta?.name);
-  const bn = safeStr(b?.pdfMeta?.name);
-  const as = Number(a?.pdfMeta?.size || 0) || 0;
-  const bs = Number(b?.pdfMeta?.size || 0) || 0;
-
-  // name is the main thing in your demo
-  if (!an || !bn) return false;
-  if (an !== bn) return false;
-
-  // size can be missing sometimes, so only compare if both exist
-  if (as > 0 && bs > 0 && as !== bs) return false;
-
-  return true;
+    el.style.height = "auto";
+    const next = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [textareaRef, value, maxRows]);
 }
 
+/* ---------------- UI-only merge (adjacent pdf + text) ---------------- */
+function shouldMergePair(a, b, WINDOW_MS) {
+  if (!a || !b) return false;
+
+  const aFromRole = String(a?.fromRole || "").toLowerCase();
+  const bFromRole = String(b?.fromRole || "").toLowerCase();
+  const aFromUid = safeStr(a?.fromUid);
+  const bFromUid = safeStr(b?.fromUid);
+
+  if (aFromRole !== bFromRole) return false;
+  if (aFromUid && bFromUid && aFromUid !== bFromUid) return false;
+
+  const aType = String(a?.type || "text").toLowerCase();
+  const bType = String(b?.type || "text").toLowerCase();
+
+  const pairOk =
+    (aType === "pdf" && bType === "text") || (aType === "text" && bType === "pdf");
+  if (!pairOk) return false;
+
+  const aMs = Number(a?._createdAtMs || 0) || 0;
+  const bMs = Number(b?._createdAtMs || 0) || 0;
+  if (!aMs || !bMs) return false;
+
+  return Math.abs(bMs - aMs) <= WINDOW_MS;
+}
+
+function makeBundleView(first, second) {
+  const aType = String(first?.type || "text").toLowerCase();
+
+  const textMsg = aType === "text" ? first : second;
+  const pdfMsg = aType === "pdf" ? first : second;
+
+  // status: if any rejected -> rejected, else if any delivered -> delivered, else pending
+  const st1 = String(first?.status || "pending").toLowerCase();
+  const st2 = String(second?.status || "pending").toLowerCase();
+
+  let status = "pending";
+  if (st1 === "rejected" || st2 === "rejected") status = "rejected";
+  else if (st1 === "delivered" || st2 === "delivered") status = "delivered";
+
+  return {
+    type: "bundle_view",
+    fromRole: first?.fromRole,
+    fromUid: first?.fromUid,
+    toRole: first?.toRole,
+
+    text: safeStr(textMsg?.text),
+    pdfMeta: pdfMsg?.pdfMeta || null,
+
+    status,
+    _createdAtMs: Math.min(first?._createdAtMs || 0, second?._createdAtMs || 0),
+    _bundleChildrenIds: [first?._uiId, second?._uiId].filter(Boolean),
+  };
+}
+
+/* ---------------- optimistic persistence ---------------- */
+function makeStorageKey({ requestId, uid, role }) {
+  return `maj_chat_opt_v1:${safeStr(requestId)}:${safeStr(uid)}:${safeStr(role)}`;
+}
+
+function loadOptimisticFromStorage(key) {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // prune extremely old items
+    const now = Date.now();
+    return parsed.filter((x) => x && Number(x.createdAtMs || 0) > now - 5 * 60_000);
+  } catch {
+    return [];
+  }
+}
+
+function saveOptimisticToStorage(key, arr) {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(arr));
+  } catch {
+    // ignore
+  }
+}
+
+/* ---------------- optimistic matching (dedupe) ---------------- */
+function samePdfName(a, b) {
+  return safeStr(a?.pdfMeta?.name) && safeStr(a?.pdfMeta?.name) === safeStr(b?.pdfMeta?.name);
+}
+
+function matchPendingForOptimistic(oMsg, pendingMine, WINDOW_MS) {
+  const oType = String(oMsg?.type || "").toLowerCase();
+  const oMs = Number(oMsg?._createdAtMs || 0) || 0;
+
+  if (!oMs) return false;
+
+  // for combo: match either part
+  const wantText = safeStr(oMsg?.text);
+  const wantPdf = safeStr(oMsg?.pdfMeta?.name);
+
+  for (const p of pendingMine) {
+    const pMs = tsToMillis(p?.createdAt);
+    if (!pMs) continue;
+    if (Math.abs(pMs - oMs) > WINDOW_MS) continue;
+
+    const pt = String(p?.type || "text").toLowerCase();
+    if (oType === "combo") {
+      if (pt === "text" && wantText && safeStr(p?.text) === wantText) return true;
+      if (pt === "pdf" && wantPdf && safeStr(p?.pdfMeta?.name) === wantPdf) return true;
+    }
+
+    if (oType === "text" && pt === "text" && wantText && safeStr(p?.text) === wantText) return true;
+
+    if (oType === "pdf" && pt === "pdf" && wantPdf && safeStr(p?.pdfMeta?.name) === wantPdf) return true;
+  }
+
+  return false;
+}
+
+function matchPublishedForOptimistic(oMsg, published, WINDOW_MS) {
+  const oType = String(oMsg?.type || "").toLowerCase();
+  const oMs = Number(oMsg?._createdAtMs || 0) || 0;
+  if (!oMs) return false;
+
+  const wantText = safeStr(oMsg?.text);
+  const wantPdf = safeStr(oMsg?.pdfMeta?.name);
+
+  for (const m of published) {
+    const mMs = tsToMillis(m?.createdAt);
+    if (!mMs) continue;
+    if (Math.abs(mMs - oMs) > WINDOW_MS) continue;
+
+    const mt = String(m?.type || "text").toLowerCase();
+
+    if (oType === "combo") {
+      // approved combo becomes two published messages in your current backend
+      if (mt === "text" && wantText && safeStr(m?.text) === wantText) return true;
+      if (mt === "pdf" && wantPdf && safeStr(m?.pdfMeta?.name) === wantPdf) return true;
+      // or bundle if you ever switch
+      if (mt === "bundle" && (safeStr(m?.text) === wantText || samePdfName(m, oMsg))) return true;
+    }
+
+    if (oType === "text" && mt === "text" && wantText && safeStr(m?.text) === wantText) return true;
+    if (oType === "pdf" && mt === "pdf" && wantPdf && safeStr(m?.pdfMeta?.name) === wantPdf) return true;
+
+    if (oType === "bundle" && mt === "bundle") {
+      const okText = !wantText || safeStr(m?.text) === wantText;
+      const okPdf = !wantPdf || samePdfName(m, oMsg);
+      if (okText && okPdf) return true;
+    }
+  }
+
+  return false;
+}
+
+/* ---------------- component ---------------- */
 export default function RequestChatPanel({ requestId, role = "user", onClose }) {
   const rid = useMemo(() => safeStr(requestId), [requestId]);
   const myRole = useMemo(() => String(role || "user").toLowerCase(), [role]);
-
   const myUid = auth.currentUser?.uid || "";
 
   const [published, setPublished] = useState([]);
   const [pendingMine, setPendingMine] = useState([]);
 
-  // ✅ optimistic pending (so UI updates instantly)
-  const [optimistic, setOptimistic] = useState([]);
+  // ✅ optimistic items persisted in sessionStorage
+  const storageKey = useMemo(() => makeStorageKey({ requestId: rid, uid: myUid, role: myRole }), [rid, myUid, myRole]);
+  const [optimistic, setOptimistic] = useState(() => loadOptimisticFromStorage(storageKey));
 
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -150,17 +301,26 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
   const [pickedPdf, setPickedPdf] = useState(null); // { name, size, mime }
   const scrollRef = useRef(null);
 
+  // ✅ send lock (prevents double send from fast enter/click)
+  const sendLockRef = useRef(false);
+
+  // ✅ textarea autosize
+  const taRef = useRef(null);
+  useAutosizeTextArea(taRef, text, { maxRows: 6 });
+
   const card = "rounded-2xl border border-zinc-200 bg-white shadow-xl";
   const bubbleBase = "max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap";
+
+  // persist optimistic
+  useEffect(() => {
+    saveOptimisticToStorage(storageKey, optimistic);
+  }, [storageKey, optimistic]);
 
   // ✅ published listener
   useEffect(() => {
     if (!rid) return;
 
-    const qy = query(
-      collection(db, "serviceRequests", rid, "messages"),
-      orderBy("createdAt", "asc")
-    );
+    const qy = query(collection(db, "serviceRequests", rid, "messages"), orderBy("createdAt", "asc"));
 
     const unsub = onSnapshot(
       qy,
@@ -183,16 +343,12 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     if (!rid) return;
     if (!myUid) return;
 
-    const qy = query(
-      collection(db, "serviceRequests", rid, "pendingMessages"),
-      where("fromUid", "==", myUid)
-    );
+    const qy = query(collection(db, "serviceRequests", rid, "pendingMessages"), where("fromUid", "==", myUid));
 
     const unsub = onSnapshot(
       qy,
       (snap) => {
         const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        // sort client-side by createdAt
         rows.sort((a, b) => tsToMillis(a.createdAt) - tsToMillis(b.createdAt));
         setPendingMine(rows);
       },
@@ -226,30 +382,44 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     return map;
   }, [published]);
 
-  // ✅ remove optimistic once real pending appears (prevents duplicates)
+  // ✅ DEDUPE optimistic:
+  // - remove optimistic text/pdf when matching pending appears
+  // - remove optimistic combo when either pending piece appears (replaces instantly)
+  // - also remove when matching published appears (edge case)
   const optimisticDeduped = useMemo(() => {
-    const WINDOW_MS = 8000; // match optimistic to real pending within 8s
+    const WINDOW_MS = 12_000; // generous to handle lag
+    const now = Date.now();
 
     return optimistic.filter((o) => {
-      const oMs = Number(o.createdAtMs || 0) || 0;
-      const oData = o.data || {};
+      const oMs = Number(o?.createdAtMs || 0) || 0;
+      if (!oMs) return false;
+      if (now - oMs > 5 * 60_000) return false; // prune old
 
-      // if a real pending exists with same content & close timestamp, drop optimistic
-      const matched = pendingMine.some((p) => {
-        const pMs = tsToMillis(p.createdAt);
-        if (!pMs || !oMs) return false;
-        if (Math.abs(pMs - oMs) > WINDOW_MS) return false;
-        return samePending(oData, p);
-      });
+      const data = o.data || {};
+      const oType = String(data?.type || "").toLowerCase();
+      const oMsg = { ...data, _createdAtMs: oMs };
 
-      if (matched) return false;
+      // If matching pending exists, replace optimistic (prevents double bubbles)
+      if (matchPendingForOptimistic(oMsg, pendingMine, WINDOW_MS)) return false;
 
-      // also expire old optimistic after 60s
-      return Date.now() - oMs < 60_000;
+      // If matching published exists, replace optimistic
+      if (matchPublishedForOptimistic(oMsg, published, WINDOW_MS)) return false;
+
+      // otherwise keep it
+      return true;
     });
-  }, [optimistic, pendingMine]);
+  }, [optimistic, pendingMine, published]);
 
-  // build timeline
+  // keep state in sync with deduped (and persist)
+  useEffect(() => {
+    // only update if changed (avoid loops)
+    if (optimisticDeduped.length !== optimistic.length) {
+      setOptimistic(optimisticDeduped);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [optimisticDeduped.length]);
+
+  // build timeline (with UI-only bundling)
   const timeline = useMemo(() => {
     const pendingVisible = pendingMine
       .filter((p) => {
@@ -260,28 +430,66 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
       })
       .map((p) => ({
         _kind: "pending",
-        id: `p_${p.id}`,
-        createdAtMs: tsToMillis(p.createdAt),
-        data: p,
+        _uiId: `p_${p.id}`,
+        _createdAtMs: tsToMillis(p.createdAt),
+        ...p,
       }));
 
     const publishedItems = published.map((m) => ({
       _kind: "published",
-      id: `m_${m.id}`,
-      createdAtMs: tsToMillis(m.createdAt),
-      data: m,
+      _uiId: `m_${m.id}`,
+      _createdAtMs: tsToMillis(m.createdAt),
+      status: "delivered",
+      ...m,
     }));
 
     const optimisticItems = optimisticDeduped.map((o) => ({
       _kind: "optimistic",
-      id: o.id,
-      createdAtMs: o.createdAtMs,
-      data: o.data,
+      _uiId: o.id,
+      _createdAtMs: o.createdAtMs,
+      ...o.data,
     }));
 
-    const all = [...publishedItems, ...pendingVisible, ...optimisticItems];
-    all.sort((a, b) => (a.createdAtMs || 0) - (b.createdAtMs || 0));
-    return all;
+    const allRaw = [...publishedItems, ...pendingVisible, ...optimisticItems].sort(
+      (a, b) => (a._createdAtMs || 0) - (b._createdAtMs || 0)
+    );
+
+    // ✅ merge adjacent pdf+text pairs into one bundle_view
+    const WINDOW_MS = 1200;
+    const out = [];
+    for (let i = 0; i < allRaw.length; i++) {
+      const cur = allRaw[i];
+      const next = allRaw[i + 1];
+
+      // don't merge true bundle types
+      const curType = String(cur?.type || "text").toLowerCase();
+      const nextType = String(next?.type || "text").toLowerCase();
+      if (curType === "bundle" || nextType === "bundle") {
+        out.push({ _kind: cur._kind, id: cur._uiId, createdAtMs: cur._createdAtMs, data: cur });
+        continue;
+      }
+
+      if (shouldMergePair(cur, next, WINDOW_MS)) {
+        const bundle = makeBundleView(cur, next);
+        out.push({
+          _kind: "bundle_view",
+          id: `b_${cur._uiId}_${next._uiId}`,
+          createdAtMs: bundle._createdAtMs,
+          data: bundle,
+        });
+        i++;
+        continue;
+      }
+
+      out.push({
+        _kind: cur._kind,
+        id: cur._uiId,
+        createdAtMs: cur._createdAtMs,
+        data: cur,
+      });
+    }
+
+    return out;
   }, [published, pendingMine, optimisticDeduped, publishedByPendingId]);
 
   // auto-scroll
@@ -311,11 +519,12 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
   const canSend = Boolean(safeStr(text) || pickedPdf);
 
   const pushOptimistic = (data) => {
+    const createdAtMs = Date.now();
     setOptimistic((prev) => [
       ...prev,
       {
-        id: `o_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-        createdAtMs: Date.now(),
+        id: `o_${createdAtMs}_${Math.random().toString(16).slice(2)}`,
+        createdAtMs,
         data,
       },
     ]);
@@ -325,13 +534,43 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     setErr("");
     const t = safeStr(text);
     const pdf = pickedPdf;
+
     if (!rid || !myUid) return;
     if (!t && !pdf) return;
 
+    // ✅ hard lock to prevent double-send (enter + click / fast taps)
+    if (sendLockRef.current) return;
+    sendLockRef.current = true;
     setSending(true);
+
     try {
-      // show instantly
-      if (pdf) {
+      // ✅ show instantly as ONE combined bubble (UI-only)
+      if (pdf && t) {
+        pushOptimistic({
+          type: "combo",
+          fromRole: myRole,
+          fromUid: myUid,
+          toRole,
+          text: t,
+          pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime },
+          status: "pending",
+        });
+
+        // backend unchanged (2 docs)
+        await sendPendingPdf({
+          requestId: rid,
+          fromRole: myRole,
+          toRole,
+          pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
+        });
+
+        await sendPendingText({
+          requestId: rid,
+          fromRole: myRole,
+          toRole,
+          text: t,
+        });
+      } else if (pdf) {
         pushOptimistic({
           fromRole: myRole,
           fromUid: myUid,
@@ -348,9 +587,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
           toRole,
           pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
         });
-      }
-
-      if (t) {
+      } else {
         pushOptimistic({
           fromRole: myRole,
           fromUid: myUid,
@@ -371,11 +608,24 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
 
       setText("");
       setPickedPdf(null);
+
+      if (taRef.current) {
+        taRef.current.style.height = "auto";
+        taRef.current.style.overflowY = "hidden";
+      }
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to send.");
     } finally {
       setSending(false);
+      sendLockRef.current = false;
+    }
+  };
+
+  const onComposerKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!sending && canSend) sendNow();
     }
   };
 
@@ -386,11 +636,11 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
 
     const type = String(m.type || "text").toLowerCase();
     const isPdf = type === "pdf";
+    const isBundleView = type === "bundle_view" || item._kind === "bundle_view";
+    const isComboOptimistic = type === "combo" && item._kind === "optimistic";
 
     const status =
-      item._kind === "published"
-        ? "delivered"
-        : String(m.status || "pending").toLowerCase();
+      item._kind === "published" ? "delivered" : String(m.status || "pending").toLowerCase();
 
     return (
       <div key={item.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
@@ -410,7 +660,34 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
             {mine ? <StatusDots status={status} /> : null}
           </div>
 
-          {isPdf ? (
+          {isBundleView ? (
+            <div className="mt-1 grid gap-2">
+              {safeStr(m.text) ? <div>{m.text}</div> : null}
+
+              {m?.pdfMeta?.name ? (
+                <div className={`${mine ? "bg-white/10" : "bg-zinc-50"} rounded-xl p-2`}>
+                  <div className="text-xs font-semibold opacity-90">PDF</div>
+                  <div className="text-xs opacity-90">
+                    {m?.pdfMeta?.name || "document.pdf"}
+                    {m?.pdfMeta?.size ? ` • ${m.pdfMeta.size} bytes` : ""}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : isComboOptimistic ? (
+            <div className="mt-1 grid gap-2">
+              {safeStr(m.text) ? <div>{m.text}</div> : null}
+              {m?.pdfMeta?.name ? (
+                <div className={`${mine ? "bg-white/10" : "bg-zinc-50"} rounded-xl p-2`}>
+                  <div className="text-xs font-semibold opacity-90">PDF</div>
+                  <div className="text-xs opacity-90">
+                    {m?.pdfMeta?.name || "document.pdf"}
+                    {m?.pdfMeta?.size ? ` • ${m.pdfMeta.size} bytes` : ""}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : isPdf ? (
             <div className="mt-1">
               <div className="font-semibold">PDF</div>
               <div className="text-xs opacity-90">
@@ -439,9 +716,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
         <div className="flex items-center justify-between gap-3 border-b border-zinc-200 p-4">
           <div>
             <div className="text-sm font-semibold text-zinc-900">Chat</div>
-            <div className="text-xs text-zinc-500">
-              Messages are reviewed by Admin before delivery.
-            </div>
+            <div className="text-xs text-zinc-500">Messages are reviewed before delivery.</div>
           </div>
 
           <button
@@ -469,7 +744,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
             {loading ? (
               <div className="text-sm text-zinc-600">Loading chat…</div>
             ) : timeline.length === 0 ? (
-              <div className="text-sm text-zinc-600">No messages yet. Say hello 👋</div>
+              <div className="text-sm text-zinc-600">No messages yet.</div>
             ) : (
               <div className="grid gap-2">{timeline.map(renderBubble)}</div>
             )}
@@ -499,7 +774,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
               </div>
             ) : null}
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-end gap-2">
               <button
                 type="button"
                 onClick={openPicker}
@@ -509,11 +784,15 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
                 <IconPlus className="h-5 w-5" />
               </button>
 
-              <input
+              <textarea
+                ref={taRef}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
+                onKeyDown={onComposerKeyDown}
                 placeholder="Type a message…"
-                className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-200"
+                rows={1}
+                className="w-full resize-none rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-200"
+                style={{ overflowY: "hidden" }}
               />
 
               <button
@@ -528,7 +807,8 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
             </div>
 
             <div className="mt-2 text-[11px] text-zinc-500">
-              Demo: attaching a PDF sends META only (no upload yet).
+              Demo: attaching a PDF sends META only.
+              <span className="ml-2">Enter = send, Shift+Enter = new line.</span>
             </div>
           </div>
         </div>

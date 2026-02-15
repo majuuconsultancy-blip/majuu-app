@@ -1,15 +1,10 @@
-// ✅ src/components/AdminRequestChatPanel.jsx
-// Admin real-chat view (FIXED bottom cut + perfect scroll):
-// - Sticky header + sticky composer
-// - Only the thread scrolls
-// - Single timeline (published + pending)
-// - Left = User, Right = Staff & Admin
-// - Pending messages from BOTH user & staff have Accept/Hide
-// - Hide makes message disappear instantly (optimistic UI)
-// - Admin sends DIRECT only (text + optional pdf meta)
-// ✅ Fixes included:
-// - composerRef + spacer so last message never hides under composer
-// - scrollToBottom uses rAF x2 to wait for layout paint (no “cuts one message”)
+// ✅ src/components/AdminRequestChatPanel.jsx (FULL COPY-PASTE)
+// FIX (FINAL):
+// - Accept: buttons disappear and NEVER come back (even if approve fails).
+// - Hide: removes message instantly (optimistic).
+// - Bundles: Accept/Hide applies to ALL pending children (pdf+text).
+// - Persist "no actions" in sessionStorage so remounts don’t bring buttons back.
+// Backend unchanged.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
@@ -56,6 +51,74 @@ function msgPreview(m) {
   const type = String(m?.type || "text").toLowerCase();
   if (type === "pdf") return `PDF: ${m?.pdfMeta?.name || "document.pdf"}`;
   return safeStr(m?.text || "");
+}
+
+/* ✅ autosize textarea like ChatGPT */
+function useAutosizeTextArea(textareaRef, value, { maxRows = 6 } = {}) {
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+
+    const computed = window.getComputedStyle(el);
+    const lineHeight = parseFloat(computed.lineHeight || "20") || 20;
+    const paddingTop = parseFloat(computed.paddingTop || "0") || 0;
+    const paddingBottom = parseFloat(computed.paddingBottom || "0") || 0;
+    const maxHeight = maxRows * lineHeight + paddingTop + paddingBottom;
+
+    el.style.height = "auto";
+    const next = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [textareaRef, value, maxRows]);
+}
+
+/* ✅ UI-only merge rule for adjacent pdf+text */
+function shouldMergePair(a, b, WINDOW_MS) {
+  if (!a || !b) return false;
+
+  const aFromRole = String(a?.fromRole || "").toLowerCase();
+  const bFromRole = String(b?.fromRole || "").toLowerCase();
+  if (aFromRole !== bFromRole) return false;
+
+  const aFromUid = safeStr(a?.fromUid);
+  const bFromUid = safeStr(b?.fromUid);
+  if (aFromUid && bFromUid && aFromUid !== bFromUid) return false;
+
+  const aType = String(a?.type || "text").toLowerCase();
+  const bType = String(b?.type || "text").toLowerCase();
+  const pairOk =
+    (aType === "pdf" && bType === "text") || (aType === "text" && bType === "pdf");
+  if (!pairOk) return false;
+
+  const aMs = Number(a?._createdAtMs || 0) || 0;
+  const bMs = Number(b?._createdAtMs || 0) || 0;
+  if (!aMs || !bMs) return false;
+
+  return Math.abs(bMs - aMs) <= WINDOW_MS;
+}
+
+function makeBundleView(first, second) {
+  const aType = String(first?.type || "text").toLowerCase();
+  const textMsg = aType === "text" ? first : second;
+  const pdfMsg = aType === "pdf" ? first : second;
+
+  const st1 = String(first?.status || "").toLowerCase();
+  const st2 = String(second?.status || "").toLowerCase();
+
+  let status = "delivered";
+  if (st1 === "pending" || st2 === "pending") status = "pending";
+  if (st1 === "rejected" || st2 === "rejected") status = "rejected";
+
+  return {
+    type: "bundle_view",
+    fromRole: first?.fromRole,
+    fromUid: first?.fromUid,
+    toRole: first?.toRole,
+    text: safeStr(textMsg?.text),
+    pdfMeta: pdfMsg?.pdfMeta || null,
+    status,
+    _createdAtMs: Math.min(first?._createdAtMs || 0, second?._createdAtMs || 0),
+  };
 }
 
 /* ---------------- icons ---------------- */
@@ -117,11 +180,14 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   const [pending, setPending] = useState([]);
   const [published, setPublished] = useState([]);
 
-  const [busyId, setBusyId] = useState("");
+  const [busyKey, setBusyKey] = useState(""); // message id or bundle id
   const [err, setErr] = useState("");
 
-  // ✅ Optimistic hide: disappear instantly
+  // ✅ Hide removes message instantly (optimistic)
   const [optimisticHidden, setOptimisticHidden] = useState(() => new Set());
+
+  // ✅ Accept removes buttons instantly and NEVER rolls back
+  const [optimisticNoActions, setOptimisticNoActions] = useState(() => new Set());
 
   // admin composer
   const [sendTo, setSendTo] = useState("user"); // user | staff
@@ -133,12 +199,39 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   const threadRef = useRef(null);
   const composerRef = useRef(null);
 
+  const taRef = useRef(null);
+  useAutosizeTextArea(taRef, text, { maxRows: 6 });
+
+  /* ---------- persist no-actions so buttons never return on remount ---------- */
+  const noActionsKey = useMemo(() => (rid ? `adminChat_noActions_${rid}` : ""), [rid]);
+
+  useEffect(() => {
+    if (!noActionsKey) return;
+    try {
+      const raw = sessionStorage.getItem(noActionsKey);
+      if (!raw) return;
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) return;
+      setOptimisticNoActions(new Set(arr.map((x) => String(x))));
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noActionsKey]);
+
+  useEffect(() => {
+    if (!noActionsKey) return;
+    try {
+      sessionStorage.setItem(noActionsKey, JSON.stringify([...optimisticNoActions]));
+    } catch {
+      // ignore
+    }
+  }, [noActionsKey, optimisticNoActions]);
+
   /* ---------- scroll helper ---------- */
   const scrollToBottom = () => {
     const el = threadRef.current;
     if (!el) return;
-
-    // wait for layout/paint to avoid “cuts last message”
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
@@ -150,7 +243,6 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   useEffect(() => {
     if (!rid) return;
 
-    // ✅ ONLY status == pending, so approve/hide removes from list immediately
     const ref = collection(db, "serviceRequests", rid, "pendingMessages");
     const qy = query(ref, where("status", "==", "pending"), orderBy("createdAt", "asc"));
 
@@ -190,40 +282,73 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     return () => unsub();
   }, [rid]);
 
-  /* ---------- build a single timeline ---------- */
+  /* ---------- build timeline (UI merge) ---------- */
   const timeline = useMemo(() => {
     const hidden = optimisticHidden;
 
-    const pendingItems = pending
+    const pendingItemsRaw = pending
       .filter((p) => !hidden.has(p.id))
       .map((p) => ({
         _kind: "pending",
-        _pid: p.id,
-        id: `p_${p.id}`,
-        createdAtMs: tsToMillis(pickCreatedAt(p)) || 0,
-        data: p,
+        _uiId: `p_${p.id}`,
+        _createdAtMs: tsToMillis(pickCreatedAt(p)) || 0,
+        status: "pending",
+        ...p,
       }));
 
-    const publishedItems = published.map((m) => ({
+    const publishedItemsRaw = published.map((m) => ({
       _kind: "published",
-      id: `m_${m.id}`,
-      createdAtMs: tsToMillis(pickCreatedAt(m)) || 0,
-      data: m,
+      _uiId: `m_${m.id}`,
+      _createdAtMs: tsToMillis(pickCreatedAt(m)) || 0,
+      status: "delivered",
+      ...m,
     }));
 
-    const all = [...publishedItems, ...pendingItems];
-    all.sort((a, b) => (a.createdAtMs || 0) - (b.createdAtMs || 0));
-    return all;
+    const allRaw = [...publishedItemsRaw, ...pendingItemsRaw].sort(
+      (a, b) => (a._createdAtMs || 0) - (b._createdAtMs || 0)
+    );
+
+    const WINDOW_MS = 1200;
+    const out = [];
+
+    for (let i = 0; i < allRaw.length; i++) {
+      const cur = allRaw[i];
+      const next = allRaw[i + 1];
+
+      if (shouldMergePair(cur, next, WINDOW_MS)) {
+        const bundle = makeBundleView(cur, next);
+        const pendingChildren = [cur, next].filter((x) => x._kind === "pending");
+
+        out.push({
+          _kind: "bundle_view",
+          id: `b_${cur._uiId}_${next._uiId}`,
+          createdAtMs: bundle._createdAtMs,
+          data: bundle,
+          _pendingChildren: pendingChildren,
+        });
+
+        i++;
+        continue;
+      }
+
+      out.push({
+        _kind: cur._kind,
+        id: cur._uiId,
+        createdAtMs: cur._createdAtMs,
+        data: cur,
+      });
+    }
+
+    return out;
   }, [pending, published, optimisticHidden]);
 
-  // ✅ Scroll whenever the timeline changes or errors show/hide
   useEffect(() => {
     scrollToBottom();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeline.length, err]);
 
-  /* ---------- moderation actions ---------- */
-  const optimisticRemovePending = (pendingId) => {
+  /* ---------- optimistic helpers ---------- */
+  const hidePendingOptimistic = (pendingId) => {
     setOptimisticHidden((prev) => {
       const next = new Set(prev);
       next.add(pendingId);
@@ -231,35 +356,93 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     });
   };
 
-  const approve = async (p) => {
+  const disableActionsOptimistic = (pendingId) => {
+    setOptimisticNoActions((prev) => {
+      const next = new Set(prev);
+      next.add(pendingId);
+      return next;
+    });
+  };
+
+  /* ---------- actions ---------- */
+  const approveBundle = async (bundleId, pendingChildren) => {
     setErr("");
-    setBusyId(p.id);
-    optimisticRemovePending(p.id);
+    if (!pendingChildren?.length) return;
+
+    setBusyKey(bundleId);
+
+    // ✅ Accept: hide buttons immediately & permanently
+    pendingChildren.forEach((c) => disableActionsOptimistic(c.id));
+
+    try {
+      for (const c of pendingChildren) {
+        await adminApprovePendingMessage({ requestId: rid, pendingId: c.id });
+      }
+    } catch (e) {
+      console.error(e);
+      // ✅ DO NOT rollback button hide (this is the “once and for all” fix)
+      setErr(e?.message || "Approve failed (buttons will stay hidden).");
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  const hideBundle = async (bundleId, pendingChildren) => {
+    setErr("");
+    if (!pendingChildren?.length) return;
+
+    setBusyKey(bundleId);
+
+    // ✅ Hide: remove bubble instantly
+    pendingChildren.forEach((c) => hidePendingOptimistic(c.id));
+
+    try {
+      for (const c of pendingChildren) {
+        await adminHidePendingMessage({ requestId: rid, pendingId: c.id });
+      }
+    } catch (e) {
+      console.error(e);
+      // rollback hide if failed
+      setOptimisticHidden((prev) => {
+        const next = new Set(prev);
+        pendingChildren.forEach((c) => next.delete(c.id));
+        return next;
+      });
+      setErr(e?.message || "Hide failed.");
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  const approveSingle = async (p) => {
+    setErr("");
+    setBusyKey(p.id);
+
+    // ✅ Accept: hide buttons immediately & permanently
+    disableActionsOptimistic(p.id);
+
     try {
       await adminApprovePendingMessage({ requestId: rid, pendingId: p.id });
     } catch (e) {
       console.error(e);
-      // rollback if failed
-      setOptimisticHidden((prev) => {
-        const next = new Set(prev);
-        next.delete(p.id);
-        return next;
-      });
-      setErr(e?.message || "Approve failed.");
+      // ✅ DO NOT rollback button hide
+      setErr(e?.message || "Approve failed (buttons will stay hidden).");
     } finally {
-      setBusyId("");
+      setBusyKey("");
     }
   };
 
-  const hideMsg = async (p) => {
+  const hideSingle = async (p) => {
     setErr("");
-    setBusyId(p.id);
-    optimisticRemovePending(p.id);
+    setBusyKey(p.id);
+
+    hidePendingOptimistic(p.id);
+
     try {
       await adminHidePendingMessage({ requestId: rid, pendingId: p.id });
     } catch (e) {
       console.error(e);
-      // rollback if failed
+      // rollback hide if failed
       setOptimisticHidden((prev) => {
         const next = new Set(prev);
         next.delete(p.id);
@@ -267,7 +450,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
       });
       setErr(e?.message || "Hide failed.");
     } finally {
-      setBusyId("");
+      setBusyKey("");
     }
   };
 
@@ -284,7 +467,6 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
       mime: f.type || "application/pdf",
     });
 
-    // allow picking the same file again later
     e.target.value = "";
   };
 
@@ -299,7 +481,6 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
     setSending(true);
     try {
-      // ✅ Admin sends DIRECT only
       if (pdf) {
         await adminSendPdfMetaDirect({
           requestId: rid,
@@ -315,7 +496,11 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
       setText("");
       setPickedPdf(null);
 
-      // ✅ scroll after send (even before snapshot arrives)
+      if (taRef.current) {
+        taRef.current.style.height = "auto";
+        taRef.current.style.overflowY = "hidden";
+      }
+
       scrollToBottom();
     } catch (e) {
       console.error(e);
@@ -337,7 +522,6 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   const composerHeight = composerRef.current?.offsetHeight || 92;
 
   return (
-    // ✅ Single, clean layout: header (sticky) + thread (scroll) + composer (sticky)
     <div className={`w-full ${card} h-[85vh] max-h-[85vh] overflow-hidden`}>
       {/* header */}
       <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-zinc-200 bg-white p-4">
@@ -372,7 +556,6 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
       {/* body */}
       <div className="flex h-full flex-col">
-        {/* error */}
         {err ? (
           <div className="px-4 pt-4">
             <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
@@ -381,7 +564,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
           </div>
         ) : null}
 
-        {/* thread (ONLY SCROLL AREA) */}
+        {/* thread */}
         <div className="flex-1 px-4 pb-3 pt-4 overflow-hidden">
           <div
             ref={threadRef}
@@ -395,15 +578,32 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                   const m = item.data || {};
                   const fromRole = String(m.fromRole || "").toLowerCase();
 
-                  // left=user, right=staff+admin
                   const isLeft = fromRole === "user";
                   const bubbleCls = isLeft ? bubbleLeft : bubbleRight;
 
                   const time = formatTime(pickCreatedAt(m));
-                  const isPending = item._kind === "pending";
 
-                  // ✅ Accept/Hide for BOTH user + staff pending messages (not admin)
-                  const showActions = isPending && (fromRole === "user" || fromRole === "staff");
+                  const isBundleView =
+                    item._kind === "bundle_view" ||
+                    String(m.type || "").toLowerCase() === "bundle_view";
+
+                  const pendingChildren = isBundleView ? item._pendingChildren || [] : [];
+
+                  const isPending =
+                    item._kind === "pending" || (isBundleView && pendingChildren.length > 0);
+
+                  const originOk = fromRole === "user" || fromRole === "staff";
+
+                  const bundleHasActionable =
+                    isBundleView &&
+                    pendingChildren.some((c) => !optimisticNoActions.has(c.id));
+
+                  const showActions =
+                    originOk &&
+                    ((item._kind === "pending" && !optimisticNoActions.has(m.id)) ||
+                      (isBundleView && bundleHasActionable));
+
+                  const busy = busyKey === m.id || busyKey === item.id;
 
                   return (
                     <div key={item.id} className={`flex ${isLeft ? "justify-start" : "justify-end"}`}>
@@ -428,26 +628,48 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                           <span className="font-medium">{time}</span>
                         </div>
 
-                        <div className="mt-1 break-words">{msgPreview(m)}</div>
+                        {isBundleView ? (
+                          <div className="mt-1 grid gap-2">
+                            {safeStr(m.text) ? <div className="break-words">{m.text}</div> : null}
+
+                            {m?.pdfMeta?.name ? (
+                              <div className={`${isLeft ? "bg-zinc-50" : "bg-white/10"} rounded-xl p-2`}>
+                                <div className="text-xs font-semibold opacity-90">PDF</div>
+                                <div className="text-xs opacity-90">
+                                  {m?.pdfMeta?.name || "document.pdf"}
+                                  {m?.pdfMeta?.size ? ` • ${m.pdfMeta.size} bytes` : ""}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="mt-1 break-words">{msgPreview(m)}</div>
+                        )}
 
                         {showActions ? (
                           <div className={`mt-2 flex gap-2 ${isLeft ? "" : "justify-end"}`}>
                             <button
                               type="button"
-                              onClick={() => approve(m)}
-                              disabled={busyId === m.id}
+                              onClick={() => {
+                                if (isBundleView) return approveBundle(item.id, pendingChildren);
+                                return approveSingle(m);
+                              }}
+                              disabled={busy}
                               className={`${smallBtn} border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700`}
                             >
-                              {busyId === m.id ? "…" : "Accept"}
+                              {busy ? "…" : "Accept"}
                             </button>
 
                             <button
                               type="button"
-                              onClick={() => hideMsg(m)}
-                              disabled={busyId === m.id}
+                              onClick={() => {
+                                if (isBundleView) return hideBundle(item.id, pendingChildren);
+                                return hideSingle(m);
+                              }}
+                              disabled={busy}
                               className={`${smallBtn} border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50`}
                             >
-                              {busyId === m.id ? "…" : "Hide"}
+                              {busy ? "…" : "Hide"}
                             </button>
                           </div>
                         ) : null}
@@ -458,12 +680,11 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
               </div>
             )}
 
-            {/* ✅ Spacer so last message never hides under sticky composer */}
             <div style={{ height: composerHeight }} />
           </div>
         </div>
 
-        {/* composer (sticky bottom) */}
+        {/* composer */}
         <div
           ref={composerRef}
           className="sticky bottom-0 z-20 border-t border-zinc-200 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
@@ -502,7 +723,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             </div>
           ) : null}
 
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-2 flex items-end gap-2">
             <button
               type="button"
               onClick={openPicker}
@@ -512,11 +733,14 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
               <IconPlus className="h-5 w-5" />
             </button>
 
-            <input
+            <textarea
+              ref={taRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="Type admin message…"
-              className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-200"
+              rows={1}
+              className="w-full resize-none rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-200"
+              style={{ overflowY: "hidden" }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -538,6 +762,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
           <div className="mt-2 text-[11px] text-zinc-500">
             Demo: attaching a PDF sends meta only (no storage yet).
+            <span className="ml-2">Enter = send, Shift+Enter = new line.</span>
           </div>
         </div>
       </div>

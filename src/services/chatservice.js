@@ -6,12 +6,16 @@
 // - admin can also send DIRECT (publish without pending)
 // - unread: readState docs + notifications for user/staff
 //
-// ✅ Improvements in this version:
-// - When admin approves a pending message, the published message keeps the ORIGINAL sent time
-//   (createdAt = pending.createdAt) so message times look correct in chat.
-// - "Hide" is now implemented as a SAFE REJECT (status: "rejected") instead of "hidden".
-//   This is audit-safe and still removes it from moderation queue instantly.
-// - Keeps compatibility exports your UI imports already.
+// ✅ Added in this version:
+// - ✅ "bundle" message type: ONE message can carry both text + pdfMeta
+//   so attachment + text send as a single chat item.
+// - ✅ New sender API: sendPendingBundle({ text, pdfMeta })
+// - ✅ Admin direct API: adminSendBundleDirect({ text, pdfMeta })
+// - ✅ Admin approve supports bundle and keeps original createdAt
+//
+// NOTE: Your UI must call sendPendingBundle when both exist.
+// Also make sure your chat UI renderer can display type === "bundle"
+// by showing the text (if any) and the pdf block (if any).
 
 import {
   addDoc,
@@ -60,7 +64,8 @@ function normalizeRole(role) {
 
 function normalizeType(type) {
   const t = safeStr(type).toLowerCase();
-  if (!["text", "pdf"].includes(t)) throw new Error("Invalid type");
+  // ✅ added bundle
+  if (!["text", "pdf", "bundle"].includes(t)) throw new Error("Invalid type");
   return t;
 }
 
@@ -150,6 +155,45 @@ export async function sendPendingPdf({ requestId, fromRole, toRole, pdfMeta } = 
     type: "pdf",
     text: "",
     pdfMeta: meta,
+    status: "pending",
+    createdAt: serverTimestamp(),
+  };
+
+  const ref = await addDoc(pendingCol(rid), payload);
+  return { ok: true, id: ref.id };
+}
+
+/**
+ * ✅ NEW: One pending message that can include BOTH text + pdfMeta
+ * Use this when user attaches doc AND types a message.
+ */
+export async function sendPendingBundle({
+  requestId,
+  fromRole,
+  toRole,
+  text = "",
+  pdfMeta = null,
+} = {}) {
+  const user = mustUser();
+  const rid = safeStr(requestId);
+  const fr = normalizeRole(fromRole);
+  const tr = normalizeRole(toRole);
+
+  const msg = safeStr(text);
+  const meta = normalizePdfMeta(pdfMeta);
+
+  if (!rid) throw new Error("requestId required");
+  if (fr === "admin") throw new Error("Admin should publish directly, not pending");
+  if (tr === "admin") throw new Error("toRole cannot be admin");
+  if (!msg && !meta) throw new Error("Bundle is empty (needs text and/or pdf)");
+
+  const payload = {
+    fromRole: fr,
+    fromUid: user.uid,
+    toRole: tr,
+    type: "bundle",
+    text: msg, // can be ""
+    pdfMeta: meta, // can be null
     status: "pending",
     createdAt: serverTimestamp(),
   };
@@ -250,8 +294,11 @@ export async function adminApprovePending({
   const finalPdfMeta =
     editedPdfMeta != null ? normalizePdfMeta(editedPdfMeta) : p.pdfMeta || null;
 
+  // ✅ Validate based on type
   if (type === "text" && !finalText) throw new Error("Final text is empty");
   if (type === "pdf" && !finalPdfMeta) throw new Error("Final pdfMeta missing");
+  if (type === "bundle" && !finalText && !finalPdfMeta)
+    throw new Error("Final bundle is empty");
 
   const receiverUid =
     toRole === "user" ? userUid : toRole === "staff" ? staffUid : "";
@@ -271,8 +318,8 @@ export async function adminApprovePending({
     toUid: receiverUid,
 
     type,
-    text: type === "text" ? finalText : "",
-    pdfMeta: type === "pdf" ? finalPdfMeta : null,
+    text: type === "pdf" ? "" : finalText, // bundle/text can have text
+    pdfMeta: type === "text" ? null : finalPdfMeta, // bundle/pdf can have pdfMeta
 
     sourcePendingId: pid,
     approvedBy: admin.uid,
@@ -295,13 +342,10 @@ export async function adminApprovePending({
   const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
   const nRef = doc(db, "users", receiverUid, "notifications", notifId);
 
-  batch.set(
-    nRef,
-    makeNotificationDoc({
-      requestId: rid,
-      kind: type === "pdf" ? "chat_pdf" : "chat_message",
-    })
-  );
+  const notifKind =
+    (type === "pdf" || (type === "bundle" && finalPdfMeta)) ? "chat_pdf" : "chat_message";
+
+  batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: notifKind }));
 
   await batch.commit();
   return { ok: true, publishedId: pubRef.id };
@@ -355,7 +399,6 @@ export async function adminRejectPending({ requestId, pendingId, reason = "" } =
 /**
  * ✅ Admin: HIDE pending message (safer)
  * Implemented as a "rejected" message with a hide flag in reason.
- * This removes it from the moderation queue instantly (because UI filters status == pending).
  */
 export async function adminHidePending({ requestId, pendingId, reason = "" } = {}) {
   const admin = mustUser();
@@ -471,6 +514,66 @@ export async function adminSendPdfMetaDirect({ requestId, toRole, pdfMeta } = {}
   const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
   const nRef = doc(db, "users", receiverUid, "notifications", notifId);
   batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: "chat_pdf" }));
+
+  await batch.commit();
+  return { ok: true, publishedId: pubRef.id };
+}
+
+/**
+ * ✅ NEW: Admin direct send bundle (text + pdfMeta in one message)
+ */
+export async function adminSendBundleDirect({
+  requestId,
+  toRole,
+  text = "",
+  pdfMeta = null,
+} = {}) {
+  const admin = mustUser();
+  const rid = safeStr(requestId);
+  const tr = normalizeRole(toRole);
+
+  const msg = safeStr(text);
+  const meta = normalizePdfMeta(pdfMeta);
+
+  if (!rid) throw new Error("requestId required");
+  if (tr === "admin") throw new Error("toRole cannot be admin");
+  if (!msg && !meta) throw new Error("Bundle is empty (needs text and/or pdf)");
+
+  const rSnap = await getDoc(reqRef(rid));
+  if (!rSnap.exists()) throw new Error("Request not found");
+  const req = { id: rSnap.id, ...rSnap.data() };
+
+  const userUid = safeStr(req.uid);
+  const staffUid = safeStr(req.assignedTo);
+
+  const receiverUid = tr === "user" ? userUid : tr === "staff" ? staffUid : "";
+  if (!receiverUid) throw new Error("Receiver not found (missing assignedTo or uid).");
+
+  const batch = writeBatch(db);
+
+  const pubRef = doc(publishedCol(rid));
+  batch.set(pubRef, {
+    requestId: rid,
+    fromRole: "admin",
+    fromUid: admin.uid,
+    toRole: tr,
+    toUid: receiverUid,
+
+    type: "bundle",
+    text: msg,
+    pdfMeta: meta,
+
+    sourcePendingId: null,
+    approvedBy: admin.uid,
+    approvedAt: serverTimestamp(),
+    createdAt: serverTimestamp(),
+  });
+
+  const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
+  const nRef = doc(db, "users", receiverUid, "notifications", notifId);
+
+  const notifKind = meta ? "chat_pdf" : "chat_message";
+  batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: notifKind }));
 
   await batch.commit();
   return { ok: true, publishedId: pubRef.id };

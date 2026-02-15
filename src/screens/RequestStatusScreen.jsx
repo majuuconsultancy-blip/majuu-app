@@ -1,3 +1,11 @@
+// ✅ RequestStatusScreen.jsx (ORIGINAL LOGIC • POLISHED TILES • FLOATY INTERACTIONS • NO DOUBLE CHAT)
+// What changed (UI only):
+// - Adds framer-motion for smooth entrance + floaty hover/tap on tiles
+// - Subtle background glow blobs (very light, not distracting)
+// - Cards get a nicer shadow + border highlight on hover
+// - Lists animate in gently
+// - ✅ Chat row stays EXACTLY as your original (only card hover/press anim) -> no duplicate “Chat” label
+
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
@@ -10,6 +18,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
+import { motion } from "framer-motion";
 import RequestChatLauncher from "../components/RequestChatLauncher";
 
 import { auth, db } from "../firebase";
@@ -160,6 +169,33 @@ function parseMissingItemsFromNote(note) {
   return Array.from(new Set(parts));
 }
 
+/* ---------------- Motion ---------------- */
+const pageIn = {
+  hidden: { opacity: 0, y: 10 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: "easeOut" } },
+};
+
+const stagger = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.06, delayChildren: 0.03 } },
+};
+
+const tileIn = {
+  hidden: { opacity: 0, y: 10, scale: 0.995 },
+  show: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: { type: "spring", stiffness: 520, damping: 42 },
+  },
+};
+
+const floaty = {
+  rest: { y: 0, scale: 1 },
+  hover: { y: -2, scale: 1.01, transition: { duration: 0.16 } },
+  tap: { scale: 0.99 },
+};
+
 export default function RequestStatusScreen() {
   const navigate = useNavigate();
   const { requestId } = useParams();
@@ -196,14 +232,11 @@ export default function RequestStatusScreen() {
         { merge: true }
       );
     } catch (e) {
-      // silent on purpose (rules may block; don't break screen)
       console.warn("markChatRead failed:", e);
     }
   };
 
   // ✅ IMPORTANT: ensure any modal/portal chat always sits on top
-  // (same trick as staff area: create a top-layer stacking context + isolate)
-  // This prevents "chat under screen" when parents create their own stacking contexts.
   const TOP_LAYER_CLS = "relative isolate z-0";
 
   useEffect(() => {
@@ -235,10 +268,8 @@ export default function RequestStatusScreen() {
       setLoading(true);
       setErr("");
 
-      // ✅ mark chat read once user opens this screen
       markChatRead();
 
-      // Request doc
       const ref = doc(db, "serviceRequests", validRequestId);
       unsubDoc = onSnapshot(
         ref,
@@ -270,7 +301,6 @@ export default function RequestStatusScreen() {
         }
       );
 
-      // User submitted docs
       const attRef = collection(db, "serviceRequests", validRequestId, "attachments");
       const attQ = query(attRef, orderBy("createdAt", "desc"));
       unsubAtt = onSnapshot(
@@ -285,7 +315,6 @@ export default function RequestStatusScreen() {
         }
       );
 
-      // Admin -> User docs (downloadable)
       const afRef = collection(db, "serviceRequests", validRequestId, "adminFiles");
       const afQ = query(afRef, orderBy("createdAt", "desc"));
       unsubAdminFiles = onSnapshot(
@@ -310,8 +339,11 @@ export default function RequestStatusScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate, validRequestId]);
 
+  // ✅ keep your original base styles, just slightly upgraded
   const cardBase =
     "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur transition duration-300 ease-out";
+  const cardPolish =
+    "hover:shadow-[0_14px_45px_rgba(0,0,0,0.08)] hover:border-emerald-200/80 active:shadow-sm";
   const softBg = "bg-gradient-to-b from-emerald-50/40 via-white to-white";
 
   const enterWrap =
@@ -428,11 +460,20 @@ export default function RequestStatusScreen() {
   return (
     <div className={`min-h-screen ${softBg} ${TOP_LAYER_CLS}`}>
       {/* ✅ this fixed, high z-index layer guarantees chat modal can sit above */}
-      <div className="relative z-[9999]">
-        {/* RequestChatLauncher may portal to body; this ensures parent stacking doesn't bury it */}
+      <div className="relative z-[9999]">{/* portal safety */}</div>
+
+      {/* soft background glows (very subtle) */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -top-24 -left-24 h-72 w-72 rounded-full bg-emerald-200/25 blur-3xl" />
+        <div className="absolute top-56 -right-28 h-72 w-72 rounded-full bg-sky-200/20 blur-3xl" />
       </div>
 
-      <div className={`max-w-xl mx-auto px-5 py-6 pb-10 ${enterWrap} ${enterCls}`}>
+      <motion.div
+        variants={pageIn}
+        initial="hidden"
+        animate="show"
+        className={`max-w-xl mx-auto px-5 py-6 pb-10 relative ${enterWrap} ${enterCls}`}
+      >
         {/* Header */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -445,235 +486,241 @@ export default function RequestStatusScreen() {
             </div>
           </div>
 
-          <span
-            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${ui.badge}`}
-          >
+          <span className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${ui.badge}`}>
             {ui.label}
           </span>
         </div>
 
-        {/* ✅ Chat row (FORCED ABOVE by high z-index wrapper around launcher) */}
-        <div className="mt-5">
-          <div className={`${cardBase} p-4 hover:border-emerald-200`}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-zinc-900">Chat with MAJUU team</div>
-                <div className="mt-1 text-xs text-zinc-500">
-                  Ask questions, follow up, and get updates.
+        <motion.div variants={stagger} initial="hidden" animate="show" className="mt-5 grid gap-4">
+          {/* ✅ Chat row (UNCHANGED layout; only floaty interactions) */}
+          <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
+            <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-4`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-zinc-900">Chat with MAJUU team</div>
+                  <div className="mt-1 text-xs text-zinc-500">
+                    Ask questions, follow up, and get updates.
+                  </div>
+                </div>
+
+                {/* ✅ KEY FIX stays */}
+                <div className="shrink-0 relative z-[9999]">
+                  <RequestChatLauncher requestId={validRequestId} />
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+
+          {/* Service + contact details */}
+          <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
+            <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-base font-semibold tracking-tight text-zinc-900">{serviceTitle}</div>
+                  <div className="mt-1 text-sm font-semibold text-zinc-700">{serviceSub}</div>
+                </div>
+
+                <div className="shrink-0 text-right">
+                  <div className="text-[11px] text-zinc-500">Request ID</div>
+                  <div className="mt-1 font-mono text-[12px] text-zinc-800">{req?.id}</div>
                 </div>
               </div>
 
-              {/* ✅ KEY FIX: keep launcher in its own top stacking context */}
-              <div className="shrink-0 relative z-[9999]">
-                <RequestChatLauncher requestId={validRequestId} />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Service + contact details */}
-        <div className={`mt-4 ${cardBase} p-5`}>
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-base font-semibold tracking-tight text-zinc-900">
-                {serviceTitle}
-              </div>
-              <div className="mt-1 text-sm font-semibold text-zinc-700">{serviceSub}</div>
-            </div>
-
-            <div className="shrink-0 text-right">
-              <div className="text-[11px] text-zinc-500">Request ID</div>
-              <div className="mt-1 font-mono text-[12px] text-zinc-800">{req?.id}</div>
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-2 text-sm">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-zinc-500">Full name</span>
-              <span className="font-medium text-zinc-900">{req?.name || "-"}</span>
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-zinc-500">Phone</span>
-              <span className="font-medium text-zinc-900">{req?.phone || "-"}</span>
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-zinc-500">Email</span>
-              <span className="font-medium text-zinc-900">{req?.email || "-"}</span>
-            </div>
-
-            {req?.note ? (
-              <div className="mt-2 rounded-2xl border border-zinc-200 bg-white/60 p-4">
-                <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700">
-                  <IconNote className="h-4 w-4 text-zinc-500" />
-                  Your note
+              <div className="mt-4 grid gap-2 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-zinc-500">Full name</span>
+                  <span className="font-medium text-zinc-900">{req?.name || "-"}</span>
                 </div>
-                <div className="mt-2 text-sm text-zinc-800 whitespace-pre-wrap">
-                  {req.note}
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-zinc-500">Phone</span>
+                  <span className="font-medium text-zinc-900">{req?.phone || "-"}</span>
                 </div>
-              </div>
-            ) : null}
-          </div>
 
-          {(st === "rejected" || st === "closed" || st === "contacted") && adminNote ? (
-            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
-              <div className="flex items-center gap-2 text-xs font-semibold text-amber-900">
-                <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-amber-200 bg-white/70">
-                  <IconNote className="h-4 w-4 text-amber-800" />
-                </span>
-                Note from MAJUU
-              </div>
-              <div className="mt-2 text-sm text-amber-900 whitespace-pre-wrap">
-                {adminNote}
-              </div>
-            </div>
-          ) : null}
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-zinc-500">Email</span>
+                  <span className="font-medium text-zinc-900">{req?.email || "-"}</span>
+                </div>
 
-          {st === "new" ? (
-            <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-700">
-              Received. We’ll review and update you here.
-            </div>
-          ) : null}
-
-          {st === "contacted" ? (
-            <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 text-sm text-emerald-900">
-              In progress. Please check back later.
-            </div>
-          ) : null}
-
-          {st === "closed" ? (
-            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-900">
-              {isFull ? "Approved. Continue with the next steps." : "Completed successfully."}
-            </div>
-          ) : null}
-
-          {st === "rejected" ? (
-            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-800">
-              Needs correction. Follow the note above.
-            </div>
-          ) : null}
-        </div>
-
-        {/* Submitted documents by user */}
-        <div className={`mt-5 ${cardBase} p-5`}>
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60">
-                <IconFile className="h-5 w-5 text-emerald-800" />
-              </span>
-              <div className="min-w-0">
-                <div className="font-semibold text-zinc-900">Submitted documents</div>
-                <div className="text-xs text-zinc-500">Your uploads for this request.</div>
-              </div>
-            </div>
-            <span className="text-xs text-zinc-500 shrink-0">{attachments.length} files</span>
-          </div>
-
-          {fileErr ? (
-            <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-              {fileErr}
-            </div>
-          ) : null}
-
-          <div className="mt-4 grid gap-2">
-            {attachments.length === 0 ? (
-              <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
-                No documents submitted yet.
-              </div>
-            ) : (
-              attachments.map((a) => (
-                <div
-                  key={a.id}
-                  className="rounded-2xl border border-zinc-200 bg-white/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-semibold text-sm text-zinc-900 break-words">
-                        {a.name || "PDF"}
-                      </div>
-                      <div className="mt-1 text-xs text-zinc-600">
-                        Status:{" "}
-                        <span className="font-semibold text-zinc-800">
-                          {attachmentStatusLabel(a.status)}
-                        </span>{" "}
-                        · {bytesToLabel(a.size)}
-                      </div>
+                {req?.note ? (
+                  <div className="mt-2 rounded-2xl border border-zinc-200 bg-white/60 p-4 transition hover:bg-white/70">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700">
+                      <IconNote className="h-4 w-4 text-zinc-500" />
+                      Your note
                     </div>
+                    <div className="mt-2 text-sm text-zinc-800 whitespace-pre-wrap">{req.note}</div>
+                  </div>
+                ) : null}
+              </div>
 
-                    <span className="shrink-0 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-700">
-                      {String(a.status || "pending_upload").toLowerCase()}
+              {(st === "rejected" || st === "closed" || st === "contacted") && adminNote ? (
+                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 transition hover:bg-amber-50/80">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-amber-900">
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-amber-200 bg-white/70">
+                      <IconNote className="h-4 w-4 text-amber-800" />
                     </span>
+                    Note from MAJUU
+                  </div>
+                  <div className="mt-2 text-sm text-amber-900 whitespace-pre-wrap">{adminNote}</div>
+                </div>
+              ) : null}
+
+              {st === "new" ? (
+                <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-700">
+                  Received. We’ll review and update you here.
+                </div>
+              ) : null}
+
+              {st === "contacted" ? (
+                <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 text-sm text-emerald-900">
+                  In progress. Please check back later.
+                </div>
+              ) : null}
+
+              {st === "closed" ? (
+                <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-900">
+                  {isFull ? "Approved. Continue with the next steps." : "Completed successfully."}
+                </div>
+              ) : null}
+
+              {st === "rejected" ? (
+                <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-800">
+                  Needs correction. Follow the note above.
+                </div>
+              ) : null}
+            </motion.div>
+          </motion.div>
+
+          {/* Submitted documents by user */}
+          <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
+            <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60">
+                    <IconFile className="h-5 w-5 text-emerald-800" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="font-semibold text-zinc-900">Submitted documents</div>
+                    <div className="text-xs text-zinc-500">Your uploads for this request.</div>
                   </div>
                 </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Documents from MAJUU */}
-        <div className={`mt-5 ${cardBase} p-5`}>
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60">
-                <IconFile className="h-5 w-5 text-emerald-800" />
-              </span>
-              <div className="min-w-0">
-                <div className="font-semibold text-zinc-900">Documents from MAJUU</div>
-                <div className="text-xs text-zinc-500">Templates, SOPs, forms.</div>
+                <span className="text-xs text-zinc-500 shrink-0">{attachments.length} files</span>
               </div>
-            </div>
-            <span className="text-xs text-zinc-500 shrink-0">{adminFiles.length} files</span>
-          </div>
 
-          {adminFilesErr ? (
-            <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-              {adminFilesErr}
-            </div>
-          ) : null}
+              {fileErr ? (
+                <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+                  {fileErr}
+                </div>
+              ) : null}
 
-          <div className="mt-4 grid gap-2">
-            {adminFiles.length === 0 ? (
-              <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
-                No documents sent yet.
-              </div>
-            ) : (
-              adminFiles.map((f) => {
-                const name = String(f.name || "Document");
-                const url = String(f.url || "").trim();
-
-                return (
-                  <div
-                    key={f.id}
-                    className="rounded-2xl border border-zinc-200 bg-white/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="font-semibold text-sm text-zinc-900 break-words">
-                          {name}
-                        </div>
-                        <div className="mt-1 text-xs text-zinc-600">Open to download</div>
-                      </div>
-
-                      <a
-                        href={url || "#"}
-                        target="_blank"
-                        rel="noreferrer"
-                        className={`shrink-0 inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] ${
-                          url
-                            ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
-                            : "border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed pointer-events-none"
-                        }`}
-                      >
-                        Open
-                      </a>
-                    </div>
+              <div className="mt-4 grid gap-2">
+                {attachments.length === 0 ? (
+                  <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+                    No documents submitted yet.
                   </div>
-                );
-              })
-            )}
-          </div>
-        </div>
+                ) : (
+                  attachments.map((a, idx) => (
+                    <motion.div
+                      key={a.id}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: Math.min(0.2, idx * 0.03), duration: 0.18 }}
+                      className="rounded-2xl border border-zinc-200 bg-white/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm text-zinc-900 break-words">
+                            {a.name || "PDF"}
+                          </div>
+                          <div className="mt-1 text-xs text-zinc-600">
+                            Status:{" "}
+                            <span className="font-semibold text-zinc-800">
+                              {attachmentStatusLabel(a.status)}
+                            </span>{" "}
+                            · {bytesToLabel(a.size)}
+                          </div>
+                        </div>
+
+                        <span className="shrink-0 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-700">
+                          {String(a.status || "pending_upload").toLowerCase()}
+                        </span>
+                      </div>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+
+          {/* Documents from MAJUU */}
+          <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
+            <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60">
+                    <IconFile className="h-5 w-5 text-emerald-800" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="font-semibold text-zinc-900">Documents from MAJUU</div>
+                    <div className="text-xs text-zinc-500">Templates, SOPs, forms.</div>
+                  </div>
+                </div>
+                <span className="text-xs text-zinc-500 shrink-0">{adminFiles.length} files</span>
+              </div>
+
+              {adminFilesErr ? (
+                <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+                  {adminFilesErr}
+                </div>
+              ) : null}
+
+              <div className="mt-4 grid gap-2">
+                {adminFiles.length === 0 ? (
+                  <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+                    No documents sent yet.
+                  </div>
+                ) : (
+                  adminFiles.map((f, idx) => {
+                    const name = String(f.name || "Document");
+                    const url = String(f.url || "").trim();
+
+                    return (
+                      <motion.div
+                        key={f.id}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: Math.min(0.2, idx * 0.03), duration: 0.18 }}
+                        className="rounded-2xl border border-zinc-200 bg-white/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-sm text-zinc-900 break-words">
+                              {name}
+                            </div>
+                            <div className="mt-1 text-xs text-zinc-600">Open to download</div>
+                          </div>
+
+                          <a
+                            href={url || "#"}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`shrink-0 inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] ${
+                              url
+                                ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
+                                : "border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed pointer-events-none"
+                            }`}
+                          >
+                            Open
+                          </a>
+                        </div>
+                      </motion.div>
+                    );
+                  })
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        </motion.div>
 
         {/* Bottom action buttons */}
         {canContinue || canStartNew || canTryAgain ? (
@@ -719,7 +766,7 @@ export default function RequestStatusScreen() {
         </div>
 
         <div className="h-10" />
-      </div>
+      </motion.div>
     </div>
   );
 }

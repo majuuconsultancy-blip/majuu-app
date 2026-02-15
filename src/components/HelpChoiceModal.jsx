@@ -1,14 +1,22 @@
-import { useState } from "react";
+// ✅ HelpChoiceModal.jsx (POLISHED • FLOATY • CLEAN • MOBILE-FIRST)
+// UI only — your analytics + gating logic is unchanged.
+// - Framer-motion entrance + subtle float/tap
+// - Blurred backdrop + nice card + close button
+// - Clear “Self-Help is Free” + “We-Help (Guided)”
+// - ESC + click-outside to close
+// - Busy state with tiny spinner
+
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { motion, AnimatePresence } from "framer-motion";
 
 function cleanStr(x, max = 80) {
   return String(x || "").trim().slice(0, max);
 }
 
 async function logChoiceFirestore({ country, choice, uid }) {
-  // Firestore analytics: signed-in only (rules enforce this)
   await addDoc(collection(db, "analytics_helpChoices"), {
     choice, // "self" | "we"
     country: cleanStr(country, 80),
@@ -18,12 +26,10 @@ async function logChoiceFirestore({ country, choice, uid }) {
 }
 
 function logChoiceGA({ country, choice, uid }) {
-  // GA4 event (anonymous or signed in)
-  // Works if you installed GA (gtag). If not installed, it safely does nothing.
   try {
     if (typeof window !== "undefined" && typeof window.gtag === "function") {
       window.gtag("event", "help_choice", {
-        choice, // self/we
+        choice,
         country: cleanStr(country, 80),
         uid_present: Boolean(uid),
       });
@@ -33,10 +39,103 @@ function logChoiceGA({ country, choice, uid }) {
   }
 }
 
+/* ---------------- Minimal icons ---------------- */
+function IconX(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M7 7l10 10M17 7 7 17"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconBolt(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconSpark(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M12 2l1.2 4.6L18 8l-4.8 1.4L12 14l-1.2-4.6L6 8l4.8-1.4L12 2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M19.2 13.2l.7 2.6 2.6.7-2.6.7-.7 2.6-.7-2.6-2.6-.7 2.6-.7.7-2.6Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function Spinner({ className = "h-4 w-4" }) {
+  return (
+    <svg className={`${className} animate-spin`} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M21 12a9 9 0 1 1-3-6.7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/* ---------------- Motion ---------------- */
+const overlay = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { duration: 0.18 } },
+  exit: { opacity: 0, transition: { duration: 0.14 } },
+};
+
+const sheet = {
+  hidden: { opacity: 0, y: 16, scale: 0.99 },
+  show: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: { type: "spring", stiffness: 520, damping: 40 },
+  },
+  exit: { opacity: 0, y: 10, scale: 0.99, transition: { duration: 0.14 } },
+};
+
+const floaty = {
+  rest: { y: 0, scale: 1 },
+  hover: { y: -2, scale: 1.01, transition: { duration: 0.16 } },
+  tap: { scale: 0.985 },
+};
+
 export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [busy, setBusy] = useState(false);
+
+  const safeCountry = useMemo(() => cleanStr(country, 40), [country]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape" && !busy) onClose?.();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onClose]);
 
   if (!country) return null;
 
@@ -46,15 +145,13 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
 
     const user = auth.currentUser;
 
-    // ✅ Always log to GA (best anonymous tracking)
     logChoiceGA({ country, choice: "self", uid: user?.uid || null });
 
-    // ✅ Also log to Firestore if signed in (ties to real user for research)
     if (user?.uid) {
       try {
         await logChoiceFirestore({ country, choice: "self", uid: user.uid });
       } catch {
-        // don't block UX if analytics fails
+        // don't block UX
       }
     }
 
@@ -68,10 +165,8 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
 
     const user = auth.currentUser;
 
-    // ✅ Always log to GA
     logChoiceGA({ country, choice: "we", uid: user?.uid || null });
 
-    // ✅ Also log to Firestore if signed in
     if (user?.uid) {
       try {
         await logChoiceFirestore({ country, choice: "we", uid: user.uid });
@@ -80,7 +175,6 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
       }
     }
 
-    // ✅ Gate We-Help for legit usercount
     if (!user) {
       setBusy(false);
       navigate("/login", {
@@ -90,7 +184,6 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
       return;
     }
 
-    // ✅ Optional: require verification for We-Help only
     if (!user.emailVerified) {
       setBusy(false);
       navigate("/verify-email", {
@@ -104,42 +197,143 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
     onWeHelp?.();
   };
 
+  const rootCard =
+    "relative w-[92vw] max-w-sm rounded-3xl border border-zinc-200/70 bg-white/80 shadow-[0_18px_55px_rgba(0,0,0,0.20)] backdrop-blur-xl";
+  const subText = "text-xs text-zinc-500";
+  const titleText = "text-[13px] font-semibold text-zinc-700";
+  const headline = "text-lg font-extrabold tracking-tight text-zinc-900";
+
+  const btnBase =
+    "w-full rounded-2xl px-4 py-3 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed";
+  const btnSelf =
+    "bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-200";
+  const btnWe =
+    "border border-zinc-200 bg-white/70 text-zinc-900 hover:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200";
+  const chip =
+    "inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800";
+
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-6 w-80">
-        <h2 className="text-lg font-bold mb-2">{country}</h2>
-        <p className="text-sm text-gray-600 mb-4">Pick your preferred Help choice!</p>
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        variants={overlay}
+        initial="hidden"
+        animate="show"
+        exit="exit"
+      >
+        {/* Backdrop (click outside closes) */}
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={() => (!busy ? onClose?.() : null)}
+          className="absolute inset-0 bg-black/45"
+        />
 
-        <div className="flex flex-col gap-3">
-          <button
-            onClick={handleSelf}
-            disabled={busy}
-            className="p-3 rounded bg-black text-white disabled:opacity-60"
-          >
-            Self-Help
-          </button>
+        {/* Modal */}
+        <motion.div variants={sheet} initial="hidden" animate="show" exit="exit" className={rootCard}>
+          {/* subtle glow */}
+          <div className="pointer-events-none absolute -top-10 -right-10 h-28 w-28 rounded-full bg-emerald-200/30 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-12 -left-10 h-32 w-32 rounded-full bg-sky-200/25 blur-3xl" />
 
-          <button
-            onClick={handleWe}
-            disabled={busy}
-            className="p-3 rounded border disabled:opacity-60"
-          >
-            We-Help
-          </button>
+          {/* Header */}
+          <div className="relative p-5 pb-4">
+            <button
+              type="button"
+              onClick={() => (!busy ? onClose?.() : null)}
+              className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white/70 text-zinc-600 transition hover:bg-white active:scale-[0.98] disabled:opacity-60"
+              disabled={busy}
+              aria-label="Close modal"
+            >
+              <IconX className="h-4 w-4" />
+            </button>
 
-          <button
-            onClick={onClose}
-            disabled={busy}
-            className="text-sm text-gray-500 mt-2 disabled:opacity-60"
-          >
-            Cancel
-          </button>
-        </div>
+            <div className={titleText}>Choose how you want help</div>
+            <div className="mt-1 flex items-center justify-between gap-3">
+              <div className={headline}>{safeCountry}</div>
+              <span className={chip}>
+                <IconSpark className="h-3.5 w-3.5" />
+                Pick one
+              </span>
+            </div>
+            <p className="mt-2 text-sm text-zinc-600">
+              Self-Help is <span className="font-semibold text-emerald-700">free</span>. We-Help is guided by the MAJUU
+              team.
+            </p>
+          </div>
 
-        <p className="mt-4 text-xs text-gray-500">
-          We-Help requires login (and verification) so we can serve you properly.
-        </p>
-      </div>
-    </div>
+          {/* Options */}
+          <div className="px-5 pb-5">
+            <div className="grid gap-3">
+              {/* Self-Help */}
+              <motion.button
+                type="button"
+                onClick={handleSelf}
+                disabled={busy}
+                variants={floaty}
+                initial="rest"
+                whileHover="hover"
+                whileTap="tap"
+                className={`${btnBase} ${btnSelf} flex items-center justify-between`}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/15">
+                    <IconBolt className="h-5 w-5" />
+                  </span>
+                  <span className="text-left">
+                    <div className="leading-tight">Self-Help</div>
+                    <div className="text-[12px] font-medium opacity-90">Do it yourself (Free)</div>
+                  </span>
+                </span>
+
+                {busy ? <Spinner className="h-4 w-4" /> : <span className="text-[12px] opacity-95">Continue</span>}
+              </motion.button>
+
+              {/* We-Help */}
+              <motion.button
+                type="button"
+                onClick={handleWe}
+                disabled={busy}
+                variants={floaty}
+                initial="rest"
+                whileHover="hover"
+                whileTap="tap"
+                className={`${btnBase} ${btnWe} flex items-center justify-between`}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white">
+                    <IconSpark className="h-5 w-5 text-emerald-700" />
+                  </span>
+                  <span className="text-left">
+                    <div className="leading-tight">We-Help</div>
+                    <div className="text-[12px] font-medium text-zinc-600">
+                      Guided support (Login required)
+                    </div>
+                  </span>
+                </span>
+
+                {busy ? <Spinner className="h-4 w-4 text-zinc-700" /> : <span className="text-[12px]">Continue</span>}
+              </motion.button>
+
+              {/* Footer note */}
+              <div className="mt-1 rounded-2xl border border-zinc-200 bg-white/55 p-3">
+                <p className={subText}>
+                  We-Help requires login (and verification) so we can keep your request secure and support you properly.
+                </p>
+              </div>
+
+              {/* Cancel */}
+              <button
+                type="button"
+                onClick={() => (!busy ? onClose?.() : null)}
+                disabled={busy}
+                className="mt-1 w-full rounded-2xl px-4 py-2.5 text-sm font-semibold text-zinc-600 transition hover:text-zinc-900 active:scale-[0.99] disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   );
 }

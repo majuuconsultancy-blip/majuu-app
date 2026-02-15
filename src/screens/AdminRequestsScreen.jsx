@@ -1,3 +1,11 @@
+// ✅ AdminRequestsScreen.jsx (FULL COPY-PASTE)
+// UI-only improvements:
+// - ✅ Staff Hire System made smaller + collapsible (mini panel) to reduce visual weight
+// - ✅ Subtle “apple-ish” entrance + floaty cards (CSS-only, no deps)
+// - ✅ More premium background + softer shadows + hover lift
+// - ✅ Sticky top header (mobile friendly) so Refresh/Search feel easier
+// - ✅ Same backend calls untouched: getRequests(), setStaffAccessByEmail()
+
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { getRequests } from "../services/adminrequestservice";
@@ -56,6 +64,20 @@ function IconChevronRight(props) {
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
       <path
         d="M9 5.5 15.5 12 9 18.5"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconChevronDown(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M6.5 9.5 12 15l5.5-5.5"
         stroke="currentColor"
         strokeWidth="1.9"
         strokeLinecap="round"
@@ -162,8 +184,10 @@ function formatShortTS(ts) {
   return d.toLocaleString();
 }
 
-/* ---------- ✅ Staff panel ---------- */
+/* ---------- ✅ Staff panel (smaller + collapsible) ---------- */
 function StaffAccessPanel() {
+  const [open, setOpen] = useState(false);
+
   const [email, setEmail] = useState("");
   const [maxActive, setMaxActive] = useState(2);
   const [specText, setSpecText] = useState("");
@@ -178,11 +202,17 @@ function StaffAccessPanel() {
       .filter(Boolean);
   }, [specText]);
 
-  const cardBase = "rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur";
+  const shell =
+    "rounded-3xl border border-zinc-200 bg-white/65 shadow-sm backdrop-blur transition";
+  const headerBtn =
+    "w-full text-left flex items-center justify-between gap-3 px-4 py-3 transition active:scale-[0.99]";
+  const smallTitle = "text-sm font-semibold text-zinc-900";
+  const smallSub = "mt-0.5 text-xs text-zinc-500";
+
   const input =
-    "w-full rounded-2xl border border-zinc-200 bg-white/70 px-4 py-3 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-emerald-200";
+    "w-full rounded-2xl border border-zinc-200 bg-white/70 px-4 py-2.5 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-4 focus:ring-emerald-100/60";
   const btnBase =
-    "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99] disabled:opacity-60";
+    "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold shadow-sm transition active:scale-[0.99] disabled:opacity-60";
   const grantBtn = "border border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700";
   const revokeBtn = "border border-rose-200 bg-rose-50/70 text-rose-700 hover:bg-rose-100";
 
@@ -216,78 +246,115 @@ function StaffAccessPanel() {
   };
 
   return (
-    <div className="mt-6">
-      <div className={cardBase}>
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-zinc-900">Staff Hire System</div>
-          <div className="mt-1 text-xs text-zinc-500">
-            The staff member must be already signed up in the App to be activated.
+    <div className="mt-5">
+      <div className={`${shell} overflow-hidden`}>
+        {/* mini header */}
+        <button type="button" onClick={() => setOpen((v) => !v)} className={headerBtn}>
+          <div className="min-w-0">
+            <div className={smallTitle}>Staff Hire System</div>
+            <div className={smallSub}>
+              {open ? "Add/remove staff access." : "Tap to expand"}
+            </div>
+          </div>
+          <div className="shrink-0 inline-flex items-center gap-2">
+            <span className="rounded-full border border-emerald-100 bg-emerald-50/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
+              Staff
+            </span>
+            <span
+              className={`inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 text-zinc-700 transition ${
+                open ? "rotate-180" : "rotate-0"
+              }`}
+            >
+              <IconChevronDown className="h-5 w-5" />
+            </span>
+          </div>
+        </button>
+
+        {/* collapsible body */}
+        <div
+          className={`grid transition-all duration-300 ease-out ${
+            open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+          }`}
+        >
+          <div className="overflow-hidden">
+            <div className="px-4 pb-4">
+              <div className="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur">
+                <div className="text-xs text-zinc-500">
+                  The staff member must already be signed up in the app to be activated.
+                </div>
+
+                {err ? (
+                  <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+                    {err}
+                  </div>
+                ) : null}
+
+                {msg ? (
+                  <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3 text-sm text-emerald-800">
+                    {msg}
+                  </div>
+                ) : null}
+
+                <div className="mt-4 grid gap-3">
+                  <input
+                    className={input}
+                    placeholder="staff@email.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      className={input}
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={maxActive}
+                      onChange={(e) => setMaxActive(e.target.value)}
+                      placeholder="maxActive"
+                    />
+                    <input
+                      className={input}
+                      value={specText}
+                      onChange={(e) => setSpecText(e.target.value)}
+                      placeholder="specialities (comma separated)"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => run("grant")}
+                      disabled={busy === "grant" || busy === "revoke"}
+                      className={`${btnBase} ${grantBtn}`}
+                    >
+                      <IconUserPlus className="h-5 w-5" />
+                      {busy === "grant" ? "Granting…" : "Grant"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => run("revoke")}
+                      disabled={busy === "grant" || busy === "revoke"}
+                      className={`${btnBase} ${revokeBtn}`}
+                    >
+                      <IconUserOff className="h-5 w-5" />
+                      {busy === "revoke" ? "Revoking…" : "Revoke"}
+                    </button>
+                  </div>
+
+                  <div className="text-[11px] text-zinc-500">
+                    Uses query to find UID by email.
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        {err ? (
-          <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-            {err}
-          </div>
-        ) : null}
-
-        {msg ? (
-          <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3 text-sm text-emerald-800">
-            {msg}
-          </div>
-        ) : null}
-
-        <div className="mt-4 grid gap-3">
-          <input
-            className={input}
-            placeholder="staff@email.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-
-          <div className="grid grid-cols-2 gap-3">
-            <input
-              className={input}
-              type="number"
-              min={1}
-              max={10}
-              value={maxActive}
-              onChange={(e) => setMaxActive(e.target.value)}
-              placeholder="maxActive"
-            />
-            <input
-              className={input}
-              value={specText}
-              onChange={(e) => setSpecText(e.target.value)}
-              placeholder="specialities (comma separated)"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => run("grant")}
-              disabled={busy === "grant" || busy === "revoke"}
-              className={`${btnBase} ${grantBtn}`}
-            >
-              <IconUserPlus className="h-5 w-5" />
-              {busy === "grant" ? "Granting…" : "Grant access"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => run("revoke")}
-              disabled={busy === "grant" || busy === "revoke"}
-              className={`${btnBase} ${revokeBtn}`}
-            >
-              <IconUserOff className="h-5 w-5" />
-              {busy === "revoke" ? "Revoking…" : "Revoke access"}
-            </button>
-          </div>
-
-          <div className="text-[11px] text-zinc-500">
-            This uses query to find UID by email.
-          </div>
+        {/* tiny footer sparkle */}
+        <div className="px-4 pb-3">
+          <div className="h-px w-full bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent" />
         </div>
       </div>
     </div>
@@ -306,6 +373,13 @@ export default function AdminRequestsScreen() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [search, setSearch] = useState(String(qFromUrl));
+
+  // ✅ subtle “apple-ish” entrance
+  const [enter, setEnter] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setEnter(true), 10);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
@@ -392,8 +466,10 @@ export default function AdminRequestsScreen() {
     );
   }, [items, search]);
 
-  const tabBtnBase = "rounded-2xl border px-3.5 py-2 text-sm font-semibold transition active:scale-[0.99]";
-  const tabBtnOn = "border-emerald-200 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700";
+  const tabBtnBase =
+    "rounded-2xl border px-3.5 py-2 text-sm font-semibold transition active:scale-[0.99]";
+  const tabBtnOn =
+    "border-emerald-200 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700";
   const tabBtnOff =
     "border-zinc-200 bg-white/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60";
 
@@ -409,27 +485,48 @@ export default function AdminRequestsScreen() {
     navigate(`/app/admin/request/${id}?${qs.toString()}`);
   };
 
+  const softBg =
+    "bg-gradient-to-b from-emerald-50/40 via-white to-white";
+  const enterWrap =
+    "transition duration-500 ease-out will-change-transform will-change-opacity";
+  const enterCls = enter ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2";
+
+  // floaty tiles
+  const card =
+    "rounded-3xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur transition duration-300 ease-out";
+  const tile =
+    "w-full text-left rounded-3xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur transition duration-300 ease-out hover:-translate-y-[2px] hover:shadow-md hover:border-emerald-200 active:translate-y-0 active:scale-[0.99]";
+
   return (
-    <div className="min-h-screen bg-white">
-      <div className="px-5 py-6">
-        {/* Header */}
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Admin Page</h1>
-            <p className="mt-1 text-sm text-zinc-600">Manage incoming application requests and decisions.</p>
+    <div className={`min-h-screen ${softBg}`}>
+      <div className={`px-5 py-6 ${enterWrap} ${enterCls}`}>
+        {/* Sticky header */}
+        <div className="sticky top-0 z-10 -mx-5 px-5 pb-3 pt-2 backdrop-blur supports-[backdrop-filter]:bg-white/50">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
+                Admin Page
+              </h1>
+              <p className="mt-1 text-sm text-zinc-600">
+                Manage incoming application requests and decisions.
+              </p>
+            </div>
+
+            <button
+              onClick={load}
+              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
+              type="button"
+            >
+              <IconRefresh className="h-5 w-5 text-emerald-700" />
+              Refresh
+            </button>
           </div>
 
-          <button
-            onClick={load}
-            className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
-            type="button"
-          >
-            <IconRefresh className="h-5 w-5 text-emerald-700" />
-            Refresh
-          </button>
+          {/* subtle divider */}
+          <div className="mt-3 h-px w-full bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent" />
         </div>
 
-        {/* Staff access panel */}
+        {/* Staff access panel (smaller) */}
         <StaffAccessPanel />
 
         {/* Tabs */}
@@ -449,7 +546,7 @@ export default function AdminRequestsScreen() {
         {/* Search */}
         <div className="mt-5">
           <label className="text-sm font-semibold text-zinc-900">Search</label>
-          <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2.5 shadow-sm backdrop-blur focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
+          <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2.5 shadow-sm backdrop-blur transition focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
             <IconSearch className="h-5 w-5 text-zinc-500" />
             <input
               className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
@@ -472,15 +569,15 @@ export default function AdminRequestsScreen() {
 
         {/* States */}
         {loading ? (
-          <div className="mt-6 rounded-2xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur">
+          <div className={`mt-6 ${card} p-4 text-sm text-zinc-600`}>
             Loading…
           </div>
         ) : msg ? (
-          <div className="mt-6 rounded-2xl border border-rose-100 bg-rose-50/70 p-4 text-sm text-rose-700 shadow-sm">
+          <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-4 text-sm text-rose-700 shadow-sm">
             {msg}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="mt-6 rounded-2xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur">
+          <div className={`mt-6 ${card} p-4 text-sm text-zinc-600`}>
             No requests found.
           </div>
         ) : (
@@ -506,7 +603,7 @@ export default function AdminRequestsScreen() {
                   key={r.id}
                   type="button"
                   onClick={() => openRequest(r.id)}
-                  className="w-full text-left rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-white hover:shadow-md active:scale-[0.99]"
+                  className={tile}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -550,7 +647,7 @@ export default function AdminRequestsScreen() {
                         </span>
                       ) : null}
 
-                      <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 text-zinc-700 transition hover:border-emerald-200 hover:bg-emerald-50/60 hover:text-emerald-800">
+                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-3xl border border-zinc-200 bg-white/60 text-zinc-700 transition hover:border-emerald-200 hover:bg-emerald-50/60 hover:text-emerald-800">
                         <IconChevronRight className="h-5 w-5" />
                       </span>
                     </div>
@@ -560,6 +657,8 @@ export default function AdminRequestsScreen() {
             })}
           </div>
         )}
+
+        <div className="h-10" />
       </div>
     </div>
   );

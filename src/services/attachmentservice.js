@@ -1,3 +1,7 @@
+// attachmentservice.js (FULL COPY-PASTE)
+// - Keeps your existing behavior for createPendingAttachment (PDF placeholder doc)
+// - Adds LINK + META attachment helpers (no Storage required yet)
+
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../firebase";
 
@@ -5,18 +9,36 @@ const MAX_PDF_MB = 10;
 const MAX_BYTES = MAX_PDF_MB * 1024 * 1024;
 
 function safeStr(x, max = 300) {
-  return String(x || "").trim().slice(0, max);
+  return String(x ?? "").trim().slice(0, max);
+}
+
+function safeNum(n, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return min;
+  return Math.max(min, Math.min(max, v));
 }
 
 function isHttpUrl(url) {
-  const u = String(url || "").trim();
+  const u = safeStr(url, 1200);
   return u.startsWith("http://") || u.startsWith("https://");
 }
 
 function isPdfFile(file) {
-  const name = String(file?.name || "").toLowerCase();
-  const type = String(file?.type || "").toLowerCase();
+  const name = safeStr(file?.name, 200).toLowerCase();
+  const type = safeStr(file?.type, 120).toLowerCase();
   return type === "application/pdf" || name.endsWith(".pdf");
+}
+
+function requireUser() {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Not logged in");
+  return user;
+}
+
+function requireRequestId(requestId) {
+  const id = safeStr(requestId, 120);
+  if (!id) throw new Error("Missing requestId");
+  return id;
 }
 
 /**
@@ -25,25 +47,24 @@ function isPdfFile(file) {
  * - Stored at: serviceRequests/{requestId}/attachments/{attId}
  */
 export async function createPendingAttachment({ requestId, file }) {
-  const user = auth.currentUser;
+  const user = requireUser();
+  const rid = requireRequestId(requestId);
 
-  if (!user) throw new Error("Not logged in");
-  if (!requestId) throw new Error("Missing requestId");
   if (!file) throw new Error("Missing file");
 
   if (!isPdfFile(file)) {
     throw new Error("Only PDF files are allowed");
   }
 
-  const size = Number(file.size || 0);
+  const size = safeNum(file?.size, 0, MAX_BYTES + 1);
   if (size > MAX_BYTES) {
     throw new Error(`PDF must be under ${MAX_PDF_MB}MB`);
   }
 
-  const name = safeStr(file.name || "document.pdf", 120);
-  const contentType = safeStr(file.type || "application/pdf", 80);
+  const name = safeStr(file?.name || "document.pdf", 120) || "document.pdf";
+  const contentType = safeStr(file?.type || "application/pdf", 80) || "application/pdf";
 
-  const ref = collection(db, "serviceRequests", requestId, "attachments");
+  const ref = collection(db, "serviceRequests", rid, "attachments");
 
   const docRef = await addDoc(ref, {
     uid: user.uid,
@@ -76,19 +97,17 @@ export async function createLinkAttachment({
   metaNote = "",
   kind = "link",
 } = {}) {
-  const user = auth.currentUser;
+  const user = requireUser();
+  const rid = requireRequestId(requestId);
 
-  if (!user) throw new Error("Not logged in");
-  if (!requestId) throw new Error("Missing requestId");
-
-  const cleanName = safeStr(name || "Document link", 120);
+  const cleanName = safeStr(name || "Document link", 120) || "Document link";
   const cleanUrl = safeStr(url || "", 1000);
 
   if (!isHttpUrl(cleanUrl)) {
     throw new Error("Valid URL required (must start with http/https)");
   }
 
-  const ref = collection(db, "serviceRequests", requestId, "attachments");
+  const ref = collection(db, "serviceRequests", rid, "attachments");
 
   const docRef = await addDoc(ref, {
     uid: user.uid,
@@ -98,10 +117,10 @@ export async function createLinkAttachment({
     size: 0,
     contentType: "link",
 
-    // optional metadata (your UI already supports these)
+    // optional metadata
     label: safeStr(label, 60),
     metaNote: safeStr(metaNote, 800),
-    kind: safeStr(kind, 60),
+    kind: safeStr(kind, 60) || "link",
 
     status: "uploaded", // since it’s already a link
     createdAt: serverTimestamp(),
@@ -113,7 +132,7 @@ export async function createLinkAttachment({
 
 /**
  * ✅ NEW: “Meta/dummy attachment” (checklist-style)
- * Example: applicant uploads “Passport” but you only store metadata (no PDF).
+ * Example: applicant "uploads" Passport but you only store metadata (no PDF).
  * You can optionally include a link too.
  */
 export async function createMetaAttachment({
@@ -123,10 +142,8 @@ export async function createMetaAttachment({
   url = "",
   kind = "user_dummy_upload",
 } = {}) {
-  const user = auth.currentUser;
-
-  if (!user) throw new Error("Not logged in");
-  if (!requestId) throw new Error("Missing requestId");
+  const user = requireUser();
+  const rid = requireRequestId(requestId);
 
   const cleanLabel = safeStr(label || "", 60);
   if (!cleanLabel) throw new Error("label is required");
@@ -136,7 +153,7 @@ export async function createMetaAttachment({
     throw new Error("If url is provided, it must start with http/https");
   }
 
-  const ref = collection(db, "serviceRequests", requestId, "attachments");
+  const ref = collection(db, "serviceRequests", rid, "attachments");
 
   const docRef = await addDoc(ref, {
     uid: user.uid,
@@ -144,13 +161,13 @@ export async function createMetaAttachment({
     name: cleanLabel,
     label: cleanLabel,
     metaNote: safeStr(metaNote, 800),
-    kind: safeStr(kind, 60),
+    kind: safeStr(kind, 60) || "user_dummy_upload",
 
     url: cleanUrl || "",
 
     size: 0,
     contentType: cleanUrl ? "link" : "meta",
-    status: "pending_upload",
+    status: "pending_upload", // still “pending” because no real file was uploaded
 
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),

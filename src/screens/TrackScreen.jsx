@@ -1,151 +1,33 @@
+// ✅ TrackScreen.jsx (FULL COPY-PASTE)
+// CHANGE ONLY:
+// - Removed country icon (Globe2) because per-country map silhouettes aren't practical with Lucide
+// - All other icons remain Lucide
+// Backend untouched (setSelectedTrack + setActiveContext + URL behavior)
+
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
+
+import {
+  GraduationCap,
+  Briefcase,
+  Plane,
+  ChevronRight,
+  X,
+  User,
+  Users,
+  Compass,
+} from "lucide-react";
 
 import { auth } from "../firebase";
 import { setActiveContext, setSelectedTrack } from "../services/userservice";
-import { useLocation } from "react-router-dom";
-
-/* ---------- Minimal icons ---------- */
-function IconStudy(props) {
-  return (
-  
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M3.5 8.5 12 4l8.5 4.5L12 13 3.5 8.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M6.5 10.2V16c0 1.7 3 3.2 5.5 3.2s5.5-1.5 5.5-3.2v-5.8"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconWork(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M9 7V6.2A2.2 2.2 0 0 1 11.2 4h1.6A2.2 2.2 0 0 1 15 6.2V7"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M5.5 8.5h13A2 2 0 0 1 20.5 10.5v7A2 2 0 0 1 18.5 19.5h-13A2 2 0 0 1 3.5 17.5v-7A2 2 0 0 1 5.5 8.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M9.5 12h5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconTravel(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M2.5 12.5 21.5 7.5l-6.5 5.5 1.8 6-3.3-4-4.5 3 .8-4.8-4.8-.7Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconChevronRight(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M9 5.5 15.5 12 9 18.5"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconClose(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconSelf(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M12 12.5a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path
-        d="M4.5 20c1.7-3.2 4.2-5 7.5-5s5.8 1.8 7.5 5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconWe(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M8.5 12a3.2 3.2 0 1 0-3.2-3.2A3.2 3.2 0 0 0 8.5 12Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path
-        d="M16 12.2a3 3 0 1 0-3-3 3 3 0 0 0 3 3Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path
-        d="M3.8 20c1.2-2.6 3.2-4.2 6-4.2s4.8 1.6 6 4.2"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M12.7 16.7c1.1-.6 2.3-.9 3.6-.9 2.2 0 3.9 1 4.9 3.2"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
 /* ---------- Track config ---------- */
 const TRACKS = {
-  study: { title: "Study Abroad", Icon: IconStudy },
-  work: { title: "Work Abroad", Icon: IconWork },
-  travel: { title: "Travel Abroad", Icon: IconTravel },
+  study: { title: "Study Abroad", Icon: GraduationCap },
+  work: { title: "Work Abroad", Icon: Briefcase },
+  travel: { title: "Travel Abroad", Icon: Plane },
 };
 
 const COUNTRIES = ["Canada", "Australia", "UK", "Germany", "USA"];
@@ -157,19 +39,35 @@ const overlayMotion = {
   exit: { opacity: 0, transition: { duration: 0.12 } },
 };
 
-const modalMotion = {
-  hidden: { opacity: 0, y: 18, scale: 0.985 },
+// sheet-style for mobile, centered modal for bigger screens
+const sheetMotion = {
+  hidden: { opacity: 0, y: 24, scale: 0.99 },
   show: {
     opacity: 1,
     y: 0,
     scale: 1,
-    transition: { type: "spring", stiffness: 420, damping: 34 },
+    transition: { type: "spring", stiffness: 430, damping: 34 },
   },
-  exit: { opacity: 0, y: 10, scale: 0.985, transition: { duration: 0.16 } },
+  exit: { opacity: 0, y: 14, scale: 0.99, transition: { duration: 0.14 } },
+};
+
+const listWrap = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.06, delayChildren: 0.08 } },
+};
+
+const listItem = {
+  hidden: { opacity: 0, y: 10 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { type: "spring", stiffness: 420, damping: 30 },
+  },
 };
 
 export default function TrackScreen({ track }) {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const safeTrack = useMemo(() => (TRACKS[track] ? track : "study"), [track]);
 
@@ -181,8 +79,6 @@ export default function TrackScreen({ track }) {
 
   const [statusMsg, setStatusMsg] = useState("");
   const [saving, setSaving] = useState(false);
-
-  const location = useLocation();
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -277,39 +173,60 @@ export default function TrackScreen({ track }) {
   const info = TRACKS[safeTrack];
   const HeaderIcon = info.Icon;
 
-  const tileBase =
-    "group w-full rounded-2xl border border-zinc-200 bg-white/65 backdrop-blur p-4 shadow-sm transition";
-  const tileHover =
-    "hover:bg-white hover:border-emerald-200 hover:shadow-md active:scale-[0.99]";
+  const topBg =
+    "bg-gradient-to-b from-emerald-50/50 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
+
+  const countryCard =
+    "group w-full text-left rounded-3xl border bg-white/70 backdrop-blur p-4 shadow-sm transition will-change-transform";
+  const countryCardHover =
+    "border-zinc-200 hover:border-emerald-200 hover:bg-white hover:shadow-md active:scale-[0.99] hover:-translate-y-[1px]";
+  const countryCardDark =
+    "dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:bg-zinc-900";
 
   return (
-    <div className="min-h-screen">
-      {/* ✅ add extra bottom padding so content doesn't hide behind the floating button */}
-      <div className="px-5 py-6 pb-40">
+    <div className={`min-h-screen ${topBg}`}>
+      {/* ✅ extra bottom padding so content doesn't hide behind dock */}
+      <div className="px-5 py-6 pb-44 max-w-xl mx-auto">
         {/* Header */}
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800">
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 border border-emerald-100">
-                <HeaderIcon className="h-4 w-4 text-emerald-700" />
-              </span>
-              {info.title}
+        <div className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white/60 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/50">
+          {/* animated glow blob */}
+          <motion.div
+            aria-hidden="true"
+            className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-emerald-300/25 blur-3xl dark:bg-emerald-400/10"
+            animate={{ x: [0, -8, 0], y: [0, 10, 0] }}
+            transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <motion.div
+            aria-hidden="true"
+            className="pointer-events-none absolute -left-16 -bottom-16 h-44 w-44 rounded-full bg-emerald-200/25 blur-3xl dark:bg-emerald-500/10"
+            animate={{ x: [0, 10, 0], y: [0, -8, 0] }}
+            transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+          />
+
+          <div className="relative flex items-end justify-between gap-3">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 border border-emerald-100 dark:bg-zinc-950/40 dark:border-emerald-900/40">
+                  <HeaderIcon className="h-4 w-4 text-emerald-700 dark:text-emerald-200" />
+                </span>
+                {info.title}
+              </div>
+
+              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                Choose a country
+              </h1>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                Pick your dream destination, then choose Self-Help or We-Help.
+              </p>
             </div>
 
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900">
-              Choose a country
-            </h1>
-            <p className="mt-1 text-sm text-zinc-600">
-              Pick your dream country destination.
-            </p>
+            <div className="h-11 w-11 rounded-2xl border border-emerald-100 bg-emerald-50/70 dark:border-zinc-800 dark:bg-zinc-950/40" />
           </div>
-
-          <div className="h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70" />
         </div>
 
         {/* Status */}
         {statusMsg ? (
-          <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3 text-sm text-emerald-800">
+          <div className="mt-4 rounded-3xl border border-emerald-100 bg-emerald-50/60 p-3 text-sm text-emerald-900 dark:border-emerald-900/30 dark:bg-emerald-950/25 dark:text-emerald-100">
             {statusMsg}
           </div>
         ) : null}
@@ -317,69 +234,92 @@ export default function TrackScreen({ track }) {
         {/* Countries */}
         <div className="mt-6">
           <div className="flex items-end justify-between">
-            <h2 className="text-sm font-semibold text-zinc-900">Countries</h2>
-            <span className="text-xs text-zinc-500">
+            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Countries
+            </h2>
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
               {COUNTRIES.length} options
             </span>
           </div>
 
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <motion.div
+            className="mt-3 grid gap-3 sm:grid-cols-2"
+            variants={listWrap}
+            initial="hidden"
+            animate="show"
+          >
             {COUNTRIES.map((c) => (
-              <button
+              <motion.button
                 key={c}
+                type="button"
                 onClick={() => openCountry(c)}
-                className={`${tileBase} ${tileHover} text-left`}
+                variants={listItem}
+                whileHover={{ y: -2 }}
+                whileTap={{ scale: 0.99 }}
+                className={`${countryCard} ${countryCardHover} ${countryCardDark}`}
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-zinc-900">{c}</div>
-                    <div className="mt-1 text-xs text-zinc-500">
-                      Choose help mode
-                    </div>
+                <div className="relative">
+                  {/* subtle shimmer */}
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl"
+                  >
+                    <div className="absolute -left-20 top-0 h-full w-24 rotate-12 bg-white/40 blur-xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 dark:bg-white/10" />
                   </div>
 
-                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white/50 text-zinc-700 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/60 group-hover:text-emerald-800">
-                    <IconChevronRight className="h-5 w-5" />
-                  </span>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                        {c}
+                      </div>
+                      <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        Tap to choose help mode
+                      </div>
+                    </div>
+
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/50 text-zinc-700 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/70 group-hover:text-emerald-800 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200 dark:group-hover:border-emerald-900/40 dark:group-hover:bg-emerald-950/25 dark:group-hover:text-emerald-200">
+                      <ChevronRight className="h-5 w-5" />
+                    </span>
+                  </div>
                 </div>
-              </button>
+              </motion.button>
             ))}
-          </div>
+          </motion.div>
         </div>
       </div>
 
-      {/* ✅ Floating button: middle of bottom third (above bottom nav) */}
-      <div className="fixed inset-x-0 z-30 flex justify-center pointer-events-none">
-        <div className="pointer-events-auto w-full max-w-sm px-5">
-          <button
-            type="button"
-            onClick={goToTracks}
-            disabled={saving}
-            className="
-              w-full
-              rounded-2xl
-              border border-zinc-200
-              bg-white/85 backdrop-blur
-              px-5 py-3
-              text-sm font-semibold text-zinc-900
-              shadow-lg
-              transition
-              hover:bg-white
-              active:scale-[0.99]
-              disabled:opacity-60
-            "
-            style={{
-              position: "fixed",
-              left: "50%",
-              transform: "translateX(-50%)",
-              // ✅ adjust this number if your bottom nav is taller/shorter
-              bottom: "140px",
-              maxWidth: "24rem",
-              width: "calc(100% - 2.5rem)",
-            }}
-          >
-            Go to Tracks
-          </button>
+      {/* ✅ Bottom dock (safe area aware) */}
+      <div className="fixed inset-x-0 bottom-0 z-30">
+        <div className="mx-auto w-full max-w-xl px-5 pb-[max(6rem,env(safe-area-inset-bottom))]">
+          <div className="rounded-3xl border border-zinc-200 bg-white/80 backdrop-blur shadow-lg dark:border-zinc-800 dark:bg-zinc-900/70">
+            <div className="flex items-center justify-between gap-3 p-3">
+              <div className="min-w-0 flex items-center gap-3">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200">
+                  <Compass className="h-5 w-5" />
+                </span>
+
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    Not sure yet?
+                  </div>
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                    You can go back and switch tracks anytime.
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={goToTracks}
+                disabled={saving}
+                className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-white active:scale-[0.99] disabled:opacity-60
+                           dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100 dark:hover:bg-zinc-950/45"
+              >
+                <ChevronRight className="h-4 w-4" />
+                Go to Tracks
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -387,7 +327,7 @@ export default function TrackScreen({ track }) {
       <AnimatePresence>
         {showModal && (
           <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-5"
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 px-4"
             variants={overlayMotion}
             initial="hidden"
             animate="show"
@@ -395,8 +335,12 @@ export default function TrackScreen({ track }) {
             onMouseDown={closeModal}
           >
             <motion.div
-              className="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white/75 p-5 shadow-lg backdrop-blur"
-              variants={modalMotion}
+              className={[
+                "w-full max-w-md rounded-3xl border border-zinc-200 bg-white/80 p-5 shadow-xl backdrop-blur",
+                "dark:border-zinc-800 dark:bg-zinc-900/70",
+                "sm:mb-0 mb-4",
+              ].join(" ")}
+              variants={sheetMotion}
               initial="hidden"
               animate="show"
               exit="exit"
@@ -405,47 +349,55 @@ export default function TrackScreen({ track }) {
               aria-modal="true"
             >
               <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold text-emerald-700">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-200">
                     Selected country
                   </p>
-                  <h2 className="mt-1 text-lg font-semibold text-zinc-900">
+                  <h2 className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
                     {selectedCountry}
                   </h2>
-                  <p className="mt-1 text-sm text-zinc-600">
+                  <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                     Choose how you want help.
                   </p>
                 </div>
 
                 <button
+                  type="button"
                   onClick={closeModal}
                   disabled={saving}
-                  className="rounded-xl border border-zinc-200 bg-white/60 p-2 text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-60"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 text-zinc-700 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60
+                             dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200 dark:hover:bg-zinc-950/45"
                   aria-label="Close"
+                  title="Close"
                 >
-                  <IconClose className="h-5 w-5" />
+                  <X className="h-5 w-5" />
                 </button>
               </div>
 
               <div className="mt-5 grid gap-3">
-                {/* Self-help */}
+                {/* Self-help (FREE badge) */}
                 <button
+                  type="button"
                   onClick={() => startProcessAndGo("self")}
                   disabled={saving}
-                  className="group w-full rounded-2xl border border-zinc-200 bg-white/60 px-4 py-3 text-left text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-white active:scale-[0.99] disabled:opacity-60"
+                  className="group w-full rounded-3xl border border-zinc-200 bg-white/60 px-4 py-3 text-left text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-white active:scale-[0.99] disabled:opacity-60
+                             dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100 dark:hover:bg-zinc-950/45"
                 >
                   <div className="flex items-center gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white">
-                      <IconSelf className="h-5 w-5 text-zinc-700" />
+                    <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/40">
+                      <User className="h-5 w-5 text-zinc-700 dark:text-zinc-200" />
                     </span>
-                    <div>
-                      <div>
-                        {saving && startingType === "self"
-                          ? "Starting…"
-                          : "Self-Help"}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span>
+                          {saving && startingType === "self" ? "Starting…" : "Self-Help"}
+                        </span>
+                        <span className="rounded-full border border-emerald-100 bg-emerald-50/70 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-100">
+                          Free
+                        </span>
                       </div>
-                      <div className="mt-0.5 text-xs font-medium text-zinc-600">
-                        Steps & checklists you follow on your own
+                      <div className="mt-0.5 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                        Steps & checklists you follow on your own.
                       </div>
                     </div>
                   </div>
@@ -453,35 +405,36 @@ export default function TrackScreen({ track }) {
 
                 {/* We-help (primary) */}
                 <button
+                  type="button"
                   onClick={() => startProcessAndGo("we")}
                   disabled={saving}
-                  className="group w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-left text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                  className="group w-full rounded-3xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-left text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                 >
                   <div className="flex items-center gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/70">
-                      <IconWe className="h-5 w-5 text-emerald-700" />
+                    <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/75">
+                      <Users className="h-5 w-5 text-emerald-700" />
                     </span>
-                    <div>
-                      <div>
-                        {saving && startingType === "we" ? "Starting…" : "We-Help"}
-                      </div>
+                    <div className="min-w-0">
+                      <div>{saving && startingType === "we" ? "Starting…" : "We-Help"}</div>
                       <div className="mt-0.5 text-xs font-medium text-white/80">
-                        We guide you and work with you
+                        We guide you and work with you end-to-end.
                       </div>
                     </div>
                   </div>
                 </button>
 
                 <button
+                  type="button"
                   onClick={closeModal}
                   disabled={saving}
-                  className="w-full rounded-2xl border border-zinc-200 bg-transparent px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
+                  className="w-full rounded-3xl border border-zinc-200 bg-transparent px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60
+                             dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-950/35"
                 >
                   Cancel
                 </button>
               </div>
 
-              <div className="mt-4 text-center text-xs text-zinc-500">
+              <div className="mt-4 text-center text-xs text-zinc-500 dark:text-zinc-400">
                 Your progress is saved automatically.
               </div>
             </motion.div>

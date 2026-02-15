@@ -1,176 +1,249 @@
+// ✅ IntroScreen.jsx (STABLE LOOP + NO WHITE FLASH + SLOWER)
+// Fixes:
+// - ✅ Auto loop: 1→2→3→1… (never sticks, never reverses)
+// - ✅ Slower progress
+// - ✅ Removes blur/filter animations that cause white flashes on mobile
+// - ✅ Always-visible background (solid base + subtle pattern + blobs)
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 const SLIDES = [
   {
-    title: "Study, Work & Travel Made Accessible",
-    body: "Choose your dream destination, Apply for free on your own or get expert help.",
+    title: "Study, Work & Travel — made simple",
+    body: "Pick a destination. Apply free (Self-Help) or get expert help (We-Help).",
+    pills: ["Self-Help (Free)", "We-Help", "Status tracking"],
   },
   {
-    title: "Track progress in real time",
-    body:
-      "Your applications and status updates are saved automatically, so you always know what’s happening.",
+    title: "Track Everything",
+    body: "Requests and updates auto-save so you always know what’s next.",
+    pills: ["Realtime updates", "Auto-saved", "Clear steps"],
   },
   {
-    title: "Fast support when you need it",
-    body:
-      "Send a request, get response in minutes, and get step-by-step guidance by the MAJUU team.",
+    title: "Support when it matters",
+    body: "Send a request, get a quick response, and follow guided steps with MAJUU.",
+    pills: ["Fast replies", "Pro Guidance", "Reliable Systems"],
   },
 ];
 
-const pageMotion = {
-  initial: { opacity: 0, x: 18, scale: 0.99, filter: "blur(2px)" },
-  animate: {
-    opacity: 1,
-    x: 0,
-    scale: 1,
-    filter: "blur(0px)",
-    transition: { type: "spring", stiffness: 420, damping: 34 },
-  },
-  exit: {
-    opacity: 0,
-    x: -18,
-    scale: 0.99,
-    filter: "blur(2px)",
-    transition: { duration: 0.18 },
-  },
-};
+// ✅ slower auto-advance
+const intervalMs = 7500;
+
+function cx(...a) {
+  return a.filter(Boolean).join(" ");
+}
 
 export default function IntroScreen() {
   const navigate = useNavigate();
+  const reduceMotion = useReducedMotion();
+
   const [i, setI] = useState(0);
+  const [runKey, setRunKey] = useState(0); // forces progress animation restart safely
 
-  // 4 seconds per slide (auto-advance)
-  const intervalMs = 4000;
-
-  // Avoid double intervals in React StrictMode (dev)
-  const startedRef = useRef(false);
+  const timerRef = useRef(null);
 
   const lastIndex = SLIDES.length - 1;
   const isLast = i === lastIndex;
 
-  const next = () => setI((v) => Math.min(v + 1, lastIndex));
   const goToAuth = () => navigate("/login", { replace: true });
-
-  // ✅ Skip button goes straight to auth
   const skip = () => goToAuth();
+
+  const next = () =>
+    setI((v) => (v >= lastIndex ? 0 : v + 1));
+  const prev = () =>
+    setI((v) => (v <= 0 ? lastIndex : v - 1));
+  const goTo = (idx) => setI(() => Math.max(0, Math.min(lastIndex, idx)));
 
   const continueLabel = useMemo(() => (isLast ? "Continue" : "Next"), [isLast]);
 
+  // ✅ single clean auto-advance (no RAF, no race conditions)
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
+    if (timerRef.current) clearTimeout(timerRef.current);
 
-    const id = setInterval(() => {
-      setI((v) => (v >= lastIndex ? v : v + 1));
+    timerRef.current = setTimeout(() => {
+      setI((v) => (v >= lastIndex ? 0 : v + 1));
     }, intervalMs);
 
-    return () => clearInterval(id);
-  }, [intervalMs, lastIndex]);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = null;
+    };
+  }, [i, lastIndex]);
+
+  // ✅ restart progress animation every slide change
+  useEffect(() => {
+    setRunKey((k) => k + 1);
+  }, [i]);
 
   const slide = SLIDES[i];
 
+  // ✅ no blur filters (these cause white flashes on some phones)
+  const slideMotion = reduceMotion
+    ? {}
+    : {
+        initial: { opacity: 0, x: 14 },
+        animate: {
+          opacity: 1,
+          x: 0,
+          transition: { type: "spring", stiffness: 420, damping: 34 },
+        },
+        exit: { opacity: 0, x: -14, transition: { duration: 0.16 } },
+      };
+
+  const tapV = reduceMotion
+    ? {}
+    : {
+        whileTap: { scale: 0.985 },
+        transition: { duration: 0.16, ease: "easeOut" },
+      };
+
+  const pageBg =
+    // ✅ solid base (prevents “plain white” even if gradients fail to paint)
+    "min-h-screen bg-zinc-50";
+
+  const glass =
+    "rounded-[28px] border border-zinc-200/70 bg-white/80 backdrop-blur-xl shadow-[0_22px_80px_rgba(0,0,0,0.12)]";
+
   return (
-    <div className="min-h-screen bg-white">
-      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white">
-        <div className="max-w-xl mx-auto px-5 py-10">
-          {/* Header */}
-          <div className="flex items-end justify-between gap-3">
-            <div>
-              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900">
-                Welcome
-              </h1>
-              <p className="mt-1 text-sm text-zinc-600">OVERVIEW.</p>
+    <div className={pageBg}>
+      {/* ✅ always-on background layers (so swapping slides never shows blank white) */}
+      <div className="fixed inset-0 -z-10">
+        {/* subtle pattern */}
+        <div
+          className="absolute inset-0 opacity-[0.7]"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 20% 10%, rgba(16,185,129,0.20), transparent 45%), radial-gradient(circle at 80% 30%, rgba(56,189,248,0.18), transparent 45%), radial-gradient(circle at 50% 90%, rgba(16,185,129,0.12), transparent 55%)",
+          }}
+        />
+        {/* blobs */}
+        <div className="absolute -top-28 -right-28 h-80 w-80 rounded-full bg-emerald-200/45 blur-3xl" />
+        <div className="absolute bottom-0 left-0 h-80 w-80 rounded-full bg-sky-200/35 blur-3xl" />
+      </div>
+
+      <div className="mx-auto max-w-xl px-5 pb-8 pt-7">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-extrabold tracking-tight text-zinc-900">
+              MAJUU APP
             </div>
-
-            <div className="flex items-center gap-2">
-              {/* ✅ Skip button */}
-              <button
-                type="button"
-                onClick={skip}
-                className="rounded-xl border border-zinc-200 bg-white/70 px-4 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
-              >
-                Skip
-              </button>
-
-              <div className="h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/60" />
+            <div className="text-[11px] font-semibold text-zinc-600">
+              Get started
             </div>
           </div>
 
-          {/* Slide card */}
-          <div className="mt-8">
-            <div className="rounded-2xl border border-zinc-200 bg-white/70 backdrop-blur p-6 shadow-sm">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={i}
-                  variants={pageMotion}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                >
-                  <div className="text-lg font-semibold text-zinc-900">
-                    {slide.title}
-                  </div>
-                  <div className="mt-2 text-sm leading-relaxed text-zinc-600">
-                    {slide.body}
-                  </div>
+          <motion.button
+            type="button"
+            onClick={skip}
+            className="rounded-2xl border border-zinc-200/80 bg-white/80 px-4 py-2 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-white"
+            {...tapV}
+          >
+            Skip
+          </motion.button>
+        </div>
 
-                  {/* Simple “feature” pills (no emojis) */}
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    <span className="text-xs px-2.5 py-1 rounded-full border bg-white/60 text-zinc-700">
-                      Country selection
-                    </span>
-                    <span className="text-xs px-2.5 py-1 rounded-full border bg-white/60 text-zinc-700">
-                      Self-Help guides
-                    </span>
-                    <span className="text-xs px-2.5 py-1 rounded-full border bg-white/60 text-zinc-700">
-                      We-Help requests
-                    </span>
-                    <span className="text-xs px-2.5 py-1 rounded-full border bg-white/60 text-zinc-700">
-                      Progress tracking
-                    </span>
-                  </div>
-                </motion.div>
-              </AnimatePresence>
+        {/* Main card */}
+        <div className={cx("mt-7", glass, "p-5")}>
+          {/* Progress */}
+          <div className="mb-4">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200/80">
+              <motion.div
+                key={runKey}
+                className="h-full rounded-full bg-emerald-600"
+                initial={{ width: "0%" }}
+                animate={{ width: "100%" }}
+                transition={
+                  reduceMotion
+                    ? { duration: 0 }
+                    : { duration: intervalMs / 1000, ease: "linear" }
+                }
+              />
+            </div>
 
-              {/* Dots indicator */}
-              <div className="mt-6 flex items-center justify-center gap-2">
-                {SLIDES.map((_, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => setI(idx)}
-                    aria-label={`Go to slide ${idx + 1}`}
-                    className={[
-                      "h-2.5 w-2.5 rounded-full transition",
-                      idx === i
-                        ? "bg-emerald-600"
-                        : "bg-zinc-300 hover:bg-zinc-400",
-                    ].join(" ")}
-                  />
+            <div className="mt-2 flex items-center justify-between text-[11px] font-semibold text-zinc-600">
+              <span>
+                {i + 1} / {SLIDES.length}
+              </span>
+              <span>Auto</span>
+            </div>
+          </div>
+
+          {/* Slide */}
+          <AnimatePresence mode="wait">
+            <motion.div key={i} {...slideMotion}>
+              <div className="text-2xl font-extrabold tracking-tight text-zinc-900">
+                {slide.title}
+              </div>
+
+              <div className="mt-2 text-sm leading-relaxed text-zinc-700">
+                {slide.body}
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-2">
+                {(slide.pills || []).map((p) => (
+                  <span
+                    key={p}
+                    className="rounded-full border border-zinc-200/80 bg-white/70 px-3 py-1 text-[11px] font-semibold text-zinc-800"
+                  >
+                    {p}
+                  </span>
                 ))}
               </div>
 
-              {/* Next / Continue */}
-              <div className="mt-6">
-                <button
-                  onClick={() => (isLast ? goToAuth() : next())}
-                  className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
-                >
-                  {continueLabel}
-                </button>
-
-                <div className="mt-3 text-center text-xs text-zinc-500">
-                  Your gateway to MAJUU.
-                </div>
+              <div className="mt-5 text-xs text-zinc-600">
+                MAJUU.
               </div>
-            </div>
+            </motion.div>
+          </AnimatePresence>
+
+          {/* Dots */}
+          <div className="mt-5 flex items-center justify-center gap-2">
+            {SLIDES.map((_, idx) => (
+              <motion.button
+                key={idx}
+                type="button"
+                onClick={() => goTo(idx)}
+                aria-label={`Go to slide ${idx + 1}`}
+                className={cx(
+                  "h-2.5 w-2.5 rounded-full transition",
+                  idx === i
+                    ? "bg-emerald-600"
+                    : "bg-zinc-300 hover:bg-zinc-400"
+                )}
+                {...tapV}
+              />
+            ))}
           </div>
 
-          {/* tiny footer spacing for mobile */}
-          <div className="h-6" />
+          {/* CTA */}
+          <div className="mt-5">
+            <motion.button
+              onClick={() => (isLast ? goToAuth() : next())}
+              className="w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 active:scale-[0.985]"
+              type="button"
+              {...tapV}
+            >
+              {continueLabel}
+            </motion.button>
+
+            <motion.button
+              type="button"
+              onClick={prev}
+              className="mt-3 w-full rounded-2xl border border-zinc-200/80 bg-white/80 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-white active:scale-[0.985]"
+              {...tapV}
+            >
+              Back
+            </motion.button>
+
+            <div className="mt-3 text-center text-xs text-zinc-600">
+              Your gateway to MAJUU.
+            </div>
+          </div>
         </div>
+
+        <div className="h-6" />
       </div>
     </div>
   );

@@ -54,8 +54,7 @@ function cleanPaymentMeta(meta) {
   };
 
   // ✅ store null unless there's meaningful data
-  const hasAny =
-    cleaned.status || cleaned.method || cleaned.paidAt > 0 || cleaned.ref;
+  const hasAny = cleaned.status || cleaned.method || cleaned.paidAt > 0 || cleaned.ref;
 
   return hasAny ? cleaned : null;
 }
@@ -93,14 +92,14 @@ export async function createServiceRequest(payload) {
 
   const ref = collection(db, "serviceRequests");
 
-  const requestType = cleanRequestType(payload.requestType);
+  const requestType = cleanRequestType(payload?.requestType);
   const isSingle = requestType === "single";
   const isFull = requestType === "full";
 
   const cleanMissingItems = isFull
     ? Array.from(
         new Set(
-          (Array.isArray(payload.missingItems) ? payload.missingItems : [])
+          (Array.isArray(payload?.missingItems) ? payload.missingItems : [])
             .map((x) => cleanStr(x, 80))
             .filter(Boolean)
         )
@@ -108,12 +107,12 @@ export async function createServiceRequest(payload) {
     : [];
 
   const cleanServiceName = isSingle
-    ? cleanStr(payload.serviceName, 80)
+    ? cleanStr(payload?.serviceName, 80)
     : isFull
-    ? cleanStr(payload.serviceName || "Full Package", 80)
+    ? cleanStr(payload?.serviceName || "Full Package", 80)
     : "";
 
-  const parentRequestId = cleanStr(payload.parentRequestId, 64);
+  const parentRequestId = cleanStr(payload?.parentRequestId, 64);
 
   const paid = Boolean(payload?.paid);
   const paymentMetaRaw = cleanPaymentMeta(payload?.paymentMeta);
@@ -124,19 +123,19 @@ export async function createServiceRequest(payload) {
   const clean = {
     uid: user.uid,
     // prefer auth email (more trustworthy), fallback to payload
-    email: cleanStr(user.email || payload.email, 120),
+    email: cleanStr(user.email || payload?.email, 120),
 
-    track: cleanTrack(payload.track),
-    country: cleanStr(payload.country, 80),
+    track: cleanTrack(payload?.track),
+    country: cleanStr(payload?.country, 80),
 
     requestType,
     serviceName: cleanServiceName,
 
-    name: cleanStr(payload.name, 120),
-    phone: cleanStr(payload.phone, 40),
-    note: cleanStr(payload.note, 1500),
+    name: cleanStr(payload?.name, 120),
+    phone: cleanStr(payload?.phone, 40),
+    note: cleanStr(payload?.note, 1500),
 
-    city: cleanStr(payload.city, 80),
+    city: cleanStr(payload?.city, 80),
 
     missingItems: cleanMissingItems,
     parentRequestId: parentRequestId || "",

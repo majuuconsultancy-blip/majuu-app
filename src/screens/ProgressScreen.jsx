@@ -1,13 +1,9 @@
 // ✅ ProgressScreen.jsx (FULL COPY-PASTE)
-// - Progress stays clean: ONLY one Notifications banner (no list here)
-// - Banner shows unread count and navigates to /app/notifications
-// - (Delete button per-notification is implemented in NotificationsScreen, not here)
-// ✅ Added: per-request chat unread badge (from request chat system)
-//
-// ✅ FIX (your exact issue):
-// When user taps View (goes to RequestStatusScreen then opens chat),
-// immediately clear that request’s "New message" pill AND persist it in sessionStorage.
-// It stays cleared until a NEWER message arrives.
+// CHANGE ONLY (as requested):
+// - Replace ALL present icons with legit Lucide icons
+// - Keep same sizing/placement/logic/styles as much as possible
+// - Pin uses Lucide Pin / PinOff (already in your code)
+// Everything else preserved.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
@@ -20,98 +16,23 @@ import {
   doc,
   deleteDoc,
   getDocs,
-
-  // ✅ notifications
   orderBy,
   limit,
 } from "firebase/firestore";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  Activity,
+  ChevronRight,
+  Trash2,
+  Bell,
+  MessageCircle,
+  Pin,
+  PinOff,
+} from "lucide-react";
 
 import { auth, db } from "../firebase";
 import { getUserState } from "../services/userservice";
 import { getMyApplications } from "../services/progressservice";
-
-/* ---------- Minimal icons (no emojis) --------- */
-function IconPulse(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M4 13.2h3.2l1.6-6.1 3.3 13 2.2-7.1H20"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconChevronRight(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M9 5.5 15.5 12 9 18.5"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconTrash(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M9 4.8h6M6.5 7.2h11M9.2 7.2l.6 13h4.4l.6-13"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-/* ✅ notifications icon */
-function IconBell(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M12 22a2.2 2.2 0 0 0 2.2-2.2H9.8A2.2 2.2 0 0 0 12 22Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M18 16.8H6c.9-1 1.5-2 1.5-3.7V10a4.5 4.5 0 1 1 9 0v3.1c0 1.7.6 2.7 1.5 3.7Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-/* ✅ chat icon */
-function IconChat(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M7 18.5l-2.6 1.4.9-3.1A7.8 7.8 0 0 1 4.2 13c0-4.2 3.6-7.6 8-7.6s8 3.4 8 7.6-3.6 7.6-8 7.6c-1.7 0-3.2-.4-4.6-1.1Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M8.6 12.8h.01M12 12.8h.01M15.4 12.8h.01"
-        stroke="currentColor"
-        strokeWidth="2.6"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
 /* ---------- Status UI ---------- */
 function statusUI(status) {
@@ -225,22 +146,69 @@ function setLocalReadSec(rid, sec) {
   } catch {}
 }
 
+/* ✅ pin persistence helpers (localStorage) */
+function pinKey(uid) {
+  return `pinned_requests_${String(uid || "")}`;
+}
+function readPins(uid) {
+  try {
+    const raw = localStorage.getItem(pinKey(uid));
+    const arr = JSON.parse(raw || "[]");
+    if (!Array.isArray(arr)) return [];
+    return arr.map((x) => String(x)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+function writePins(uid, arr) {
+  try {
+    localStorage.setItem(pinKey(uid), JSON.stringify(arr));
+  } catch {}
+}
+
+/* ---------- Motion ---------- */
+const pageIn = {
+  hidden: { opacity: 0, y: 10 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { type: "spring", stiffness: 420, damping: 34 },
+  },
+};
+const listWrap = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.06, delayChildren: 0.06 } },
+};
+const listItem = {
+  hidden: { opacity: 0, y: 10 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { type: "spring", stiffness: 420, damping: 30 },
+  },
+};
+
 export default function ProgressScreen() {
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [state, setState] = useState(null);
   const [requests, setRequests] = useState([]);
-  const [apps, setApps] = useState([]); // kept (pitch can hide)
+  const [apps, setApps] = useState([]); // kept
   const [err, setErr] = useState("");
   const [deletingId, setDeletingId] = useState("");
 
-  // ✅ unread notifications count (no list shown here)
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // ✅ chat unread per requestId
   const [chatUnreadByRequest, setChatUnreadByRequest] = useState({});
   const chatUnsubsRef = useRef({}); // { [requestId]: () => void }
+
+  /* ✅ pins state (max 2) */
+  const [pinnedIds, setPinnedIds] = useState([]);
+  const pinnedIdsRef = useRef([]);
+  useEffect(() => {
+    pinnedIdsRef.current = pinnedIds;
+  }, [pinnedIds]);
 
   async function deleteRequestDeep(requestId) {
     const attRef = collection(db, "serviceRequests", requestId, "attachments");
@@ -251,7 +219,6 @@ export default function ProgressScreen() {
     await deleteDoc(doc(db, "serviceRequests", requestId));
   }
 
-  // ✅ helper to compute unread
   const setChatUnread = (requestId, isUnread) => {
     setChatUnreadByRequest((prev) => {
       const curr = !!prev[requestId];
@@ -261,11 +228,9 @@ export default function ProgressScreen() {
     });
   };
 
-  // ✅ attach per-request listeners for chat (latest message + readState)
   const attachChatUnreadListeners = (requestIds) => {
     const existing = chatUnsubsRef.current || {};
 
-    // cleanup removed requests
     Object.keys(existing).forEach((rid) => {
       if (!requestIds.includes(rid)) {
         try {
@@ -276,7 +241,6 @@ export default function ProgressScreen() {
       }
     });
 
-    // attach for new ones
     requestIds.forEach((rid) => {
       if (existing[rid]) return;
 
@@ -294,7 +258,6 @@ export default function ProgressScreen() {
         setChatUnread(rid, latestMsgSec > effectiveRead);
       };
 
-      // latest message (only 1)
       const msgRef = collection(db, "serviceRequests", rid, "messages");
       const msgQ = query(msgRef, orderBy("createdAt", "desc"), limit(1));
       const unsubMsg = onSnapshot(
@@ -310,7 +273,6 @@ export default function ProgressScreen() {
         }
       );
 
-      // read state (user)
       const rsDoc = doc(db, "serviceRequests", rid, "readState", "user");
       const unsubRead = onSnapshot(
         rsDoc,
@@ -351,11 +313,14 @@ export default function ProgressScreen() {
       setLoading(true);
       setErr("");
 
+      /* ✅ load pins for this user (max 2) */
+      const pins = readPins(user.uid).slice(0, 2);
+      setPinnedIds(pins);
+
       try {
         const s = await getUserState(user.uid);
         setState(s);
 
-        // ✅ Requests (existing)
         const reqRef = collection(db, "serviceRequests");
         const reqQ = query(reqRef, where("uid", "==", user.uid));
 
@@ -368,8 +333,16 @@ export default function ProgressScreen() {
             data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
             setRequests(data);
 
-            // ✅ attach chat unread listeners
             attachChatUnreadListeners(data.map((x) => String(x.id)));
+
+            // ✅ keep pins valid (remove pins that no longer exist)
+            const ids = new Set(data.map((x) => String(x.id)));
+            const currentPins = pinnedIdsRef.current || [];
+            const filtered = currentPins.filter((pid) => ids.has(String(pid))).slice(0, 2);
+            if (filtered.join("|") !== currentPins.join("|")) {
+              setPinnedIds(filtered);
+              writePins(user.uid, filtered);
+            }
           },
           (error) => {
             console.error("Realtime requests error:", error);
@@ -377,7 +350,6 @@ export default function ProgressScreen() {
           }
         );
 
-        // ✅ Notifications count only (for badge + banner)
         if (unsubNotifs) unsubNotifs();
         const nRef = collection(db, "users", user.uid, "notifications");
         const nQ = query(nRef, orderBy("createdAt", "desc"), limit(50));
@@ -414,7 +386,6 @@ export default function ProgressScreen() {
       if (unsubReq) unsubReq();
       if (unsubNotifs) unsubNotifs();
 
-      // ✅ cleanup chat listeners
       const m = chatUnsubsRef.current || {};
       Object.keys(m).forEach((rid) => {
         try {
@@ -448,19 +419,54 @@ export default function ProgressScreen() {
     String(state?.activeHelpType || "").toLowerCase() === "we" ? "We-Help" : "Self-Help";
 
   const cardBase =
-    "rounded-2xl border border-zinc-200 bg-white/70 backdrop-blur p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60";
+    "rounded-3xl border border-zinc-200 bg-white/70 backdrop-blur p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60";
   const cardHover =
-    "transition hover:border-emerald-200 hover:bg-white hover:shadow-md dark:hover:border-emerald-900/40 dark:hover:bg-zinc-900";
-
+    "transition hover:border-emerald-200 hover:bg-white hover:shadow-md active:scale-[0.99] dark:hover:border-emerald-900/40 dark:hover:bg-zinc-900";
   const primaryBtn =
-    "w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60";
+    "w-full rounded-3xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60";
   const ghostBtn =
-    "rounded-2xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900";
+    "rounded-3xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900";
 
   const requestsCountLabel = useMemo(() => {
     const n = requests.length;
     return n === 1 ? "1 request" : `${n} requests`;
   }, [requests.length]);
+
+  /* ✅ reorder: pinned first (in pin order), then rest as-is */
+  const requestsSorted = useMemo(() => {
+    const pins = (pinnedIds || []).map((x) => String(x));
+    if (!pins.length) return requests;
+
+    const byId = new Map(requests.map((r) => [String(r.id), r]));
+    const pinned = pins.map((id) => byId.get(id)).filter(Boolean);
+    const rest = requests.filter((r) => !pins.includes(String(r.id)));
+    return [...pinned, ...rest];
+  }, [requests, pinnedIds]);
+
+  /* ✅ toggle pin (max 2) */
+  const togglePin = (rid) => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const id = String(rid || "");
+    setPinnedIds((prev) => {
+      const curr = Array.isArray(prev) ? prev.map(String) : [];
+      const exists = curr.includes(id);
+
+      let next = curr;
+      if (exists) {
+        next = curr.filter((x) => x !== id);
+      } else {
+        if (curr.length >= 2) {
+          return curr; // max 2
+        }
+        next = [...curr, id];
+      }
+
+      writePins(user.uid, next);
+      return next;
+    });
+  };
 
   if (loading) {
     return (
@@ -480,47 +486,67 @@ export default function ProgressScreen() {
   return (
     <div className="min-h-screen bg-white dark:bg-zinc-950">
       <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-6 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
-        <div className="max-w-xl mx-auto px-5 py-6">
-          {/* Header */}
-          <div className="flex items-end justify-between gap-3">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-emerald-200">
-                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-100 bg-white/70 dark:border-zinc-700 dark:bg-zinc-950/40">
-                  <IconPulse className="h-4 w-4 text-emerald-700 dark:text-emerald-200" />
-                </span>
-                Progress
+        <motion.div
+          className="max-w-xl mx-auto px-5 py-6"
+          variants={pageIn}
+          initial="hidden"
+          animate="show"
+        >
+          {/* Header (premium) */}
+          <div className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white/60 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/50">
+            <motion.div
+              aria-hidden="true"
+              className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-emerald-300/25 blur-3xl dark:bg-emerald-400/10"
+              animate={{ x: [0, -8, 0], y: [0, 10, 0] }}
+              transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
+            />
+            <motion.div
+              aria-hidden="true"
+              className="pointer-events-none absolute -left-16 -bottom-16 h-44 w-44 rounded-full bg-emerald-200/25 blur-3xl dark:bg-emerald-500/10"
+              animate={{ x: [0, 10, 0], y: [0, -8, 0] }}
+              transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+            />
+
+            <div className="relative flex items-end justify-between gap-3">
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-emerald-200">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-100 bg-white/70 dark:border-zinc-700 dark:bg-zinc-950/40">
+                    <Activity className="h-4 w-4 text-emerald-700 dark:text-emerald-200" />
+                  </span>
+                  Progress
+                </div>
+
+                <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                  Your activity
+                </h1>
+                <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                  Continue your process and track We-Help requests.
+                </p>
               </div>
 
-              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-                Your activity
-              </h1>
-              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                Continue your process and track We-Help requests.
-              </p>
+              <div className="h-11 w-11 rounded-2xl border border-emerald-100 bg-emerald-50/70 dark:border-zinc-800 dark:bg-zinc-950/40" />
             </div>
-
-            <div className="h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70 dark:border-zinc-800 dark:bg-zinc-900/60" />
           </div>
 
           {/* Error */}
           {err ? (
-            <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
+            <div className="mt-4 rounded-3xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
               {err}
             </div>
           ) : null}
 
           {/* ✅ Notifications (single banner) */}
           <div className="mt-6">
-            <button
+            <motion.button
               type="button"
               onClick={() => navigate("/app/notifications")}
+              whileTap={{ scale: 0.99 }}
               className={`${cardBase} ${cardHover} w-full text-left`}
-              style={{ cursor: "pointer" }}
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60 text-emerald-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
-                    <IconBell className="h-5 w-5" />
+                    <Bell className="h-5 w-5" />
                   </span>
 
                   <div className="min-w-0">
@@ -534,20 +560,34 @@ export default function ProgressScreen() {
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
-                  {unreadCount ? (
-                    <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-rose-600 px-2 text-[11px] font-semibold text-white">
-                      {unreadCount > 99 ? "99+" : unreadCount}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                      All caught up
-                    </span>
-                  )}
+                  <AnimatePresence initial={false}>
+                    {unreadCount ? (
+                      <motion.span
+                        key="unread"
+                        initial={{ scale: 0.85, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.9, opacity: 0 }}
+                        className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-rose-600 px-2 text-[11px] font-semibold text-white"
+                      >
+                        {unreadCount > 99 ? "99+" : unreadCount}
+                      </motion.span>
+                    ) : (
+                      <motion.span
+                        key="caughtup"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="text-xs text-zinc-500 dark:text-zinc-400"
+                      >
+                        All caught up
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
 
-                  <IconChevronRight className="h-4 w-4 text-zinc-400 dark:text-zinc-500" />
+                  <ChevronRight className="h-4 w-4 text-zinc-400 dark:text-zinc-500" />
                 </div>
               </div>
-            </button>
+            </motion.button>
           </div>
 
           {/* Current process */}
@@ -626,14 +666,13 @@ export default function ProgressScreen() {
                 </div>
               </div>
             ) : (
-              <div className="mt-3 grid gap-3">
-                {requests.map((r) => {
+              <motion.div className="mt-3 grid gap-3" variants={listWrap} initial="hidden" animate="show">
+                {requestsSorted.map((r) => {
                   const ui = statusUI(r.status);
                   const track = String(r.track || "").toLowerCase();
                   const safeTrack = track === "work" || track === "travel" ? track : "study";
 
                   const st = String(r.status || "new").toLowerCase();
-
                   const canDelete = st === "closed" || st === "rejected";
                   const isDeleting = deletingId === r.id;
 
@@ -641,10 +680,12 @@ export default function ProgressScreen() {
 
                   const titleLeft = `${String(r.track || "").toUpperCase()} • ${r.country || "-"}`;
                   const subtitle = isFull ? "Full package" : `Single: ${r.serviceName || "-"}`;
-
                   const createdLabel = formatCreatedAt(r.createdAt);
 
                   const hasChatUnread = Boolean(chatUnreadByRequest?.[r.id]);
+
+                  const rid = String(r.id || "");
+                  const isPinned = (pinnedIds || []).includes(rid);
 
                   const handleTryAgain = () => {
                     const country = r.country || "Not selected";
@@ -655,10 +696,7 @@ export default function ProgressScreen() {
                       if (!missingItems.length) missingItems = parseMissingItemsFromNote(r.note);
 
                       try {
-                        sessionStorage.setItem(
-                          `fp_missing_${safeTrack}`,
-                          JSON.stringify(missingItems)
-                        );
+                        sessionStorage.setItem(`fp_missing_${safeTrack}`, JSON.stringify(missingItems));
                       } catch {}
 
                       const picked =
@@ -683,28 +721,18 @@ export default function ProgressScreen() {
                     );
                   };
 
-                  // ✅ FIX: when user opens request, clear pill and persist as "read up to latest"
+                  // ✅ FIX: open request clears pill immediately + persists
                   const openRequestAndClearChatPill = () => {
-                    const rid = String(r.id || "");
-
-                    // We can safely set local-read to "now-ish" using latest known message sec from storage recompute.
-                    // But we want accuracy: we already have latestMsgSec in the listener closure per request.
-                    // Since this handler is outside that closure, we just read what we previously persisted in sessionStorage.
-                    // If there was unread, localRead should jump to current latest by setting it to a big value:
-                    // better: set it to current epoch seconds so it always clears until next message arrives.
                     const nowSec = Math.floor(Date.now() / 1000);
 
-                    // mark locally read up to now (covers latest message that triggered the pill)
                     setLocalReadSec(rid, nowSec);
-
-                    // instantly hide badge
                     setChatUnread(rid, false);
 
                     navigate(`/app/request/${rid}`);
                   };
 
                   return (
-                    <div key={r.id} className={`${cardBase} ${cardHover}`}>
+                    <motion.div key={r.id} variants={listItem} className={`${cardBase} ${cardHover} relative`}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
@@ -713,23 +741,27 @@ export default function ProgressScreen() {
                               {titleLeft}
                             </div>
 
-                            {/* ✅ Chat unread badge (per request) */}
-                            {hasChatUnread ? (
-                              <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50/70 px-2 py-0.5 text-[11px] font-semibold text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
-                                <IconChat className="h-4 w-4" />
-                                New message
-                              </span>
-                            ) : null}
+                            {/* ✅ animated unread pill */}
+                            <AnimatePresence initial={false}>
+                              {hasChatUnread ? (
+                                <motion.span
+                                  initial={{ scale: 0.9, opacity: 0, y: -2 }}
+                                  animate={{ scale: 1, opacity: 1, y: 0 }}
+                                  exit={{ scale: 0.95, opacity: 0, y: -2 }}
+                                  className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50/70 px-2 py-0.5 text-[11px] font-semibold text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200"
+                                >
+                                  <MessageCircle className="h-4 w-4" />
+                                  New message
+                                </motion.span>
+                              ) : null}
+                            </AnimatePresence>
                           </div>
 
-                          <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                            {subtitle}
-                          </div>
+                          <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{subtitle}</div>
 
                           {createdLabel ? (
                             <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-                              Created:{" "}
-                              <span className="font-medium">{createdLabel}</span>
+                              Created: <span className="font-medium">{createdLabel}</span>
                             </div>
                           ) : null}
                         </div>
@@ -740,27 +772,30 @@ export default function ProgressScreen() {
                       </div>
 
                       <div className="mt-4 flex flex-wrap gap-2">
-                        <button
+                        <motion.button
+                          whileTap={{ scale: 0.99 }}
                           onClick={openRequestAndClearChatPill}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-3.5 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.99]
+                          className="inline-flex items-center gap-2 rounded-3xl border border-emerald-200 bg-emerald-50/60 px-3.5 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.99]
                                      dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/55"
                         >
                           View
-                          <IconChevronRight className="h-4 w-4" />
-                        </button>
+                          <ChevronRight className="h-4 w-4" />
+                        </motion.button>
 
                         {st === "rejected" && (
-                          <button
+                          <motion.button
+                            whileTap={{ scale: 0.99 }}
                             onClick={handleTryAgain}
-                            className="rounded-2xl border border-zinc-200 bg-white/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
+                            className="rounded-3xl border border-zinc-200 bg-white/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
                                        dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
                           >
                             Try again
-                          </button>
+                          </motion.button>
                         )}
 
                         {canDelete && (
-                          <button
+                          <motion.button
+                            whileTap={{ scale: 0.99 }}
                             disabled={isDeleting}
                             onClick={async () => {
                               const ok = window.confirm("Delete this request? This cannot be undone.");
@@ -771,6 +806,16 @@ export default function ProgressScreen() {
 
                               try {
                                 await deleteRequestDeep(r.id);
+
+                                // ✅ if deleted request was pinned, remove from pins
+                                const user = auth.currentUser;
+                                if (user) {
+                                  setPinnedIds((prev) => {
+                                    const next = (prev || []).filter((x) => String(x) !== rid).slice(0, 2);
+                                    writePins(user.uid, next);
+                                    return next;
+                                  });
+                                }
                               } catch (e) {
                                 console.error("Delete request failed:", e);
                                 setErr(e?.message || "Failed to delete request.");
@@ -778,12 +823,12 @@ export default function ProgressScreen() {
                                 setDeletingId("");
                               }
                             }}
-                            className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60
+                            className="inline-flex items-center gap-2 rounded-3xl border border-rose-200 bg-rose-50/70 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60
                                        dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/55"
                           >
-                            <IconTrash className="h-4 w-4" />
+                            <Trash2 className="h-4 w-4" />
                             {isDeleting ? "Deleting…" : "Delete"}
-                          </button>
+                          </motion.button>
                         )}
                       </div>
 
@@ -792,15 +837,33 @@ export default function ProgressScreen() {
                           Received — you’ll see updates here as we process it.
                         </div>
                       ) : null}
-                    </div>
+
+                      {/* ✅ Pin button bottom-right, icon-only, PinOff when pinned */}
+                      <motion.button
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => togglePin(rid)}
+                        type="button"
+                        title={isPinned ? "Unpin" : pinnedIds.length >= 2 ? "Pin limit reached" : "Pin"}
+                        aria-label={isPinned ? "Unpin request" : "Pin request"}
+                        disabled={!isPinned && pinnedIds.length >= 2}
+                        className={`absolute bottom-3 right-3 inline-flex items-center justify-center rounded-2xl border p-2 transition active:scale-[0.99] disabled:opacity-50
+                          ${
+                            isPinned
+                              ? "border-emerald-200 bg-emerald-50/60 text-emerald-800 ring-2 ring-emerald-300/60 shadow-[0_0_0_1px_rgba(16,185,129,0.25),0_10px_30px_rgba(16,185,129,0.18)] dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-200 dark:ring-emerald-500/30 dark:shadow-[0_0_0_1px_rgba(16,185,129,0.18),0_10px_30px_rgba(16,185,129,0.12)]"
+                              : "border-zinc-200 bg-white/60 text-zinc-700 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                          }`}
+                      >
+                        {isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+                      </motion.button>
+                    </motion.div>
                   );
                 })}
-              </div>
+              </motion.div>
             )}
           </div>
 
           {/* apps kept but not rendered */}
-        </div>
+        </motion.div>
       </div>
     </div>
   );

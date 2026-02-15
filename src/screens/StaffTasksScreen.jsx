@@ -1,6 +1,11 @@
 // ✅ StaffTasksScreen.jsx (FULL COPY-PASTE)
-// FIX: Back button should ALWAYS go to "/dashboard" (not navigate(-1))
-// Everything else unchanged.
+// Polishes added (UI only — backend untouched):
+// - ✅ Apple-ish entrance animation (fade + lift)
+// - ✅ Sticky top header (Back + Logout stay visible while scrolling)
+// - ✅ “Floaty” task cards (soft shadow + hover lift)
+// - ✅ Cleaner background gradient + subtle divider line
+// - ✅ Search input gets smoother focus ring + backdrop blur
+// - ✅ Back button ALWAYS goes to "/dashboard" (kept)
 
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -130,6 +135,13 @@ export default function StaffTasksScreen() {
   const [requestsMap, setRequestsMap] = useState({});
   const [uid, setUid] = useState("");
   const [busy, setBusy] = useState("");
+
+  // ✅ Apple-ish entrance animation (CSS only)
+  const [enter, setEnter] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setEnter(true), 10);
+    return () => clearTimeout(t);
+  }, []);
 
   // keep URL state in sync (Back button friendly)
   useEffect(() => {
@@ -264,24 +276,34 @@ export default function StaffTasksScreen() {
   const tabBtnOn =
     "border-emerald-200 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700";
   const tabBtnOff =
-    "border-zinc-200 bg-white/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60";
+    "border-zinc-200 bg-white/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900";
 
   const activeLabel = useMemo(() => {
     return TABS.find((t) => t.key === tab)?.label || "New";
   }, [tab]);
 
+  const softBg =
+    "bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
+  const enterWrap =
+    "transition duration-500 ease-out will-change-transform will-change-opacity";
+  const enterCls = enter ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2";
+
+  const floatCard =
+    "rounded-3xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur transition duration-300 ease-out hover:-translate-y-[2px] hover:shadow-md hover:border-emerald-200 active:translate-y-0 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/60";
+
   return (
-    <div className="min-h-screen bg-white dark:bg-zinc-950">
-      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-6 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
-        <div className="max-w-xl mx-auto px-5 py-6">
+    <div className={`min-h-screen ${softBg}`}>
+      <div className={`max-w-xl mx-auto px-5 py-6 pb-10 ${enterWrap} ${enterCls}`}>
+        {/* Sticky top bar */}
+        <div className="sticky top-0 z-10 -mx-5 px-5 pb-3 pt-2 backdrop-blur supports-[backdrop-filter]:bg-white/50 dark:supports-[backdrop-filter]:bg-zinc-950/40">
           {/* Top row: Back + Logout */}
           <div className="flex items-start justify-between gap-3">
             <div>
               <button
                 type="button"
                 onClick={() => navigate("/dashboard", { replace: true })}
-                className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/60 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
-                           dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100"
+                className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
+                           dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
               >
                 <IconChevronLeft className="h-4 w-4" />
                 Back
@@ -300,8 +322,8 @@ export default function StaffTasksScreen() {
               type="button"
               onClick={doLogout}
               disabled={busy === "logout" || !uid}
-              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-rose-200 hover:bg-rose-50/60 active:scale-[0.99] disabled:opacity-60
-                         dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100"
+              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-rose-200 hover:bg-rose-50/60 active:scale-[0.99] disabled:opacity-60
+                         dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
               title="Logout"
             >
               <IconLogout className="h-5 w-5" />
@@ -309,146 +331,140 @@ export default function StaffTasksScreen() {
             </button>
           </div>
 
-          {err ? (
-            <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
-              {err}
-            </div>
-          ) : null}
-
-          {/* Tabs */}
-          <div className="mt-6 flex flex-wrap gap-2">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`${tabBtnBase} ${tab === t.key ? tabBtnOn : tabBtnOff}`}
-                type="button"
-              >
-                {t.label}
-                <span className="ml-2 rounded-full border border-zinc-200 bg-white/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700">
-                  {t.key === "new"
-                    ? counts.new
-                    : t.key === "ongoing"
-                    ? counts.ongoing
-                    : counts.done}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          {/* Search + counters */}
-          <div className="mt-5">
-            <label className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Search
-            </label>
-            <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2.5 shadow-sm backdrop-blur focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
-              <IconSearch className="h-5 w-5 text-zinc-500" />
-              <input
-                className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
-                placeholder="Track, country, applicant, service, ID…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
-            <div className="mt-2 flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-              <span>
-                Showing{" "}
-                <span className="font-semibold text-zinc-700 dark:text-zinc-200">
-                  {filtered.length}
-                </span>{" "}
-                in <span className="font-semibold">{activeLabel}</span>
-              </span>
-
-              <span className="rounded-full border border-emerald-100 bg-emerald-50/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
-                Tab: {activeLabel}
-              </span>
-            </div>
-          </div>
-
-          {/* States */}
-          {loading ? (
-            <div className="mt-6 rounded-2xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur">
-              Loading…
-            </div>
-          ) : tasks.length === 0 ? (
-            <div className="mt-6 rounded-2xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur">
-              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                No tasks assigned
-              </div>
-              <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                Wait for assignments from admin.
-              </div>
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="mt-6 rounded-2xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur">
-              No requests found in this tab.
-            </div>
-          ) : (
-            <div className="mt-6 grid gap-3">
-              {filtered.map(({ task, rid, req, staffStatus }) => {
-                const tp = taskPillByStaffStatus(staffStatus);
-                const rp = recPill(req?.staffDecision);
-
-                const title = req
-                  ? `${String(req.track || "").toUpperCase()} • ${req.country || "-"}`
-                  : `Request • ${rid}`;
-
-                const sub = req
-                  ? String(req.requestType || "").toLowerCase() === "full"
-                    ? "Full Package"
-                    : `Single: ${req.serviceName || req.requestType || "-"}`
-                  : "Loading request details…";
-
-                const sNorm = String(req?.staffStatus || "assigned").toLowerCase();
-                const goTo =
-                  sNorm === "in_progress" || sNorm === "done"
-                    ? `/staff/request/${rid}`
-                    : `/staff/request/${rid}/start`;
-
-                return (
-                  <button
-                    key={task.id}
-                    type="button"
-                    onClick={() => navigate(goTo)}
-                    className="w-full text-left rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-white hover:shadow-md active:scale-[0.99]"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                          {title}
-                        </div>
-                        <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                          {sub}
-                        </div>
-
-                        {rp ? (
-                          <div className="mt-2">
-                            <span
-                              className={`inline-flex rounded-full px-2 py-0.5 text-[10px] leading-none font-semibold ${rp.cls}`}
-                            >
-                              {rp.label}
-                            </span>
-                          </div>
-                        ) : null}
-
-                        <div className="mt-2 text-[11px] text-zinc-500">
-                          ID: <span className="font-mono">{rid}</span>
-                        </div>
-                      </div>
-
-                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${tp.cls}`}>
-                        {tp.label}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="h-6" />
+          {/* subtle divider */}
+          <div className="mt-4 h-px w-full bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent dark:via-zinc-700/70" />
         </div>
+
+        {err ? (
+          <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
+            {err}
+          </div>
+        ) : null}
+
+        {/* Tabs */}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`${tabBtnBase} ${tab === t.key ? tabBtnOn : tabBtnOff}`}
+              type="button"
+            >
+              {t.label}
+              <span className="ml-2 rounded-full border border-zinc-200 bg-white/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">
+                {t.key === "new" ? counts.new : t.key === "ongoing" ? counts.ongoing : counts.done}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Search + counters */}
+        <div className="mt-5">
+          <label className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Search
+          </label>
+          <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2.5 shadow-sm backdrop-blur transition focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100/80
+                          dark:border-zinc-800 dark:bg-zinc-900/60 dark:focus-within:ring-emerald-300/20">
+            <IconSearch className="h-5 w-5 text-zinc-500" />
+            <input
+              className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
+              placeholder="Track, country, applicant, service, ID…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          <div className="mt-2 flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+            <span>
+              Showing{" "}
+              <span className="font-semibold text-zinc-700 dark:text-zinc-200">
+                {filtered.length}
+              </span>{" "}
+              in <span className="font-semibold">{activeLabel}</span>
+            </span>
+
+            <span className="rounded-full border border-emerald-100 bg-emerald-50/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
+              Tab: {activeLabel}
+            </span>
+          </div>
+        </div>
+
+        {/* States */}
+        {loading ? (
+          <div className="mt-6 rounded-3xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
+            Loading…
+          </div>
+        ) : tasks.length === 0 ? (
+          <div className="mt-6 rounded-3xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
+            <div className="font-semibold text-zinc-900 dark:text-zinc-100">No tasks assigned</div>
+            <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              Wait for assignments from admin.
+            </div>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="mt-6 rounded-3xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
+            No requests found in this tab.
+          </div>
+        ) : (
+          <div className="mt-6 grid gap-3">
+            {filtered.map(({ task, rid, req, staffStatus }) => {
+              const tp = taskPillByStaffStatus(staffStatus);
+              const rp = recPill(req?.staffDecision);
+
+              const title = req
+                ? `${String(req.track || "").toUpperCase()} • ${req.country || "-"}`
+                : `Request • ${rid}`;
+
+              const sub = req
+                ? String(req.requestType || "").toLowerCase() === "full"
+                  ? "Full Package"
+                  : `Single: ${req.serviceName || req.requestType || "-"}`
+                : "Loading request details…";
+
+              const sNorm = String(req?.staffStatus || "assigned").toLowerCase();
+              const goTo =
+                sNorm === "in_progress" || sNorm === "done"
+                  ? `/staff/request/${rid}`
+                  : `/staff/request/${rid}/start`;
+
+              return (
+                <button
+                  key={task.id}
+                  type="button"
+                  onClick={() => navigate(goTo)}
+                  className={floatCard}
+                >
+                  <div className="flex items-start justify-between gap-3 p-4">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-zinc-900 dark:text-zinc-100">{title}</div>
+                      <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{sub}</div>
+
+                      {rp ? (
+                        <div className="mt-2">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-0.5 text-[10px] leading-none font-semibold ${rp.cls}`}
+                          >
+                            {rp.label}
+                          </span>
+                        </div>
+                      ) : null}
+
+                      <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+                        ID: <span className="font-mono">{rid}</span>
+                      </div>
+                    </div>
+
+                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${tp.cls}`}>
+                      {tp.label}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="h-6" />
       </div>
     </div>
   );

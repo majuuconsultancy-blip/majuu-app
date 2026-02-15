@@ -1,16 +1,29 @@
+// ✅ FullPackageMissingScreen.jsx (APPLE-LIKE TILES + ICONS + MICRO-ANIMS — FULL COPY-PASTE)
+// What changed (frontend only):
+// - ✅ Interactive “iOS-like” tiles: press scale, hover glow, subtle chevrons
+// - ✅ Matched icons per item (Document, SOP, CV, Interview, Pre-departure, Passport, Visa, IELTS, Funds, Offer, etc.)
+// - ✅ Smooth entrance stagger + progress chip animations (Framer Motion)
+// - ✅ Better hierarchy + “Remaining / Completed” pills + compact progress
+// - ✅ NO backend changes: createServiceRequest payload/logic/gating unchanged
+
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
+import { motion, useReducedMotion } from "framer-motion";
 
 import { auth, db } from "../firebase";
 import RequestModal from "../components/RequestModal";
 import { createServiceRequest } from "../services/requestservice";
-import { getUserState, setActiveProcessDetails, upsertUserContact } from "../services/userservice";
+import {
+  getUserState,
+  setActiveProcessDetails,
+  upsertUserContact,
+} from "../services/userservice";
 import { getMissingProfileFields } from "../utils/profileGuard";
 import { createPendingAttachment } from "../services/attachmentservice";
 
-/* - Minimal icons -  */
+/* ---------------- Icons (minimal, consistent stroke) ---------------- */
 function IconBack(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
@@ -19,6 +32,50 @@ function IconBack(props) {
         stroke="currentColor"
         strokeWidth="1.9"
         strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function IconChevronRight(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M10 7l5 5-5 5"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function IconCheck(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M6 12.5 10 16.5 18 7.8"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function IconLock(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M7.5 11V8.8A4.5 4.5 0 0 1 12 4.3 4.5 4.5 0 0 1 16.5 8.8V11"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M6.5 11h11a2 2 0 0 1 2 2v5.2a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V13a2 2 0 0 1 2-2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
         strokeLinejoin="round"
       />
     </svg>
@@ -48,11 +105,255 @@ function IconSpark(props) {
     </svg>
   );
 }
+function IconDoc(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M8 3.8h6l3 3V20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5.8a2 2 0 0 1 2-2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 3.8V7a2 2 0 0 0 2 2h3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9 11h6M9 14h6M9 17h4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+function IconPen(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M4 20h4l10.5-10.5a2.3 2.3 0 0 0 0-3.2l-.8-.8a2.3 2.3 0 0 0-3.2 0L4 16v4Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13.7 6.3 17.7 10.3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+function IconIdCard(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M4 7.5h16a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7 15.6c.8-1.4 2.1-2.1 3.6-2.1s2.8.7 3.6 2.1"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M10.6 12a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M15.6 10h3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M15.6 13h3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+function IconChat(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M7 18.5 3.8 20V6.8A2.3 2.3 0 0 1 6.1 4.5H18a2.5 2.5 0 0 1 2.5 2.5V14A2.5 2.5 0 0 1 18 16.5H7Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7.5 9.5h8M7.5 12.5h6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+function IconPlane(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M3 13.5l18-7.5-7.5 18-2.2-7.1L3 13.5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M11.3 16.9 21 6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+function IconBriefcase(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M8 7V5.8A1.8 1.8 0 0 1 9.8 4h4.4A1.8 1.8 0 0 1 16 5.8V7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M4 7h16a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M2 12h20"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+function IconBook(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M5.5 4.8h11a2 2 0 0 1 2 2V19a2 2 0 0 0-2-2h-11a2 2 0 0 0-2 2V6.8a2 2 0 0 1 2-2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7.5 8h8M7.5 11h8M7.5 14h6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+function IconShieldCheck(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M12 3.5 19 6.7v6.5c0 4.3-3 8.2-7 9.3-4-1.1-7-5-7-9.3V6.7L12 3.5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m9.3 12.4 1.8 1.8 3.8-4.1"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function IconMoney(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M4 7h16a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 14.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M6 10h0M18 14h0"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/* ---------------- Helpers ---------------- */
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+/* ---------------- Icon mapping for items ---------------- */
+function getItemMeta(item, safeTrack) {
+  const s = String(item || "").toLowerCase();
+
+  // keywords → icon + subtitle
+  if (s.includes("document checklist") || s.includes("checklist"))
+    return { icon: IconDoc, sub: "We’ll confirm what’s needed and what’s missing." };
+
+  if (s.includes("sop") || s.includes("motivation"))
+    return { icon: IconPen, sub: "Draft, improve, and make it convincing." };
+
+  if (s.includes("cv") || s.includes("resume"))
+    return { icon: IconIdCard, sub: "Format + improve for your target country." };
+
+  if (s.includes("interview"))
+    return { icon: IconChat, sub: "Questions, answers, and confidence practice." };
+
+  if (s.includes("pre-departure") || s.includes("pre departure") || s.includes("flight"))
+    return { icon: IconPlane, sub: "Packing, bookings, arrival plan, and tips." };
+
+  if (s.includes("passport"))
+    return { icon: IconBook, sub: "Checklist + guidance for a clean application." };
+
+  if (s.includes("visa"))
+    return { icon: IconShieldCheck, sub: "Forms, requirements, and submission steps." };
+
+  if (s.includes("ielts"))
+    return { icon: IconBook, sub: "Prep plan + resources + practice schedule." };
+
+  if (s.includes("proof of funds") || s.includes("fund"))
+    return { icon: IconMoney, sub: "What to show and how to present it." };
+
+  if (s.includes("offer letter"))
+    return { icon: IconDoc, sub: "Review details and confirm requirements." };
+
+  // fallback by track
+  if (safeTrack === "work") return { icon: IconBriefcase, sub: "Continue this step with our team." };
+  if (safeTrack === "study") return { icon: IconBook, sub: "Continue this step with our team." };
+  return { icon: IconPlane, sub: "Continue this step with our team." };
+}
 
 export default function FullPackageMissingScreen() {
   const navigate = useNavigate();
   const location = useLocation();
   const { track } = useParams();
+  const reduceMotion = useReducedMotion();
 
   const safeTrack = useMemo(() => {
     const t = String(track || "").toLowerCase().trim();
@@ -60,7 +361,6 @@ export default function FullPackageMissingScreen() {
   }, [track]);
 
   const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
-
   const country = params.get("country") || "Not selected";
   const parentRequestId = params.get("parentRequestId") || params.get("parent") || "";
 
@@ -73,6 +373,9 @@ export default function FullPackageMissingScreen() {
     if (safeTrack === "work") return "Work Abroad";
     return "Travel Abroad";
   }, [safeTrack]);
+
+  const headerIcon = safeTrack === "study" ? IconBook : safeTrack === "work" ? IconBriefcase : IconPlane;
+  const HeaderIcon = headerIcon;
 
   const [uid, setUid] = useState(null);
   const [email, setEmail] = useState("");
@@ -176,11 +479,12 @@ export default function FullPackageMissingScreen() {
     setAutoOpened(true);
   }, [autoOpened, shouldAutoOpen, canContinueHere, autoItem, missingItems]);
 
-  const isCompleted = (need) => {
+  const completedList = useMemo(() => {
     const done = parentReq?.completedItems || parentReq?.doneItems || [];
-    if (!Array.isArray(done)) return false;
-    return done.map((x) => String(x)).includes(String(need));
-  };
+    return Array.isArray(done) ? done.map((x) => String(x)) : [];
+  }, [parentReq]);
+
+  const isCompleted = (need) => completedList.includes(String(need));
 
   const openNeed = (need) => {
     if (!canContinueHere) return;
@@ -292,19 +596,60 @@ export default function FullPackageMissingScreen() {
       if (err?.code === "auth/email-not-verified") {
         navigate("/verify-email", { replace: false });
       }
-      // rethrow so RequestModal shows error message
       throw err;
     }
   };
 
+  // progress
+  const totalCount = missingItems.length;
+  const doneCount = useMemo(
+    () => missingItems.filter((x) => isCompleted(x)).length,
+    [missingItems, completedList]
+  );
+  const remainingCount = Math.max(0, totalCount - doneCount);
+  const progressPct = totalCount ? clamp(Math.round((doneCount / totalCount) * 100), 0, 100) : 0;
+
+  const canTapTiles = canContinueHere;
+
+  const chipTrack =
+    safeTrack === "study"
+      ? "border-emerald-200 bg-emerald-50/60 text-emerald-900"
+      : safeTrack === "work"
+        ? "border-sky-200 bg-sky-50/60 text-sky-900"
+        : "border-emerald-200 bg-emerald-50/60 text-emerald-900";
+
   const cardBase =
-    "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur";
+    "rounded-3xl border border-zinc-200/70 bg-white/70 shadow-sm backdrop-blur";
+
   const btnPrimary =
-    "inline-flex items-center justify-center rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]";
+    "inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]";
+
+  // Animations
+  const wrapV = reduceMotion
+    ? {}
+    : {
+        initial: "hidden",
+        animate: "show",
+        variants: {
+          hidden: { opacity: 0 },
+          show: { opacity: 1, transition: { staggerChildren: 0.05 } },
+        },
+      };
+
+  const tileV = reduceMotion
+    ? {}
+    : {
+        variants: {
+          hidden: { opacity: 0, y: 10 },
+          show: { opacity: 1, y: 0, transition: { duration: 0.22, ease: "easeOut" } },
+        },
+        whileTap: { scale: 0.985 },
+      };
 
   return (
     <div className="min-h-screen">
       <div className="px-5 py-6">
+        {/* Back */}
         <button
           onClick={goBack}
           className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800"
@@ -313,20 +658,21 @@ export default function FullPackageMissingScreen() {
           Back
         </button>
 
+        {/* Header */}
         <div className="flex items-end justify-between gap-3">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800">
+            <div className={["inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-extrabold", chipTrack].join(" ")}>
               <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-emerald-100 bg-white/70">
-                <IconSpark className="h-4 w-4 text-emerald-700" />
+                <HeaderIcon className="h-4 w-4 opacity-90" />
               </span>
               Full package • {titleText}
             </div>
 
             <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900">
-              Here’s what is Remaining:
+              Continue your full package
             </h1>
             <p className="mt-1 text-sm text-zinc-600">
-              Select any item below to continue...
+              Tap any tile to continue that step.
             </p>
           </div>
 
@@ -334,18 +680,27 @@ export default function FullPackageMissingScreen() {
         </div>
 
         {parentErr ? (
-          <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+          <div className="mt-4 rounded-3xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
             {parentErr}
           </div>
         ) : null}
 
+        {/* Profile gate */}
         {!canContinueHere ? (
-          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
-            <div className="text-sm font-semibold text-zinc-900">
-              Complete your profile to continue
-            </div>
-            <div className="mt-1 text-sm text-zinc-700">
-              Missing: <span className="font-medium">{missing.join(", ")}</span>
+          <div className="mt-5 rounded-3xl border border-amber-200 bg-amber-50/60 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-extrabold text-zinc-900">
+                  Complete your profile to continue
+                </div>
+                <div className="mt-1 text-sm text-zinc-700">
+                  Missing: <span className="font-semibold">{missing.join(", ")}</span>
+                </div>
+              </div>
+
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-amber-200 bg-white/70 text-amber-800">
+                <IconLock className="h-5 w-5" />
+              </span>
             </div>
 
             <button onClick={goToProfile} className={`${btnPrimary} mt-4 w-full`}>
@@ -354,46 +709,136 @@ export default function FullPackageMissingScreen() {
           </div>
         ) : null}
 
+        {/* Summary / progress */}
         <div className="mt-6 grid gap-3">
           <div className={`${cardBase} p-4`}>
-            <div className="text-sm font-semibold text-zinc-900">Remaining items</div>
-            <div className="mt-1 text-sm text-zinc-600">
-              Country: <span className="font-medium text-zinc-900">{country}</span>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-extrabold text-zinc-900">
+                  Remaining steps
+                </div>
+                <div className="mt-1 text-sm text-zinc-600">
+                  Country:{" "}
+                  <span className="font-semibold text-zinc-900">{country}</span>
+                </div>
+                {parentRequestId ? (
+                  <div className="mt-1 text-[11px] text-zinc-500">
+                    Continuation from request{" "}
+                    <span className="font-semibold">{parentRequestId}</span>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="text-right">
+                <div className="inline-flex items-center gap-2">
+                  <span className="rounded-full border border-zinc-200 bg-white/70 px-2 py-1 text-[11px] font-extrabold text-zinc-700">
+                    Done {doneCount}/{totalCount}
+                  </span>
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-1 text-[11px] font-extrabold text-emerald-900">
+                    {remainingCount} left
+                  </span>
+                </div>
+              </div>
             </div>
 
-            <div className="mt-4 grid gap-2">
-              {missingItems.map((need) => {
-                const done = isCompleted(need);
-                return (
-                  <button
-                    key={need}
-                    onClick={() => openNeed(need)}
-                    disabled={!canContinueHere || done}
-                    className={`w-full rounded-2xl border p-4 text-left transition ${
-                      done
-                        ? "border-zinc-200 bg-zinc-50/60 text-zinc-500"
-                        : "border-zinc-200 bg-white/60 hover:border-emerald-200 hover:bg-white"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="font-semibold">{need}</div>
-                      <div className="text-xs">{done ? "Completed" : "Continue"}</div>
-                    </div>
-                    <div className="mt-1 text-xs text-zinc-500">
-                      You can attach PDFs when submitting.
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-zinc-200/70">
+              <motion.div
+                initial={false}
+                animate={{ width: `${progressPct}%` }}
+                transition={reduceMotion ? { duration: 0 } : { duration: 0.28, ease: "easeOut" }}
+                className="h-full rounded-full bg-emerald-600"
+              />
+            </div>
+
+            <div className="mt-2 text-[11px] text-zinc-500">
+              Tip: Attach PDFs when submitting — it speeds up the review.
             </div>
           </div>
         </div>
 
+        {/* Apple-like tiles */}
+        <motion.div {...wrapV} className="mt-4 grid gap-3">
+          {missingItems.map((need) => {
+            const done = isCompleted(need);
+            const disabled = !canTapTiles || done;
+
+            const meta = getItemMeta(need, safeTrack);
+            const TileIcon = meta.icon;
+
+            return (
+              <motion.button
+                key={need}
+                type="button"
+                onClick={() => openNeed(need)}
+                disabled={disabled}
+                {...tileV}
+                className={[
+                  "w-full text-left rounded-3xl border px-4 py-4 transition",
+                  "shadow-[0_14px_46px_rgba(0,0,0,0.07)] backdrop-blur",
+                  "active:scale-[0.99]",
+                  done
+                    ? "border-zinc-200 bg-zinc-50/60 text-zinc-500"
+                    : "border-zinc-200/70 bg-white/70 hover:bg-white/85 hover:border-emerald-200/70",
+                  disabled && !done ? "opacity-60 cursor-not-allowed" : "",
+                ].join(" ")}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex items-start gap-3">
+                    <span
+                      className={[
+                        "inline-flex h-11 w-11 items-center justify-center rounded-2xl border",
+                        done
+                          ? "border-emerald-200 bg-emerald-50/70 text-emerald-800"
+                          : "border-emerald-100 bg-emerald-50/50 text-emerald-800",
+                      ].join(" ")}
+                    >
+                      {done ? <IconCheck className="h-5 w-5" /> : <TileIcon className="h-5 w-5" />}
+                    </span>
+
+                    <div className="min-w-0">
+                      <div className="truncate text-[15px] font-extrabold text-zinc-900">
+                        {need}
+                      </div>
+                      <div className="mt-1 text-sm text-zinc-600">
+                        {done ? "Completed" : meta.sub}
+                      </div>
+
+                      {!done ? (
+                        <div className="mt-2 inline-flex items-center gap-2">
+                          <span className="rounded-full border border-zinc-200 bg-white/70 px-2 py-1 text-[11px] font-extrabold text-zinc-700">
+                            PDFs allowed
+                          </span>
+                          <span className="rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-1 text-[11px] font-extrabold text-emerald-900">
+                            Continue
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <span
+                    className={[
+                      "shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-extrabold",
+                      done
+                        ? "border-emerald-200 bg-emerald-50/70 text-emerald-900"
+                        : "border-zinc-200 bg-white/70 text-zinc-700",
+                    ].join(" ")}
+                  >
+                    {done ? "Done" : "Open"}
+                    {!done ? <IconChevronRight className="h-4 w-4" /> : null}
+                  </span>
+                </div>
+              </motion.button>
+            );
+          })}
+        </motion.div>
+
+        {/* Modal */}
         <RequestModal
           open={modalOpen}
           onClose={() => setModalOpen(false)}
           onSubmit={submitFullPackage}
-          title="Continue Full Package"
+          title={pickedNeed ? `Continue: ${pickedNeed}` : "Continue Full Package"}
           subtitle={`${titleText} • ${country}`}
           defaultName={defaultName}
           defaultPhone={defaultPhone}

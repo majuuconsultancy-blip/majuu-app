@@ -1,26 +1,22 @@
-// ✅ src/components/StaffRequestChatPanel.jsx
+// ✅ src/components/StaffRequestChatPanel.jsx (FULL COPY-PASTE)
 // Staff Chat (Portal modal, mobile-first, perfect overlay)
-// - Single timeline: published + staff pending
-// - Staff outgoing shows: Pending (amber) OR Rejected (red)
-// - Delivered = when admin approves (message appears in /messages)
-// - If admin hides OR rejects => we show "Rejected" on the pending bubble
-// - Clean input bar: + | input | send
-// - Blur overlay + smooth slide animation
-// - Timestamps + auto-scroll
-// - Marks read when opened
+// ✅ FIXED: file manager picker (no prompt())
+// ✅ FIXED: attach PDF meta like user panel (pickedPdf chip, not auto-send)
+// ✅ FIXED: supports sending BOTH text + pdf as ONE pending "bundle" (sendPendingBundle)
+// ✅ Supports rendering text/pdf/bundle for published + pending.
+// ✅ Marks read when opened.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import {
-  collection,
-  onSnapshot,
-  orderBy,
-  query,
-  where,
-} from "firebase/firestore";
+import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { auth, db } from "../firebase";
-import { sendPendingPdf, sendPendingText, markRequestChatRead } from "../services/chatservice";
+import {
+  sendPendingText,
+  sendPendingPdf,
+  sendPendingBundle,
+  markRequestChatRead,
+} from "../services/chatservice";
 
 /* ---------------- helpers ---------------- */
 function safeStr(x) {
@@ -43,7 +39,14 @@ function formatTime(ts) {
 }
 
 function pickCreatedAt(doc) {
-  return doc?.createdAt || doc?.approvedAt || doc?.editedAt || doc?.rejectedAt || doc?.hiddenAt || null;
+  return (
+    doc?.createdAt ||
+    doc?.approvedAt ||
+    doc?.editedAt ||
+    doc?.rejectedAt ||
+    doc?.hiddenAt ||
+    null
+  );
 }
 
 function roleLabel(role) {
@@ -53,10 +56,51 @@ function roleLabel(role) {
   return "Admin";
 }
 
-function msgPreview(m) {
+/* ✅ Render helper: supports text/pdf/bundle */
+function RenderMessageBody({ m, mine }) {
   const type = String(m?.type || "text").toLowerCase();
-  if (type === "pdf") return `📎 ${m?.pdfMeta?.name || "document.pdf"}`;
-  return safeStr(m?.text || "");
+
+  // pdf-only
+  if (type === "pdf") {
+    return (
+      <div className="grid gap-1">
+        <div className="text-xs font-semibold opacity-90">PDF</div>
+        <div className="text-sm">
+          📎 {m?.pdfMeta?.name || "document.pdf"}
+          {m?.pdfMeta?.size ? (
+            <span className="text-xs opacity-80"> • {m.pdfMeta.size} bytes</span>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  // bundle: show text (if any) + pdf block (if any)
+  if (type === "bundle") {
+    const txt = safeStr(m?.text);
+    const hasPdf = Boolean(m?.pdfMeta?.name);
+
+    return (
+      <div className="grid gap-2">
+        {txt ? <div className="break-words whitespace-pre-wrap">{txt}</div> : null}
+
+        {hasPdf ? (
+          <div className={`${mine ? "bg-white/10" : "bg-zinc-50"} rounded-xl p-2`}>
+            <div className="text-xs font-semibold opacity-90">PDF</div>
+            <div className="text-xs opacity-90">
+              📎 {m?.pdfMeta?.name || "document.pdf"}
+              {m?.pdfMeta?.size ? ` • ${m.pdfMeta.size} bytes` : ""}
+            </div>
+          </div>
+        ) : null}
+
+        {!txt && !hasPdf ? <div className="opacity-70">[Empty bundle]</div> : null}
+      </div>
+    );
+  }
+
+  // text default
+  return <div className="break-words whitespace-pre-wrap">{safeStr(m?.text || "")}</div>;
 }
 
 /* ---------------- icons ---------------- */
@@ -136,10 +180,13 @@ export default function StaffRequestChatPanel({ requestId }) {
   const [pendingMine, setPendingMine] = useState([]); // /pendingMessages (staff only)
 
   const [text, setText] = useState("");
+  const [pickedPdf, setPickedPdf] = useState(null); // { name, size, mime }
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState("");
 
   const threadRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const sendLockRef = useRef(false);
 
   /* ---------- auth (needed to filter staff pending) ---------- */
   useEffect(() => {
@@ -151,7 +198,6 @@ export default function StaffRequestChatPanel({ requestId }) {
   useEffect(() => {
     if (!rid) return;
 
-    // ✅ approved/published
     const ref = collection(db, "serviceRequests", rid, "messages");
     const qy = query(ref, orderBy("createdAt", "asc"));
 
@@ -173,8 +219,7 @@ export default function StaffRequestChatPanel({ requestId }) {
   useEffect(() => {
     if (!rid || !uid) return;
 
-    // ✅ staff pending (mine) — shows instantly after send
-    // Note: this query usually works without custom index (where + orderBy).
+    // staff pending (mine)
     const ref = collection(db, "serviceRequests", rid, "pendingMessages");
     const qy = query(ref, where("fromUid", "==", uid), orderBy("createdAt", "asc"));
 
@@ -186,7 +231,6 @@ export default function StaffRequestChatPanel({ requestId }) {
       },
       (e) => {
         console.error("staff pending snapshot:", e);
-        // don’t hard-fail the whole chat if this index errors; still show published
         setErr(e?.message || "Failed to load pending messages.");
       }
     );
@@ -231,18 +275,15 @@ export default function StaffRequestChatPanel({ requestId }) {
 
   /* ---------- build a single timeline ---------- */
   const timeline = useMemo(() => {
-    // Any published message that came from approving a pending message will have sourcePendingId
     const approvedPendingIds = new Set(
       visiblePublished.map((m) => safeStr(m?.sourcePendingId)).filter(Boolean)
     );
 
-    // pending mine: show only those NOT approved yet, OR those rejected/hidden
     const pendingItems = pendingMine
       .filter((p) => {
         const st = String(p?.status || "pending").toLowerCase();
         const isRejectedLike = st === "rejected" || st === "hidden";
         const isApproved = approvedPendingIds.has(String(p.id));
-        // If approved, we will show the delivered message from /messages instead (avoid duplicate).
         return isRejectedLike || !isApproved;
       })
       .map((p) => ({
@@ -272,48 +313,74 @@ export default function StaffRequestChatPanel({ requestId }) {
     el.scrollTop = el.scrollHeight;
   }, [open, timeline.length]);
 
+  /* ---------- file picker ---------- */
+  const openPicker = () => fileInputRef.current?.click();
+
+  const onPickFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+
+    setPickedPdf({
+      name: f.name || "document.pdf",
+      size: Number(f.size || 0) || 0,
+      mime: f.type || "application/pdf",
+    });
+
+    // allow picking same file again later
+    e.target.value = "";
+  };
+
+  const canSend = Boolean(safeStr(text) || pickedPdf);
+
   /* ---------- actions ---------- */
   const sendNow = async () => {
     setErr("");
+    if (!rid) return;
+
     const t = safeStr(text);
-    if (!t || !rid) return;
+    const pdf = pickedPdf;
+
+    if (!t && !pdf) return;
+
+    // prevent double send
+    if (sendLockRef.current) return;
+    sendLockRef.current = true;
 
     setSending(true);
     try {
-      await sendPendingText({
-        requestId: rid,
-        fromRole: "staff",
-        toRole: "user",
-        text: t,
-      });
+      // ✅ Best: use bundle when both exist (ONE pending doc)
+      if (pdf && t) {
+        await sendPendingBundle({
+          requestId: rid,
+          fromRole: "staff",
+          toRole: "user",
+          text: t,
+          pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
+        });
+      } else if (pdf) {
+        await sendPendingPdf({
+          requestId: rid,
+          fromRole: "staff",
+          toRole: "user",
+          pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
+        });
+      } else {
+        await sendPendingText({
+          requestId: rid,
+          fromRole: "staff",
+          toRole: "user",
+          text: t,
+        });
+      }
+
       setText("");
-      // ✅ No need to manually push to UI — pending listener will show instantly
+      setPickedPdf(null);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Send failed.");
     } finally {
       setSending(false);
-    }
-  };
-
-  const sendPdfMeta = async () => {
-    setErr("");
-    const name = safeStr(prompt("PDF name (example: passport.pdf)") || "");
-    if (!name || !rid) return;
-
-    setSending(true);
-    try {
-      await sendPendingPdf({
-        requestId: rid,
-        fromRole: "staff",
-        toRole: "user",
-        pdfMeta: { name, size: 0, mime: "application/pdf", note: "" },
-      });
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Send PDF failed.");
-    } finally {
-      setSending(false);
+      sendLockRef.current = false;
     }
   };
 
@@ -325,7 +392,7 @@ export default function StaffRequestChatPanel({ requestId }) {
 
   const modal = (
     <div className="fixed inset-0 z-[9999]">
-      {/* overlay (blur + dim) */}
+      {/* overlay */}
       <button
         type="button"
         className={[
@@ -340,7 +407,7 @@ export default function StaffRequestChatPanel({ requestId }) {
       <div
         className={[
           "absolute inset-x-0 bottom-0 top-0 bg-white flex flex-col",
-          "sm:inset-y-6 sm:left-1/2 sm:h-auto sm:max-h-[85vh] sm:w-[min(500px,92vw)] sm:-translate-x-1/2 sm:rounded-2xl sm:border sm:border-zinc-200",
+          "sm:inset-y-6 sm:left-1/2 sm:h-auto sm:max-h-[85vh] sm:w-[min(520px,92vw)] sm:-translate-x-1/2 sm:rounded-2xl sm:border sm:border-zinc-200",
           "shadow-[0_20px_60px_rgba(0,0,0,0.20)]",
           "transition-transform transition-opacity duration-200",
           mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3",
@@ -372,7 +439,7 @@ export default function StaffRequestChatPanel({ requestId }) {
           </div>
         ) : null}
 
-        {/* messages (ONLY this scrolls) */}
+        {/* messages */}
         <div ref={threadRef} className="flex-1 overflow-y-auto px-4 py-4 bg-zinc-50">
           {timeline.length === 0 ? (
             <div className="text-sm text-zinc-600">No messages yet.</div>
@@ -383,36 +450,30 @@ export default function StaffRequestChatPanel({ requestId }) {
                 const kind = item._kind;
 
                 const fromRole = String(m?.fromRole || "").toLowerCase();
-                const mine = fromRole === "staff"; // staff outgoing on right
+                const mine = fromRole === "staff";
 
                 const time = formatTime(pickCreatedAt(m));
 
-                // pending status for staff outgoing
                 const pendingStatus = String(m?.status || "pending").toLowerCase();
-                const isRejectedLike = pendingStatus === "rejected" || pendingStatus === "hidden";
+                const isRejectedLike =
+                  pendingStatus === "rejected" || pendingStatus === "hidden";
 
                 const bubbleBase = "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm";
                 const bubbleMine = "bg-emerald-600 text-white";
                 const bubbleOther = "bg-white text-zinc-900 border border-zinc-200";
-
                 const bubbleRejected = "bg-rose-50 text-rose-800 border border-rose-200";
 
-                // label row under text
                 let statusChip = null;
                 if (kind === "pending" && mine) {
-                  if (isRejectedLike) {
-                    statusChip = (
-                      <span className="ml-2 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
-                        Rejected
-                      </span>
-                    );
-                  } else {
-                    statusChip = (
-                      <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                        Pending
-                      </span>
-                    );
-                  }
+                  statusChip = isRejectedLike ? (
+                    <span className="ml-2 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+                      Rejected
+                    </span>
+                  ) : (
+                    <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                      Pending
+                    </span>
+                  );
                 }
 
                 const bubbleCls =
@@ -423,11 +484,19 @@ export default function StaffRequestChatPanel({ requestId }) {
                     : bubbleOther;
 
                 return (
-                  <div key={item.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                  <div
+                    key={item.id}
+                    className={`flex ${mine ? "justify-end" : "justify-start"}`}
+                  >
                     <div className={`${bubbleBase} ${bubbleCls}`}>
-                      <div className="break-words whitespace-pre-wrap">{msgPreview(m)}</div>
+                      <RenderMessageBody m={m} mine={mine} />
 
-                      <div className={`mt-1 flex items-center justify-between gap-3 text-[10px] ${mine ? "text-white/70" : "text-zinc-400"}`}>
+                      <div
+                        className={[
+                          "mt-1 flex items-center justify-between gap-3 text-[10px]",
+                          mine ? "text-white/70" : "text-zinc-400",
+                        ].join(" ")}
+                      >
                         <span className="font-semibold">
                           {roleLabel(m.fromRole)} → {roleLabel(m.toRole)}
                           {statusChip}
@@ -443,15 +512,41 @@ export default function StaffRequestChatPanel({ requestId }) {
           <div className="h-2" />
         </div>
 
-        {/* input bar (pinned) */}
+        {/* composer */}
         <div className="border-t border-zinc-200 bg-white p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          {/* hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={onPickFile}
+          />
+
+          {/* picked file chip */}
+          {pickedPdf ? (
+            <div className="mb-2 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs">
+              <span className="font-semibold text-zinc-900">{pickedPdf.name}</span>
+              <span className="text-zinc-500">
+                {pickedPdf.size ? `${pickedPdf.size} bytes` : ""}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPickedPdf(null)}
+                className="ml-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50"
+              >
+                Remove
+              </button>
+            </div>
+          ) : null}
+
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={sendPdfMeta}
+              onClick={openPicker}
               disabled={sending}
               className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
-              title="Attach (PDF meta)"
+              title="Attach PDF"
             >
               <IconPlus className="h-5 w-5" />
             </button>
@@ -461,12 +556,18 @@ export default function StaffRequestChatPanel({ requestId }) {
               onChange={(e) => setText(e.target.value)}
               placeholder="Type a message…"
               className="h-11 w-full rounded-2xl border border-zinc-200 bg-white px-4 text-sm outline-none focus:border-emerald-200"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (!sending && canSend) sendNow();
+                }
+              }}
             />
 
             <button
               type="button"
               onClick={sendNow}
-              disabled={sending || !safeStr(text)}
+              disabled={sending || !canSend}
               className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60 active:scale-[0.99]"
               title="Send"
             >
@@ -483,7 +584,7 @@ export default function StaffRequestChatPanel({ requestId }) {
     </div>
   );
 
-  // Count to show on button: published visible + pending mine not approved yet
+  // Count to show on button: published visible + pending mine
   const buttonCount = useMemo(() => {
     const pendingCount = pendingMine.filter((p) => {
       const st = String(p?.status || "pending").toLowerCase();

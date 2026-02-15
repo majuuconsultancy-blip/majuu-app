@@ -1,86 +1,54 @@
-// ✅ WorkWeHelp.jsx (FULL COPY-PASTE, fixed soft-gate UX)
-// NOTE: Supports Retry deep-link auto-open:
-// /app/work/we-help?country=UAE&autoOpen=1&open=Visa%20Application
+// ✅ WorkWeHelp.jsx (FULL COPY-PASTE)
+// CHANGE: Replace + add new icons (lucide-react). No custom SVG icon components.
+// Logic/backend wiring untouched.
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
+import { motion, AnimatePresence } from "framer-motion";
+
+import {
+  Briefcase,
+  ShieldCheck,
+  ArrowRight,
+  ArrowLeft,
+  Search,
+  X,
+  Sparkles,
+  Package,
+  BadgeCheck,
+  MapPinned,
+  Filter,
+  Tags,
+  FileCheck2,
+  IdCard,
+  FileText,
+  Target,
+  MessageSquareQuote,
+  ClipboardCheck,
+} from "lucide-react";
 
 import { auth } from "../firebase";
 import RequestModal from "../components/RequestModal";
 import FullPackageDiagnosticModal from "../components/FullPackageDiagnosticModal";
 
 import { createServiceRequest } from "../services/requestservice";
-import { getUserState, setActiveProcessDetails, upsertUserContact } from "../services/userservice";
+import {
+  getUserState,
+  setActiveProcessDetails,
+  upsertUserContact,
+} from "../services/userservice";
 import { getMissingProfileFields } from "../utils/profileGuard";
 import { createPendingAttachment } from "../services/attachmentservice";
 
-/* -------- Minimal icons -------- */
-function IconBriefcase(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M8 7V5.8A2.3 2.3 0 0 1 10.3 3.5h3.4A2.3 2.3 0 0 1 16 5.8V7"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M4.5 8.5h15V18a2.5 2.5 0 0 1-2.5 2.5H7A2.5 2.5 0 0 1 4.5 18V8.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M4.5 12h15"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-function IconShieldCheck(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M12 3.5 19 6.7v6.5c0 4.3-3 8.2-7 9.3-4-1.1-7-5-7-9.3V6.7L12 3.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="m9.3 12.4 1.8 1.8 3.8-4.1"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-function IconArrowRight(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M10 7l5 5-5 5"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 /* ---------------- Data ---------------- */
 const SINGLE_SERVICES = [
-  { title: "Passport Application", note: "Guidance + document checklist" },
-  { title: "Visa Application", note: "Forms + appointment + submission support" },
-  { title: "CV / Resume", note: "Professional formatting + improvements" },
-  { title: "Job Search Strategy", note: "Plan + targeting + profile advice" },
-  { title: "Interview Preparation", note: "Practice questions + confidence" },
-  { title: "Document Review", note: "Verify missing items before submission" },
+  { title: "Passport Application", note: "Guidance + document checklist", tag: "Docs" },
+  { title: "Visa Application", note: "Forms + appointment + submission support", tag: "Visa" },
+  { title: "CV / Resume", note: "Professional formatting + improvements", tag: "CV" },
+  { title: "Job Search Strategy", note: "Plan + targeting + profile advice", tag: "Jobs" },
+  { title: "Interview Preparation", note: "Practice questions + confidence", tag: "Interview" },
+  { title: "Document Review", note: "Verify missing items before submission", tag: "Docs" },
 ];
 
 const FULL_PACKAGE = [
@@ -91,6 +59,94 @@ const FULL_PACKAGE = [
   "Interview preparation",
   "Pre-departure guidance",
 ];
+
+/* ---------------- Motion ---------------- */
+const pageIn = {
+  hidden: { opacity: 0, y: 10 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: "easeOut" } },
+};
+
+const floatCard = {
+  rest: { y: 0, scale: 1 },
+  hover: { y: -2, scale: 1.01, transition: { duration: 0.16 } },
+  tap: { scale: 0.985 },
+};
+
+function Chip({ active, children, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-extrabold transition active:scale-[0.99]",
+        active
+          ? "border-emerald-200 bg-emerald-50/80 text-emerald-900"
+          : "border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white",
+      ].join(" ")}
+    >
+      <Tags className="h-3.5 w-3.5 opacity-80" />
+      {children}
+    </button>
+  );
+}
+
+function ServiceIcon({ tag, title }) {
+  const cls = "h-4.5 w-4.5";
+  if (title === "Document Review") return <FileCheck2 className={cls} />;
+  if (title === "Passport Application") return <IdCard className={cls} />;
+  if (tag === "Visa") return <MapPinned className={cls} />;
+  if (tag === "Docs") return <Package className={cls} />;
+  if (tag === "CV") return <FileText className={cls} />;
+  if (tag === "Jobs") return <Target className={cls} />;
+  if (tag === "Interview") return <MessageSquareQuote className={cls} />;
+  return <Package className={cls} />;
+}
+
+function ServiceTile({ s, disabled, onClick }) {
+  const isDocReview = s.title === "Document Review";
+  return (
+    <motion.button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      variants={floatCard}
+      initial="rest"
+      whileHover={disabled ? "rest" : "hover"}
+      whileTap={disabled ? "rest" : "tap"}
+      className={[
+        "w-full text-left rounded-3xl border p-4 shadow-[0_14px_40px_rgba(0,0,0,0.08)] backdrop-blur-xl transition",
+        disabled
+          ? "border-zinc-200/70 bg-white/55 opacity-60 cursor-not-allowed"
+          : "border-zinc-200/70 bg-white/72 hover:border-emerald-200 hover:bg-white/85",
+      ].join(" ")}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white/70 px-2 py-0.5 text-[11px] font-extrabold text-zinc-700">
+              <ServiceIcon tag={s.tag} title={s.title} />
+              {s.tag}
+            </span>
+
+            {isDocReview ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/70 px-2 py-0.5 text-[11px] font-extrabold text-emerald-900">
+                <FileCheck2 className="h-4 w-4" />
+                Attach PDFs
+              </span>
+            ) : null}
+          </div>
+
+          <div className="mt-2 font-extrabold text-zinc-900">{s.title}</div>
+          <div className="mt-1 text-sm text-zinc-600">{s.note}</div>
+        </div>
+
+        <span className="inline-flex h-11 w-11 items-center justify-center rounded-3xl border border-emerald-100 bg-emerald-50/70 text-emerald-800 shadow-sm">
+          <ArrowRight className="h-5 w-5" />
+        </span>
+      </div>
+    </motion.button>
+  );
+}
 
 export default function WorkWeHelp() {
   const navigate = useNavigate();
@@ -122,6 +178,13 @@ export default function WorkWeHelp() {
 
   // Full Package diagnostic state
   const [diagnosticOpen, setDiagnosticOpen] = useState(false);
+
+  // UI extras
+  const [q, setQ] = useState("");
+  const [chip, setChip] = useState("All");
+  const [toast, setToast] = useState("");
+
+  const canUseWeHelp = missing.length === 0 && profileChecked;
 
   const goBackToChoice = () => {
     navigate(`/app/work?country=${encodeURIComponent(country)}&from=choice`);
@@ -163,7 +226,11 @@ export default function WorkWeHelp() {
     if (!openService) return;
     if (!profileChecked) return;
 
-    if (missing.length > 0) return;
+    if (missing.length > 0) {
+      setToast("Complete your profile first — then you can submit this request.");
+      setTimeout(() => setToast(""), 2600);
+      return;
+    }
 
     setRequestMeta({ requestType: "single", serviceName: openService });
     setModalOpen(true);
@@ -178,15 +245,33 @@ export default function WorkWeHelp() {
   const modalSubtitle = useMemo(() => `Work Abroad • ${country}`, [country]);
 
   const openSingle = (serviceName) => {
+    if (!canUseWeHelp) return;
     setRequestMeta({ requestType: "single", serviceName });
     setModalOpen(true);
   };
 
-  const openFull = () => setDiagnosticOpen(true);
+  const openFull = () => {
+    if (!canUseWeHelp) return;
+    setDiagnosticOpen(true);
+  };
+
   const goToProfile = () => navigate("/app/profile");
 
-  const enableAttachments = true; 
-    requestMeta?.requestType === "single" && requestMeta?.serviceName === "Document Review";
+  // ✅ Attachments ONLY on Document Review
+  const enableAttachments =
+    requestMeta?.requestType === "single" &&
+    requestMeta?.serviceName === "Document Review";
+
+  const filteredSingles = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return SINGLE_SERVICES.filter((s) => {
+      const chipOk = chip === "All" ? true : s.tag === chip;
+      const qOk = !needle
+        ? true
+        : `${s.title} ${s.note} ${s.tag}`.toLowerCase().includes(needle);
+      return chipOk && qOk;
+    });
+  }, [q, chip]);
 
   const submitRequest = async ({
     name,
@@ -246,7 +331,6 @@ export default function WorkWeHelp() {
         requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
       });
 
-      // ✅ create attachment records whenever files exist
       const picked = Array.isArray(dummyFiles) ? dummyFiles : [];
       if (picked.length > 0) {
         for (const file of picked) {
@@ -265,44 +349,73 @@ export default function WorkWeHelp() {
       setModalOpen(false);
       navigate(`/app/request/${requestId}`, { replace: true });
     } catch (err) {
-      // ✅ KEY FIX: route unverified users to verify screen (and show error in modal)
       if (err?.code === "auth/email-not-verified") {
         navigate("/verify-email", { replace: false });
       }
-      // Re-throw so RequestModal catches and displays err.message
       throw err;
     }
   };
 
   return (
-    <div className="min-h-screen">
-      <div className="px-5 py-6">
+    <div className="min-h-screen bg-gradient-to-b from-emerald-50/60 via-white to-white">
+      {/* soft background glow */}
+      <div className="pointer-events-none fixed inset-0 -z-10">
+        <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-200/30 blur-3xl" />
+        <div className="absolute top-44 -left-24 h-72 w-72 rounded-full bg-sky-200/25 blur-3xl" />
+        <div className="absolute bottom-0 right-0 h-72 w-72 rounded-full bg-emerald-100/25 blur-3xl" />
+      </div>
+
+      <motion.div
+        variants={pageIn}
+        initial="hidden"
+        animate="show"
+        className="px-5 py-6 max-w-xl mx-auto"
+      >
+        {/* Back */}
         <button
           onClick={goBackToChoice}
-          className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+          className="mb-4 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:bg-white active:scale-[0.99]"
         >
-          ← Back
+          <ArrowLeft className="h-4 w-4" />
+          Back
         </button>
 
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800">
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-emerald-100 bg-white/70">
-                <IconBriefcase className="h-4 w-4 text-emerald-700" />
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-extrabold text-emerald-900">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/80 border border-emerald-100">
+                <Briefcase className="h-4 w-4 text-emerald-700" />
               </span>
               Work · We-Help
             </div>
 
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900">
+            <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-zinc-900">
               Get help with your work process
             </h1>
-            <p className="mt-1 text-sm text-zinc-600">
-              Country: <span className="font-medium text-zinc-900">{country}</span>
+
+            <p className="mt-1 flex items-center gap-2 text-sm text-zinc-600">
+              <MapPinned className="h-4 w-4 text-emerald-700" />
+              Destination: <span className="font-semibold text-zinc-900">{country}</span>
             </p>
           </div>
 
-          <div className="h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70" />
+          <div className="shrink-0 h-12 w-12 rounded-3xl border border-emerald-100 bg-emerald-50/80 shadow-sm" />
         </div>
+
+        {/* Toast */}
+        <AnimatePresence>
+          {toast ? (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm font-semibold text-amber-900 backdrop-blur"
+            >
+              {toast}
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
 
         {pageErr ? (
           <div className="mt-5 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
@@ -310,120 +423,203 @@ export default function WorkWeHelp() {
           </div>
         ) : null}
 
+        {/* Profile banner */}
         {missing.length > 0 ? (
-          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+          <motion.div
+            variants={floatCard}
+            initial="rest"
+            whileHover="hover"
+            whileTap="tap"
+            className="mt-5 rounded-3xl border border-amber-200 bg-amber-50/70 p-4 shadow-[0_14px_40px_rgba(0,0,0,0.08)] backdrop-blur-xl"
+          >
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-zinc-900">
+              <div className="min-w-0">
+                <div className="text-sm font-extrabold text-zinc-900">
                   Complete your profile to continue
                 </div>
                 <div className="mt-1 text-sm text-zinc-700">
-                  Missing: <span className="font-medium">{missing.join(", ")}</span>
+                  Missing: <span className="font-semibold">{missing.join(", ")}</span>
                 </div>
               </div>
 
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-amber-200 bg-white/70 text-amber-800">
-                <IconShieldCheck className="h-5 w-5" />
+              <span className="inline-flex h-11 w-11 items-center justify-center rounded-3xl border border-amber-200 bg-white/70 text-amber-900 shadow-sm">
+                <ShieldCheck className="h-5 w-5" />
               </span>
             </div>
 
             <button
               onClick={goToProfile}
-              className="mt-4 w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
+              className="mt-4 w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
             >
               Go to Profile
             </button>
-          </div>
+          </motion.div>
         ) : null}
 
-        <div className="mt-7 grid gap-4">
-          <div className="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur">
-            <div className="flex items-end justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-zinc-900">Single packages</h2>
-                <p className="mt-1 text-sm text-zinc-600">
-                  Choose one service you want help with.
-                </p>
+        {/* Full package hero */}
+        <motion.div
+          variants={floatCard}
+          initial="rest"
+          whileHover={canUseWeHelp ? "hover" : "rest"}
+          whileTap={canUseWeHelp ? "tap" : "rest"}
+          className={[
+            "mt-6 rounded-3xl border p-5 shadow-[0_18px_55px_rgba(0,0,0,0.10)] backdrop-blur-xl",
+            canUseWeHelp
+              ? "border-emerald-200/80 bg-white/75"
+              : "border-zinc-200/70 bg-white/60 opacity-70",
+          ].join(" ")}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1.5 text-xs font-extrabold text-emerald-900">
+                <Sparkles className="h-4 w-4" />
+                Full package · Best value
               </div>
-              <span className="text-xs text-zinc-500">{SINGLE_SERVICES.length} options</span>
+
+              <h2 className="mt-3 text-lg font-extrabold text-zinc-900">
+                End-to-end work support, organized in one place
+              </h2>
+              <p className="mt-1 text-sm text-zinc-600">
+                We help you with documents, submissions, and next steps — inside MAJUU.
+              </p>
             </div>
 
-            <div className="mt-4 grid gap-3">
-              {SINGLE_SERVICES.map((s) => (
-                <button
-                  key={s.title}
-                  onClick={() => openSingle(s.title)}
-                  className="w-full text-left rounded-2xl border border-zinc-200 bg-white/60 p-4 shadow-sm transition hover:border-emerald-200 hover:bg-white"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-semibold text-zinc-900">{s.title}</div>
-                      <div className="mt-1 text-sm text-zinc-600">{s.note}</div>
-                      {s.title === "Document Review" ? (
-                        <div className="mt-2 text-xs text-emerald-700">Attach PDFs when submitting</div>
-                      ) : null}
-                    </div>
-
-                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50/60 text-emerald-700">
-                      <IconArrowRight className="h-5 w-5" />
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
+            <span className="shrink-0 inline-flex h-12 w-12 items-center justify-center rounded-3xl border border-emerald-100 bg-emerald-50/80 text-emerald-800 shadow-sm">
+              <ClipboardCheck className="h-6 w-6" />
+            </span>
           </div>
 
-          <div className="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-zinc-900">Full package</h2>
-                <p className="mt-1 text-sm text-zinc-600">
-                  End-to-end support at a discounted price.
-                </p>
+          <ul className="mt-4 grid gap-2 text-sm text-zinc-700">
+            {FULL_PACKAGE.map((item) => (
+              <li key={item} className="flex items-start gap-2">
+                <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50/70 text-emerald-800">
+                  <BadgeCheck className="h-3.5 w-3.5" />
+                </span>
+                <span className="min-w-0">{item}</span>
+              </li>
+            ))}
+          </ul>
+
+          <button
+            onClick={openFull}
+            disabled={!canUseWeHelp}
+            className={[
+              "mt-5 w-full rounded-2xl border px-4 py-3 text-sm font-extrabold shadow-sm transition active:scale-[0.99]",
+              canUseWeHelp
+                ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
+                : "border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed",
+            ].join(" ")}
+          >
+            Request full package
+          </button>
+
+          {!canUseWeHelp ? (
+            <div className="mt-3 text-xs text-zinc-500">
+              Complete your profile first to unlock requests.
+            </div>
+          ) : null}
+        </motion.div>
+
+        {/* Single services */}
+        <div className="mt-6">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-base font-extrabold text-zinc-900">Single packages</h2>
+              <p className="mt-1 text-sm text-zinc-600">
+                Choose one service you want help with.
+              </p>
+            </div>
+            <span className="text-xs font-semibold text-zinc-500">
+              {SINGLE_SERVICES.length} options
+            </span>
+          </div>
+
+          {/* Search */}
+          <div className="mt-4 rounded-3xl border border-zinc-200/70 bg-white/72 p-3 shadow-sm backdrop-blur-xl">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/70 text-emerald-800">
+                <Search className="h-5 w-5" />
+              </span>
+
+              <div className="min-w-0 flex-1">
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search services… (visa, CV, interview, documents)"
+                  className="w-full bg-transparent text-sm font-semibold text-zinc-900 placeholder:text-zinc-400 outline-none"
+                />
               </div>
-              <span className="rounded-full border border-emerald-200 bg-emerald-50/60 px-2.5 py-1 text-xs font-semibold text-emerald-800">
-                Best value
+
+              {q ? (
+                <button
+                  type="button"
+                  onClick={() => setQ("")}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/70 text-zinc-700 transition hover:bg-white active:scale-[0.99]"
+                  aria-label="Clear search"
+                  title="Clear"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              ) : null}
+
+              <span className="hidden sm:inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 text-zinc-700">
+                <Filter className="h-5 w-5" />
               </span>
             </div>
 
-            <ul className="mt-4 grid gap-2 text-sm text-zinc-700">
-              {FULL_PACKAGE.map((item) => (
-                <li key={item} className="flex items-start gap-2">
-                  <span className="mt-2 h-1.5 w-1.5 rounded-full bg-emerald-400/70" />
-                  {item}
-                </li>
+            {/* Chips */}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {["All", "Visa", "Docs", "CV", "Jobs", "Interview"].map((c) => (
+                <Chip key={c} active={chip === c} onClick={() => setChip(c)}>
+                  {c}
+                </Chip>
               ))}
-            </ul>
+            </div>
+          </div>
 
-            <button
-              onClick={openFull}
-              className="mt-4 w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
-            >
-              Request full package
-            </button>
+          {/* Tiles */}
+          <div className="mt-4 grid gap-3">
+            {filteredSingles.length === 0 ? (
+              <div className="rounded-3xl border border-zinc-200/70 bg-white/70 p-5 text-sm text-zinc-600 shadow-sm backdrop-blur">
+                No results. Try a different keyword (e.g. “visa”, “CV”, “interview”).
+              </div>
+            ) : (
+              filteredSingles.map((s) => (
+                <ServiceTile
+                  key={s.title}
+                  s={s}
+                  disabled={!canUseWeHelp}
+                  onClick={() => openSingle(s.title)}
+                />
+              ))
+            )}
           </div>
         </div>
 
-        <FullPackageDiagnosticModal
-          open={diagnosticOpen}
-          onClose={() => setDiagnosticOpen(false)}
-          track="work"
-          country={country}
-        />
+        <div className="h-10" />
+      </motion.div>
 
-        <RequestModal
-          open={modalOpen}
-          onClose={() => setModalOpen(false)}
-          onSubmit={submitRequest}
-          title={modalTitle}
-          subtitle={modalSubtitle}
-          defaultName={defaultName}
-          defaultPhone={defaultPhone}
-          defaultEmail={auth.currentUser?.email || userProfile?.email || ""}
-          enableAttachments={enableAttachments}
-          maxPdfMb={10}
-        />
-      </div>
+      {/* Full Package diagnostic modal */}
+      <FullPackageDiagnosticModal
+        open={diagnosticOpen}
+        onClose={() => setDiagnosticOpen(false)}
+        track="work"
+        country={country}
+      />
+
+      {/* Single-service Request Modal */}
+      <RequestModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onSubmit={submitRequest}
+        title={modalTitle}
+        subtitle={modalSubtitle}
+        defaultName={defaultName}
+        defaultPhone={defaultPhone}
+        defaultEmail={auth.currentUser?.email || email || ""}
+        enableAttachments={enableAttachments}
+        maxPdfMb={10}
+      />
     </div>
   );
 }
