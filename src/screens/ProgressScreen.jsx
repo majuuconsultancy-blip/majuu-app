@@ -1,8 +1,8 @@
 // ✅ ProgressScreen.jsx (FULL COPY-PASTE)
 // CHANGE ONLY (as requested):
-// - Replace ALL present icons with legit Lucide icons
-// - Keep same sizing/placement/logic/styles as much as possible
-// - Pin uses Lucide Pin / PinOff (already in your code)
+// ✅ When you VIEW a request (or Continue into a request), ALL unread notifications
+//    for that request are marked read automatically (so the top banner count drops).
+// ✅ No backend changes. Uses existing users/{uid}/notifications update (readAt only).
 // Everything else preserved.
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -18,6 +18,8 @@ import {
   getDocs,
   orderBy,
   limit,
+  updateDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -164,6 +166,35 @@ function writePins(uid, arr) {
   try {
     localStorage.setItem(pinKey(uid), JSON.stringify(arr));
   } catch {}
+}
+
+/* ✅ mark notifications read for ONE request (client-only) */
+async function markRequestNotificationsRead({ uid, requestId }) {
+  const u = String(uid || "").trim();
+  const rid = String(requestId || "").trim();
+  if (!u || !rid) return;
+
+  try {
+    const nRef = collection(db, "users", u, "notifications");
+
+    // ✅ expects your notification docs to include { requestId: "<rid>" }
+    // and unread means readAt missing/null.
+    const q1 = query(nRef, where("requestId", "==", rid), where("readAt", "==", null));
+    const snap = await getDocs(q1);
+
+    if (snap.empty) return;
+
+    const jobs = [];
+    snap.forEach((d) => {
+      jobs.push(updateDoc(d.ref, { readAt: serverTimestamp() }));
+    });
+
+    // best-effort
+    await Promise.all(jobs);
+  } catch (e) {
+    // don't break UX if rules/fields differ
+    console.warn("markRequestNotificationsRead failed:", e?.message || e);
+  }
 }
 
 /* ---------- Motion ---------- */
@@ -330,7 +361,9 @@ export default function ProgressScreen() {
           reqQ,
           (snap) => {
             const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+            data.sort(
+              (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
+            );
             setRequests(data);
 
             attachChatUnreadListeners(data.map((x) => String(x.id)));
@@ -338,7 +371,9 @@ export default function ProgressScreen() {
             // ✅ keep pins valid (remove pins that no longer exist)
             const ids = new Set(data.map((x) => String(x.id)));
             const currentPins = pinnedIdsRef.current || [];
-            const filtered = currentPins.filter((pid) => ids.has(String(pid))).slice(0, 2);
+            const filtered = currentPins
+              .filter((pid) => ids.has(String(pid)))
+              .slice(0, 2);
             if (filtered.join("|") !== currentPins.join("|")) {
               setPinnedIds(filtered);
               writePins(user.uid, filtered);
@@ -396,12 +431,15 @@ export default function ProgressScreen() {
     };
   }, [navigate]);
 
-  const goContinue = () => {
+  const goContinue = async () => {
     const helpType = String(state?.activeHelpType || "").toLowerCase();
     const requestId = String(state?.activeRequestId || "").trim();
     const track = String(state?.activeTrack || "").toLowerCase();
 
+    // ✅ If continuing into a request, clear its notifications immediately
     if (helpType === "we" && requestId) {
+      const uid = auth.currentUser?.uid || "";
+      await markRequestNotificationsRead({ uid, requestId });
       navigate(`/app/request/${requestId}`, { replace: true });
       return;
     }
@@ -416,7 +454,9 @@ export default function ProgressScreen() {
   const activeTrack = String(state?.activeTrack || "-");
   const activeCountry = String(state?.activeCountry || "-");
   const activeMode =
-    String(state?.activeHelpType || "").toLowerCase() === "we" ? "We-Help" : "Self-Help";
+    String(state?.activeHelpType || "").toLowerCase() === "we"
+      ? "We-Help"
+      : "Self-Help";
 
   const cardBase =
     "rounded-3xl border border-zinc-200 bg-white/70 backdrop-blur p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60";
@@ -666,7 +706,12 @@ export default function ProgressScreen() {
                 </div>
               </div>
             ) : (
-              <motion.div className="mt-3 grid gap-3" variants={listWrap} initial="hidden" animate="show">
+              <motion.div
+                className="mt-3 grid gap-3"
+                variants={listWrap}
+                initial="hidden"
+                animate="show"
+              >
                 {requestsSorted.map((r) => {
                   const ui = statusUI(r.status);
                   const track = String(r.track || "").toLowerCase();
@@ -721,18 +766,25 @@ export default function ProgressScreen() {
                     );
                   };
 
-                  // ✅ FIX: open request clears pill immediately + persists
-                  const openRequestAndClearChatPill = () => {
+                  // ✅ FIX: open request clears chat pill + clears request notifications immediately
+                  const openRequestAndClearChatPill = async () => {
                     const nowSec = Math.floor(Date.now() / 1000);
 
                     setLocalReadSec(rid, nowSec);
                     setChatUnread(rid, false);
 
+                    const uid = auth.currentUser?.uid || "";
+                    await markRequestNotificationsRead({ uid, requestId: rid });
+
                     navigate(`/app/request/${rid}`);
                   };
 
                   return (
-                    <motion.div key={r.id} variants={listItem} className={`${cardBase} ${cardHover} relative`}>
+                    <motion.div
+                      key={r.id}
+                      variants={listItem}
+                      className={`${cardBase} ${cardHover} relative`}
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
@@ -757,7 +809,9 @@ export default function ProgressScreen() {
                             </AnimatePresence>
                           </div>
 
-                          <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{subtitle}</div>
+                          <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                            {subtitle}
+                          </div>
 
                           {createdLabel ? (
                             <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
@@ -811,7 +865,9 @@ export default function ProgressScreen() {
                                 const user = auth.currentUser;
                                 if (user) {
                                   setPinnedIds((prev) => {
-                                    const next = (prev || []).filter((x) => String(x) !== rid).slice(0, 2);
+                                    const next = (prev || [])
+                                      .filter((x) => String(x) !== rid)
+                                      .slice(0, 2);
                                     writePins(user.uid, next);
                                     return next;
                                   });

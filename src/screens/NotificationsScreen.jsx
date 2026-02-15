@@ -1,14 +1,18 @@
 // ✅ NotificationsScreen.jsx (FROSTED + FLOATY + SMOOTH ANIMATIONS) — FULL COPY-PASTE
+// Updates (safe + minimal):
+// ✅ Swap ALL custom SVG icons -> lucide-react
+// ✅ If notification looks like a CHAT/message notification, we TRY a safe redirect to the request screen:
+//    - We set a small sessionStorage flag `maj_open_chat:<requestId>=1`
+//    - Then navigate to `/app/request/<requestId>`
+//    ⚠️ This will only auto-open the chat IF your Request screen reads this flag (we can add that next).
+//    If not present, it still safely takes user to the correct request.
+// ✅ When opening ONE notification, we also mark ALL unread notifications for the SAME requestId as read (if present).
+//
 // Keeps your fixes:
 // 1) ✅ No nested <button> (outer wrapper is <div>)
 // 2) ✅ Open => mark as read => goes to History (NOT deleted)
 // 3) ✅ Red trash icon deletes (Inbox + History) without triggering open (stopPropagation added)
 // 4) ✅ Clear all deletes current tab
-// UI upgrades (no backend changes):
-// - Frosted glass tiles + subtle gradient borders
-// - Smooth “float” hover + tap feedback
-// - Framer Motion entrance/exit + tab indicator animation
-// - Softer empty state + cleaner spacing
 
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
@@ -25,70 +29,9 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { AnimatePresence, motion } from "framer-motion";
+import { ChevronLeft, Bell, ChevronRight, Trash2, MessageCircle } from "lucide-react";
 
 import { auth, db } from "../firebase";
-
-/* ---------- Minimal icons (no emojis) --------- */
-function IconChevronLeft(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M14.5 5.5 8 12l6.5 6.5"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconBell(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M12 22a2.2 2.2 0 0 0 2.2-2.2H9.8A2.2 2.2 0 0 0 12 22Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M18 16.8H6c.9-1 1.5-2 1.5-3.7V10a4.5 4.5 0 1 1 9 0v3.1c0 1.7.6 2.7 1.5 3.7Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconChevronRight(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M9 5.5 15.5 12 9 18.5"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconTrash(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M9 4.8h6M6.5 7.2h11M9.2 7.2l.6 13h4.4l.6-13"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 /* ✅ safe createdAt formatter */
 function formatCreatedAt(createdAt) {
@@ -131,6 +74,55 @@ const item = {
   show: { opacity: 1, y: 0, scale: 1, transition: { type: "spring", stiffness: 520, damping: 38 } },
   exit: { opacity: 0, y: 10, scale: 0.99, transition: { duration: 0.16 } },
 };
+
+/* ---------- helpers (safe) ---------- */
+function safeStr(x) {
+  return String(x || "").trim();
+}
+
+function extractRequestId(n) {
+  // supports common shapes:
+  // - requestId
+  // - rid
+  // - meta.requestId
+  // - data.requestId
+  const direct = safeStr(n?.requestId) || safeStr(n?.rid);
+  if (direct) return direct;
+
+  const meta = n?.meta || n?.data || null;
+  const nested = safeStr(meta?.requestId) || safeStr(meta?.rid);
+  if (nested) return nested;
+
+  // try to parse from link: /app/request/<id>
+  const link = safeStr(n?.link);
+  const m = link.match(/\/app\/request\/([^/?#]+)/i);
+  return m ? safeStr(m[1]) : "";
+}
+
+function looksLikeChatNotif(n) {
+  const t = `${safeStr(n?.type)} ${safeStr(n?.title)} ${safeStr(n?.body)}`.toLowerCase();
+  // keep broad but safe (we only redirect if we have a requestId)
+  return (
+    t.includes("message") ||
+    t.includes("chat") ||
+    t.includes("new text") ||
+    t.includes("new msg") ||
+    t.includes("reply")
+  );
+}
+
+function isInternalLink(link) {
+  const s = safeStr(link);
+  return s.startsWith("/");
+}
+
+function setOpenChatFlag(requestId) {
+  const rid = safeStr(requestId);
+  if (!rid) return;
+  try {
+    sessionStorage.setItem(`maj_open_chat:${rid}`, "1");
+  } catch {}
+}
 
 export default function NotificationsScreen() {
   const navigate = useNavigate();
@@ -216,6 +208,32 @@ export default function NotificationsScreen() {
     }
   };
 
+  async function markRead(userUid, notifId) {
+    await updateDoc(doc(db, "users", userUid, "notifications", notifId), {
+      readAt: serverTimestamp(),
+    });
+  }
+
+  // ✅ mark all unread notifications for the same requestId as read (best-effort)
+  const markAllForRequestRead = async (userUid, requestId) => {
+    const rid = safeStr(requestId);
+    if (!rid) return;
+
+    const targets = notifs.filter((x) => {
+      if (x?.readAt) return false;
+      return extractRequestId(x) === rid;
+    });
+
+    if (!targets.length) return;
+
+    // best-effort, sequential keeps it simple + avoids spikes
+    for (const x of targets) {
+      try {
+        await markRead(userUid, x.id);
+      } catch {}
+    }
+  };
+
   const openAndMarkRead = async (n) => {
     try {
       const user = auth.currentUser;
@@ -223,18 +241,35 @@ export default function NotificationsScreen() {
 
       setErr("");
 
-      // mark as read (move to History)
+      const rid = extractRequestId(n);
+
+      // ✅ mark as read (move to History)
       if (!n.readAt) {
-        await updateDoc(doc(db, "users", user.uid, "notifications", n.id), {
-          readAt: serverTimestamp(),
-        });
+        await markRead(user.uid, n.id);
       }
 
-      const link = String(n.link || "").trim();
+      // ✅ also mark ALL unread notifications for this request as read
+      if (rid) {
+        await markAllForRequestRead(user.uid, rid);
+      }
+
+      // ✅ Chat notification: route to request and set a flag to auto-open chat (safe even if not implemented yet)
+      const isChat = looksLikeChatNotif(n) && !!rid;
+      if (isChat) {
+        setOpenChatFlag(rid);
+        navigate(`/app/request/${encodeURIComponent(rid)}`);
+        return;
+      }
+
+      // otherwise: follow link if present
+      const link = safeStr(n.link);
       if (!link) return;
 
-      if (link.startsWith("/")) navigate(link);
-      else window.open(link, "_blank", "noopener,noreferrer");
+      if (isInternalLink(link)) {
+        navigate(link);
+      } else {
+        window.open(link, "_blank", "noopener,noreferrer");
+      }
     } catch (e) {
       console.error("Open/read notification failed:", e);
       setErr(e?.message || "Failed to open notification.");
@@ -245,17 +280,17 @@ export default function NotificationsScreen() {
     const user = auth.currentUser;
     if (!user) return;
 
-    const list = shown;
-    if (!list.length) return;
+    const listNow = shown;
+    if (!listNow.length) return;
 
     const label = tab === "inbox" ? "Inbox" : "History";
-    const ok = window.confirm(`Delete ${list.length} notifications from ${label}?`);
+    const ok = window.confirm(`Delete ${listNow.length} notifications from ${label}?`);
     if (!ok) return;
 
     try {
       setErr("");
       setBusyId(tab === "inbox" ? "clear_inbox" : "clear_history");
-      for (const n of list) {
+      for (const n of listNow) {
         await deleteDoc(doc(db, "users", user.uid, "notifications", n.id));
       }
     } catch (e) {
@@ -270,7 +305,7 @@ export default function NotificationsScreen() {
 
   return (
     <div className="min-h-screen bg-white dark:bg-zinc-950">
-      {/* Background: subtle “apple-ish” blobs */}
+      {/* Background blobs */}
       <div className="relative min-h-screen overflow-hidden">
         <div className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-emerald-200/35 blur-3xl dark:bg-emerald-500/10" />
         <div className="pointer-events-none absolute top-44 -left-24 h-72 w-72 rounded-full bg-zinc-200/50 blur-3xl dark:bg-zinc-700/20" />
@@ -292,7 +327,7 @@ export default function NotificationsScreen() {
                   className="inline-flex items-center gap-2 rounded-2xl border border-white/60 bg-white/55 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm backdrop-blur-xl transition hover:bg-white/70 active:scale-[0.99]
                              dark:border-zinc-700/60 dark:bg-zinc-900/45 dark:text-zinc-100 dark:hover:bg-zinc-900/55"
                 >
-                  <IconChevronLeft className="h-4 w-4" />
+                  <ChevronLeft className="h-4 w-4" />
                   Back
                 </button>
 
@@ -305,7 +340,7 @@ export default function NotificationsScreen() {
               </div>
 
               <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/60 bg-white/55 shadow-sm backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/45">
-                <IconBell className="h-5 w-5 text-emerald-700 dark:text-emerald-200" />
+                <Bell className="h-5 w-5 text-emerald-700 dark:text-emerald-200" />
               </div>
             </div>
 
@@ -316,12 +351,11 @@ export default function NotificationsScreen() {
               </div>
             ) : null}
 
-            {/* Tabs + actions (frosted bar) */}
+            {/* Tabs + actions */}
             <div className={`mt-6 ${glassCard} p-2`}>
               <div className="flex items-center justify-between gap-3">
                 {/* Tabs */}
                 <div className="relative flex items-center gap-1 rounded-2xl border border-white/60 bg-white/40 p-1 backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/35">
-                  {/* Active indicator */}
                   <motion.div
                     layout
                     transition={{ type: "spring", stiffness: 520, damping: 40 }}
@@ -388,15 +422,13 @@ export default function NotificationsScreen() {
               <div className="mt-4">
                 <div className={`${tileBase} text-center`}>
                   <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/60 bg-white/45 backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/35">
-                    <IconBell className="h-6 w-6 text-emerald-700 dark:text-emerald-200" />
+                    <Bell className="h-6 w-6 text-emerald-700 dark:text-emerald-200" />
                   </div>
                   <div className="mt-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                     {tab === "inbox" ? "Inbox is empty" : "No history yet"}
                   </div>
                   <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    {tab === "inbox"
-                      ? "New updates will appear here."
-                      : "Opened notifications will appear here."}
+                    {tab === "inbox" ? "New updates will appear here." : "Opened notifications will appear here."}
                   </div>
                 </div>
               </div>
@@ -405,10 +437,12 @@ export default function NotificationsScreen() {
                 <AnimatePresence initial={false}>
                   {shown.map((n) => {
                     const unread = !n.readAt;
-                    const title = String(n.title || n.type || "Update");
-                    const body = String(n.body || "");
+                    const title = safeStr(n.title || n.type || "Update");
+                    const body = safeStr(n.body || "");
                     const when = formatCreatedAt(n.createdAt);
-                    const hasLink = Boolean(String(n.link || "").trim());
+                    const hasLink = Boolean(safeStr(n.link));
+                    const rid = extractRequestId(n);
+                    const isChat = looksLikeChatNotif(n) && !!rid;
 
                     return (
                       <motion.div
@@ -419,7 +453,7 @@ export default function NotificationsScreen() {
                         className={`${tileBase} ${tileHover}`}
                       >
                         <div className="flex items-start justify-between gap-3">
-                          {/* ✅ Open area (single button, outer is div => no nested button issue) */}
+                          {/* ✅ Open area */}
                           <button
                             type="button"
                             onClick={() => openAndMarkRead(n)}
@@ -432,9 +466,17 @@ export default function NotificationsScreen() {
                                   unread ? "bg-rose-500" : "bg-zinc-300 dark:bg-zinc-600"
                                 }`}
                               />
+
                               <div className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">
                                 {title}
                               </div>
+
+                              {isChat ? (
+                                <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-emerald-200/70 bg-emerald-50/55 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 backdrop-blur-xl dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                                  <MessageCircle className="h-3.5 w-3.5" />
+                                  Chat
+                                </span>
+                              ) : null}
 
                               {unread ? (
                                 <span className="ml-1 rounded-full border border-rose-200/60 bg-rose-50/55 px-2 py-0.5 text-[11px] font-semibold text-rose-700 backdrop-blur-xl dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
@@ -455,11 +497,11 @@ export default function NotificationsScreen() {
                               </div>
                             ) : null}
 
-                            {hasLink ? (
+                            {(hasLink || isChat) ? (
                               <div className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-emerald-200/70 bg-emerald-50/55 px-3.5 py-2 text-sm font-semibold text-emerald-800 shadow-sm backdrop-blur-xl transition hover:bg-emerald-50/80 active:scale-[0.99]
                                               dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200 dark:hover:bg-emerald-950/40">
                                 Open
-                                <IconChevronRight className="h-4 w-4" />
+                                <ChevronRight className="h-4 w-4" />
                               </div>
                             ) : (
                               <div className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
@@ -492,7 +534,7 @@ export default function NotificationsScreen() {
                               aria-label="Delete notification"
                               title="Delete"
                             >
-                              <IconTrash className="h-4 w-4" />
+                              <Trash2 className="h-4 w-4" />
                             </button>
                           </div>
                         </div>

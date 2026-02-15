@@ -347,7 +347,7 @@ export default function LoginScreen() {
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
         setNetMsg("You’re offline. Check your network and try again.");
       } else if (isNetworkishAuthError(err)) {
-        setNetMsg("Couldn’t connect after 3 tries. Check your network and try again.");
+        setNetMsg("Couldn’t connect. Check your internet connection and try again.");
       } else {
         setError(friendlyAuthError(err));
       }
@@ -402,7 +402,7 @@ export default function LoginScreen() {
       } else if (typeof navigator !== "undefined" && navigator.onLine === false) {
         setNetMsg("You’re offline. Check your network and try again.");
       } else if (isNetworkishAuthError(err)) {
-        setNetMsg("Couldn’t connect after 3 tries. Check your network and try again.");
+        setNetMsg("Couldn’t connect. Check your internet connection and try again.");
       } else {
         setError(friendlyAuthError(err));
       }
@@ -444,7 +444,7 @@ export default function LoginScreen() {
         if (typeof navigator !== "undefined" && navigator.onLine === false) {
           setNetMsg("You’re offline. Check your network and try again.");
         } else if (isNetworkishAuthError(err)) {
-          setNetMsg("Couldn’t connect after 3 tries. Check your network and try again.");
+          setNetMsg("Couldn’t connect. Check your internet connection and try again.");
         } else {
           setError(friendlyAuthError(err));
         }

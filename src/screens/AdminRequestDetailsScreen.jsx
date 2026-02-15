@@ -5,7 +5,6 @@ import {
   getDoc,
   collection,
   onSnapshot,
-  orderBy,
   query,
   updateDoc,
   serverTimestamp,
@@ -231,6 +230,9 @@ export default function AdminRequestDetailsScreen() {
   const [staffDraftErr, setStaffDraftErr] = useState("");
   const [stagingStaffDrafts, setStagingStaffDrafts] = useState(false);
 
+  // ✅ chat notification
+  const [chatPendingCount, setChatPendingCount] = useState(0);
+
   const status = String(req?.status || "new").toLowerCase();
   const statusPill = useMemo(() => pill(status), [status]);
 
@@ -278,17 +280,51 @@ export default function AdminRequestDetailsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestId]);
 
+  /* ✅ FIX: pending chat count without orderBy (no index needed) */
+  useEffect(() => {
+    if (!requestId) return;
+
+    const ref = collection(db, "serviceRequests", requestId, "pendingMessages");
+    const qy = query(ref); // <-- NO orderBy
+
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        let n = 0;
+        snap.docs.forEach((d) => {
+          const m = d.data() || {};
+          const st = String(m?.status || "pending").toLowerCase();
+          const from = String(m?.fromRole || "").toLowerCase();
+
+          // Count only items that admin must review
+          // - pending status
+          // - from user or staff
+          if (st === "pending" && (from === "user" || from === "staff")) n += 1;
+        });
+        setChatPendingCount(n);
+      },
+      (e) => {
+        console.warn("pendingMessages count snapshot error:", e?.message || e);
+        setChatPendingCount(0);
+      }
+    );
+
+    return () => unsub();
+  }, [requestId]);
+
   // ✅ live drafts list (adminFileDrafts)
   useEffect(() => {
     if (!requestId) return;
 
     const ref = collection(db, "serviceRequests", requestId, "adminFileDrafts");
-    const qy = query(ref, orderBy("createdAt", "desc"));
+    const qy = query(ref);
 
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        setDrafts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        rows.sort((a, b) => (b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0));
+        setDrafts(rows);
         setDraftErr("");
       },
       (e) => {
@@ -305,12 +341,14 @@ export default function AdminRequestDetailsScreen() {
     if (!requestId) return;
 
     const ref = collection(db, "serviceRequests", requestId, "staffFileDrafts");
-    const qy = query(ref, orderBy("createdAt", "desc"));
+    const qy = query(ref);
 
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        setStaffDrafts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        rows.sort((a, b) => (b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0));
+        setStaffDrafts(rows);
         setStaffDraftErr("");
       },
       (e) => {
@@ -330,14 +368,12 @@ export default function AdminRequestDetailsScreen() {
     const staffDecision = String(req?.staffDecision || "").toLowerCase();
     const staffStatus = String(req?.staffStatus || "").toLowerCase();
 
-    // only when staff finished and recommended accept
     const okToAutofill =
       staffStatus === "done" && staffDecision === "recommend_accept";
 
     if (!okToAutofill) return;
     if (!Array.isArray(staffDrafts) || staffDrafts.length === 0) return;
 
-    // stage only ones not staged yet
     const pending = staffDrafts.filter((d) => !d?.stagedAt && isHttp(d?.url));
     if (pending.length === 0) return;
 
@@ -451,7 +487,6 @@ export default function AdminRequestDetailsScreen() {
     }
   };
 
-  // ✅ optional: allow admin to quickly mark request "contacted" if needed (safe)
   const setContacted = async () => {
     try {
       await updateDoc(doc(db, "serviceRequests", requestId), {
@@ -501,9 +536,7 @@ export default function AdminRequestDetailsScreen() {
     );
   }
 
-  const headerLeft = `${String(req?.track || "").toUpperCase()} • ${
-    req?.country || "-"
-  }`;
+  const headerLeft = `${String(req?.track || "").toUpperCase()} • ${req?.country || "-"}`;
   const headerRight =
     req?.requestType === "full"
       ? "Full Package"
@@ -517,6 +550,8 @@ export default function AdminRequestDetailsScreen() {
       : status === "rejected"
       ? "Decision complete. This request was rejected."
       : "Review the applicant details and documents, then make a decision.";
+
+  const badgeText = chatPendingCount > 99 ? "99+" : String(chatPendingCount);
 
   return (
     <div className={pageBg}>
@@ -538,8 +573,25 @@ export default function AdminRequestDetailsScreen() {
           </div>
 
           <div className="shrink-0 flex items-center gap-2">
-            {/* ✅ Chat launcher (opens scrollable modal) */}
-            <AdminRequestChatLauncher requestId={requestId} />
+            {/* ✅ Chat launcher with badge */}
+            <span className="relative inline-flex">
+              <AdminRequestChatLauncher requestId={requestId} />
+              {chatPendingCount > 0 ? (
+                <span
+                  className={[
+                    "absolute -top-1 -right-1 z-10",
+                    "min-w-[18px] h-[18px] px-1",
+                    "rounded-full bg-rose-600 text-white",
+                    "text-[10px] font-extrabold leading-none",
+                    "flex items-center justify-center",
+                    "shadow-[0_0_0_3px_rgba(244,63,94,0.18),0_0_14px_rgba(244,63,94,0.45)]",
+                  ].join(" ")}
+                  title="New messages pending review"
+                >
+                  {badgeText}
+                </span>
+              ) : null}
+            </span>
 
             <button
               onClick={goBackToList}
@@ -692,7 +744,7 @@ export default function AdminRequestDetailsScreen() {
           />
         </div>
 
-        {/* ✅ Staff proposed links (auto-fill source) */}
+        {/* ✅ Staff suggested files */}
         <div className={`mt-6 ${card} p-5`}>
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -787,7 +839,7 @@ export default function AdminRequestDetailsScreen() {
           )}
         </div>
 
-        {/* ✅ Attach files for applicant (adminFileDrafts) */}
+        {/* ✅ Attach files for applicant */}
         <div className={`mt-6 ${card} p-5`}>
           <div className="flex items-start justify-between gap-3">
             <div>
