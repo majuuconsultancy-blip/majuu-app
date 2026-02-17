@@ -1,0 +1,89 @@
+/* Prevent text auto inflation */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Remove tap highlight */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Ensure app fills screen properly */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* Fix standalone overscroll feel */
+body {
+  overscroll-behavior-y: none;
+}
+/* ✅ Make installed PWA feel less "chunky" (Android standalone mode) */
+@media (display-mode: standalone) {
+  html {
+    font-size: 15px; /* default is usually 16px */
+  }
+}
+
+/* Optional: if still too big, try 14px */
+@media (display-mode: standalone) {
+  html.pwa-compact {
+    font-size: 14px;
+  }
+}
+
+/* Prevent horizontal overflow bugs in PWA */
+* {
+  min-width: 0;
+}
+
+.flex,
+[class*="flex"] {
+  min-width: 0;
+}
+/* =========================
+   PWA performance overrides
+   ========================= */
+
+/* Installed PWA (standalone) */
+@media (display-mode: standalone) {
+  /* Backdrop blur is a known Android/WebView scroll glitch source */
+  .backdrop-blur,
+  .backdrop-blur-sm,
+  .backdrop-blur-md,
+  .backdrop-blur-lg,
+  .backdrop-blur-xl,
+  .backdrop-blur-2xl,
+  .backdrop-blur-3xl {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  /* Reduce heavy transparency layers (helps “tearing/half paint”) */
+  .bg-white\/70,
+  .bg-white\/60,
+  .bg-white\/55,
+  .bg-white\/50,
+  .bg-white\/40,
+  .bg-white\/30 {
+    background-color: rgba(255, 255, 255, 0.96) !important;
+  }
+
+  /* Heavy shadows can stutter on long lists */
+  .shadow,
+  .shadow-sm,
+  .shadow-md,
+  .shadow-lg,
+  .shadow-xl,
+  .shadow-2xl {
+    box-shadow: none !important;
+  }
+
+  /* Prevent accidental horizontal overflow during scroll */
+  html,
+  body {
+    overflow-x: hidden;
+  }
+}

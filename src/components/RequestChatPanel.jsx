@@ -791,7 +791,12 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
                 onKeyDown={onComposerKeyDown}
                 placeholder="Type a message…"
                 rows={1}
-                className="w-full resize-none rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-200"
+                className="w-full rounded-xl px-3 py-2 text-sm
+                           bg-white text-zinc-900
+                           dark:bg-zinc-900 dark:text-zinc-100
+                           placeholder:text-zinc-400
+                           border border-zinc-200 dark:border-zinc-700
+                           focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 style={{ overflowY: "hidden" }}
               />
 

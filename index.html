@@ -2,20 +2,42 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>majuu-app</title>
+
+    <!-- ✅ Correct viewport for PWA + safe areas -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+
+    <!-- ✅ PWA / mobile standalone hints -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+
+    <!-- ✅ Theme color (match your PWA manifest colors) -->
+    <meta name="theme-color" content="#0B1220" />
+
+    <!-- ✅ Icons -->
+    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <title>MAJUU</title>
 
     <!-- ✅ Google Analytics (GA4) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-7YF31R8JCT"></script>
+    <script
+      async
+      src="https://www.googletagmanager.com/gtag/js?id=G-7YF31R8JCT"
+    ></script>
     <script>
       window.dataLayer = window.dataLayer || [];
-      function gtag(){ dataLayer.push(arguments); }
+      function gtag() {
+        dataLayer.push(arguments);
+      }
       window.gtag = gtag;
 
       gtag("js", new Date());
       gtag("config", "G-7YF31R8JCT", {
-        anonymize_ip: true,     // privacy-friendly
+        anonymize_ip: true, // privacy-friendly
         send_page_view: true,
       });
     </script>

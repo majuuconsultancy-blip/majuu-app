@@ -1,6 +1,14 @@
+// ✅ FullPackageDiagnosticModal.jsx (NO-TRANSFORM MODAL — ANDROID JUMP FIX + EXTRA FROSTED)
+//
+// Why this fixes your case:
+// ✅ Android WebView scroll containers often jump when any ancestor is transformed (Framer Motion uses transforms).
+// ✅ So: NO motion/transform on the modal panel. Only backdrop fades.
+// ✅ Also: prevent tiny layout shifts (helperText line-wrap) by forcing single-line + fixed row height.
+//
+// Build: FDIAG BUILD 2026-02-18 NO-TRANSFORM-A
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 
 const CHECKLIST = [
   "Passport",
@@ -31,38 +39,6 @@ const ITEM_CREDITS = {
   "Offer Letter": 1600,
   "Proof of Funds": 1400,
 };
-
-function useAnimatedNumber(target, { duration = 520 } = {}) {
-  const [value, setValue] = useState(target);
-  const rafRef = useRef(null);
-  const startRef = useRef(0);
-  const fromRef = useRef(target);
-  const toRef = useRef(target);
-
-  useEffect(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-
-    fromRef.current = value;
-    toRef.current = target;
-    startRef.current = performance.now();
-
-    const tick = (now) => {
-      const elapsed = now - startRef.current;
-      const t = clamp(elapsed / duration, 0, 1);
-      const eased = 1 - Math.pow(1 - t, 4);
-      const next = fromRef.current + (toRef.current - fromRef.current) * eased;
-
-      setValue(next);
-      if (t < 1) rafRef.current = requestAnimationFrame(tick);
-    };
-
-    rafRef.current = requestAnimationFrame(tick);
-    return () => rafRef.current && cancelAnimationFrame(rafRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target]);
-
-  return value;
-}
 
 /* ---------- Minimal icons ---------- */
 function IconX(props) {
@@ -112,18 +88,70 @@ function IconCheck(props) {
   );
 }
 
+/* ---------- Body scroll lock (fixed-position) ---------- */
+function lockBodyScrollFixed() {
+  const y = window.scrollY || 0;
+  const prev = {
+    bodyPosition: document.body.style.position,
+    bodyTop: document.body.style.top,
+    bodyLeft: document.body.style.left,
+    bodyRight: document.body.style.right,
+    bodyWidth: document.body.style.width,
+    bodyOverflow: document.body.style.overflow,
+    htmlOverflow: document.documentElement.style.overflow,
+  };
+
+  document.documentElement.style.overflow = "hidden";
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${y}px`;
+  document.body.style.left = "0";
+  document.body.style.right = "0";
+  document.body.style.width = "100%";
+  document.body.style.overflow = "hidden";
+
+  return () => {
+    document.documentElement.style.overflow = prev.htmlOverflow;
+    document.body.style.position = prev.bodyPosition;
+    document.body.style.top = prev.bodyTop;
+    document.body.style.left = prev.bodyLeft;
+    document.body.style.right = prev.bodyRight;
+    document.body.style.width = prev.bodyWidth;
+    document.body.style.overflow = prev.bodyOverflow;
+
+    const top = parseInt(prev.bodyTop || "0", 10);
+    const restoreY = Number.isFinite(top) && top !== 0 ? -top : y;
+    window.scrollTo(0, restoreY);
+  };
+}
+
 export default function FullPackageDiagnosticModal({ open, onClose, track, country }) {
   const navigate = useNavigate();
-  const reduceMotion = useReducedMotion();
+  const listScrollRef = useRef(null);
 
   const [checked, setChecked] = useState({});
   const [pricePulse, setPricePulse] = useState(false);
 
+  // reset each open (as before)
   useEffect(() => {
     if (open) setChecked({});
   }, [open]);
 
-  const toggle = (item) => setChecked((p) => ({ ...p, [item]: !p[item] }));
+  // lock body scroll while open
+  useEffect(() => {
+    if (!open) return;
+    const unlock = lockBodyScrollFixed();
+    return () => unlock();
+  }, [open]);
+
+  // ESC close
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") onClose?.();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
 
   const total = CHECKLIST.length;
 
@@ -140,8 +168,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
   );
 
   const readinessLabel = useMemo(() => {
-    if (readiness < 35)
-      return { text: "Low", cls: "bg-rose-50 border-rose-200 text-rose-800" };
+    if (readiness < 35) return { text: "Low", cls: "bg-rose-50 border-rose-200 text-rose-800" };
     if (readiness < 70)
       return { text: "Good", cls: "bg-amber-50 border-amber-200 text-amber-900" };
     return { text: "Strong", cls: "bg-emerald-50 border-emerald-200 text-emerald-900" };
@@ -157,7 +184,6 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
   );
 
   const livePrice = useMemo(() => clamp(BASE_PRICE - discount, MIN_PRICE, BASE_PRICE), [discount]);
-  const animatedPrice = useAnimatedNumber(livePrice, { duration: 560 });
 
   const saved = useMemo(() => clamp(BASE_PRICE - livePrice, 0, BASE_PRICE), [livePrice]);
   const saveText = saved > 0 ? `Save ${formatKES(saved)}` : "Best value";
@@ -165,247 +191,317 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
   useEffect(() => {
     if (!open) return;
     setPricePulse(true);
-    const t = setTimeout(() => setPricePulse(false), 220);
+    const t = setTimeout(() => setPricePulse(false), 160);
     return () => clearTimeout(t);
   }, [livePrice, open]);
 
   const isCountryValid = Boolean(country && country !== "Not selected");
-const recommended = missingItems.length >= 3;   // ✅ MINIMUM 3 missing
-const canProceed = isCountryValid && recommended;
+  const recommended = missingItems.length >= 3;
+  const canProceed = isCountryValid && recommended;
 
-const helperText = !isCountryValid
-  ? "Pick a country first."
-  : recommended
+  // ✅ IMPORTANT: keep this single-line so it NEVER changes height and triggers anchoring
+  const helperText = !isCountryValid
+    ? "Pick a country first."
+    : recommended
     ? "Great fit for 3+ missing items."
     : "Best when 3+ items are missing.";
 
   const handleProceed = () => {
-  if (!canProceed) return;
+    if (!canProceed) return;
 
-  navigate(`/app/full-package/${track}?country=${encodeURIComponent(country)}`, {
-    state: { missingItems },
-  });
-  onClose?.();
-};
+    const missingParam = encodeURIComponent(missingItems.join("|"));
+    navigate(
+      `/app/full-package/${track}?country=${encodeURIComponent(country)}&missing=${missingParam}`,
+      { state: { missingItems } }
+    );
 
-  const backdropV = { hidden: { opacity: 0 }, show: { opacity: 1 }, exit: { opacity: 0 } };
+    onClose?.();
+  };
 
-  const modalV = reduceMotion
-    ? { hidden: { opacity: 0 }, show: { opacity: 1 }, exit: { opacity: 0 } }
-    : {
-        hidden: { opacity: 0, y: 14, scale: 0.985 },
-        show: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.22, ease: "easeOut" } },
-        exit: { opacity: 0, y: 12, scale: 0.985, transition: { duration: 0.16 } },
-      };
+  const toggle = (item) => {
+    // ✅ capture scrollTop and restore immediately after state update flush (microtask)
+    const el = listScrollRef.current;
+    const top = el ? el.scrollTop : 0;
+
+    setChecked((p) => {
+      const next = { ...p, [item]: !p[item] };
+      return next;
+    });
+
+    // ✅ restore ASAP + RAF (beats Android snap)
+    queueMicrotask(() => {
+      const el2 = listScrollRef.current;
+      if (el2) el2.scrollTop = top;
+
+      requestAnimationFrame(() => {
+        const el3 = listScrollRef.current;
+        if (el3) el3.scrollTop = top;
+      });
+    });
+  };
 
   if (!open) return null;
 
   return (
-    <AnimatePresence>
-      {open ? (
-        <motion.div
-          variants={backdropV}
-          initial="hidden"
-          animate="show"
-          exit="exit"
-          className="fixed inset-0 z-50 flex items-center justify-center px-5"
-          onMouseDown={onClose}
-        >
-          <div className="absolute inset-0 bg-black/20" />
-          <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-200/25 blur-3xl" />
-          <div className="pointer-events-none absolute bottom-0 left-0 h-72 w-72 rounded-full bg-sky-200/20 blur-3xl" />
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center px-5"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose?.();
+      }}
+      style={{ touchAction: "manipulation" }}
+      role="presentation"
+    >
+      {/* ✅ SUPER FROSTED BACKDROP */}
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-lg" />
+      <div className="absolute inset-0 bg-white/[0.06]" />
 
-          <motion.div
-            variants={modalV}
-            onMouseDown={(e) => e.stopPropagation()}
-            className={[
-              "relative w-full max-w-md",
-              "h-[78vh] max-h-[78vh]", // ✅ fixed height feels more predictable on mobile
-              "rounded-[22px]",
-              "border border-zinc-200/70 bg-white/80",
-              "shadow-[0_20px_70px_rgba(0,0,0,0.18)] backdrop-blur-xl",
-              "flex flex-col overflow-hidden", // ✅ allows body to take remaining space
-            ].join(" ")}
-            role="dialog"
-            aria-modal="true"
-          >
-            {/* Header (sticky, smaller) */}
-            <div className="sticky top-0 z-20 border-b border-zinc-200/60 bg-white/70 backdrop-blur-xl">
-              <div className="flex items-start justify-between gap-3 px-5 py-2">
+      <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-200/25 blur-3xl" />
+      <div className="pointer-events-none absolute bottom-0 left-0 h-72 w-72 rounded-full bg-sky-200/20 blur-3xl" />
+
+      {/* ✅ NO FRAMER MOTION HERE (no transforms) */}
+      <div
+        className={[
+          "relative w-full max-w-md",
+          "h-[78vh] max-h-[78vh]",
+          "rounded-[22px]",
+          "border border-white/40 bg-white/55",
+          "shadow-[0_20px_70px_rgba(0,0,0,0.18)] backdrop-blur-2xl",
+          "ring-1 ring-white/20",
+          "flex flex-col overflow-hidden",
+          "dark:border-zinc-800/70 dark:bg-zinc-900/55 dark:ring-white/10",
+        ].join(" ")}
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        style={{
+          // helps some WebViews stop “scroll coordination” weirdness
+          isolation: "isolate",
+        }}
+      >
+        {/* Header */}
+        <div className="shrink-0 border-b border-white/25 bg-white/45 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/45">
+          <div className="flex items-start justify-between gap-3 px-5 py-2">
+            <div className="min-w-0">
+              <div className="text-[12px] font-extrabold text-emerald-900/85 dark:text-emerald-200/90">
+                Full package diagnostic
+              </div>
+              <h2 className="mt-0.5 text-[16px] font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100">
+                Let’s understand where you are
+              </h2>
+              <p className="mt-0.5 text-[12px] text-zinc-600 dark:text-zinc-300">
+                Tick what you already have.
+              </p>
+            </div>
+
+            <div className="absolute right-3 top-3 z-50 rounded-full border border-white/35 bg-white/55 px-2 py-1 text-[10px] font-extrabold text-zinc-700 backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/55 dark:text-zinc-200">
+              FDIAG BUILD 2026-02-18 NO-TRANSFORM-A
+            </div>
+
+            <button
+              onClick={onClose}
+              className="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-white/35 bg-white/55 text-zinc-700 transition hover:bg-white/70 active:scale-[0.99] backdrop-blur-xl
+                         dark:border-zinc-700/60 dark:bg-zinc-900/55 dark:text-zinc-200"
+              aria-label="Close"
+              type="button"
+            >
+              <IconX className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Summary */}
+        <div className="shrink-0 border-b border-white/20 bg-white/40 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/40">
+          <div className="px-5 py-2">
+            <div className="rounded-3xl border border-white/35 bg-white/45 px-4 py-2.5 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/45">
+              <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[12px] font-extrabold text-emerald-900/85">
-                    Full package diagnostic
+                  <div className="text-[10.5px] font-extrabold text-zinc-600 dark:text-zinc-300">
+                    Price
                   </div>
-                  <h2 className="mt-0.5 text-[16px] font-extrabold tracking-tight text-zinc-900">
-                    Let’s understand where you are
-                  </h2>
-                  <p className="mt-0.5 text-[12px] text-zinc-600">
-                    Tick what you already have.
-                  </p>
+
+                  <div
+                    className={[
+                      "mt-0.5 text-[18px] font-extrabold text-zinc-900 tabular-nums leading-none dark:text-zinc-100",
+                      pricePulse ? "scale-[1.02]" : "scale-100",
+                      "transition-transform duration-150 ease-out",
+                    ].join(" ")}
+                  >
+                    {formatKES(livePrice)}
+                  </div>
+
+                  <div className="mt-0.5 text-[10.5px] font-extrabold text-emerald-900/70 dark:text-emerald-200/80">
+                    {saveText}
+                  </div>
                 </div>
 
-                <button
-                  onClick={onClose}
-                  className="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white/70 text-zinc-700 transition hover:bg-white active:scale-[0.99]"
-                  aria-label="Close"
-                >
-                  <IconX className="h-5 w-5" />
-                </button>
+                <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-0.5 text-[10.5px] font-extrabold text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+                  <IconShieldCheck className="h-4 w-4" />
+                  Best
+                </span>
               </div>
-            </div>
 
-            {/* ✅ ONE compact sticky summary card (price + readiness inside) */}
-            <div className="sticky top-[54px] z-10 border-b border-zinc-200/50 bg-white/60 backdrop-blur-xl">
-              <div className="px-5 py-2">
-                <div className="rounded-3xl border border-zinc-200/60 bg-white/65 px-4 py-2.5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[10.5px] font-extrabold text-zinc-600">
-                        Price
-                      </div>
-                      <motion.div
-                        animate={
-                          pricePulse && !reduceMotion ? { scale: [1, 1.02, 1] } : { scale: 1 }
-                        }
-                        transition={{ duration: 0.2, ease: "easeOut" }}
-                        className="mt-0.5 text-[18px] font-extrabold text-zinc-900 tabular-nums leading-none"
-                      >
-                        {formatKES(animatedPrice)}
-                      </motion.div>
-                      <div className="mt-0.5 text-[10.5px] font-extrabold text-emerald-900/65">
-                        {saveText}
-                      </div>
-                    </div>
+              <div className="mt-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[12px] font-extrabold text-zinc-900 dark:text-zinc-100">
+                    Readiness {readiness}%
+                  </div>
 
-                    <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-0.5 text-[10.5px] font-extrabold text-emerald-900">
-                      <IconShieldCheck className="h-4 w-4" />
-                      Best
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10.5px] font-semibold text-zinc-500 dark:text-zinc-300">
+                      {haveCount}/{total}
                     </span>
-                  </div>
-
-                  {/* readiness row */}
-                  <div className="mt-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-[12px] font-extrabold text-zinc-900">
-                        Readiness {readiness}%
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10.5px] font-semibold text-zinc-500">
-                          {haveCount}/{total}
-                        </span>
-                        <span
-                          className={[
-                            "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-extrabold",
-                            readinessLabel.cls,
-                          ].join(" ")}
-                        >
-                          {readinessLabel.text}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-zinc-200/70">
-                      <motion.div
-                        initial={false}
-                        animate={{ width: `${readiness}%` }}
-                        transition={reduceMotion ? { duration: 0 } : { duration: 0.24, ease: "easeOut" }}
-                        className="h-full rounded-full bg-emerald-600"
-                      />
-                    </div>
-
-                    <div className="mt-1 text-[10.5px] text-zinc-600">{helperText}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* ✅ Scroll body takes ALL remaining height, scrollbar hidden */}
-            <div className="flex-1 overflow-y-auto overscroll-contain px-5 pt-3 pb-4 scrollbar-hide">
-              <div className="grid gap-3">
-                {CHECKLIST.map((item) => {
-                  const isOn = !!checked[item];
-                  const credit = ITEM_CREDITS[item] || 0;
-
-                  return (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() => toggle(item)}
+                    <span
                       className={[
-                        "w-full text-left rounded-3xl border px-4 py-3 transition active:scale-[0.99]",
-                        "shadow-[0_12px_36px_rgba(0,0,0,0.06)] backdrop-blur",
-                        isOn
-                          ? "border-emerald-200 bg-white/80"
-                          : "border-zinc-200/70 bg-white/65 hover:bg-white/80 hover:border-emerald-200/70",
+                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-extrabold",
+                        readinessLabel.cls,
                       ].join(" ")}
                     >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0 flex items-center gap-3">
-                          <span
-                            className={[
-                              "inline-flex h-9 w-9 items-center justify-center rounded-2xl border",
-                              isOn
-                                ? "border-emerald-200 bg-emerald-50/80 text-emerald-800"
-                                : "border-zinc-200 bg-white/70 text-zinc-700",
-                            ].join(" ")}
-                          >
-                            {isOn ? (
-                              <IconCheck className="h-5 w-5" />
-                            ) : (
-                              <span className="h-2 w-2 rounded-full bg-zinc-300" />
-                            )}
-                          </span>
+                      {readinessLabel.text}
+                    </span>
+                  </div>
+                </div>
 
-                          <div className="min-w-0">
-                            <div className="font-extrabold text-zinc-900">{item}</div>
-                            <div className="mt-0.5 text-xs text-zinc-500">
-                              Tap to {isOn ? "undo" : "mark ready"}
-                            </div>
-                          </div>
-                        </div>
+                <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-zinc-200/70 dark:bg-zinc-800/60">
+                  <div
+                    className="h-full rounded-full bg-emerald-600"
+                    style={{ width: `${readiness}%` }}
+                  />
+                </div>
 
-                        <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-extrabold text-emerald-900">
-                          -{formatKES(credit)}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* buttons inside scroll */}
-              <div className="mt-4 rounded-3xl border border-zinc-200/70 bg-white/70 p-4">
-                <button
-                  onClick={handleProceed}
-                  disabled={!canProceed}
-                  className={[
-                    "w-full rounded-2xl border px-4 py-2.5 text-sm font-extrabold shadow-sm transition active:scale-[0.99]",
-                    canProceed
-                      ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
-                      : "border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed",
-                  ].join(" ")}
-                >
-                  Proceed
-                </button>
-
-                <button
-                  onClick={onClose}
-                  className="mt-2.5 w-full rounded-2xl border border-zinc-200 bg-white/70 px-4 py-2.5 text-sm font-extrabold text-zinc-800 transition hover:bg-white active:scale-[0.99]"
-                >
-                  Cancel
-                </button>
-
-                <div className="mt-2 text-center text-[10.5px] text-zinc-500">
-                  Tip: recommended when missing <b>3+</b> items.
+                {/* ✅ single-line: prevents height changes that trigger scroll anchoring */}
+                <div className="mt-1 text-[10.5px] text-zinc-600 dark:text-zinc-300 truncate">
+                  {helperText}
                 </div>
               </div>
-
-              <div className="h-2" />
             </div>
-          </motion.div>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
+          </div>
+        </div>
+
+        {/* Scroll area */}
+        <div className="flex-1 min-h-0 px-5 pt-3 pb-4">
+          <div
+            ref={listScrollRef}
+            className="h-full overflow-y-auto overscroll-contain scrollbar-hide"
+            style={{
+              WebkitOverflowScrolling: "touch",
+              overscrollBehavior: "contain",
+              overflowAnchor: "none",
+              WebkitOverflowAnchor: "none",
+              // helps reduce “jump to top” for some WebViews
+              contain: "layout paint",
+            }}
+          >
+            <div className="grid gap-3">
+              {CHECKLIST.map((item) => {
+                const isOn = !!checked[item];
+                const credit = ITEM_CREDITS[item] || 0;
+
+                return (
+                  <div
+                    key={item}
+                    role="button"
+                    aria-pressed={isOn}
+                    tabIndex={-1}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onTouchStart={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      toggle(item);
+                    }}
+                    className={[
+                      "w-full text-left rounded-3xl border px-4 py-3 transition active:scale-[0.99]",
+                      "shadow-[0_12px_36px_rgba(0,0,0,0.06)] backdrop-blur-2xl",
+                      // ✅ fixed visual height stability (no tiny reflow surprises)
+                      "min-h-[78px]",
+                      isOn
+                        ? "border-emerald-200 bg-white/55 dark:bg-zinc-900/55"
+                        : "border-white/35 bg-white/40 hover:bg-white/50 hover:border-emerald-200/60 dark:border-zinc-800/60 dark:bg-zinc-900/40",
+                    ].join(" ")}
+                    style={{
+                      touchAction: "manipulation",
+                      WebkitTapHighlightColor: "transparent",
+                      userSelect: "none",
+                      overflowAnchor: "none",
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex items-center gap-3">
+                        <span
+                          className={[
+                            "inline-flex h-9 w-9 items-center justify-center rounded-2xl border",
+                            isOn
+                              ? "border-emerald-200 bg-emerald-50/60 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200"
+                              : "border-white/35 bg-white/45 text-zinc-700 dark:border-zinc-700/60 dark:bg-zinc-950/30 dark:text-zinc-200",
+                          ].join(" ")}
+                        >
+                          {isOn ? <IconCheck className="h-5 w-5" /> : <span className="h-2 w-2 rounded-full bg-zinc-300" />}
+                        </span>
+
+                        <div className="min-w-0">
+                          <div className="font-extrabold text-zinc-900 dark:text-zinc-100">
+                            {item}
+                          </div>
+                          <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-300">
+                            Tap to {isOn ? "undo" : "mark ready"}
+                          </div>
+                        </div>
+                      </div>
+
+                      <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50/60 px-2.5 py-1 text-[11px] font-extrabold text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+                        -{formatKES(credit)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* actions */}
+            <div className="mt-4 rounded-3xl border border-white/35 bg-white/45 p-4 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/45">
+              <button
+                onClick={handleProceed}
+                disabled={!canProceed}
+                className={[
+                  "w-full rounded-2xl border px-4 py-2.5 text-sm font-extrabold shadow-sm transition active:scale-[0.99]",
+                  canProceed
+                    ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
+                    : "border-white/30 bg-white/30 text-zinc-400 cursor-not-allowed dark:border-zinc-800/60 dark:bg-zinc-950/20",
+                ].join(" ")}
+                type="button"
+              >
+                Proceed
+              </button>
+
+              <button
+                onClick={onClose}
+                className="mt-2.5 w-full rounded-2xl border border-white/35 bg-white/45 px-4 py-2.5 text-sm font-extrabold text-zinc-800 transition hover:bg-white/60 active:scale-[0.99] backdrop-blur-2xl
+                           dark:border-zinc-800/60 dark:bg-zinc-900/45 dark:text-zinc-100"
+                type="button"
+              >
+                Cancel
+              </button>
+
+              <div className="mt-2 text-center text-[10.5px] text-zinc-500 dark:text-zinc-300">
+                Tip: recommended when missing <b>3+</b> items.
+              </div>
+            </div>
+
+            <div className="h-2" />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

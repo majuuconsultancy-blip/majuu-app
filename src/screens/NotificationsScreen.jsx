@@ -28,7 +28,7 @@ import {
   updateDoc,
   serverTimestamp,
 } from "firebase/firestore";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion, AnimatePresence } from "../utils/motionProxy";
 import { ChevronLeft, Bell, ChevronRight, Trash2, MessageCircle } from "lucide-react";
 
 import { auth, db } from "../firebase";

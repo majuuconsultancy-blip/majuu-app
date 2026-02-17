@@ -1,14 +1,26 @@
-// ✅ RequestModal.jsx (COPY-PASTE)
-// Same logic as your current modal ✅
-// + Sticky CTA (Pay / Send / Cancel) always visible ✅
-// + Apple-like momentum scroll on mobile ✅
-// + Safer scroll behavior: body lock, overscroll containment ✅
-// + enableAttachments prop: hide upload unless enabled ✅
-// ✅ Email is now REQUIRED + validated ✅
-// ✅ Supports auto-fill via defaultEmail prop ✅
+// ✅ RequestModal.jsx (FINAL COPY-PASTE — ANDROID KEYBOARD WARM-UP + TOUCH + SCROLL FIX)
+//
+// New fix added for your "keyboard doesn't open until I trigger it once":
+// ✅ IME warm-up runs ONCE per app session, and only on a real user tap inside inputs.
+//    - Uses a hidden input focus+blur trick (gesture-bound) so Android WebView initializes keyboard.
+//    - Then re-focuses the intended input on the next frame.
+// This matches your symptom: works after 1 trigger until app is killed from recents.
+//
+// Everything else kept:
+// ✅ Fixed-position body scroll lock (keyboard stability)
+// ✅ Overlay closes ONLY when you tap overlay (pointerdown) but won't steal focus
+// ✅ Panel stops pointer propagation
+// ✅ Scroll focused field into view
+// ✅ Escape close
+// ✅ Standalone performance tweaks
+// ✅ Build indicator
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isStandalone } from "../utils/isStandalone";
 
+const STANDALONE = isStandalone();
+
+/* ---------------- Icons ---------------- */
 function IconX(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
@@ -118,15 +130,14 @@ function IconPin(props) {
   );
 }
 
+/* ---------------- Helpers ---------------- */
 function normalizePhone(input) {
   return String(input || "").trim();
 }
 
-// ✅ lightweight email validation (good enough for UI + firebase)
 function isValidEmail(input) {
   const e = String(input || "").trim();
   if (!e) return false;
-  // very common safe pattern (not overly strict)
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 }
 
@@ -145,6 +156,116 @@ function fileToMeta(f) {
   };
 }
 
+// ✅ Best-practice body lock for Android PWA keyboard stability
+function lockBodyScrollFixed() {
+  const y = window.scrollY || 0;
+
+  const prev = {
+    bodyPosition: document.body.style.position,
+    bodyTop: document.body.style.top,
+    bodyWidth: document.body.style.width,
+    bodyOverflow: document.body.style.overflow,
+    htmlOverflow: document.documentElement.style.overflow,
+  };
+
+  document.documentElement.style.overflow = "hidden";
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${y}px`;
+  document.body.style.width = "100%";
+  document.body.style.overflow = "hidden";
+
+  return () => {
+    document.documentElement.style.overflow = prev.htmlOverflow;
+    document.body.style.position = prev.bodyPosition;
+    document.body.style.top = prev.bodyTop;
+    document.body.style.width = prev.bodyWidth;
+    document.body.style.overflow = prev.bodyOverflow;
+
+    const top = parseInt(prev.bodyTop || "0", 10);
+    const restoreY = Number.isFinite(top) && top !== 0 ? -top : y;
+    window.scrollTo(0, restoreY);
+  };
+}
+
+// Helps Android: ensure focused input is visible within scroll container
+function scrollFieldIntoView(el, scrollContainer) {
+  if (!el || !scrollContainer) return;
+
+  setTimeout(() => {
+    try {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    } catch {
+      // fallback
+    }
+
+    try {
+      const r1 = el.getBoundingClientRect();
+      const r2 = scrollContainer.getBoundingClientRect();
+      const delta = r1.top - r2.top - r2.height * 0.35;
+      scrollContainer.scrollTop += delta;
+    } catch {
+      // no-op
+    }
+  }, 80);
+}
+
+/**
+ * ✅ Android WebView IME warm-up (one-time per session)
+ * Runs only on a real user gesture (we call it from onPointerDownCapture on inputs).
+ * Then refocuses the target input.
+ */
+function warmUpKeyboardOnceAndRefocus(targetEl) {
+  try {
+    if (sessionStorage.getItem("kb_warmed") === "1") return;
+
+    const hidden = document.createElement("input");
+    hidden.type = "text";
+    hidden.setAttribute("aria-hidden", "true");
+    hidden.style.position = "fixed";
+    hidden.style.opacity = "0";
+    hidden.style.height = "1px";
+    hidden.style.width = "1px";
+    hidden.style.left = "-1000px";
+    hidden.style.top = "0";
+    hidden.style.pointerEvents = "none";
+
+    document.body.appendChild(hidden);
+
+    try {
+      hidden.focus();
+    } catch {}
+
+    setTimeout(() => {
+      try {
+        hidden.blur();
+      } catch {}
+      try {
+        document.body.removeChild(hidden);
+      } catch {}
+
+      sessionStorage.setItem("kb_warmed", "1");
+
+      // refocus the real field on next frame so keyboard appears for the user
+      if (targetEl) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            try {
+              targetEl.focus({ preventScroll: true });
+            } catch {
+              try {
+                targetEl.focus();
+              } catch {}
+            }
+          });
+        });
+      }
+    }, 60);
+  } catch {
+    // no-op
+  }
+}
+
 export default function RequestModal({
   open,
   onClose,
@@ -156,10 +277,13 @@ export default function RequestModal({
   defaultEmail = "",
   onPay,
   maxPdfMb = 10,
-  enableAttachments = true, // ✅ hide upload section unless enabled
+  enableAttachments = true,
 }) {
   const panelRef = useRef(null);
   const scrollRef = useRef(null);
+
+  // ✅ prevents "tap causes close + blur" on Android
+  const startedInsidePanelRef = useRef(false);
 
   const [name, setName] = useState(defaultName);
   const [phone, setPhone] = useState(defaultPhone);
@@ -167,50 +291,39 @@ export default function RequestModal({
   const [city, setCity] = useState("");
   const [note, setNote] = useState("");
 
-  const [pickedFiles, setPickedFiles] = useState([]); // File[]
+  const [pickedFiles, setPickedFiles] = useState([]);
   const [paid, setPaid] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
-  useEffect(() => {
-    if (open) {
-      setName(defaultName || "");
-      setPhone(defaultPhone || "");
-      setEmail(defaultEmail || "");
-      setCity("");
-      setNote("");
-      setPickedFiles([]);
-      setPaid(false);
-      setErr("");
-      setLoading(false);
-
-      requestAnimationFrame(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = 0;
-      });
-    }
-  }, [open, defaultName, defaultPhone, defaultEmail]);
-
-  // ✅ Lock background scroll while modal open
+  // reset when opened
   useEffect(() => {
     if (!open) return;
 
-    const prevOverflow = document.body.style.overflow;
-    const prevPaddingRight = document.body.style.paddingRight;
+    setName(defaultName || "");
+    setPhone(defaultPhone || "");
+    setEmail(defaultEmail || "");
+    setCity("");
+    setNote("");
+    setPickedFiles([]);
+    setPaid(false);
+    setErr("");
+    setLoading(false);
 
-    const scrollbarWidth =
-      window.innerWidth - document.documentElement.clientWidth;
-    document.body.style.overflow = "hidden";
-    if (scrollbarWidth > 0)
-      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    });
+  }, [open, defaultName, defaultPhone, defaultEmail]);
 
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      document.body.style.paddingRight = prevPaddingRight;
-    };
+  // ✅ lock body scroll (ANDROID SAFE)
+  useEffect(() => {
+    if (!open) return;
+    const unlock = lockBodyScrollFixed();
+    return () => unlock();
   }, [open]);
 
-  // ESC to close (when not loading)
+  // ESC close
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e) => {
@@ -220,24 +333,12 @@ export default function RequestModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, loading, onClose]);
 
-  // ✅ Email required now (so pay gate also requires it)
   const canPay = useMemo(() => {
-    return (
-      name.trim().length > 0 &&
-      phone.trim().length > 0 &&
-      isValidEmail(email) &&
-      !loading
-    );
+    return name.trim().length > 0 && phone.trim().length > 0 && isValidEmail(email) && !loading;
   }, [name, phone, email, loading]);
 
   const canSubmit = useMemo(() => {
-    return (
-      name.trim().length > 0 &&
-      phone.trim().length > 0 &&
-      isValidEmail(email) &&
-      paid &&
-      !loading
-    );
+    return name.trim().length > 0 && phone.trim().length > 0 && isValidEmail(email) && paid && !loading;
   }, [name, phone, email, paid, loading]);
 
   if (!open) return null;
@@ -266,15 +367,10 @@ export default function RequestModal({
 
     if (!cleanName) return setErr("Please enter your full name.");
     if (!cleanPhone) return setErr("Please enter your phone / WhatsApp.");
-
-    // ✅ Email required
     if (!cleanEmail) return setErr("Please enter your email address.");
-    if (!isValidEmail(cleanEmail))
-      return setErr("Please enter a valid email address.");
-
+    if (!isValidEmail(cleanEmail)) return setErr("Please enter a valid email address.");
     if (!paid) return setErr("Please press Pay first to unlock sending.");
 
-    // ✅ only validate files if attachments enabled
     let fileMetas = [];
     if (enableAttachments) {
       const maxBytes = maxPdfMb * 1024 * 1024;
@@ -283,12 +379,9 @@ export default function RequestModal({
       if (badType) return setErr("Only PDF files are allowed for now.");
 
       const tooBig = pickedFiles.find((f) => (f?.size || 0) > maxBytes);
-      if (tooBig)
-        return setErr(`One file is too large. Max size is ${maxPdfMb}MB.`);
+      if (tooBig) return setErr(`One file is too large. Max size is ${maxPdfMb}MB.`);
 
-      fileMetas = Array.isArray(pickedFiles)
-        ? pickedFiles.map(fileToMeta)
-        : [];
+      fileMetas = Array.isArray(pickedFiles) ? pickedFiles.map(fileToMeta) : [];
     } else {
       if (pickedFiles.length) setPickedFiles([]);
     }
@@ -306,19 +399,11 @@ export default function RequestModal({
 
         requestUploadMeta:
           enableAttachments && fileMetas.length > 0
-            ? {
-                count: fileMetas.length,
-                files: fileMetas,
-                note: "User selected PDF files (metadata only).",
-              }
+            ? { count: fileMetas.length, files: fileMetas, note: "User selected PDF files (metadata only)." }
             : null,
 
         paid: true,
-        paymentMeta: {
-          status: "paid_gate_passed",
-          method: "dummy",
-          paidAt: Date.now(),
-        },
+        paymentMeta: { status: "paid_gate_passed", method: "dummy", paidAt: Date.now() },
       });
     } catch (e) {
       setErr(e?.message || "Failed to submit. Try again.");
@@ -327,60 +412,86 @@ export default function RequestModal({
     }
   };
 
+  // ✅ lighter styles in standalone (no blur, no heavy shadows)
+  const overlayCls = STANDALONE ? "bg-black/40" : "bg-black/35 backdrop-blur-[2px]";
+  const panelCls = STANDALONE
+    ? "w-full max-w-md rounded-3xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 flex flex-col"
+    : "w-full max-w-md rounded-3xl border border-zinc-200 bg-white/75 shadow-xl backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/75 flex flex-col";
+
+  const ctaWrapCls = STANDALONE
+    ? "rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 px-3 py-3"
+    : "rounded-2xl border border-zinc-200 bg-white/80 shadow-lg backdrop-blur px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950/70";
+
   const fieldWrap =
-    "mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 " +
-    "focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100";
+    "mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 " +
+    "focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100 " +
+    "dark:border-zinc-800 dark:bg-zinc-950";
+
   const inputBase =
-    "w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400";
+    "w-full bg-transparent text-sm outline-none placeholder:text-zinc-400 text-zinc-900 dark:text-zinc-100";
+
+  const focusProps = {
+    onFocus: (e) => scrollFieldIntoView(e.currentTarget, scrollRef.current),
+    // ✅ IMPORTANT: gesture-bound warm up happens BEFORE focus is applied by the browser
+    onPointerDownCapture: (e) => warmUpKeyboardOnceAndRefocus(e.currentTarget),
+  };
+
+  const textareaFocusProps = {
+    onFocus: (e) => scrollFieldIntoView(e.currentTarget, scrollRef.current),
+    onPointerDownCapture: (e) => warmUpKeyboardOnceAndRefocus(e.currentTarget),
+  };
 
   return (
-    <div
-      className="fixed inset-0 z-50"
-      aria-modal="true"
-      role="dialog"
-      style={{ overscrollBehavior: "contain" }}
-    >
-      {/* overlay */}
+    <div className="fixed inset-0 z-50" aria-modal="true" role="dialog" style={{ overscrollBehavior: "contain" }}>
+      {/* ✅ Overlay: close ONLY if pointer started on overlay (not inside modal) */}
       <div
-        className="absolute inset-0 bg-black/35 backdrop-blur-[2px]"
-        style={{ touchAction: "none" }}
-        onMouseDown={() => {
+        className={`absolute inset-0 ${overlayCls}`}
+        aria-hidden="true"
+        onPointerDown={(e) => {
+          if (startedInsidePanelRef.current) return;
           if (!loading) onClose?.();
         }}
-        onTouchStart={() => {
-          if (!loading) onClose?.();
-        }}
+        style={{ touchAction: "manipulation" }}
       />
 
       {/* panel wrapper */}
       <div className="relative min-h-screen flex items-center justify-center p-4">
         <div
           ref={panelRef}
-          onMouseDown={(e) => e.stopPropagation()}
-          onTouchStart={(e) => e.stopPropagation()}
-          className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white/75 shadow-xl backdrop-blur flex flex-col"
-          style={{
-            height: "75vh",
-            maxHeight: "75vh",
+          className={panelCls}
+          style={{ height: "75vh", maxHeight: "75vh", overflow: "hidden" }}
+          onPointerDown={(e) => {
+            startedInsidePanelRef.current = true;
+            e.stopPropagation();
           }}
+          onPointerUp={() => {
+            setTimeout(() => {
+              startedInsidePanelRef.current = false;
+            }, 0);
+          }}
+          onPointerCancel={() => {
+            startedInsidePanelRef.current = false;
+          }}
+          onClick={(e) => e.stopPropagation()}
         >
+          {/* Build indicator */}
+          <div className="absolute right-3 top-3 z-50 rounded-full border border-zinc-200 bg-white/80 px-2 py-1 text-[10px] font-extrabold text-zinc-700">
+            REQMODAL BUILD 2026-02-18 FINAL-KC
+          </div>
+
           {/* Header */}
           <div className="px-5 pt-5 shrink-0">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-lg font-semibold tracking-tight text-zinc-900">
-                  {title}
-                </h2>
-                {subtitle ? (
-                  <p className="mt-1 text-sm text-zinc-600">{subtitle}</p>
-                ) : null}
+                <h2 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">{title}</h2>
+                {subtitle ? <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{subtitle}</p> : null}
               </div>
 
               <button
                 type="button"
                 onClick={onClose}
                 disabled={loading}
-                className="shrink-0 rounded-xl border border-zinc-200 bg-white/60 p-2 text-zinc-700 transition hover:bg-white disabled:opacity-60"
+                className="shrink-0 rounded-xl border border-zinc-200 bg-white p-2 text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
                 aria-label="Close"
                 title="Close"
               >
@@ -397,15 +508,13 @@ export default function RequestModal({
               style={{
                 WebkitOverflowScrolling: "touch",
                 overscrollBehavior: "contain",
-                touchAction: "pan-y",
+                touchAction: "auto",
               }}
             >
               <div className="grid gap-4">
                 {/* Name */}
                 <div>
-                  <label className="text-sm font-medium text-zinc-800">
-                    Full name
-                  </label>
+                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Full name</label>
                   <div className={fieldWrap}>
                     <IconUser className="h-5 w-5 text-zinc-500" />
                     <input
@@ -415,15 +524,18 @@ export default function RequestModal({
                       placeholder="Your full name"
                       disabled={loading}
                       autoComplete="name"
+                      enterKeyHint="next"
+                      autoCapitalize="words"
+                      autoCorrect="on"
+                      spellCheck={false}
+                      {...focusProps}
                     />
                   </div>
                 </div>
 
                 {/* Phone */}
                 <div>
-                  <label className="text-sm font-medium text-zinc-800">
-                    Phone / WhatsApp
-                  </label>
+                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Phone / WhatsApp</label>
                   <div className={fieldWrap}>
                     <IconPhone className="h-5 w-5 text-zinc-500" />
                     <input
@@ -434,13 +546,15 @@ export default function RequestModal({
                       disabled={loading}
                       inputMode="tel"
                       autoComplete="tel"
+                      enterKeyHint="next"
+                      {...focusProps}
                     />
                   </div>
                 </div>
 
-                {/* ✅ Email (required) */}
+                {/* Email */}
                 <div>
-                  <label className="text-sm font-medium text-zinc-800">
+                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
                     Email <span className="text-rose-600">*</span>
                   </label>
                   <div className={fieldWrap}>
@@ -453,23 +567,19 @@ export default function RequestModal({
                       disabled={loading}
                       inputMode="email"
                       autoComplete="email"
+                      enterKeyHint="next"
+                      {...focusProps}
                     />
                   </div>
 
-                  {/* tiny inline hint (only when user typed something invalid) */}
-                  {String(email || "").trim().length > 0 &&
-                  !isValidEmail(email) ? (
-                    <div className="mt-1 text-xs text-rose-600">
-                      Enter a valid email (example: you@gmail.com)
-                    </div>
+                  {String(email || "").trim().length > 0 && !isValidEmail(email) ? (
+                    <div className="mt-1 text-xs text-rose-600">Enter a valid email (example: you@gmail.com)</div>
                   ) : null}
                 </div>
 
                 {/* City */}
                 <div>
-                  <label className="text-sm font-medium text-zinc-800">
-                    City / Town (optional)
-                  </label>
+                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">City / Town (optional)</label>
                   <div className={fieldWrap}>
                     <IconPin className="h-5 w-5 text-zinc-500" />
                     <input
@@ -478,17 +588,19 @@ export default function RequestModal({
                       onChange={(e) => setCity(e.target.value)}
                       placeholder="Nairobi..."
                       disabled={loading}
+                      enterKeyHint="next"
+                      {...focusProps}
                     />
                   </div>
                 </div>
 
-                {/* Upload PDFs — only if enabled */}
+                {/* Upload PDFs */}
                 {enableAttachments ? (
                   <div>
-                    <label className="text-sm font-medium text-zinc-800">
+                    <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
                       Upload documents (optional)
                     </label>
-                    <div className="mt-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-3">
+                    <div className="mt-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950">
                       <input
                         type="file"
                         multiple
@@ -498,10 +610,10 @@ export default function RequestModal({
                           const arr = Array.from(e.target.files || []);
                           setPickedFiles(arr);
                         }}
-                        className="w-full text-sm text-zinc-900"
+                        className="w-full text-sm text-zinc-900 dark:text-zinc-100"
                       />
 
-                      <div className="mt-2 text-xs text-zinc-500">
+                      <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
                         PDFs only. Max {maxPdfMb}MB each.
                       </div>
 
@@ -510,7 +622,7 @@ export default function RequestModal({
                           {pickedFiles.map((f, idx) => (
                             <div
                               key={`${f.name}-${idx}`}
-                              className="rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-xs text-zinc-700"
+                              className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
                             >
                               {f.name} • {Math.round((f.size || 0) / 1024)} KB
                             </div>
@@ -523,9 +635,7 @@ export default function RequestModal({
 
                 {/* Note */}
                 <div>
-                  <label className="text-sm font-medium text-zinc-800">
-                    Note (optional)
-                  </label>
+                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Note (optional)</label>
                   <div className={fieldWrap + " items-start"}>
                     <IconNote className="h-5 w-5 text-zinc-500 mt-0.5" />
                     <textarea
@@ -534,13 +644,14 @@ export default function RequestModal({
                       onChange={(e) => setNote(e.target.value)}
                       placeholder="Any extra details to help us assist you..."
                       disabled={loading}
+                      {...textareaFocusProps}
                     />
                   </div>
                 </div>
 
                 {/* Error */}
                 {err ? (
-                  <div className="rounded-2xl border border-rose-100 bg-rose-50/70 px-3 py-2 text-sm text-rose-700">
+                  <div className="rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200">
                     {err}
                   </div>
                 ) : null}
@@ -550,18 +661,22 @@ export default function RequestModal({
 
           {/* Sticky CTA */}
           <div className="sticky bottom-0 px-5 pb-5 pt-3 shrink-0">
-            <div className="pointer-events-none -mt-6 h-6 w-full bg-gradient-to-b from-transparent to-white/80 backdrop-blur-[2px]" />
+            {!STANDALONE ? (
+              <div className="pointer-events-none -mt-6 h-6 w-full bg-gradient-to-b from-transparent to-white/80 backdrop-blur-[2px]" />
+            ) : (
+              <div className="pointer-events-none -mt-6 h-6 w-full bg-gradient-to-b from-transparent to-white" />
+            )}
 
-            <div className="rounded-2xl border border-zinc-200 bg-white/80 shadow-lg backdrop-blur px-3 py-3">
+            <div className={ctaWrapCls}>
               <div className="grid gap-2">
                 <button
                   type="button"
                   onClick={doPay}
                   disabled={!canPay || loading || paid}
-                  className={`w-full rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99] disabled:opacity-60 ${
+                  className={`w-full rounded-xl border px-4 py-3 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60 ${
                     paid
                       ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                      : "border-zinc-200 bg-white/60 text-zinc-900 hover:bg-white"
+                      : "border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
                   }`}
                 >
                   {paid ? "Payment confirmed ✓" : "Pay to unlock request"}
@@ -571,7 +686,7 @@ export default function RequestModal({
                   type="button"
                   onClick={submit}
                   disabled={!canSubmit}
-                  className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                  className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                 >
                   {loading ? "Sending..." : "Send request"}
                 </button>
@@ -580,14 +695,13 @@ export default function RequestModal({
                   type="button"
                   onClick={onClose}
                   disabled={loading}
-                  className="w-full rounded-xl border border-zinc-200 bg-white/40 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
+                  className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
                 >
                   Cancel
                 </button>
 
-                <p className="text-center text-xs text-zinc-500">
-                  You must <span className="font-semibold">Pay</span>{" "}
-                  before sending an application.
+                <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
+                  You must <span className="font-semibold">Pay</span> before sending an application.
                 </p>
               </div>
             </div>

@@ -1,18 +1,18 @@
-// ✅ ProfileScreen.jsx (FULL COPY-PASTE)
-// CHANGE ONLY:
-// - Replace ALL custom SVG icons with legit Lucide icons
-// - Keep your earlier change: REMOVE flag/nationality + phone from HERO tile (already removed below)
-// Everything else untouched.
+// ✅ ProfileScreen.jsx (COPY-PASTE — MODAL REMOVED, EDIT -> /app/profile/edit)
+//
+// Why: Android WebView keyboards + fixed modal overlays are unreliable.
+// This screen is now clean: "Edit" navigates to a dedicated edit page.
+//
+// Build indicator: PROFILE BUILD 2026-02-17 ROUTE EDIT
 
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "../utils/motionProxy";
 
 import {
   Mail,
   Pencil,
-  Check,
   LogOut,
   Settings,
   ShieldCheck,
@@ -22,86 +22,10 @@ import {
 } from "lucide-react";
 
 import { auth } from "../firebase";
-import { getUserState, updateUserProfile } from "../services/userservice";
+import { getUserState } from "../services/userservice";
 import ThemeToggle from "../components/ThemeToggle";
 
-const RESIDENCE_COUNTRIES = [
-  "Kenya",
-  "Uganda",
-  "Tanzania",
-  "Rwanda",
-  "Burundi",
-  "South Sudan",
-  "Ethiopia",
-  "Somalia",
-  "DRC",
-  "Other",
-];
-
-const DIAL_BY_COUNTRY = {
-  Kenya: "+254",
-  Uganda: "+256",
-  Tanzania: "+255",
-  Rwanda: "+250",
-  Burundi: "+257",
-  "South Sudan": "+211",
-  Ethiopia: "+251",
-  Somalia: "+252",
-  DRC: "+243",
-};
-
-/* ----------------- helpers ----------------- */
-function onlyDigits(s) {
-  return String(s || "").replace(/\D+/g, "");
-}
-function normalizeResidencePhone(residence, dial, localDigitsOrFull) {
-  const r = String(residence || "").trim();
-  if (r === "Kenya") {
-    const digits = onlyDigits(localDigitsOrFull);
-    let local = digits;
-    if (local.startsWith("254") && local.length >= 12) local = local.slice(3);
-    if (local.startsWith("0") && local.length >= 10) local = local.slice(1);
-    return `${dial}${local}`;
-  }
-  return String(localDigitsOrFull || "").trim().replace(/\s+/g, "");
-}
-function validateProfile({ draftName, residence, draftPhoneLocal, draftPhoneAny }) {
-  const name = String(draftName || "").trim();
-  if (name.length < 3) return "Full name must be at least 3 characters.";
-  const r = String(residence || "").trim();
-  if (!r) return "Please select your country of residence.";
-  if (r === "Kenya") {
-    const localDigits = onlyDigits(draftPhoneLocal);
-    if (!localDigits) return "Please enter your phone number.";
-    if (!/^(7|1)\d{8}$/.test(localDigits)) {
-      return "Kenya phone must be 9 digits (starting with 7 or 1). Example: +2547XXXXXXXX";
-    }
-    return "";
-  }
-  const any = String(draftPhoneAny || "").trim();
-  if (!any) return "Please enter your phone/WhatsApp.";
-  if (onlyDigits(any).length < 8) return "Phone number looks too short.";
-  return "";
-}
-
 /* ---------- Motion ---------- */
-const overlay = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { duration: 0.18 } },
-  exit: { opacity: 0, transition: { duration: 0.14 } },
-};
-
-const modal = {
-  hidden: { opacity: 0, y: 28, scale: 0.985 },
-  show: {
-    opacity: 1,
-    y: 18,
-    scale: 1,
-    transition: { type: "spring", stiffness: 520, damping: 40 },
-  },
-  exit: { opacity: 0, y: 24, scale: 0.985, transition: { duration: 0.16 } },
-};
-
 const pageIn = {
   hidden: { opacity: 0, y: 10 },
   show: { opacity: 1, y: 0, transition: { duration: 0.32, ease: "easeOut" } },
@@ -118,7 +42,6 @@ export default function ProfileScreen() {
   const ADMIN_EMAIL = "brioneroo@gmail.com";
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
   const [uid, setUid] = useState(null);
@@ -127,13 +50,6 @@ export default function ProfileScreen() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [countryOfResidence, setCountryOfResidence] = useState("");
-
-  const [isEditing, setIsEditing] = useState(false);
-  const [draftName, setDraftName] = useState("");
-  const [draftResidence, setDraftResidence] = useState("");
-
-  const [draftPhoneLocal, setDraftPhoneLocal] = useState("");
-  const [draftPhoneAny, setDraftPhoneAny] = useState("");
 
   const [busy, setBusy] = useState("");
 
@@ -149,16 +65,6 @@ export default function ProfileScreen() {
     const second = parts[1]?.[0] || "";
     return (first + second).toUpperCase();
   }, [name, email]);
-
-  const dialCode = useMemo(() => {
-    const r = String(draftResidence || countryOfResidence || "").trim();
-    return DIAL_BY_COUNTRY[r] || "";
-  }, [draftResidence, countryOfResidence]);
-
-  const isKenya = useMemo(() => {
-    const r = String(draftResidence || countryOfResidence || "").trim();
-    return r === "Kenya";
-  }, [draftResidence, countryOfResidence]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -179,22 +85,6 @@ export default function ProfileScreen() {
         setName(n);
         setPhone(p);
         setCountryOfResidence(c);
-
-        setDraftName(n);
-        setDraftResidence(c);
-
-        if (c === "Kenya") {
-          const digits = onlyDigits(p);
-          let local = digits;
-          if (local.startsWith("254") && local.length >= 12) local = local.slice(3);
-          if (local.startsWith("0") && local.length >= 10) local = local.slice(1);
-          local = local.slice(-9);
-          setDraftPhoneLocal(local);
-          setDraftPhoneAny("");
-        } else {
-          setDraftPhoneAny(p);
-          setDraftPhoneLocal("");
-        }
       } catch (e) {
         console.error(e);
         setErr(e?.message || "Failed to load profile.");
@@ -206,112 +96,9 @@ export default function ProfileScreen() {
     return () => unsub();
   }, [navigate]);
 
-  useEffect(() => {
-    if (!isEditing) return;
-
-    if (draftResidence === "Kenya") {
-      const digits = onlyDigits(draftPhoneAny);
-      let local = digits;
-      if (local.startsWith("254") && local.length >= 12) local = local.slice(3);
-      if (local.startsWith("0") && local.length >= 10) local = local.slice(1);
-      local = local.slice(-9);
-      setDraftPhoneLocal(local);
-      setDraftPhoneAny("");
-    } else {
-      if (draftPhoneAny) return;
-      const localDigits = onlyDigits(draftPhoneLocal);
-      if (localDigits) {
-        const dial = DIAL_BY_COUNTRY["Kenya"] || "+254";
-        setDraftPhoneAny(`${dial}${localDigits}`);
-      } else {
-        setDraftPhoneAny(phone || "");
-      }
-      setDraftPhoneLocal("");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftResidence, isEditing]);
-
-  const cancelEdit = () => {
-    setDraftName(name || "");
-    setDraftResidence(countryOfResidence || "");
-
-    if ((countryOfResidence || "") === "Kenya") {
-      const digits = onlyDigits(phone);
-      let local = digits;
-      if (local.startsWith("254") && local.length >= 12) local = local.slice(3);
-      if (local.startsWith("0") && local.length >= 10) local = local.slice(1);
-      local = local.slice(-9);
-      setDraftPhoneLocal(local);
-      setDraftPhoneAny("");
-    } else {
-      setDraftPhoneAny(phone || "");
-      setDraftPhoneLocal("");
-    }
-
-    setIsEditing(false);
-    setErr("");
-  };
-
-  useEffect(() => {
-    if (!isEditing) return;
-    const onKey = (e) => {
-      if (e.key === "Escape" && !saving) cancelEdit();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditing, saving]);
-
-  useEffect(() => {
-    if (!isEditing) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [isEditing]);
-
   const openEdit = () => {
-    setErr("");
-    setIsEditing(true);
-  };
-
-  const save = async () => {
-    if (!uid) return;
-    setErr("");
-
-    const validationError = validateProfile({
-      draftName,
-      residence: draftResidence,
-      draftPhoneLocal,
-      draftPhoneAny,
-    });
-    if (validationError) return setErr(validationError);
-
-    const finalPhone =
-      String(draftResidence || "").trim() === "Kenya"
-        ? normalizeResidencePhone("Kenya", dialCode || "+254", draftPhoneLocal)
-        : normalizeResidencePhone(draftResidence, dialCode, draftPhoneAny);
-
-    setSaving(true);
-    try {
-      await updateUserProfile(uid, {
-        name: String(draftName || "").trim(),
-        phone: finalPhone,
-        countryOfResidence: String(draftResidence || "").trim(),
-      });
-
-      setName(String(draftName || "").trim());
-      setPhone(finalPhone);
-      setCountryOfResidence(String(draftResidence || "").trim());
-
-      setIsEditing(false);
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to save profile");
-    } finally {
-      setSaving(false);
-    }
+    // ✅ go to dedicated edit screen (stable keyboard on Android)
+    navigate("/app/profile/edit");
   };
 
   const logout = async () => {
@@ -358,8 +145,6 @@ export default function ProfileScreen() {
   const logoutCard =
     "rounded-2xl border border-rose-200/70 bg-rose-50/45 backdrop-blur-xl p-4 shadow-[0_14px_40px_rgba(244,63,94,0.12)] transition hover:bg-rose-50/60 hover:shadow-[0_22px_70px_rgba(244,63,94,0.16)] active:scale-[0.99] disabled:opacity-60 dark:border-rose-900/40 dark:bg-rose-950/22";
 
-  const chevron = "text-zinc-400 dark:text-zinc-500 text-xl leading-none";
-
   return (
     <div className={`min-h-screen ${topBg}`}>
       <motion.div
@@ -382,7 +167,11 @@ export default function ProfileScreen() {
           </div>
         </div>
 
-        {err && !isEditing ? (
+        <div className="fixed bottom-3 right-3 z-[99999] rounded-full border border-zinc-200 bg-white/80 px-2 py-1 text-[10px] font-extrabold text-zinc-700">
+          PROFILE BUILD 2026-02-17 ROUTE EDIT
+        </div>
+
+        {err ? (
           <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
             {err}
           </div>
@@ -392,7 +181,11 @@ export default function ProfileScreen() {
         <motion.div
           className={`mt-6 rounded-3xl ${glass} p-5`}
           initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0, transition: { duration: 0.28, ease: "easeOut" } }}
+          animate={{
+            opacity: 1,
+            y: 0,
+            transition: { duration: 0.28, ease: "easeOut" },
+          }}
         >
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-start gap-4 min-w-0">
@@ -416,8 +209,6 @@ export default function ProfileScreen() {
                   <Mail className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
                   <span className="truncate">{email || "—"}</span>
                 </div>
-
-                {/* ✅ REMOVED: flag/nationality + phone badge from hero tile */}
               </div>
             </div>
 
@@ -567,202 +358,6 @@ export default function ProfileScreen() {
           </motion.button>
         </div>
       </motion.div>
-
-      {/* ✅ FIXED EDIT SHEET (unchanged, only icon swap for Save button) */}
-      <AnimatePresence>
-        {isEditing ? (
-          <motion.div
-            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-            variants={overlay}
-            initial="hidden"
-            animate="show"
-            exit="exit"
-          >
-            <button
-              type="button"
-              aria-label="Close edit"
-              onClick={() => !saving && cancelEdit()}
-              className="absolute inset-0 bg-black/35 backdrop-blur-[2px]"
-            />
-
-            <motion.div
-              variants={modal}
-              initial="hidden"
-              animate="show"
-              exit="exit"
-              role="dialog"
-              aria-modal="true"
-              onMouseDown={(e) => e.stopPropagation()}
-              className="
-                relative w-full
-                max-w-[380px]
-                overflow-hidden
-                rounded-[26px]
-                border border-white/40
-                bg-white/75
-                shadow-[0_30px_90px_rgba(0,0,0,0.35)]
-                backdrop-blur-xl
-                dark:border-zinc-800/70 dark:bg-zinc-900/70
-                flex flex-col
-              "
-              style={{
-                maxHeight: "calc(100dvh - 180px)",
-              }}
-            >
-              <div className="shrink-0 border-b border-white/40 bg-white/65 px-4 py-4 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-900/65">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-200">
-                      Edit profile
-                    </div>
-                    <div className="mt-1 text-base font-semibold text-zinc-900 dark:text-zinc-100">
-                      Update your details
-                    </div>
-                  </div>
-
-                  <motion.button
-                    type="button"
-                    onClick={cancelEdit}
-                    disabled={saving}
-                    whileTap={{ scale: 0.98 }}
-                    className="rounded-2xl border border-white/40 bg-white/60 px-3 py-2 text-sm font-semibold text-zinc-900 transition hover:bg-white active:scale-[0.99] disabled:opacity-60
-                               dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
-                  >
-                    Close
-                  </motion.button>
-                </div>
-
-                {err ? (
-                  <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
-                    {err}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="flex-1 overflow-y-auto px-4 py-4">
-                <div className="grid gap-3">
-                  <div className="rounded-2xl border border-white/40 bg-white/55 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                      Full name
-                    </div>
-                    <input
-                      value={draftName}
-                      onChange={(e) => setDraftName(e.target.value)}
-                      placeholder="Enter your full name"
-                      className="mt-2 w-full rounded-xl border border-white/50 bg-white/75 px-3 py-2.5 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4
-                                 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
-                    />
-                  </div>
-
-                  <div className="rounded-2xl border border-white/40 bg-white/55 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                      Country of residence
-                    </div>
-                    <select
-                      value={draftResidence}
-                      onChange={(e) => setDraftResidence(e.target.value)}
-                      className="mt-2 w-full rounded-xl border border-white/50 bg-white/75 px-3 py-2.5 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4
-                                 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
-                    >
-                      <option value="">Select…</option>
-                      {RESIDENCE_COUNTRIES.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/40 bg-white/55 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                      Phone / WhatsApp
-                    </div>
-
-                    {isKenya ? (
-                      <div className="mt-2 grid gap-2">
-                        <div className="flex gap-2">
-                          <div className="shrink-0 rounded-xl border border-white/50 bg-white/75 px-3 py-2.5 text-sm font-semibold text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100">
-                            {dialCode || "+254"}
-                          </div>
-                          <input
-                            value={draftPhoneLocal}
-                            onChange={(e) => setDraftPhoneLocal(onlyDigits(e.target.value).slice(0, 9))}
-                            placeholder="9 digits (e.g. 712345678)"
-                            inputMode="numeric"
-                            className="w-full rounded-xl border border-white/50 bg-white/75 px-3 py-2.5 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4
-                                       dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
-                          />
-                        </div>
-                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                          Kenya format: 9 digits starting with <span className="font-semibold">7</span>{" "}
-                          or <span className="font-semibold">1</span>.
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-2 grid gap-2">
-                        <input
-                          value={draftPhoneAny}
-                          onChange={(e) => setDraftPhoneAny(e.target.value)}
-                          placeholder="e.g. +2567..., +2557..., +1..."
-                          className="w-full rounded-xl border border-white/50 bg-white/75 px-3 py-2.5 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4
-                                     dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
-                        />
-                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                          Tip: include your country code (start with <span className="font-semibold">+</span>).
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="rounded-2xl border border-emerald-200/60 bg-emerald-50/50 p-3 backdrop-blur-xl dark:border-emerald-900/40 dark:bg-emerald-950/20">
-                    <div className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">
-                      Currently saved
-                    </div>
-                    <div className="mt-2 grid gap-1 text-xs text-emerald-900/80 dark:text-emerald-200/80">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="opacity-80">Residence</span>
-                        <span className="font-semibold truncate">{countryOfResidence || "—"}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="opacity-80">Phone</span>
-                        <span className="font-semibold truncate">{phone || "—"}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="shrink-0 border-t border-white/40 bg-white/65 px-4 py-4 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-900/65">
-                <div className="flex gap-3">
-                  <motion.button
-                    onClick={cancelEdit}
-                    disabled={saving}
-                    whileTap={{ scale: 0.98 }}
-                    className="w-full rounded-2xl border border-white/50 bg-white/70 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-white disabled:opacity-60
-                               dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:hover:bg-zinc-950"
-                    type="button"
-                  >
-                    Cancel
-                  </motion.button>
-
-                  <motion.button
-                    onClick={save}
-                    disabled={saving}
-                    whileTap={{ scale: 0.98 }}
-                    className="w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
-                    type="button"
-                  >
-                    <span className="inline-flex items-center justify-center gap-2">
-                      <Check className="h-5 w-5" />
-                      {saving ? "Saving..." : "Save changes"}
-                    </span>
-                  </motion.button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
     </div>
   );
 }

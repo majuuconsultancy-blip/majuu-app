@@ -18,7 +18,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "../utils/motionProxy";
 import RequestChatLauncher from "../components/RequestChatLauncher";
 
 import { auth, db } from "../firebase";

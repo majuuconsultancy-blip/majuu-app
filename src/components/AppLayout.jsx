@@ -1,13 +1,24 @@
 import { Outlet, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, onSnapshot, collection, query, orderBy, limit } from "firebase/firestore";
+import {
+  doc,
+  onSnapshot,
+  collection,
+  query,
+  orderBy,
+  limit,
+} from "firebase/firestore";
 
 import { auth, db } from "../firebase";
 import ScreenLoader from "./ScreenLoader";
 
-import { AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "../utils/motionProxy";
 import PageTransitions from "./PageTransitions";
+
+// ✅ NEW: offline banner + online status
+import { useNetworkStatus } from "../hooks/useNetworkStatus";
+import OfflineBanner from "./OfflineBanner";
 
 const VALID_TRACKS = new Set(["study", "work", "travel"]);
 
@@ -63,6 +74,9 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // ✅ NEW: online/offline status for banner + action guarding later
+  const online = useNetworkStatus();
+
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [uid, setUid] = useState(null);
   const [activeTrack, setActiveTrack] = useState(null);
@@ -74,10 +88,23 @@ export default function AppLayout() {
   /* ✅ scroll tracking for fade */
   const [scrollY, setScrollY] = useState(0);
 
+  // ✅ tiny perf fix: update scrollY at most once per animation frame
+  const rafRef = useRef(null);
   useEffect(() => {
-    const onScroll = () => setScrollY(window.scrollY || 0);
+    const onScroll = () => {
+      if (rafRef.current) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        setScrollY(window.scrollY || 0);
+      });
+    };
+
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -124,7 +151,7 @@ export default function AppLayout() {
         }
       );
 
-      // ✅ NEW: notifications listener for badge
+      // ✅ notifications listener for badge
       const nRef = collection(db, "users", user.uid, "notifications");
       const nQ = query(nRef, orderBy("createdAt", "desc"), limit(50));
 
@@ -200,6 +227,9 @@ export default function AppLayout() {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      {/* ✅ Offline banner: applies to /app/* shell only */}
+      <OfflineBanner online={online} />
+
       {/* background + constrained app column */}
       <div
         className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-28
@@ -256,7 +286,7 @@ export default function AppLayout() {
                 <span className="relative">
                   <IconProgress className="h-5 w-5" />
 
-                  {/* ✅ NEW: unread badge */}
+                  {/* ✅ unread badge */}
                   {unreadCount > 0 ? (
                     <span
                       className={`absolute -top-2 -right-19 h-2.5 w-2.5 rounded-full ${

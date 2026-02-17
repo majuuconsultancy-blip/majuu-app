@@ -1,7 +1,7 @@
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 
-/* ----------------- NEW helpers (safe, no dependencies) ----------------- */
+/* ----------------- helpers ----------------- */
 function onlyDigits(s) {
   return String(s || "").replace(/\D+/g, "");
 }
@@ -26,7 +26,9 @@ function normalizePhoneByResidence(countryOfResidence, phoneRaw) {
     local = local.slice(-9);
 
     if (!/^(7|1)\d{8}$/.test(local)) {
-      throw new Error("Invalid Kenya phone. Use 9 digits starting with 7 or 1 (e.g. +254712345678).");
+      throw new Error(
+        "Invalid Kenya phone. Use 9 digits starting with 7 or 1 (e.g. +254712345678)."
+      );
     }
 
     return `+254${local}`;
@@ -40,7 +42,6 @@ function normalizePhoneByResidence(countryOfResidence, phoneRaw) {
     throw new Error("Phone number looks too short.");
   }
 
-  // recommended: if user didn’t include +, we still accept (you can force later)
   return phone;
 }
 
@@ -49,6 +50,7 @@ function validateProfilePayload({ name, phone, countryOfResidence }) {
 
   if (typeof name !== "undefined") {
     const n = normalizeName(name);
+    if (!n) throw new Error("Full name is required.");
     if (n.length < 3) throw new Error("Full name must be at least 3 characters.");
   }
 
@@ -56,15 +58,11 @@ function validateProfilePayload({ name, phone, countryOfResidence }) {
     if (!residence) throw new Error("Country of residence is required.");
   }
 
-  // if phone provided, validate relative to residence (if we have residence)
   if (typeof phone !== "undefined") {
-    // If residence is missing here, we can’t do strict country-specific validation.
-    // We still do basic check to avoid empty/garbage.
     const raw = String(phone || "").trim();
     if (!raw) throw new Error("Phone is required.");
 
     if (residence) {
-      // full validation will happen in normalize
       normalizePhoneByResidence(residence, raw);
     } else {
       if (onlyDigits(raw).length < 8) throw new Error("Phone number looks too short.");
@@ -72,44 +70,83 @@ function validateProfilePayload({ name, phone, countryOfResidence }) {
   }
 }
 
-/* ----------------- Existing code (kept) ----------------- */
-
-// Create user doc if missing
+/**
+ * ✅ Hard-safe “ensure”:
+ * - If doc missing: create it
+ * - If doc exists: ONLY fill missing fields, NEVER overwrite existing values
+ */
 export async function ensureUserDoc({ uid, email }) {
   const ref = doc(db, "users", uid);
   const snap = await getDoc(ref);
 
+  const base = {
+    email: email || "",
+    name: "",
+    phone: "",
+    countryOfResidence: "",
+    selectedTrack: null,
+    hasActiveProcess: false,
+    activeTrack: null,
+    activeCountry: null,
+    activeHelpType: null,
+    activeRequestId: null,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
   if (!snap.exists()) {
-    await setDoc(ref, {
-      email: email || "",
-      name: "",
-      phone: "",
-      countryOfResidence: "", // ✅ ensure field exists (harmless)
-      selectedTrack: null,
-      hasActiveProcess: false,
-      activeTrack: null,
-      activeCountry: null,
-      activeHelpType: null,
-      activeRequestId: null,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    // Create fresh
+    await setDoc(ref, base, { merge: true });
+  } else {
+    // Repair only missing fields (do NOT wipe anything)
+    const d = snap.data() || {};
+    const patch = { updatedAt: serverTimestamp() };
+
+    // only set if missing/undefined/null (not if empty string the user intentionally saved)
+    const setIfMissing = (key, value) => {
+      if (typeof d[key] === "undefined" || d[key] === null) patch[key] = value;
+    };
+
+    setIfMissing("email", email || d.email || "");
+    setIfMissing("name", "");
+    setIfMissing("phone", "");
+    setIfMissing("countryOfResidence", "");
+    setIfMissing("selectedTrack", null);
+    setIfMissing("hasActiveProcess", false);
+    setIfMissing("activeTrack", null);
+    setIfMissing("activeCountry", null);
+    setIfMissing("activeHelpType", null);
+    setIfMissing("activeRequestId", null);
+    setIfMissing("createdAt", serverTimestamp());
+
+    // Only write if there is something to repair
+    if (Object.keys(patch).length > 1) {
+      await setDoc(ref, patch, { merge: true });
+    }
   }
 
   const latest = await getDoc(ref);
   return latest.exists() ? latest.data() : null;
 }
 
-// Read user state
-export async function getUserState(uid) {
+// Read user state (✅ auto-heal if missing)
+export async function getUserState(uid, emailIfKnown = "") {
   const ref = doc(db, "users", uid);
   const snap = await getDoc(ref);
-  return snap.exists() ? snap.data() : null;
+
+  if (!snap.exists()) {
+    // ✅ This prevents Profile from loading null and looking “wiped”
+    await ensureUserDoc({ uid, email: emailIfKnown || "" });
+    const again = await getDoc(ref);
+    return again.exists() ? again.data() : null;
+  }
+
+  return snap.data();
 }
 
 // Backward compatibility for ProfileScreen
-export async function getUserProfile(uid) {
-  return getUserState(uid);
+export async function getUserProfile(uid, emailIfKnown = "") {
+  return getUserState(uid, emailIfKnown);
 }
 
 export async function setSelectedTrack(uid, track) {
@@ -120,7 +157,6 @@ export async function setSelectedTrack(uid, track) {
   });
 }
 
-// Old/simple setter (still okay to keep)
 export async function setActiveProcess(uid, { hasActiveProcess, activeTrack }) {
   const ref = doc(db, "users", uid);
   await updateDoc(ref, {
@@ -130,7 +166,6 @@ export async function setActiveProcess(uid, { hasActiveProcess, activeTrack }) {
   });
 }
 
-// ✅ New: save full active process details (track/country/helpType/requestId)
 export async function setActiveProcessDetails(uid, details) {
   const ref = doc(db, "users", uid);
   await updateDoc(ref, {
@@ -139,19 +174,17 @@ export async function setActiveProcessDetails(uid, details) {
   });
 }
 
-// Optional: context setter (if you still want it)
 export async function setActiveContext(uid, { hasActiveProcess, activeTrack, activeCountry, activeHelpType }) {
   const ref = doc(db, "users", uid);
   await updateDoc(ref, {
     hasActiveProcess: Boolean(hasActiveProcess),
     activeTrack: hasActiveProcess ? activeTrack : null,
     activeCountry: hasActiveProcess ? (activeCountry || null) : null,
-    activeHelpType: hasActiveProcess ? (activeHelpType || null) : null, // "self" | "we"
+    activeHelpType: hasActiveProcess ? (activeHelpType || null) : null,
     updatedAt: serverTimestamp(),
   });
 }
 
-// ✅ Clear everything (used when admin closes/rejects)
 export async function clearActiveProcess(uid) {
   const ref = doc(db, "users", uid);
   await updateDoc(ref, {
@@ -164,73 +197,74 @@ export async function clearActiveProcess(uid) {
   });
 }
 
-// Optional: update name later
 export async function updateUserName(uid, name) {
   const ref = doc(db, "users", uid);
   const clean = normalizeName(name);
-  if (clean && clean.length < 3) throw new Error("Full name must be at least 3 characters.");
+  if (!clean) throw new Error("Full name is required.");
+  if (clean.length < 3) throw new Error("Full name must be at least 3 characters.");
 
   await updateDoc(ref, {
-    name: clean || "",
+    name: clean,
     updatedAt: serverTimestamp(),
   });
 }
 
-//clear active process//
+// clear active process (kept)
 export async function clearActiveProcessIfSaidDone(uid) {
-  const ref = doc(db, "users", uid);
-  await updateDoc(ref, {
-    hasActiveProcess: false,
-    activeTrack: null,
-    activeCountry: null,
-    activeHelpType: null,
-    activeRequestId: null,
-    updatedAt: serverTimestamp(),
-  });
+  return clearActiveProcess(uid);
 }
 
-// Save basic profile fields (name/phone) without overwriting everything
 export async function upsertUserContact(uid, { name, phone }) {
   const ref = doc(db, "users", uid);
 
-  // ✅ fetch residence so Kenya normalization can apply
   const snap = await getDoc(ref);
-  const existing = snap.exists() ? snap.data() : {};
+  if (!snap.exists()) {
+    // if doc missing, create it first to prevent updateDoc crash
+    await ensureUserDoc({ uid, email: "" });
+  }
+
+  const snap2 = await getDoc(ref);
+  const existing = snap2.exists() ? snap2.data() : {};
   const residence = String(existing?.countryOfResidence || "").trim();
 
   const cleanName = normalizeName(name);
-  const cleanPhone = residence ? normalizePhoneByResidence(residence, phone) : String(phone || "").trim();
+  if (!cleanName) throw new Error("Full name is required.");
+  if (cleanName.length < 3) throw new Error("Full name must be at least 3 characters.");
 
-  if (cleanName && cleanName.length < 3) {
-    throw new Error("Full name must be at least 3 characters.");
-  }
-  if (!cleanPhone) {
-    throw new Error("Phone is required.");
-  }
+  const cleanPhone = residence
+    ? normalizePhoneByResidence(residence, phone)
+    : String(phone || "").trim();
+
+  if (!cleanPhone) throw new Error("Phone is required.");
 
   await updateDoc(ref, {
-    name: cleanName || "",
-    phone: cleanPhone || "",
+    name: cleanName,
+    phone: cleanPhone,
     updatedAt: serverTimestamp(),
   });
 }
 
-//update user profile//
 export async function updateUserProfile(uid, { name, phone, countryOfResidence }) {
   const ref = doc(db, "users", uid);
 
-  // ✅ validate input
+  // ensure doc exists so updateDoc never fails
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    await ensureUserDoc({ uid, email: "" });
+  }
+
+  // ✅ validate input (and prevents blank writes)
   validateProfilePayload({ name, phone, countryOfResidence });
 
-  // ✅ if user is changing residence & phone together, normalize correctly
-  // otherwise if only phone is passed, we fetch current residence for strict checks.
-  let residence = typeof countryOfResidence !== "undefined"
-    ? String(countryOfResidence || "").trim()
-    : null;
+  // determine residence for phone normalization
+  let residence =
+    typeof countryOfResidence !== "undefined"
+      ? String(countryOfResidence || "").trim()
+      : null;
 
   if (!residence && typeof phone !== "undefined") {
-    const snap = await getDoc(ref);
-    const existing = snap.exists() ? snap.data() : {};
+    const s2 = await getDoc(ref);
+    const existing = s2.exists() ? s2.data() : {};
     residence = String(existing?.countryOfResidence || "").trim();
   }
 
@@ -239,7 +273,8 @@ export async function updateUserProfile(uid, { name, phone, countryOfResidence }
   };
 
   if (typeof name !== "undefined") payload.name = normalizeName(name);
-  if (typeof countryOfResidence !== "undefined") payload.countryOfResidence = String(countryOfResidence || "").trim();
+  if (typeof countryOfResidence !== "undefined")
+    payload.countryOfResidence = String(countryOfResidence || "").trim();
 
   if (typeof phone !== "undefined") {
     payload.phone = residence

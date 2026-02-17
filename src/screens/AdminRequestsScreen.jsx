@@ -26,7 +26,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { motion, AnimatePresence } from "../utils/motionProxy";
 import {
   RefreshCw,
   Search,

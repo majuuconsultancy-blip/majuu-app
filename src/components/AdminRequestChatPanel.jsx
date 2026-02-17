@@ -760,9 +760,8 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             </button>
           </div>
 
-          <div className="mt-2 text-[11px] text-zinc-500">
-            Demo: attaching a PDF sends meta only (no storage yet).
-            <span className="ml-2">Enter = send, Shift+Enter = new line.</span>
+          <div className="mt-2 text-[11px] text-zinc-500">            
+            <span className="ml-2">Demo.</span>
           </div>
         </div>
       </div>

@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "../utils/motionProxy";
 
 import {
   BookOpen,

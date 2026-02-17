@@ -21,7 +21,7 @@ import {
   updateDoc,
   serverTimestamp,
 } from "firebase/firestore";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion, AnimatePresence } from "../utils/motionProxy";
 import {
   Activity,
   ChevronRight,
@@ -802,7 +802,7 @@ export default function ProgressScreen() {
                                   exit={{ scale: 0.95, opacity: 0, y: -2 }}
                                   className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50/70 px-2 py-0.5 text-[11px] font-semibold text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200"
                                 >
-                                  <MessageCircle className="h-4 w-4" />
+                                  <MessageCircle className="h-2 w-3" />
                                   New message
                                 </motion.span>
                               ) : null}

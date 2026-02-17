@@ -1,13 +1,13 @@
-// ✅ IntroScreen.jsx (STABLE LOOP + NO WHITE FLASH + SLOWER)
+// ✅ IntroScreen.jsx (NO AUTO + NO LOADING BAR + BUILD INDICATOR)
 // Fixes:
-// - ✅ Auto loop: 1→2→3→1… (never sticks, never reverses)
-// - ✅ Slower progress
-// - ✅ Removes blur/filter animations that cause white flashes on mobile
-// - ✅ Always-visible background (solid base + subtle pattern + blobs)
+// - ✅ Removes loading/progress bar
+// - ✅ Removes auto-advance (no auto scroll/slide)
+// - ✅ Adds BUILD indicator to confirm deploy updates
+// - ✅ Keeps the same design & manual Next/Back/Dots
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { motion, AnimatePresence } from "../utils/motionProxy";
 
 const SLIDES = [
   {
@@ -27,8 +27,8 @@ const SLIDES = [
   },
 ];
 
-// ✅ slower auto-advance
-const intervalMs = 7500;
+// ✅ change this text anytime to verify deploy
+const BUILD_TAG = "BUILD 2026-02-d";
 
 function cx(...a) {
   return a.filter(Boolean).join(" ");
@@ -36,12 +36,9 @@ function cx(...a) {
 
 export default function IntroScreen() {
   const navigate = useNavigate();
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = true;
 
   const [i, setI] = useState(0);
-  const [runKey, setRunKey] = useState(0); // forces progress animation restart safely
-
-  const timerRef = useRef(null);
 
   const lastIndex = SLIDES.length - 1;
   const isLast = i === lastIndex;
@@ -49,36 +46,14 @@ export default function IntroScreen() {
   const goToAuth = () => navigate("/login", { replace: true });
   const skip = () => goToAuth();
 
-  const next = () =>
-    setI((v) => (v >= lastIndex ? 0 : v + 1));
-  const prev = () =>
-    setI((v) => (v <= 0 ? lastIndex : v - 1));
+  const next = () => setI((v) => (v >= lastIndex ? lastIndex : v + 1));
+  const prev = () => setI((v) => (v <= 0 ? 0 : v - 1));
   const goTo = (idx) => setI(() => Math.max(0, Math.min(lastIndex, idx)));
 
   const continueLabel = useMemo(() => (isLast ? "Continue" : "Next"), [isLast]);
 
-  // ✅ single clean auto-advance (no RAF, no race conditions)
-  useEffect(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-
-    timerRef.current = setTimeout(() => {
-      setI((v) => (v >= lastIndex ? 0 : v + 1));
-    }, intervalMs);
-
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = null;
-    };
-  }, [i, lastIndex]);
-
-  // ✅ restart progress animation every slide change
-  useEffect(() => {
-    setRunKey((k) => k + 1);
-  }, [i]);
-
   const slide = SLIDES[i];
 
-  // ✅ no blur filters (these cause white flashes on some phones)
   const slideMotion = reduceMotion
     ? {}
     : {
@@ -98,18 +73,15 @@ export default function IntroScreen() {
         transition: { duration: 0.16, ease: "easeOut" },
       };
 
-  const pageBg =
-    // ✅ solid base (prevents “plain white” even if gradients fail to paint)
-    "min-h-screen bg-zinc-50";
+  const pageBg = "min-h-screen bg-zinc-50";
 
   const glass =
     "rounded-[28px] border border-zinc-200/70 bg-white/80 backdrop-blur-xl shadow-[0_22px_80px_rgba(0,0,0,0.12)]";
 
   return (
     <div className={pageBg}>
-      {/* ✅ always-on background layers (so swapping slides never shows blank white) */}
+      {/* ✅ always-on background layers */}
       <div className="fixed inset-0 -z-10">
-        {/* subtle pattern */}
         <div
           className="absolute inset-0 opacity-[0.7]"
           style={{
@@ -117,7 +89,6 @@ export default function IntroScreen() {
               "radial-gradient(circle at 20% 10%, rgba(16,185,129,0.20), transparent 45%), radial-gradient(circle at 80% 30%, rgba(56,189,248,0.18), transparent 45%), radial-gradient(circle at 50% 90%, rgba(16,185,129,0.12), transparent 55%)",
           }}
         />
-        {/* blobs */}
         <div className="absolute -top-28 -right-28 h-80 w-80 rounded-full bg-emerald-200/45 blur-3xl" />
         <div className="absolute bottom-0 left-0 h-80 w-80 rounded-full bg-sky-200/35 blur-3xl" />
       </div>
@@ -131,6 +102,11 @@ export default function IntroScreen() {
             </div>
             <div className="text-[11px] font-semibold text-zinc-600">
               Get started
+            </div>
+
+            {/* ✅ BUILD INDICATOR */}
+            <div className="mt-1 text-[10px] font-extrabold text-rose-600">
+              {BUILD_TAG}
             </div>
           </div>
 
@@ -146,29 +122,7 @@ export default function IntroScreen() {
 
         {/* Main card */}
         <div className={cx("mt-7", glass, "p-5")}>
-          {/* Progress */}
-          <div className="mb-4">
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200/80">
-              <motion.div
-                key={runKey}
-                className="h-full rounded-full bg-emerald-600"
-                initial={{ width: "0%" }}
-                animate={{ width: "100%" }}
-                transition={
-                  reduceMotion
-                    ? { duration: 0 }
-                    : { duration: intervalMs / 1000, ease: "linear" }
-                }
-              />
-            </div>
-
-            <div className="mt-2 flex items-center justify-between text-[11px] font-semibold text-zinc-600">
-              <span>
-                {i + 1} / {SLIDES.length}
-              </span>
-              <span>Auto</span>
-            </div>
-          </div>
+          {/* ✅ Removed Progress/Loading bar */}
 
           {/* Slide */}
           <AnimatePresence mode="wait">
@@ -192,9 +146,7 @@ export default function IntroScreen() {
                 ))}
               </div>
 
-              <div className="mt-5 text-xs text-zinc-600">
-                MAJUU.
-              </div>
+              <div className="mt-5 text-xs text-zinc-600">MAJUU.</div>
             </motion.div>
           </AnimatePresence>
 
@@ -208,9 +160,7 @@ export default function IntroScreen() {
                 aria-label={`Go to slide ${idx + 1}`}
                 className={cx(
                   "h-2.5 w-2.5 rounded-full transition",
-                  idx === i
-                    ? "bg-emerald-600"
-                    : "bg-zinc-300 hover:bg-zinc-400"
+                  idx === i ? "bg-emerald-600" : "bg-zinc-300 hover:bg-zinc-400"
                 )}
                 {...tapV}
               />
@@ -231,7 +181,11 @@ export default function IntroScreen() {
             <motion.button
               type="button"
               onClick={prev}
-              className="mt-3 w-full rounded-2xl border border-zinc-200/80 bg-white/80 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-white active:scale-[0.985]"
+              disabled={i === 0}
+              className={cx(
+                "mt-3 w-full rounded-2xl border border-zinc-200/80 bg-white/80 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-white active:scale-[0.985]",
+                i === 0 && "opacity-60"
+              )}
               {...tapV}
             >
               Back

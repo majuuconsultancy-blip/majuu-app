@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "../utils/motionProxy";
 import {
   Compass,
   Link2,

@@ -1,7 +1,18 @@
-// firebase.js (REPLACE with this)
+// ✅ firebase.js (FULL COPY-PASTE — ANDROID/PWA AUTH PERSISTENCE HARD FIX)
+
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  initializeAuth,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
+  GoogleAuthProvider,
+} from "firebase/auth";
+import {
+  getFirestore,
+  enableIndexedDbPersistence,
+  CACHE_SIZE_UNLIMITED,
+  initializeFirestore,
+} from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCcWaFmHj10rbJXDmOD-IBCzX6pGQAbtUQ",
@@ -14,11 +25,34 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+/**
+ * ✅ AUTH (CRITICAL)
+ * Force persistence order:
+ * 1) indexedDB (best for Android/PWA/Capacitor)
+ * 2) localStorage fallback
+ *
+ * This prevents “random logout” / “session forgotten” behavior.
+ */
+export const auth = initializeAuth(app, {
+  persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+});
+
+/**
+ * ✅ FIRESTORE
+ * Use initializeFirestore so we can safely set cache settings.
+ * (Still works like getFirestore, just more controlled.)
+ */
+export const db = initializeFirestore(app, {
+  cacheSizeBytes: CACHE_SIZE_UNLIMITED,
+});
+
+// ✅ Offline-friendly Firestore persistence (IndexedDB)
+enableIndexedDbPersistence(db).catch((err) => {
+  // failed-precondition: multiple tabs open
+  // unimplemented: browser doesn't support persistence
+  console.warn("Firestore persistence not enabled:", err?.code || err);
+});
 
 // Google provider (export it)
 export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({
-  prompt: "select_account",
-});
+googleProvider.setCustomParameters({ prompt: "select_account" });

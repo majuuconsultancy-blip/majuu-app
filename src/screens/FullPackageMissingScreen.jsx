@@ -1,16 +1,15 @@
-// ✅ FullPackageMissingScreen.jsx (APPLE-LIKE TILES + ICONS + MICRO-ANIMS — FULL COPY-PASTE)
-// What changed (frontend only):
-// - ✅ Interactive “iOS-like” tiles: press scale, hover glow, subtle chevrons
-// - ✅ Matched icons per item (Document, SOP, CV, Interview, Pre-departure, Passport, Visa, IELTS, Funds, Offer, etc.)
-// - ✅ Smooth entrance stagger + progress chip animations (Framer Motion)
-// - ✅ Better hierarchy + “Remaining / Completed” pills + compact progress
-// - ✅ NO backend changes: createServiceRequest payload/logic/gating unchanged
+// ✅ FullPackageMissingScreen.jsx (FULL COPY-PASTE — FIXED: uses missingItems from Diagnostic Modal)
+// Fixes:
+// ✅ Uses location.state.missingItems FIRST (from FullPackageDiagnosticModal)
+// ✅ Falls back to parent request remainingItems/missingItems only if state not present
+// ✅ Falls back to default list only if neither exists
+// ✅ createServiceRequest now sends the correct "missingItems" list (not the fallback list)
+// ✅ Keeps your auth soft-reconnect behavior (no instant redirect on transient null)
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
-import { motion, useReducedMotion } from "framer-motion";
+import { motion } from "../utils/motionProxy";
 
 import { auth, db } from "../firebase";
 import RequestModal from "../components/RequestModal";
@@ -74,30 +73,6 @@ function IconLock(props) {
       />
       <path
         d="M6.5 11h11a2 2 0 0 1 2 2v5.2a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V13a2 2 0 0 1 2-2Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-function IconSpark(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M12 2l1.2 4.2L17.4 8 13.2 9.2 12 13.4 10.8 9.2 6.6 8l4.2-1.8L12 2Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M5 13l.8 2.8L8.6 17l-2.8 1.2L5 21l-1.2-2.8L1 17l2.8-1.2L5 13Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M18.5 13.5l.7 2.2 2.3.8-2.3.8-.7 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinejoin="round"
@@ -312,7 +287,6 @@ function clamp(n, min, max) {
 function getItemMeta(item, safeTrack) {
   const s = String(item || "").toLowerCase();
 
-  // keywords → icon + subtitle
   if (s.includes("document checklist") || s.includes("checklist"))
     return { icon: IconDoc, sub: "We’ll confirm what’s needed and what’s missing." };
 
@@ -343,7 +317,6 @@ function getItemMeta(item, safeTrack) {
   if (s.includes("offer letter"))
     return { icon: IconDoc, sub: "Review details and confirm requirements." };
 
-  // fallback by track
   if (safeTrack === "work") return { icon: IconBriefcase, sub: "Continue this step with our team." };
   if (safeTrack === "study") return { icon: IconBook, sub: "Continue this step with our team." };
   return { icon: IconPlane, sub: "Continue this step with our team." };
@@ -353,7 +326,7 @@ export default function FullPackageMissingScreen() {
   const navigate = useNavigate();
   const location = useLocation();
   const { track } = useParams();
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = true;
 
   const safeTrack = useMemo(() => {
     const t = String(track || "").toLowerCase().trim();
@@ -364,7 +337,6 @@ export default function FullPackageMissingScreen() {
   const country = params.get("country") || "Not selected";
   const parentRequestId = params.get("parentRequestId") || params.get("parent") || "";
 
-  // ✅ Retry support: auto-open RequestModal from "Try again"
   const shouldAutoOpen = params.get("autoOpen") === "1";
   const autoItem = String(params.get("item") || "").trim();
 
@@ -377,31 +349,76 @@ export default function FullPackageMissingScreen() {
   const headerIcon = safeTrack === "study" ? IconBook : safeTrack === "work" ? IconBriefcase : IconPlane;
   const HeaderIcon = headerIcon;
 
+  // ✅ Auth state for this screen only (no hard redirects during transient null)
+  const [authChecked, setAuthChecked] = useState(false);
+
   const [uid, setUid] = useState(null);
   const [email, setEmail] = useState("");
 
   const [userState, setUserState] = useState(null);
   const [missing, setMissing] = useState([]);
 
-  // parent request data (optional)
   const [parentReq, setParentReq] = useState(null);
   const [parentErr, setParentErr] = useState("");
 
-  // modal
   const [modalOpen, setModalOpen] = useState(false);
   const [pickedNeed, setPickedNeed] = useState(null);
   const [autoOpened, setAutoOpened] = useState(false);
 
-  // autofill
   const [defaultName, setDefaultName] = useState("");
   const [defaultPhone, setDefaultPhone] = useState("");
 
   const goBack = () => navigate(-1);
+  const goToProfile = () => navigate("/app/profile");
 
+  // ✅ 1) missing items from Diagnostic Modal navigation state
+  const navMissingItems = useMemo(() => {
+    const raw = location?.state?.missingItems;
+
+    if (!raw) return null;
+    if (!Array.isArray(raw)) return null;
+
+    const cleaned = raw
+      .map((x) => String(x || "").trim())
+      .filter(Boolean);
+
+    // if it's empty array, treat as no data
+    if (!cleaned.length) return null;
+
+    // de-dupe while preserving order
+    const seen = new Set();
+    const uniq = [];
+    for (const it of cleaned) {
+      if (!seen.has(it)) {
+        seen.add(it);
+        uniq.push(it);
+      }
+    }
+    return uniq.length ? uniq : null;
+  }, [location?.state]);
+
+  // ✅ IMPORTANT: Avoid navigating to /login instantly if auth is temporarily null
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
+    let alive = true;
+    const start = Date.now();
+
+    const tick = async () => {
+      const user = auth.currentUser;
+
+      if (!alive) return;
+
+      if (!user && Date.now() - start < 1200) {
+        setTimeout(tick, 150);
+        return;
+      }
+
+      setAuthChecked(true);
+
       if (!user) {
-        navigate("/login", { replace: true });
+        setUid(null);
+        setEmail("");
+        setUserState(null);
+        setMissing([]);
         return;
       }
 
@@ -409,21 +426,26 @@ export default function FullPackageMissingScreen() {
       setEmail(user.email || "");
 
       try {
-        const s = await getUserState(user.uid);
-        setUserState(s || null);
+        // ✅ pass email so getUserState can auto-heal doc if missing
+        const s = await getUserState(user.uid, user.email || "");
+        if (!alive) return;
 
+        setUserState(s || null);
         setDefaultName(s?.name || "");
         setDefaultPhone(s?.phone || "");
-
         setMissing(getMissingProfileFields(s || {}));
       } catch (e) {
         console.error("FullPackageMissing getUserState error:", e);
       }
-    });
+    };
 
-    return () => unsub();
-  }, [navigate]);
+    tick();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
+  // Parent request snapshot (only if parentRequestId exists)
   useEffect(() => {
     if (!parentRequestId) return;
 
@@ -448,11 +470,27 @@ export default function FullPackageMissingScreen() {
     return () => unsub();
   }, [parentRequestId]);
 
-  const missingItems = useMemo(() => {
-    // If parent request has remaining list, use it. Otherwise fall back.
+  // ✅ 2) missing items from parent request (fallback)
+  const parentMissingItems = useMemo(() => {
     const arr =
-      parentReq?.remainingItems || parentReq?.missingItems || parentReq?.remaining || [];
-    if (Array.isArray(arr) && arr.length) return arr.map((x) => String(x));
+      parentReq?.remainingItems ||
+      parentReq?.missingItems ||
+      parentReq?.remaining ||
+      parentReq?.items ||
+      [];
+
+    if (Array.isArray(arr) && arr.length) {
+      const cleaned = arr.map((x) => String(x || "").trim()).filter(Boolean);
+      return cleaned.length ? cleaned : null;
+    }
+    return null;
+  }, [parentReq]);
+
+  // ✅ 3) final source-of-truth list for tiles + request payload
+  const finalMissingItems = useMemo(() => {
+    // priority: navigation state > parent request > default list
+    if (navMissingItems?.length) return navMissingItems;
+    if (parentMissingItems?.length) return parentMissingItems;
 
     return [
       "Document checklist",
@@ -461,30 +499,29 @@ export default function FullPackageMissingScreen() {
       "Interview preparation",
       "Pre-departure guidance",
     ];
-  }, [parentReq]);
+  }, [navMissingItems, parentMissingItems]);
 
-  const canContinueHere = missing.length === 0;
-
-  // ✅ Auto-open modal when routed from "Try again"
-  useEffect(() => {
-    if (autoOpened) return;
-    if (!shouldAutoOpen) return;
-    if (!canContinueHere) return;
-
-    const picked =
-      autoItem || String(missingItems?.[0] || "").trim() || "Document checklist";
-
-    setPickedNeed(picked);
-    setModalOpen(true);
-    setAutoOpened(true);
-  }, [autoOpened, shouldAutoOpen, canContinueHere, autoItem, missingItems]);
-
+  // ✅ Completed list (if parent request has progress)
   const completedList = useMemo(() => {
     const done = parentReq?.completedItems || parentReq?.doneItems || [];
     return Array.isArray(done) ? done.map((x) => String(x)) : [];
   }, [parentReq]);
 
   const isCompleted = (need) => completedList.includes(String(need));
+
+  const canContinueHere = missing.length === 0;
+
+  useEffect(() => {
+    if (autoOpened) return;
+    if (!shouldAutoOpen) return;
+    if (!canContinueHere) return;
+
+    const picked = autoItem || String(finalMissingItems?.[0] || "").trim() || "Document checklist";
+
+    setPickedNeed(picked);
+    setModalOpen(true);
+    setAutoOpened(true);
+  }, [autoOpened, shouldAutoOpen, canContinueHere, autoItem, finalMissingItems]);
 
   const openNeed = (need) => {
     if (!canContinueHere) return;
@@ -493,9 +530,6 @@ export default function FullPackageMissingScreen() {
     setModalOpen(true);
   };
 
-  const goToProfile = () => navigate("/app/profile");
-
-  // Allow users to attach PDFs for any selected full-package item
   const enableAttachments = true;
 
   const submitFullPackage = async ({
@@ -542,7 +576,7 @@ export default function FullPackageMissingScreen() {
       `Track: ${safeTrack}`,
       `Country: ${country}`,
       pickedNeed ? `Selected item: ${pickedNeed}` : null,
-      missingItems?.length ? `Missing items: ${missingItems.join(", ")}` : null,
+      finalMissingItems?.length ? `Missing items: ${finalMissingItems.join(", ")}` : null,
     ]
       .filter(Boolean)
       .join(" | ");
@@ -559,7 +593,10 @@ export default function FullPackageMissingScreen() {
         country,
         requestType: "full",
         serviceName: "Full Package",
-        missingItems: Array.isArray(missingItems) ? missingItems : [],
+
+        // ✅ CRITICAL: send the correct missing items list
+        missingItems: Array.isArray(finalMissingItems) ? finalMissingItems : [],
+
         name,
         phone,
         note: finalNote,
@@ -573,7 +610,6 @@ export default function FullPackageMissingScreen() {
         fullPackageItem: pickedNeed || "",
       });
 
-      // ✅ only create attachment docs when files exist
       const picked = Array.isArray(dummyFiles) ? dummyFiles : [];
       if (picked.length > 0) {
         for (const file of picked) {
@@ -592,7 +628,6 @@ export default function FullPackageMissingScreen() {
       setModalOpen(false);
       navigate(`/app/request/${requestId}`, { replace: true });
     } catch (err) {
-      // ✅ soft-gate: unverified → verify screen
       if (err?.code === "auth/email-not-verified") {
         navigate("/verify-email", { replace: false });
       }
@@ -600,11 +635,10 @@ export default function FullPackageMissingScreen() {
     }
   };
 
-  // progress
-  const totalCount = missingItems.length;
+  const totalCount = finalMissingItems.length;
   const doneCount = useMemo(
-    () => missingItems.filter((x) => isCompleted(x)).length,
-    [missingItems, completedList]
+    () => finalMissingItems.filter((x) => isCompleted(x)).length,
+    [finalMissingItems, completedList]
   );
   const remainingCount = Math.max(0, totalCount - doneCount);
   const progressPct = totalCount ? clamp(Math.round((doneCount / totalCount) * 100), 0, 100) : 0;
@@ -618,38 +652,47 @@ export default function FullPackageMissingScreen() {
         ? "border-sky-200 bg-sky-50/60 text-sky-900"
         : "border-emerald-200 bg-emerald-50/60 text-emerald-900";
 
-  const cardBase =
-    "rounded-3xl border border-zinc-200/70 bg-white/70 shadow-sm backdrop-blur";
+  const cardBase = "rounded-3xl border border-zinc-200/70 bg-white/70 shadow-sm backdrop-blur";
 
   const btnPrimary =
     "inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]";
 
-  // Animations
-  const wrapV = reduceMotion
-    ? {}
-    : {
-        initial: "hidden",
-        animate: "show",
-        variants: {
-          hidden: { opacity: 0 },
-          show: { opacity: 1, transition: { staggerChildren: 0.05 } },
-        },
-      };
+  // ✅ Simple auth UI (no forced redirect)
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen px-5 py-10">
+        <div className="rounded-3xl border border-zinc-200 bg-white/80 p-5 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="text-base font-extrabold">Reconnecting…</div>
+          <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            Restoring your session.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  const tileV = reduceMotion
-    ? {}
-    : {
-        variants: {
-          hidden: { opacity: 0, y: 10 },
-          show: { opacity: 1, y: 0, transition: { duration: 0.22, ease: "easeOut" } },
-        },
-        whileTap: { scale: 0.985 },
-      };
+  if (authChecked && !uid) {
+    return (
+      <div className="min-h-screen px-5 py-10">
+        <div className="rounded-3xl border border-zinc-200 bg-white/80 p-5 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="text-base font-extrabold">You’re signed out</div>
+          <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            Please sign in again to continue.
+          </div>
+          <button
+            onClick={() => navigate("/login", { replace: true })}
+            className="mt-4 w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white active:scale-[0.99]"
+          >
+            Go to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen">
       <div className="px-5 py-6">
-        {/* Back */}
         <button
           onClick={goBack}
           className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800"
@@ -658,10 +701,14 @@ export default function FullPackageMissingScreen() {
           Back
         </button>
 
-        {/* Header */}
         <div className="flex items-end justify-between gap-3">
           <div>
-            <div className={["inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-extrabold", chipTrack].join(" ")}>
+            <div
+              className={[
+                "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-extrabold",
+                chipTrack,
+              ].join(" ")}
+            >
               <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-emerald-100 bg-white/70">
                 <HeaderIcon className="h-4 w-4 opacity-90" />
               </span>
@@ -671,9 +718,7 @@ export default function FullPackageMissingScreen() {
             <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900">
               Continue your full package
             </h1>
-            <p className="mt-1 text-sm text-zinc-600">
-              Tap any tile to continue that step.
-            </p>
+            <p className="mt-1 text-sm text-zinc-600">Tap any tile to continue that step.</p>
           </div>
 
           <div className="h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70" />
@@ -685,7 +730,6 @@ export default function FullPackageMissingScreen() {
           </div>
         ) : null}
 
-        {/* Profile gate */}
         {!canContinueHere ? (
           <div className="mt-5 rounded-3xl border border-amber-200 bg-amber-50/60 p-4">
             <div className="flex items-start justify-between gap-3">
@@ -709,19 +753,20 @@ export default function FullPackageMissingScreen() {
           </div>
         ) : null}
 
-        {/* Summary / progress */}
         <div className="mt-6 grid gap-3">
           <div className={`${cardBase} p-4`}>
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-extrabold text-zinc-900">
-                  Remaining steps
-                </div>
+                <div className="text-sm font-extrabold text-zinc-900">Remaining steps</div>
                 <div className="mt-1 text-sm text-zinc-600">
-                  Country:{" "}
-                  <span className="font-semibold text-zinc-900">{country}</span>
+                  Country: <span className="font-semibold text-zinc-900">{country}</span>
                 </div>
-                {parentRequestId ? (
+
+                {navMissingItems?.length ? (
+                  <div className="mt-1 text-[11px] text-emerald-700">
+                    Using diagnostic results (items you didn’t tick).
+                  </div>
+                ) : parentRequestId ? (
                   <div className="mt-1 text-[11px] text-zinc-500">
                     Continuation from request{" "}
                     <span className="font-semibold">{parentRequestId}</span>
@@ -756,9 +801,8 @@ export default function FullPackageMissingScreen() {
           </div>
         </div>
 
-        {/* Apple-like tiles */}
-        <motion.div {...wrapV} className="mt-4 grid gap-3">
-          {missingItems.map((need) => {
+        <div className="mt-4 grid gap-3">
+          {finalMissingItems.map((need) => {
             const done = isCompleted(need);
             const disabled = !canTapTiles || done;
 
@@ -766,12 +810,11 @@ export default function FullPackageMissingScreen() {
             const TileIcon = meta.icon;
 
             return (
-              <motion.button
+              <button
                 key={need}
                 type="button"
                 onClick={() => openNeed(need)}
                 disabled={disabled}
-                {...tileV}
                 className={[
                   "w-full text-left rounded-3xl border px-4 py-4 transition",
                   "shadow-[0_14px_46px_rgba(0,0,0,0.07)] backdrop-blur",
@@ -828,12 +871,11 @@ export default function FullPackageMissingScreen() {
                     {!done ? <IconChevronRight className="h-4 w-4" /> : null}
                   </span>
                 </div>
-              </motion.button>
+              </button>
             );
           })}
-        </motion.div>
+        </div>
 
-        {/* Modal */}
         <RequestModal
           open={modalOpen}
           onClose={() => setModalOpen(false)}
@@ -842,7 +884,7 @@ export default function FullPackageMissingScreen() {
           subtitle={`${titleText} • ${country}`}
           defaultName={defaultName}
           defaultPhone={defaultPhone}
-          defaultEmail={auth.currentUser?.email || userProfile?.email || ""}
+          defaultEmail={auth.currentUser?.email || email || ""}
           enableAttachments={enableAttachments}
           maxPdfMb={10}
         />

@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "../utils/motionProxy";
 
 function cleanStr(x, max = 80) {
   return String(x || "").trim().slice(0, max);

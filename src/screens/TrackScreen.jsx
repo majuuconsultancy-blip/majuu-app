@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { useNavigate, useLocation } from "react-router-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion, AnimatePresence } from "../utils/motionProxy";
 
 import {
   GraduationCap,
