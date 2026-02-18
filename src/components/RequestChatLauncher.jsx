@@ -1,13 +1,17 @@
-// ✅ src/components/RequestChatLauncher.jsx
-// - Shows unread badge (published messages to user after lastReadAt)
-// - Opens RequestChatPanel modal
-// ✅ FIX: Force modal to the top layer (prevents "chat under screen")
-// - Renders the modal into document.body via portal
-// - Uses fixed + high z-index overlay wrapper
+// ✅ src/components/RequestChatLauncher.jsx (FULL COPY-PASTE)
+// GOAL:
+// ✅ When closing chat (X / back), return to the *request status* screen (service request),
+// NOT ProgressScreen.
+// FIX:
+// - Capture the current route (pathname + search) when user opens chat
+// - On close, navigate back to that saved route (replace), instead of relying on history
+// - If missing, fallback to /app/request/:id
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { onSnapshot, collection, doc } from "firebase/firestore";
+import { useLocation, useNavigate } from "react-router-dom";
+
 import { auth, db } from "../firebase";
 import RequestChatPanel from "./RequestChatPanel";
 
@@ -35,10 +39,16 @@ function IconChat(props) {
 }
 
 export default function RequestChatLauncher({ requestId }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const rid = useMemo(() => safeStr(requestId), [requestId]);
 
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+
+  // ✅ remember where chat was opened from (request status screen route)
+  const returnToRef = useRef("");
 
   // ✅ body-portal ready flag (SSR-safe + avoids hydration issues)
   const [canPortal, setCanPortal] = useState(false);
@@ -101,29 +111,42 @@ export default function RequestChatLauncher({ requestId }) {
     };
   }, [open]);
 
+  const openChat = () => {
+    // ✅ capture the exact current screen (service request status screen)
+    // so closing chat returns here, not to ProgressScreen.
+    returnToRef.current = `${location.pathname}${location.search || ""}`;
+    setOpen(true);
+  };
+
+  const closeChat = () => {
+    setOpen(false);
+
+    // ✅ return to where chat was opened from
+    const backTo = safeStr(returnToRef.current);
+    if (backTo) {
+      navigate(backTo, { replace: true });
+      return;
+    }
+
+    // fallback: safe request status route
+    if (rid) navigate(`/app/request/${rid}`, { replace: true });
+  };
+
   const btn =
     "w-full inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99]";
   const btnMain = "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700";
 
   const Modal = (
-    <div
-      className="fixed inset-0 z-[999999] pointer-events-none"
-      aria-hidden={!open}
-    >
-      {/* overlay wrapper keeps it on top even if panel uses absolute/fixed internally */}
+    <div className="fixed inset-0 z-[999999] pointer-events-none" aria-hidden={!open}>
       <div className="absolute inset-0 pointer-events-auto">
-        <RequestChatPanel requestId={rid} role="user" onClose={() => setOpen(false)} />
+        <RequestChatPanel requestId={rid} role="user" onClose={closeChat} />
       </div>
     </div>
   );
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className={`${btn} ${btnMain}`}
-      >
+      <button type="button" onClick={openChat} className={`${btn} ${btnMain}`}>
         <IconChat className="h-5 w-5" />
         CHAT
         {unreadCount > 0 ? (

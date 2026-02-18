@@ -1,11 +1,14 @@
 // ✅ TravelSelfHelp.jsx (FULL COPY-PASTE)
 // CHANGE: Redo ALL icons using lucide-react (no custom SVG icon components)
+// ✅ ADD: Android hardware back ALWAYS goes to TrackScreen (/app/travel)
+// - Uses history.pushState + popstate trap (PWA-safe)
+// - On-screen Back also goes to /app/travel
 // Everything else (layout/logic/keys) unchanged.
 // Keeps visited memory key: majuu_visited_links_v1
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "../utils/motionProxy";
+import { motion } from "../utils/motionProxy";
 import {
   Compass,
   Link2,
@@ -235,7 +238,6 @@ export default function TravelSelfHelp() {
   const country = new URLSearchParams(location.search).get("country") || "";
 
   const [visitedMap, setVisitedMap] = useState({});
-
   const refreshVisited = () => setVisitedMap(loadVisited());
 
   useEffect(() => {
@@ -247,8 +249,29 @@ export default function TravelSelfHelp() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  // ✅ Desired back destination (TrackScreen)
+  const backUrl = `/app/travel?country=${encodeURIComponent(country)}&from=choice`;
+
+  // ✅ HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/travel)
+  useEffect(() => {
+    try {
+      window.history.pushState(
+        { __majuu_selfhelp_back_trap: true },
+        "",
+        window.location.href
+      );
+    } catch {}
+
+    const onPopState = () => {
+      navigate(backUrl, { replace: true });
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [navigate, backUrl]);
+
   const goBackToChoice = () => {
-    navigate(`/app/travel?country=${encodeURIComponent(country)}&from=choice`);
+    navigate(backUrl, { replace: true });
   };
 
   const qs = encodeURIComponent(country || "destination country");
@@ -304,8 +327,7 @@ export default function TravelSelfHelp() {
         links: [
           {
             title: "Search: “travel insurance for Kenya citizens”",
-            url: "https://www.google.com/search?q=travel+insurance+for+Kenya+citizens",
-            note: "Pick a reputable insurer",
+            url: "https://www.google.com/search?q=travel+insurance+for+Kenya+citizens"            
           },
         ],
       },
@@ -328,20 +350,13 @@ export default function TravelSelfHelp() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-emerald-50/60 via-white to-white">
-      {/* soft background glow */}
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-200/30 blur-3xl" />
         <div className="absolute top-44 -left-24 h-72 w-72 rounded-full bg-sky-200/25 blur-3xl" />
         <div className="absolute bottom-0 right-0 h-72 w-72 rounded-full bg-emerald-100/25 blur-3xl" />
       </div>
 
-      <motion.div
-        variants={pageIn}
-        initial="hidden"
-        animate="show"
-        className="px-5 py-6 max-w-xl mx-auto"
-      >
-        {/* Back */}
+      <motion.div variants={pageIn} initial="hidden" animate="show" className="px-5 py-6 max-w-xl mx-auto">
         <button
           onClick={goBackToChoice}
           className="mb-4 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:bg-white active:scale-[0.99]"
@@ -350,7 +365,6 @@ export default function TravelSelfHelp() {
           Back
         </button>
 
-        {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-extrabold text-emerald-900">
@@ -371,7 +385,6 @@ export default function TravelSelfHelp() {
           <div className="shrink-0 h-12 w-12 rounded-3xl border border-emerald-100 bg-emerald-50/80 shadow-sm" />
         </div>
 
-        {/* Country tile (ONLY country + total websites) */}
         <motion.div
           variants={cardFloat}
           initial="rest"
@@ -394,22 +407,15 @@ export default function TravelSelfHelp() {
           </div>
         </motion.div>
 
-        {/* Sections */}
         <div className="mt-6 grid gap-4">
           {sections.map((sec, i) => (
             <SectionCard key={sec.title} title={sec.title} subtitle={sec.subtitle} index={i}>
               {sec.links.map((l) => (
-                <LinkRow
-                  key={l.url}
-                  item={l}
-                  visitedMap={visitedMap}
-                  onRefreshVisited={refreshVisited}
-                />
+                <LinkRow key={l.url} item={l} visitedMap={visitedMap} onRefreshVisited={refreshVisited} />
               ))}
             </SectionCard>
           ))}
 
-          {/* Safety tip */}
           <motion.div
             variants={cardFloat}
             initial="rest"

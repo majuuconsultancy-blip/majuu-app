@@ -6,11 +6,29 @@
 // - ✅ Cleaner background gradient + subtle divider line
 // - ✅ Search input gets smoother focus ring + backdrop blur
 // - ✅ Back button ALWAYS goes to "/dashboard" (kept)
+//
+// ✅ NEW (your request):
+// - ✅ Banner counts “requests with unread chat” (NOT message count)
+// - ✅ Uses users/{staffUid}/notifications where readAt == null
+// - ✅ Counts unique requestId per tab
+// - ✅ When you tap a request card, it marks that request’s notifications as read
+//    so banner drops (10 -> 9) exactly like you described.
 
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { collection, doc, getDoc, onSnapshot, orderBy, query } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  where,
+  writeBatch,
+} from "firebase/firestore";
 
 import { auth, db } from "../firebase";
 
@@ -136,6 +154,9 @@ export default function StaffTasksScreen() {
   const [uid, setUid] = useState("");
   const [busy, setBusy] = useState("");
 
+  // ✅ NEW: unread notifications aggregated by requestId
+  const [unreadReqIds, setUnreadReqIds] = useState(() => new Set());
+
   // ✅ Apple-ish entrance animation (CSS only)
   const [enter, setEnter] = useState(false);
   useEffect(() => {
@@ -211,6 +232,67 @@ export default function StaffTasksScreen() {
     };
   }, [navigate]);
 
+  // ✅ NEW: live unread-by-request from notifications (readAt == null)
+  useEffect(() => {
+    if (!uid) return;
+
+    const nRef = collection(db, "users", uid, "notifications");
+
+    // only unread chat notifications
+    const qy = query(
+      nRef,
+      where("type", "==", "chat_message"),
+      where("readAt", "==", null)
+    );
+
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        const set = new Set();
+        snap.docs.forEach((d) => {
+          const data = d.data() || {};
+          const rid = String(data.requestId || "").trim();
+          if (rid) set.add(rid);
+        });
+        setUnreadReqIds(set);
+      },
+      () => {
+        // silent: we don't want this to break tasks view if rules block it
+      }
+    );
+
+    return () => unsub();
+  }, [uid]);
+
+  // ✅ NEW: when user opens a request card, mark that request’s notifications as read
+  const markRequestNotifsRead = async (requestId) => {
+    const rid = String(requestId || "").trim();
+    if (!uid || !rid) return;
+
+    try {
+      const nRef = collection(db, "users", uid, "notifications");
+      const qy = query(
+        nRef,
+        where("type", "==", "chat_message"),
+        where("requestId", "==", rid),
+        where("readAt", "==", null)
+      );
+
+      const snap = await getDocs(qy);
+      if (snap.empty) return;
+
+      const batch = writeBatch(db);
+      snap.docs.forEach((d) => {
+        batch.update(doc(db, "users", uid, "notifications", d.id), {
+          readAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+    } catch {
+      // ignore (banner may not clear if rules disallow, but navigation still works)
+    }
+  };
+
   const enriched = useMemo(() => {
     return tasks
       .map((t) => {
@@ -257,6 +339,21 @@ export default function StaffTasksScreen() {
           .includes(q);
       });
   }, [enriched, tab, search]);
+
+  // ✅ NEW: unread “requests count” per tab (not messages)
+  const unreadCountsByTab = useMemo(() => {
+    const c = { new: 0, ongoing: 0, done: 0 };
+    if (!unreadReqIds || unreadReqIds.size === 0) return c;
+
+    enriched.forEach((x) => {
+      if (!unreadReqIds.has(x.rid)) return;
+      if (c[x.staffTab] != null) c[x.staffTab] += 1;
+    });
+
+    return c;
+  }, [enriched, unreadReqIds]);
+
+  const unreadInActiveTab = unreadCountsByTab[tab] || 0;
 
   const doLogout = async () => {
     try {
@@ -354,9 +451,32 @@ export default function StaffTasksScreen() {
               <span className="ml-2 rounded-full border border-zinc-200 bg-white/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">
                 {t.key === "new" ? counts.new : t.key === "ongoing" ? counts.ongoing : counts.done}
               </span>
+
+              {/* ✅ NEW: unread request badge per tab */}
+              {unreadCountsByTab[t.key] > 0 ? (
+                <span className="ml-2 rounded-full border border-amber-200 bg-amber-50/70 px-2 py-0.5 text-[11px] font-bold text-amber-900">
+                  {unreadCountsByTab[t.key]}
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
+
+        {/* ✅ NEW: banner for active tab (counts requests with unread chat) */}
+        {unreadInActiveTab > 0 ? (
+          <div className="mt-4 rounded-3xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-900 shadow-sm">
+            <div className="font-semibold">
+              New messages in{" "}
+              <span className="rounded-full border border-amber-200 bg-white/60 px-2 py-0.5 text-[12px] font-bold">
+                {unreadInActiveTab}
+              </span>{" "}
+              {unreadInActiveTab === 1 ? "request" : "requests"}
+            </div>
+            <div className="mt-1 text-xs text-amber-900/80">
+              Open a request to clear it from this count.
+            </div>
+          </div>
+        ) : null}
 
         {/* Search + counters */}
         <div className="mt-5">
@@ -427,16 +547,34 @@ export default function StaffTasksScreen() {
                   ? `/staff/request/${rid}`
                   : `/staff/request/${rid}/start`;
 
+              const hasUnread = unreadReqIds?.has(rid);
+
               return (
                 <button
                   key={task.id}
                   type="button"
-                  onClick={() => navigate(goTo)}
+                  onClick={async () => {
+                    // ✅ clear this request from banner by marking its notifications read
+                    await markRequestNotifsRead(rid);
+                    navigate(goTo);
+                  }}
                   className={floatCard}
                 >
                   <div className="flex items-start justify-between gap-3 p-4">
                     <div className="min-w-0">
-                      <div className="font-semibold text-zinc-900 dark:text-zinc-100">{title}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                          {title}
+                        </div>
+
+                        {/* ✅ per-request unread dot */}
+                        {hasUnread ? (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50/70 px-2 py-0.5 text-[11px] font-bold text-amber-900">
+                            New
+                          </span>
+                        ) : null}
+                      </div>
+
                       <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{sub}</div>
 
                       {rp ? (

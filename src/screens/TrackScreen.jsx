@@ -2,6 +2,9 @@
 // CHANGE ONLY:
 // - Removed country icon (Globe2) because per-country map silhouettes aren't practical with Lucide
 // - All other icons remain Lucide
+// - ✅ NEW: Android/browser back button now always goes to /dashboard
+// - ✅ UPDATED: Removed the huge bottom “Go to Tracks” dock button
+// - ✅ UPDATED: Added a small “Tracks” button at the top-right of the header card
 // Backend untouched (setSelectedTrack + setActiveContext + URL behavior)
 
 import { useEffect, useMemo, useState } from "react";
@@ -86,6 +89,28 @@ export default function TrackScreen({ track }) {
     });
     return () => unsub();
   }, []);
+
+  // ✅ NEW: Android/browser back button should go to Dashboard from TrackScreen
+  useEffect(() => {
+    // Make TrackScreen the current history entry (so back triggers popstate cleanly)
+    try {
+      window.history.replaceState(
+        { ...(window.history.state || {}), __majuu_track: true },
+        ""
+      );
+    } catch {}
+
+    const onPopState = (e) => {
+      // Force dashboard instead of returning to previous page
+      try {
+        e.preventDefault?.();
+      } catch {}
+      navigate("/dashboard", { replace: true });
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [navigate]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -185,10 +210,23 @@ export default function TrackScreen({ track }) {
 
   return (
     <div className={`min-h-screen ${topBg}`}>
-      {/* ✅ extra bottom padding so content doesn't hide behind dock */}
-      <div className="px-5 py-6 pb-44 max-w-xl mx-auto">
+      {/* ✅ page padding */}
+      <div className="px-5 py-6 pb-10 max-w-xl mx-auto">
         {/* Header */}
         <div className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white/60 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/50">
+          {/* ✅ small Tracks button (top-right) */}
+          <button
+            type="button"
+            onClick={goToTracks}
+            disabled={saving}
+            className="absolute right-4 bottom-3 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-900 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60
+                       dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100 dark:hover:bg-zinc-950/45"
+            title="Go to Tracks"
+          >
+            <Compass className="h-4 w-4" />
+            Tracks
+          </button>
+
           {/* animated glow blob */}
           <motion.div
             aria-hidden="true"
@@ -203,7 +241,7 @@ export default function TrackScreen({ track }) {
             transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
           />
 
-          <div className="relative flex items-end justify-between gap-3">
+          <div className="relative flex items-end justify-between gap-3 pr-24">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100">
                 <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 border border-emerald-100 dark:bg-zinc-950/40 dark:border-emerald-900/40">
@@ -216,11 +254,11 @@ export default function TrackScreen({ track }) {
                 Choose a country
               </h1>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                Pick your dream destination, then choose Self-Help or We-Help.
+                Pick your dream destination.
               </p>
             </div>
 
-            <div className="h-11 w-11 rounded-2xl border border-emerald-100 bg-emerald-50/70 dark:border-zinc-800 dark:bg-zinc-950/40" />
+            <div className="h-4 w-12 rounded-2xl border border-emerald-100 bg-emerald-50/70 dark:border-zinc-800 dark:bg-zinc-950/40" />
           </div>
         </div>
 
@@ -285,41 +323,6 @@ export default function TrackScreen({ track }) {
               </motion.button>
             ))}
           </motion.div>
-        </div>
-      </div>
-
-      {/* ✅ Bottom dock (safe area aware) */}
-      <div className="fixed inset-x-0 bottom-0 z-30">
-        <div className="mx-auto w-full max-w-xl px-5 pb-[max(6rem,env(safe-area-inset-bottom))]">
-          <div className="rounded-3xl border border-zinc-200 bg-white/80 backdrop-blur shadow-lg dark:border-zinc-800 dark:bg-zinc-900/70">
-            <div className="flex items-center justify-between gap-3 p-3">
-              <div className="min-w-0 flex items-center gap-3">
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200">
-                  <Compass className="h-5 w-5" />
-                </span>
-
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                    Not sure yet?
-                  </div>
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    You can go back and switch tracks anytime.
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={goToTracks}
-                disabled={saving}
-                className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-white active:scale-[0.99] disabled:opacity-60
-                           dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100 dark:hover:bg-zinc-950/45"
-              >
-                <ChevronRight className="h-4 w-4" />
-                Go to Tracks
-              </button>
-            </div>
-          </div>
         </div>
       </div>
 

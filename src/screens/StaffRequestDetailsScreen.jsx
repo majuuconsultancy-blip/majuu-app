@@ -7,8 +7,15 @@
 // - ✅ “Chat” card styled as primary block
 // - ✅ Buttons + inputs get smoother focus rings + disabled states
 // - ✅ Keeps ALL your Firestore logic EXACTLY the same
+//
+// ✅ FIX ADDED (minimal, staff-side only):
+// - If admin approved staff chat BEFORE assignment, those messages may be in /messages with toUid missing.
+// - When the assigned staff opens this screen, we "claim" those orphan staff messages:
+//   - set toUid = current staff uid
+//   - mark needsAssignment = false
+//   - create a notification for each newly claimed message (so badge/notifications work)
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
@@ -23,6 +30,7 @@ import {
   writeBatch,
   onSnapshot,
   addDoc,
+  where,
 } from "firebase/firestore";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -439,6 +447,93 @@ export default function StaffRequestDetailsScreen() {
       setBusy("");
     }
   };
+
+  /* =========================================================
+     ✅ FIX: Claim orphan "to staff" messages after assignment
+     ========================================================= */
+  const claimedRef = useRef(false);
+
+  useEffect(() => {
+    // Only run when:
+    // - request loaded
+    // - staff is signed in
+    // - request is assigned to THIS staff
+    if (!requestId) return;
+    if (!uid) return;
+    if (!req) return;
+
+    const assignedTo = String(req?.assignedTo || "").trim();
+    if (!assignedTo) return;
+    if (assignedTo !== uid) return;
+
+    if (claimedRef.current) return;
+    claimedRef.current = true;
+
+    const run = async () => {
+      try {
+        // Find messages intended for staff but missing a receiver id
+        const msgCol = collection(db, "serviceRequests", requestId, "messages");
+
+        // NOTE: Firestore can't OR in one query.
+        // We'll query the most common: toUid == null
+        const qNull = query(msgCol, where("toRole", "==", "staff"), where("toUid", "==", null));
+        const snapNull = await getDocs(qNull);
+
+        // Also try toUid == "" (in case older code wrote empty string)
+        const qEmpty = query(msgCol, where("toRole", "==", "staff"), where("toUid", "==", ""));
+        const snapEmpty = await getDocs(qEmpty);
+
+        const rows = [];
+        snapNull.docs.forEach((d) => rows.push({ id: d.id, ref: d.ref, data: d.data() || {} }));
+        snapEmpty.docs.forEach((d) => rows.push({ id: d.id, ref: d.ref, data: d.data() || {} }));
+
+        // Dedupe by id
+        const seen = new Set();
+        const unique = rows.filter((r) => {
+          if (seen.has(r.id)) return false;
+          seen.add(r.id);
+          return true;
+        });
+
+        if (unique.length === 0) return;
+
+        const batch = writeBatch(db);
+
+        unique.forEach((m) => {
+          batch.update(m.ref, {
+            toUid: uid,
+            needsAssignment: false,
+            assignedAt: serverTimestamp(),
+          });
+
+          // Create a notification for staff (so unread badge/notifications work)
+          // We only do this "claim time" because we couldn't notify earlier.
+          const notifRef = doc(collection(db, "users", uid, "notifications"));
+          const type = String(m.data?.type || "text").toLowerCase();
+          const hasPdf = type === "pdf" || (type === "bundle" && m.data?.pdfMeta);
+          batch.set(notifRef, {
+            type: "chat_message",
+            requestId: String(requestId),
+            title: hasPdf ? "New document" : "New message",
+            body: hasPdf
+              ? "A document was sent to your request chat."
+              : "You have a new message on your request.",
+            createdAt: serverTimestamp(),
+            readAt: null,
+            _claimedFromOrphan: true,
+            messageId: m.id,
+          });
+        });
+
+        await batch.commit();
+      } catch (e) {
+        // Don't block UI; just log
+        console.warn("claim orphan staff messages failed:", e?.message || e);
+      }
+    };
+
+    run();
+  }, [requestId, uid, req]);
 
   if (checkingAuth) {
     return (

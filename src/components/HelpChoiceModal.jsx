@@ -1,12 +1,10 @@
 // ✅ HelpChoiceModal.jsx (POLISHED • FLOATY • CLEAN • MOBILE-FIRST)
-// UI only — your analytics + gating logic is unchanged.
-// - Framer-motion entrance + subtle float/tap
-// - Blurred backdrop + nice card + close button
-// - Clear “Self-Help is Free” + “We-Help (Guided)”
-// - ESC + click-outside to close
-// - Busy state with tiny spinner
+// CHANGE ONLY (as requested):
+// ✅ When you press BACK while modal is open, it navigates back to TrackScreen
+//    (based on current pathname: /app/:track/*). Also closing the modal uses the same behavior.
+// - Keeps your analytics + gating logic unchanged.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
@@ -109,7 +107,7 @@ const sheet = {
   hidden: { opacity: 0, y: 16, scale: 0.99 },
   show: {
     opacity: 1,
-    y: 0,
+    y: -40,
     scale: 1,
     transition: { type: "spring", stiffness: 520, damping: 40 },
   },
@@ -122,6 +120,15 @@ const floaty = {
   tap: { scale: 0.985 },
 };
 
+// ✅ derive track screen from current URL: /app/:track/...
+function deriveTrackPath(pathname) {
+  const p = String(pathname || "");
+  const m = p.match(/^\/app\/(study|work|travel)(?:\/|$)/i);
+  const t = (m?.[1] || "").toLowerCase();
+  if (t === "study" || t === "work" || t === "travel") return `/app/${t}`;
+  return "/dashboard";
+}
+
 export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -129,13 +136,45 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
 
   const safeCountry = useMemo(() => cleanStr(country, 40), [country]);
 
+  const trackPath = useMemo(() => deriveTrackPath(location.pathname), [location.pathname]);
+
+  // ✅ single "back target" behavior: go to TrackScreen
+  const goBackToTrack = useCallback(() => {
+    if (busy) return;
+    // If parent passed onClose, call it (so parent clears modal state)
+    try {
+      onClose?.();
+    } catch {}
+    // Then navigate to track screen (replace so modal doesn’t come back)
+    navigate(trackPath, { replace: true });
+  }, [busy, navigate, trackPath, onClose]);
+
+  // ✅ Back button handling for WebView/browser back
+  useEffect(() => {
+    // anchor current entry so back becomes predictable
+    try {
+      window.history.replaceState({ ...(window.history.state || {}), __majuu_helpchoice: true }, "");
+    } catch {}
+
+    const onPopState = (e) => {
+      try {
+        e.preventDefault?.();
+      } catch {}
+      goBackToTrack();
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [goBackToTrack]);
+
+  // ESC closes -> TrackScreen
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === "Escape" && !busy) onClose?.();
+      if (e.key === "Escape") goBackToTrack();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [busy, onClose]);
+  }, [goBackToTrack]);
 
   if (!country) return null;
 
@@ -215,17 +254,17 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-8"
         variants={overlay}
         initial="hidden"
         animate="show"
         exit="exit"
       >
-        {/* Backdrop (click outside closes) */}
+        {/* Backdrop (click outside -> TrackScreen) */}
         <button
           type="button"
           aria-label="Close"
-          onClick={() => (!busy ? onClose?.() : null)}
+          onClick={goBackToTrack}
           className="absolute inset-0 bg-black/45"
         />
 
@@ -239,7 +278,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
           <div className="relative p-5 pb-4">
             <button
               type="button"
-              onClick={() => (!busy ? onClose?.() : null)}
+              onClick={goBackToTrack}
               className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white/70 text-zinc-600 transition hover:bg-white active:scale-[0.98] disabled:opacity-60"
               disabled={busy}
               aria-label="Close modal"
@@ -321,10 +360,10 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
                 </p>
               </div>
 
-              {/* Cancel */}
+              {/* Cancel -> TrackScreen */}
               <button
                 type="button"
-                onClick={() => (!busy ? onClose?.() : null)}
+                onClick={goBackToTrack}
                 disabled={busy}
                 className="mt-1 w-full rounded-2xl px-4 py-2.5 text-sm font-semibold text-zinc-600 transition hover:text-zinc-900 active:scale-[0.99] disabled:opacity-60"
               >

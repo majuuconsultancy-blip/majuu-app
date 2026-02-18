@@ -1,11 +1,14 @@
 // ✅ StudySelfHelp.jsx (FULL COPY-PASTE)
 // CHANGE: Redo ALL icons using lucide-react (no custom SVG icon components)
+// ✅ ADD: Android hardware back ALWAYS goes to TrackScreen (/app/study)
+// - Uses history.pushState + popstate trap (PWA-safe)
+// - On-screen Back also goes to /app/study
 // Everything else (layout/logic/keys) unchanged.
 // Keeps visited memory key: majuu_visited_links_v1
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "../utils/motionProxy";
+import { motion } from "../utils/motionProxy";
 import {
   BookOpen,
   Link2,
@@ -235,7 +238,6 @@ export default function StudySelfHelp() {
   const country = new URLSearchParams(location.search).get("country") || "";
 
   const [visitedMap, setVisitedMap] = useState({});
-
   const refreshVisited = () => setVisitedMap(loadVisited());
 
   useEffect(() => {
@@ -247,8 +249,30 @@ export default function StudySelfHelp() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  // ✅ Desired back destination (TrackScreen)
+  const backUrl = `/app/study?country=${encodeURIComponent(country || "")}&from=choice`;
+
+  // ✅ HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/study)
+  useEffect(() => {
+    try {
+      window.history.pushState(
+        { __majuu_selfhelp_back_trap: true },
+        "",
+        window.location.href
+      );
+    } catch {}
+
+    const onPopState = () => {
+      navigate(backUrl, { replace: true });
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [navigate, backUrl]);
+
+  // ✅ On-screen Back
   const goBackToChoice = () => {
-    navigate(`/app/study?country=${encodeURIComponent(country)}&from=choice`);
+    navigate(backUrl, { replace: true });
   };
 
   const qs = encodeURIComponent(country || "selected country");
@@ -259,21 +283,9 @@ export default function StudySelfHelp() {
         title: "Universities & programs",
         subtitle: "Find schools, compare programs, and shortlist options.",
         links: [
-          {
-            title: "Studyportals — Bachelor & Master programs",
-            url: "https://www.studyportals.com/",
-            note: "Search programs by country & subject",
-          },
-          {
-            title: "QS Top Universities",
-            url: "https://www.topuniversities.com/",
-            note: "Rankings + university profiles",
-          },
-          {
-            title: "Times Higher Education (THE) Rankings",
-            url: "https://www.timeshighereducation.com/world-university-rankings",
-            note: "Rankings and insights",
-          },
+          { title: "Studyportals — Bachelor & Master programs", url: "https://www.studyportals.com/", note: "Search programs by country & subject" },
+          { title: "QS Top Universities", url: "https://www.topuniversities.com/", note: "Rankings + university profiles" },
+          { title: "Times Higher Education (THE) Rankings", url: "https://www.timeshighereducation.com/world-university-rankings", note: "Rankings and insights" },
           {
             title: `Search: “universities in ${country || "your country"} admissions”`,
             url: `https://www.google.com/search?q=universities+in+${qs}+admissions`,
@@ -285,47 +297,23 @@ export default function StudySelfHelp() {
         title: "Scholarships & funding",
         subtitle: "Popular global scholarship sources (start here).",
         links: [
-          {
-            title: "DAAD Scholarships (Germany)",
-            url: "https://www.daad.de/en/study-and-research-in-germany/scholarships/",
-            note: "Official DAAD scholarships portal",
-          },
-          {
-            title: "Chevening Scholarships (UK)",
-            url: "https://www.chevening.org/",
-            note: "UK government scholarship program",
-          },
-          {
-            title: "Fulbright Program (US)",
-            url: "https://foreign.fulbrightonline.org/",
-            note: "Official Fulbright applications/info",
-          },
-          {
-            title: "Erasmus+ (EU)",
-            url: "https://erasmus-plus.ec.europa.eu/",
-            note: "EU education program (official)",
-          },
+          { title: "DAAD Scholarships (Germany)", url: "https://www.daad.de/en/study-and-research-in-germany/scholarships/", note: "Official DAAD scholarships portal" },
+          { title: "Chevening Scholarships (UK)", url: "https://www.chevening.org/", note: "UK government scholarship program" },
+          { title: "Fulbright Program (US)", url: "https://foreign.fulbrightonline.org/", note: "Official Fulbright applications/info" },
+          { title: "Erasmus+ (EU)", url: "https://erasmus-plus.ec.europa.eu/", note: "EU education program (official)" },
         ],
       },
       {
         title: "Visa, embassy & official guidance",
         subtitle: "Always prioritize official government/embassy pages for requirements.",
         links: [
-          {
-            title: "EmbassyPages — embassies & consulates directory",
-            url: "https://www.embassypages.com/",
-            note: "Find the correct embassy/consulate",
-          },
+          { title: "EmbassyPages — embassies & consulates directory", url: "https://www.embassypages.com/", note: "Find the correct embassy/consulate" },
           {
             title: `Search: “${country || "your destination"} student visa official site”`,
             url: `https://www.google.com/search?q=${qs}+student+visa+official+government+site`,
             note: "Use the top government result",
           },
-          {
-            title: "VFS Global (if your destination uses it)",
-            url: "https://www.vfsglobal.com/",
-            note: "Visa application center (varies by country)",
-          },
+          { title: "VFS Global (if your destination uses it)", url: "https://www.vfsglobal.com/", note: "Visa application center (varies by country)" },
         ],
       },
       {
@@ -334,22 +322,14 @@ export default function StudySelfHelp() {
         links: [
           { title: "IELTS", url: "https://www.ielts.org/", note: "Official site" },
           { title: "TOEFL", url: "https://www.ets.org/toefl", note: "Official site" },
-          {
-            title: "WES (credential evaluation)",
-            url: "https://www.wes.org/",
-            note: "Often needed for US/Canada (varies)",
-          },
+          { title: "WES (credential evaluation)", url: "https://www.wes.org/", note: "Often needed for US/Canada (varies)" },
         ],
       },
       {
         title: "Flights & accommodation",
         subtitle: "Use trusted platforms + compare prices.",
         links: [
-          {
-            title: "Google Flights",
-            url: "https://www.google.com/travel/flights",
-            note: "Compare flight options",
-          },
+          { title: "Google Flights", url: "https://www.google.com/travel/flights", note: "Compare flight options" },
           { title: "Skyscanner", url: "https://www.skyscanner.net/", note: "Flight search & alerts" },
           { title: "Booking.com", url: "https://www.booking.com/", note: "Hotels & stays" },
           { title: "Airbnb", url: "https://www.airbnb.com/", note: "Short/long stays" },
@@ -360,25 +340,18 @@ export default function StudySelfHelp() {
 
   const totalSites = useMemo(() => {
     const list = sections.flatMap((s) => s.links).map((x) => x.url);
-    return new Set(list).size; // unique count
+    return new Set(list).size;
   }, [sections]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-emerald-50/60 via-white to-white">
-      {/* soft background glow */}
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-200/30 blur-3xl" />
         <div className="absolute top-44 -left-24 h-72 w-72 rounded-full bg-sky-200/25 blur-3xl" />
         <div className="absolute bottom-0 right-0 h-72 w-72 rounded-full bg-emerald-100/25 blur-3xl" />
       </div>
 
-      <motion.div
-        variants={pageIn}
-        initial="hidden"
-        animate="show"
-        className="px-5 py-6 max-w-xl mx-auto"
-      >
-        {/* Back */}
+      <motion.div variants={pageIn} initial="hidden" animate="show" className="px-5 py-6 max-w-xl mx-auto">
         <button
           onClick={goBackToChoice}
           className="mb-4 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:bg-white active:scale-[0.99]"
@@ -387,7 +360,6 @@ export default function StudySelfHelp() {
           Back
         </button>
 
-        {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-extrabold text-emerald-900">
@@ -408,7 +380,6 @@ export default function StudySelfHelp() {
           <div className="shrink-0 h-12 w-12 rounded-3xl border border-emerald-100 bg-emerald-50/80 shadow-sm" />
         </div>
 
-        {/* Country tile (ONLY country + total websites) */}
         <motion.div
           variants={cardFloat}
           initial="rest"
@@ -431,22 +402,15 @@ export default function StudySelfHelp() {
           </div>
         </motion.div>
 
-        {/* Sections */}
         <div className="mt-6 grid gap-4">
           {sections.map((sec, i) => (
             <SectionCard key={sec.title} title={sec.title} subtitle={sec.subtitle} index={i}>
               {sec.links.map((l) => (
-                <LinkRow
-                  key={l.url}
-                  item={l}
-                  visitedMap={visitedMap}
-                  onRefreshVisited={refreshVisited}
-                />
+                <LinkRow key={l.url} item={l} visitedMap={visitedMap} onRefreshVisited={refreshVisited} />
               ))}
             </SectionCard>
           ))}
 
-          {/* Safety tip */}
           <motion.div
             variants={cardFloat}
             initial="rest"

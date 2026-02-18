@@ -1,11 +1,13 @@
 // ✅ WorkSelfHelp.jsx (FULL COPY-PASTE)
-// CHANGE: Redo ALL icons using lucide-react (no custom SVG icon components)
+// CHANGE: Android hardware back now ALWAYS goes to TrackScreen (/app/work)
+// - Uses history.pushState + popstate trap (PWA-safe)
+// - On-screen Back also goes to /app/work
 // Everything else (layout/logic/keys) unchanged.
 // Keeps visited memory key: majuu_visited_links_v1
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "../utils/motionProxy";
+import { motion } from "../utils/motionProxy";
 import {
   Briefcase,
   Link2,
@@ -246,8 +248,30 @@ export default function WorkSelfHelp() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  // ✅ Desired back destination (TrackScreen)
+  const backUrl = `/app/work?country=${encodeURIComponent(country || "")}&from=choice`;
+
+  // ✅ HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/work)
+  useEffect(() => {
+    try {
+      window.history.pushState(
+        { __majuu_selfhelp_back_trap: true },
+        "",
+        window.location.href
+      );
+    } catch {}
+
+    const onPopState = () => {
+      navigate(backUrl, { replace: true });
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [navigate, backUrl]);
+
+  // ✅ On-screen Back
   const goBackToChoice = () => {
-    navigate(`/app/work?country=${encodeURIComponent(country || "")}&from=choice`);
+    navigate(backUrl, { replace: true });
   };
 
   const qs = encodeURIComponent(country || "destination country");
@@ -258,21 +282,9 @@ export default function WorkSelfHelp() {
         title: "Job search platforms",
         subtitle: "Start applying + build your shortlist.",
         links: [
-          {
-            title: "LinkedIn Jobs",
-            url: "https://www.linkedin.com/jobs/",
-            note: "Strong for professional roles",
-          },
-          {
-            title: "Indeed",
-            url: "https://www.indeed.com/",
-            note: "Big job board (varies by country)",
-          },
-          {
-            title: "Glassdoor",
-            url: "https://www.glassdoor.com/Job/index.htm",
-            note: "Jobs + company reviews",
-          },
+          { title: "LinkedIn Jobs", url: "https://www.linkedin.com/jobs/", note: "Strong for professional roles" },
+          { title: "Indeed", url: "https://www.indeed.com/", note: "Big job board (varies by country)" },
+          { title: "Glassdoor", url: "https://www.glassdoor.com/Job/index.htm", note: "Jobs + company reviews" },
           {
             title: `Search: “government job portal ${country || "your destination"}”`,
             url: `https://www.google.com/search?q=government+job+portal+${qs}`,
@@ -289,53 +301,25 @@ export default function WorkSelfHelp() {
             url: `https://www.google.com/search?q=${qs}+work+visa+official+government+site`,
             note: "Use the top government result",
           },
-          {
-            title: "EmbassyPages — embassies & consulates directory",
-            url: "https://www.embassypages.com/",
-            note: "Find your destination embassy in Kenya",
-          },
-          {
-            title: "VFS Global (if destination uses it)",
-            url: "https://www.vfsglobal.com/",
-            note: "Visa application center (varies)",
-          },
+          { title: "EmbassyPages — embassies & consulates directory", url: "https://www.embassypages.com/", note: "Find your destination embassy in Kenya" },
+          { title: "VFS Global (if destination uses it)", url: "https://www.vfsglobal.com/", note: "Visa application center (varies)" },
         ],
       },
       {
         title: "CV / Resume & interviews",
         subtitle: "Polish your documents before applying.",
         links: [
-          {
-            title: "Canva Resume Templates",
-            url: "https://www.canva.com/resumes/templates/",
-            note: "Fast and clean CV templates",
-          },
-          {
-            title: "Europass CV (EU style)",
-            url: "https://europa.eu/europass/en/create-europass-cv",
-            note: "Useful for many EU jobs",
-          },
-          {
-            title: "Interview tips (Google search)",
-            url: "https://www.google.com/search?q=job+interview+prep+checklist",
-            note: "Pick reputable sources",
-          },
+          { title: "Canva Resume Templates", url: "https://www.canva.com/resumes/templates/", note: "Fast and clean CV templates" },
+          { title: "Europass CV (EU style)", url: "https://europa.eu/europass/en/create-europass-cv", note: "Useful for many EU jobs" },
+          { title: "Interview tips (Google search)", url: "https://www.google.com/search?q=job+interview+prep+checklist", note: "Pick reputable sources" },
         ],
       },
       {
         title: "Relocation basics",
         subtitle: "Budgeting, housing, and cost of living.",
         links: [
-          {
-            title: "Numbeo — cost of living",
-            url: "https://www.numbeo.com/cost-of-living/",
-            note: "Compare cities and costs",
-          },
-          {
-            title: "Booking.com",
-            url: "https://www.booking.com/",
-            note: "Short stays for arrival week",
-          },
+          { title: "Numbeo — cost of living", url: "https://www.numbeo.com/cost-of-living/", note: "Compare cities and costs" },
+          { title: "Booking.com", url: "https://www.booking.com/", note: "Short stays for arrival week" },
           { title: "Airbnb", url: "https://www.airbnb.com/", note: "Short/medium stays" },
         ],
       },
@@ -344,25 +328,18 @@ export default function WorkSelfHelp() {
 
   const totalSites = useMemo(() => {
     const list = sections.flatMap((s) => s.links).map((x) => x.url);
-    return new Set(list).size; // unique count
+    return new Set(list).size;
   }, [sections]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-emerald-50/60 via-white to-white">
-      {/* soft background glow */}
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-200/30 blur-3xl" />
         <div className="absolute top-44 -left-24 h-72 w-72 rounded-full bg-sky-200/25 blur-3xl" />
         <div className="absolute bottom-0 right-0 h-72 w-72 rounded-full bg-emerald-100/25 blur-3xl" />
       </div>
 
-      <motion.div
-        variants={pageIn}
-        initial="hidden"
-        animate="show"
-        className="px-5 py-6 max-w-xl mx-auto"
-      >
-        {/* Back */}
+      <motion.div variants={pageIn} initial="hidden" animate="show" className="px-5 py-6 max-w-xl mx-auto">
         <button
           onClick={goBackToChoice}
           className="mb-4 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:bg-white active:scale-[0.99]"
@@ -371,7 +348,6 @@ export default function WorkSelfHelp() {
           Back
         </button>
 
-        {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-extrabold text-emerald-900">
@@ -392,7 +368,6 @@ export default function WorkSelfHelp() {
           <div className="shrink-0 h-12 w-12 rounded-3xl border border-emerald-100 bg-emerald-50/80 shadow-sm" />
         </div>
 
-        {/* Country tile (ONLY country + total websites) */}
         <motion.div
           variants={cardFloat}
           initial="rest"
@@ -415,22 +390,15 @@ export default function WorkSelfHelp() {
           </div>
         </motion.div>
 
-        {/* Sections */}
         <div className="mt-6 grid gap-4">
           {sections.map((sec, i) => (
             <SectionCard key={sec.title} title={sec.title} subtitle={sec.subtitle} index={i}>
               {sec.links.map((l) => (
-                <LinkRow
-                  key={l.url}
-                  item={l}
-                  visitedMap={visitedMap}
-                  onRefreshVisited={refreshVisited}
-                />
+                <LinkRow key={l.url} item={l} visitedMap={visitedMap} onRefreshVisited={refreshVisited} />
               ))}
             </SectionCard>
           ))}
 
-          {/* Safety tip */}
           <motion.div
             variants={cardFloat}
             initial="rest"

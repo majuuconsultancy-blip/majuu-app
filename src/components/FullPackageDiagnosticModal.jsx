@@ -1,11 +1,10 @@
 // ✅ FullPackageDiagnosticModal.jsx (NO-TRANSFORM MODAL — ANDROID JUMP FIX + EXTRA FROSTED)
 //
-// Why this fixes your case:
-// ✅ Android WebView scroll containers often jump when any ancestor is transformed (Framer Motion uses transforms).
-// ✅ So: NO motion/transform on the modal panel. Only backdrop fades.
-// ✅ Also: prevent tiny layout shifts (helperText line-wrap) by forcing single-line + fixed row height.
+// ✅ CHANGE (your request):
+// - Android hardware BACK now closes this modal and returns to the We-Help screen behind it
+// - Uses popstate trap (pushState) while open
 //
-// Build: FDIAG BUILD 2026-02-18 NO-TRANSFORM-A
+// Build: FDIAG BUILD 2026-02-18 NO-TRANSFORM-B (BACK->CLOSE)
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -143,6 +142,28 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     return () => unlock();
   }, [open]);
 
+  // ✅ Android hardware BACK closes modal (returns to We-Help behind it)
+  useEffect(() => {
+    if (!open) return;
+
+    // Add a history entry so back triggers popstate instead of leaving the screen
+    try {
+      window.history.pushState({ __majuu_fdiag_backtrap: true }, "", window.location.href);
+    } catch {}
+
+    const onPopState = () => {
+      // Close modal and keep user on same We-Help route
+      onClose?.();
+      // Re-push to neutralize the back navigation jump on some WebViews
+      try {
+        window.history.pushState({ __majuu_fdiag_backtrap: true }, "", window.location.href);
+      } catch {}
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [open, onClose]);
+
   // ESC close
   useEffect(() => {
     if (!open) return;
@@ -219,16 +240,11 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
   };
 
   const toggle = (item) => {
-    // ✅ capture scrollTop and restore immediately after state update flush (microtask)
     const el = listScrollRef.current;
     const top = el ? el.scrollTop : 0;
 
-    setChecked((p) => {
-      const next = { ...p, [item]: !p[item] };
-      return next;
-    });
+    setChecked((p) => ({ ...p, [item]: !p[item] }));
 
-    // ✅ restore ASAP + RAF (beats Android snap)
     queueMicrotask(() => {
       const el2 = listScrollRef.current;
       if (el2) el2.scrollTop = top;
@@ -274,10 +290,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
-        style={{
-          // helps some WebViews stop “scroll coordination” weirdness
-          isolation: "isolate",
-        }}
+        style={{ isolation: "isolate" }}
       >
         {/* Header */}
         <div className="shrink-0 border-b border-white/25 bg-white/45 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/45">
@@ -295,7 +308,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
             </div>
 
             <div className="absolute right-3 top-3 z-50 rounded-full border border-white/35 bg-white/55 px-2 py-1 text-[10px] font-extrabold text-zinc-700 backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/55 dark:text-zinc-200">
-              FDIAG BUILD 2026-02-18 NO-TRANSFORM-A
+              FDIAG BUILD 2026-02-18 NO-TRANSFORM-B
             </div>
 
             <button
@@ -369,7 +382,6 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                   />
                 </div>
 
-                {/* ✅ single-line: prevents height changes that trigger scroll anchoring */}
                 <div className="mt-1 text-[10.5px] text-zinc-600 dark:text-zinc-300 truncate">
                   {helperText}
                 </div>
@@ -388,7 +400,6 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
               overscrollBehavior: "contain",
               overflowAnchor: "none",
               WebkitOverflowAnchor: "none",
-              // helps reduce “jump to top” for some WebViews
               contain: "layout paint",
             }}
           >
@@ -423,7 +434,6 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                     className={[
                       "w-full text-left rounded-3xl border px-4 py-3 transition active:scale-[0.99]",
                       "shadow-[0_12px_36px_rgba(0,0,0,0.06)] backdrop-blur-2xl",
-                      // ✅ fixed visual height stability (no tiny reflow surprises)
                       "min-h-[78px]",
                       isOn
                         ? "border-emerald-200 bg-white/55 dark:bg-zinc-900/55"
@@ -446,7 +456,11 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                               : "border-white/35 bg-white/45 text-zinc-700 dark:border-zinc-700/60 dark:bg-zinc-950/30 dark:text-zinc-200",
                           ].join(" ")}
                         >
-                          {isOn ? <IconCheck className="h-5 w-5" /> : <span className="h-2 w-2 rounded-full bg-zinc-300" />}
+                          {isOn ? (
+                            <IconCheck className="h-5 w-5" />
+                          ) : (
+                            <span className="h-2 w-2 rounded-full bg-zinc-300" />
+                          )}
                         </span>
 
                         <div className="min-w-0">

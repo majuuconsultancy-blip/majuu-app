@@ -1,13 +1,27 @@
 // ✅ src/components/AdminRequestChatPanel.jsx (FULL COPY-PASTE)
-// FIX (FINAL):
-// - Accept: buttons disappear and NEVER come back (even if approve fails).
-// - Hide: removes message instantly (optimistic).
-// - Bundles: Accept/Hide applies to ALL pending children (pdf+text).
-// - Persist "no actions" in sessionStorage so remounts don’t bring buttons back.
-// Backend unchanged.
+// FIX (NEW):
+// ✅ If admin accepts a pending message while NO staff is assigned yet,
+//    we STILL publish it into /messages (toRole="staff") and mark pending as delivered.
+//    This way staff can see it later after assignment.
+//
+// Everything else preserved:
+// - Accept buttons disappear and never come back
+// - Hide optimistic
+// - Bundles: Accept/Hide applies to all pending children
+// - sessionStorage persistence for "no actions"
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import {
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+  doc,
+  addDoc,
+  updateDoc,
+  serverTimestamp,
+} from "firebase/firestore";
 import { db } from "../firebase";
 import {
   adminApprovePendingMessage,
@@ -36,8 +50,8 @@ function formatTime(ts) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function pickCreatedAt(doc) {
-  return doc?.createdAt || doc?.approvedAt || doc?.editedAt || doc?.rejectedAt || null;
+function pickCreatedAt(docu) {
+  return docu?.createdAt || docu?.approvedAt || docu?.editedAt || docu?.rejectedAt || null;
 }
 
 function roleLabel(role) {
@@ -183,6 +197,9 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   const [busyKey, setBusyKey] = useState(""); // message id or bundle id
   const [err, setErr] = useState("");
 
+  // ✅ NEW: track whether staff is assigned
+  const [assignedStaffUid, setAssignedStaffUid] = useState("");
+
   // ✅ Hide removes message instantly (optimistic)
   const [optimisticHidden, setOptimisticHidden] = useState(() => new Set());
 
@@ -213,9 +230,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
       const arr = JSON.parse(raw);
       if (!Array.isArray(arr)) return;
       setOptimisticNoActions(new Set(arr.map((x) => String(x))));
-    } catch {
-      // ignore
-    }
+    } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noActionsKey]);
 
@@ -223,9 +238,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     if (!noActionsKey) return;
     try {
       sessionStorage.setItem(noActionsKey, JSON.stringify([...optimisticNoActions]));
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [noActionsKey, optimisticNoActions]);
 
   /* ---------- scroll helper ---------- */
@@ -238,6 +251,34 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
       });
     });
   };
+
+  /* ---------- NEW: watch request assignment ---------- */
+  useEffect(() => {
+    if (!rid) return;
+
+    const reqRef = doc(db, "serviceRequests", rid);
+    const unsub = onSnapshot(
+      reqRef,
+      (snap) => {
+        const d = snap.exists() ? snap.data() : null;
+
+        // support a few possible field names (use whichever you have)
+        const uid =
+          d?.assignedStaffUid ||
+          d?.assignedToUid ||
+          d?.staffUid ||
+          d?.staffAssignedUid ||
+          "";
+
+        setAssignedStaffUid(String(uid || "").trim());
+      },
+      () => {
+        setAssignedStaffUid("");
+      }
+    );
+
+    return () => unsub();
+  }, [rid]);
 
   /* ---------- listeners ---------- */
   useEffect(() => {
@@ -364,6 +405,37 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     });
   };
 
+  /* ---------- ✅ NEW: fallback approve when no staff assigned ---------- */
+  const approvePendingWithoutAssignment = async (p) => {
+    // Publish into /messages as "toRole: staff", even if no staffUid yet
+    const type = String(p?.type || "text").toLowerCase();
+
+    await addDoc(collection(db, "serviceRequests", rid, "messages"), {
+      type,
+      text: safeStr(p?.text),
+      pdfMeta: p?.pdfMeta || null,
+
+      fromRole: p?.fromRole || "user",
+      fromUid: p?.fromUid || null,
+
+      // ✅ deliver to staff lane
+      toRole: "staff",
+      toUid: null,
+
+      createdAt: serverTimestamp(),
+
+      // ✅ important: lets user UI hide delivered pending by id
+      sourcePendingId: String(p?.id || ""),
+    });
+
+    // Mark pending as delivered so it disappears from pending list
+    await updateDoc(doc(db, "serviceRequests", rid, "pendingMessages", String(p?.id || "")), {
+      status: "delivered",
+      deliveredAt: serverTimestamp(),
+      approvedAt: serverTimestamp(),
+    });
+  };
+
   /* ---------- actions ---------- */
   const approveBundle = async (bundleId, pendingChildren) => {
     setErr("");
@@ -375,12 +447,18 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     pendingChildren.forEach((c) => disableActionsOptimistic(c.id));
 
     try {
+      const hasAssignee = Boolean(String(assignedStaffUid || "").trim());
+
       for (const c of pendingChildren) {
-        await adminApprovePendingMessage({ requestId: rid, pendingId: c.id });
+        if (!hasAssignee) {
+          await approvePendingWithoutAssignment(c);
+        } else {
+          await adminApprovePendingMessage({ requestId: rid, pendingId: c.id });
+        }
       }
     } catch (e) {
       console.error(e);
-      // ✅ DO NOT rollback button hide (this is the “once and for all” fix)
+      // ✅ DO NOT rollback button hide
       setErr(e?.message || "Approve failed (buttons will stay hidden).");
     } finally {
       setBusyKey("");
@@ -422,7 +500,13 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     disableActionsOptimistic(p.id);
 
     try {
-      await adminApprovePendingMessage({ requestId: rid, pendingId: p.id });
+      const hasAssignee = Boolean(String(assignedStaffUid || "").trim());
+
+      if (!hasAssignee) {
+        await approvePendingWithoutAssignment(p);
+      } else {
+        await adminApprovePendingMessage({ requestId: rid, pendingId: p.id });
+      }
     } catch (e) {
       console.error(e);
       // ✅ DO NOT rollback button hide
@@ -533,6 +617,11 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             <div className="font-semibold text-zinc-900">Request chat</div>
             <div className="text-xs text-zinc-500">
               Left = User • Right = Staff & Admin • Accept/Hide pending inline.
+              {assignedStaffUid ? (
+                <span className="ml-2 text-emerald-700 font-semibold">• Staff assigned</span>
+              ) : (
+                <span className="ml-2 text-amber-700 font-semibold">• No staff assigned</span>
+              )}
             </div>
           </div>
         </div>
@@ -760,7 +849,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             </button>
           </div>
 
-          <div className="mt-2 text-[11px] text-zinc-500">            
+          <div className="mt-2 text-[11px] text-zinc-500">
             <span className="ml-2">Demo.</span>
           </div>
         </div>

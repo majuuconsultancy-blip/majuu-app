@@ -1,9 +1,10 @@
 // ✅ ProfileScreen.jsx (COPY-PASTE — MODAL REMOVED, EDIT -> /app/profile/edit)
+// CHANGE:
+// ✅ Android/browser back button now goes to TrackScreen (based on active track if available)
+// - Adds a safe popstate handler (same style as TrackScreen fix)
+// - Optional: uses /app/track/:track route (fallback to /app/track/study)
 //
-// Why: Android WebView keyboards + fixed modal overlays are unreliable.
-// This screen is now clean: "Edit" navigates to a dedicated edit page.
-//
-// Build indicator: PROFILE BUILD 2026-02-17 ROUTE EDIT
+// Build indicator unchanged
 
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
@@ -51,6 +52,9 @@ export default function ProfileScreen() {
   const [phone, setPhone] = useState("");
   const [countryOfResidence, setCountryOfResidence] = useState("");
 
+  // ✅ for back target
+  const [activeTrack, setActiveTrack] = useState(""); // "study" | "work" | "travel" | ""
+
   const [busy, setBusy] = useState("");
 
   const isAdmin = useMemo(
@@ -85,6 +89,11 @@ export default function ProfileScreen() {
         setName(n);
         setPhone(p);
         setCountryOfResidence(c);
+
+        // ✅ read activeTrack for back nav (fallback to selectedTrack if you store it)
+        const t = String(s?.activeTrack || s?.selectedTrack || "").toLowerCase();
+        if (t === "study" || t === "work" || t === "travel") setActiveTrack(t);
+        else setActiveTrack("");
       } catch (e) {
         console.error(e);
         setErr(e?.message || "Failed to load profile.");
@@ -95,6 +104,29 @@ export default function ProfileScreen() {
 
     return () => unsub();
   }, [navigate]);
+
+  // ✅ NEW: Android/browser back button should go to TrackScreen
+  useEffect(() => {
+    // mark this history entry
+    try {
+      window.history.replaceState(
+        { ...(window.history.state || {}), __majuu_profile: true },
+        ""
+      );
+    } catch {}
+
+    const onPopState = (e) => {
+      try {
+        e.preventDefault?.();
+      } catch {}
+
+      const t = activeTrack || "study";
+      navigate(`/app/track/${t}`, { replace: true });
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [navigate, activeTrack]);
 
   const openEdit = () => {
     // ✅ go to dedicated edit screen (stable keyboard on Android)

@@ -6,16 +6,24 @@
 // - admin can also send DIRECT (publish without pending)
 // - unread: readState docs + notifications for user/staff
 //
-// ✅ Added in this version:
-// - ✅ "bundle" message type: ONE message can carry both text + pdfMeta
-//   so attachment + text send as a single chat item.
-// - ✅ New sender API: sendPendingBundle({ text, pdfMeta })
-// - ✅ Admin direct API: adminSendBundleDirect({ text, pdfMeta })
-// - ✅ Admin approve supports bundle and keeps original createdAt
+// ✅ FIX in this version (your issue):
+// ✅ Admin can now APPROVE a message to STAFF even when the request is NOT assigned yet.
+// - Before: approve would FAIL ("Receiver not found") and message stayed pending forever.
+// - Now: we still publish it to /messages (toRole:"staff", toUid:null) and mark pending as approved.
+// - When staff later opens the request chat, they WILL see it because chat panels read /messages.
+// - Staff notification is skipped until an assignee exists (because we can't know who to notify yet).
 //
-// NOTE: Your UI must call sendPendingBundle when both exist.
-// Also make sure your chat UI renderer can display type === "bundle"
-// by showing the text (if any) and the pdf block (if any).
+// ✅ Added previously (kept):
+// - ✅ "bundle" type
+// - ✅ sendPendingBundle
+// - ✅ adminSendBundleDirect
+// - ✅ admin approve supports bundle and keeps original createdAt
+//
+// NOTE:
+// - Staff notification is only created when assignedTo exists.
+// - If you want “notify staff immediately after assignment”, that should be handled
+//   where you assign staff (small extra code in that assign flow), but at least now
+//   NOTHING stays stuck in pending and staff WILL see it in chat once assigned.
 
 import {
   addDoc,
@@ -64,7 +72,6 @@ function normalizeRole(role) {
 
 function normalizeType(type) {
   const t = safeStr(type).toLowerCase();
-  // ✅ added bundle
   if (!["text", "pdf", "bundle"].includes(t)) throw new Error("Invalid type");
   return t;
 }
@@ -105,6 +112,22 @@ function makeNotificationDoc({ requestId, kind = "chat_message" } = {}) {
     createdAt: serverTimestamp(),
     readAt: null,
   };
+}
+
+/**
+ * ✅ Compute receiver UID.
+ * - user => request.uid
+ * - staff => request.assignedTo (may be empty if not assigned yet)
+ * Returns "" if unknown.
+ */
+function resolveReceiverUid({ req, toRole }) {
+  const tr = normalizeRole(toRole);
+  const userUid = safeStr(req?.uid);
+  const staffUid = safeStr(req?.assignedTo);
+
+  if (tr === "user") return userUid || "";
+  if (tr === "staff") return staffUid || ""; // ✅ can be missing (not assigned yet)
+  return "";
 }
 
 /* -------------------- Sender: User/Staff -> Pending -------------------- */
@@ -164,7 +187,7 @@ export async function sendPendingPdf({ requestId, fromRole, toRole, pdfMeta } = 
 }
 
 /**
- * ✅ NEW: One pending message that can include BOTH text + pdfMeta
+ * ✅ One pending message that can include BOTH text + pdfMeta
  * Use this when user attaches doc AND types a message.
  */
 export async function sendPendingBundle({
@@ -276,9 +299,6 @@ export async function adminApprovePending({
   if (!rSnap.exists()) throw new Error("Request not found");
   const req = { id: rSnap.id, ...rSnap.data() };
 
-  const userUid = safeStr(req.uid);
-  const staffUid = safeStr(req.assignedTo);
-
   const pRef = doc(db, "serviceRequests", rid, "pendingMessages", pid);
   const pSnap = await getDoc(pRef);
   if (!pSnap.exists()) throw new Error("Pending message not found");
@@ -300,22 +320,19 @@ export async function adminApprovePending({
   if (type === "bundle" && !finalText && !finalPdfMeta)
     throw new Error("Final bundle is empty");
 
-  const receiverUid =
-    toRole === "user" ? userUid : toRole === "staff" ? staffUid : "";
-
-  if (!receiverUid) {
-    throw new Error("Receiver not found (missing assignedTo or uid).");
-  }
+  // ✅ FIX: allow staff receiver to be missing (not assigned yet)
+  const receiverUid = resolveReceiverUid({ req, toRole }); // may be ""
 
   const batch = writeBatch(db);
 
+  // publish anyway (even if receiverUid missing for staff)
   const pubRef = doc(publishedCol(rid));
   batch.set(pubRef, {
     requestId: rid,
     fromRole,
     fromUid,
     toRole,
-    toUid: receiverUid,
+    toUid: receiverUid || null, // ✅ null if not assigned yet
 
     type,
     text: type === "pdf" ? "" : finalText, // bundle/text can have text
@@ -327,8 +344,12 @@ export async function adminApprovePending({
 
     // ✅ keep original send time
     createdAt: p?.createdAt || serverTimestamp(),
+
+    // ✅ optional hint: published before assignee existed
+    needsAssignment: toRole === "staff" && !receiverUid ? true : false,
   });
 
+  // mark pending as approved ALWAYS
   batch.update(pRef, {
     status: "approved",
     editedText: editedText != null ? finalText : null,
@@ -339,16 +360,19 @@ export async function adminApprovePending({
     approvedBy: admin.uid,
   });
 
-  const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
-  const nRef = doc(db, "users", receiverUid, "notifications", notifId);
+  // ✅ notifications only when we actually know who to notify
+  if (receiverUid) {
+    const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
+    const nRef = doc(db, "users", receiverUid, "notifications", notifId);
 
-  const notifKind =
-    (type === "pdf" || (type === "bundle" && finalPdfMeta)) ? "chat_pdf" : "chat_message";
+    const notifKind =
+      (type === "pdf" || (type === "bundle" && finalPdfMeta)) ? "chat_pdf" : "chat_message";
 
-  batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: notifKind }));
+    batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: notifKind }));
+  }
 
   await batch.commit();
-  return { ok: true, publishedId: pubRef.id };
+  return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
 }
 
 export async function adminEditPending({
@@ -437,12 +461,9 @@ export async function adminSendTextDirect({ requestId, toRole, text } = {}) {
   if (!rSnap.exists()) throw new Error("Request not found");
   const req = { id: rSnap.id, ...rSnap.data() };
 
-  const userUid = safeStr(req.uid);
-  const staffUid = safeStr(req.assignedTo);
+  const receiverUid = resolveReceiverUid({ req, toRole: tr }); // may be ""
 
-  const receiverUid = tr === "user" ? userUid : tr === "staff" ? staffUid : "";
-  if (!receiverUid) throw new Error("Receiver not found (missing assignedTo or uid).");
-
+  // ✅ FIX: allow staff direct send even if not assigned yet (publish anyway, skip notif)
   const batch = writeBatch(db);
 
   const pubRef = doc(publishedCol(rid));
@@ -451,7 +472,7 @@ export async function adminSendTextDirect({ requestId, toRole, text } = {}) {
     fromRole: "admin",
     fromUid: admin.uid,
     toRole: tr,
-    toUid: receiverUid,
+    toUid: receiverUid || null,
 
     type: "text",
     text: msg,
@@ -461,14 +482,18 @@ export async function adminSendTextDirect({ requestId, toRole, text } = {}) {
     approvedBy: admin.uid,
     approvedAt: serverTimestamp(),
     createdAt: serverTimestamp(),
+
+    needsAssignment: tr === "staff" && !receiverUid ? true : false,
   });
 
-  const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
-  const nRef = doc(db, "users", receiverUid, "notifications", notifId);
-  batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: "chat_message" }));
+  if (receiverUid) {
+    const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
+    const nRef = doc(db, "users", receiverUid, "notifications", notifId);
+    batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: "chat_message" }));
+  }
 
   await batch.commit();
-  return { ok: true, publishedId: pubRef.id };
+  return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
 }
 
 export async function adminSendPdfMetaDirect({ requestId, toRole, pdfMeta } = {}) {
@@ -485,11 +510,7 @@ export async function adminSendPdfMetaDirect({ requestId, toRole, pdfMeta } = {}
   if (!rSnap.exists()) throw new Error("Request not found");
   const req = { id: rSnap.id, ...rSnap.data() };
 
-  const userUid = safeStr(req.uid);
-  const staffUid = safeStr(req.assignedTo);
-
-  const receiverUid = tr === "user" ? userUid : tr === "staff" ? staffUid : "";
-  if (!receiverUid) throw new Error("Receiver not found (missing assignedTo or uid).");
+  const receiverUid = resolveReceiverUid({ req, toRole: tr }); // may be ""
 
   const batch = writeBatch(db);
 
@@ -499,7 +520,7 @@ export async function adminSendPdfMetaDirect({ requestId, toRole, pdfMeta } = {}
     fromRole: "admin",
     fromUid: admin.uid,
     toRole: tr,
-    toUid: receiverUid,
+    toUid: receiverUid || null,
 
     type: "pdf",
     text: "",
@@ -509,18 +530,22 @@ export async function adminSendPdfMetaDirect({ requestId, toRole, pdfMeta } = {}
     approvedBy: admin.uid,
     approvedAt: serverTimestamp(),
     createdAt: serverTimestamp(),
+
+    needsAssignment: tr === "staff" && !receiverUid ? true : false,
   });
 
-  const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
-  const nRef = doc(db, "users", receiverUid, "notifications", notifId);
-  batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: "chat_pdf" }));
+  if (receiverUid) {
+    const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
+    const nRef = doc(db, "users", receiverUid, "notifications", notifId);
+    batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: "chat_pdf" }));
+  }
 
   await batch.commit();
-  return { ok: true, publishedId: pubRef.id };
+  return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
 }
 
 /**
- * ✅ NEW: Admin direct send bundle (text + pdfMeta in one message)
+ * ✅ Admin direct send bundle (text + pdfMeta in one message)
  */
 export async function adminSendBundleDirect({
   requestId,
@@ -543,11 +568,7 @@ export async function adminSendBundleDirect({
   if (!rSnap.exists()) throw new Error("Request not found");
   const req = { id: rSnap.id, ...rSnap.data() };
 
-  const userUid = safeStr(req.uid);
-  const staffUid = safeStr(req.assignedTo);
-
-  const receiverUid = tr === "user" ? userUid : tr === "staff" ? staffUid : "";
-  if (!receiverUid) throw new Error("Receiver not found (missing assignedTo or uid).");
+  const receiverUid = resolveReceiverUid({ req, toRole: tr }); // may be ""
 
   const batch = writeBatch(db);
 
@@ -557,7 +578,7 @@ export async function adminSendBundleDirect({
     fromRole: "admin",
     fromUid: admin.uid,
     toRole: tr,
-    toUid: receiverUid,
+    toUid: receiverUid || null,
 
     type: "bundle",
     text: msg,
@@ -567,16 +588,20 @@ export async function adminSendBundleDirect({
     approvedBy: admin.uid,
     approvedAt: serverTimestamp(),
     createdAt: serverTimestamp(),
+
+    needsAssignment: tr === "staff" && !receiverUid ? true : false,
   });
 
-  const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
-  const nRef = doc(db, "users", receiverUid, "notifications", notifId);
+  if (receiverUid) {
+    const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
+    const nRef = doc(db, "users", receiverUid, "notifications", notifId);
 
-  const notifKind = meta ? "chat_pdf" : "chat_message";
-  batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: notifKind }));
+    const notifKind = meta ? "chat_pdf" : "chat_message";
+    batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: notifKind }));
+  }
 
   await batch.commit();
-  return { ok: true, publishedId: pubRef.id };
+  return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
 }
 
 /* -------------------- ✅ Compatibility exports -------------------- */

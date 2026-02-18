@@ -1,21 +1,13 @@
 // ✅ RequestModal.jsx (FINAL COPY-PASTE — ANDROID KEYBOARD WARM-UP + TOUCH + SCROLL FIX)
+// ✅ UPDATE (Back routing support):
+// - Add optional prop: returnTo (string path)
+// - If returnTo is set, closing the modal (X / Cancel / overlay) will navigate there.
+// - If not set, it behaves exactly like before.
 //
-// New fix added for your "keyboard doesn't open until I trigger it once":
-// ✅ IME warm-up runs ONCE per app session, and only on a real user tap inside inputs.
-//    - Uses a hidden input focus+blur trick (gesture-bound) so Android WebView initializes keyboard.
-//    - Then re-focuses the intended input on the next frame.
-// This matches your symptom: works after 1 trigger until app is killed from recents.
-//
-// Everything else kept:
-// ✅ Fixed-position body scroll lock (keyboard stability)
-// ✅ Overlay closes ONLY when you tap overlay (pointerdown) but won't steal focus
-// ✅ Panel stops pointer propagation
-// ✅ Scroll focused field into view
-// ✅ Escape close
-// ✅ Standalone performance tweaks
-// ✅ Build indicator
+// Everything else unchanged.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { isStandalone } from "../utils/isStandalone";
 
 const STANDALONE = isStandalone();
@@ -195,18 +187,14 @@ function scrollFieldIntoView(el, scrollContainer) {
     try {
       el.scrollIntoView({ block: "center", behavior: "smooth" });
       return;
-    } catch {
-      // fallback
-    }
+    } catch {}
 
     try {
       const r1 = el.getBoundingClientRect();
       const r2 = scrollContainer.getBoundingClientRect();
       const delta = r1.top - r2.top - r2.height * 0.35;
       scrollContainer.scrollTop += delta;
-    } catch {
-      // no-op
-    }
+    } catch {}
   }, 80);
 }
 
@@ -246,7 +234,6 @@ function warmUpKeyboardOnceAndRefocus(targetEl) {
 
       sessionStorage.setItem("kb_warmed", "1");
 
-      // refocus the real field on next frame so keyboard appears for the user
       if (targetEl) {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
@@ -261,9 +248,7 @@ function warmUpKeyboardOnceAndRefocus(targetEl) {
         });
       }
     }, 60);
-  } catch {
-    // no-op
-  }
+  } catch {}
 }
 
 export default function RequestModal({
@@ -278,12 +263,42 @@ export default function RequestModal({
   onPay,
   maxPdfMb = 10,
   enableAttachments = true,
+
+  // ✅ NEW: optional "where to go back to when closing"
+  // Example:
+  //   returnTo={`/app/work/we-help?country=${encodeURIComponent(country)}`}
+  returnTo,
 }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const panelRef = useRef(null);
   const scrollRef = useRef(null);
 
   // ✅ prevents "tap causes close + blur" on Android
   const startedInsidePanelRef = useRef(false);
+
+  // ✅ fallback: allow returnTo via query param (?returnTo=/app/...)
+  const effectiveReturnTo = useMemo(() => {
+    if (returnTo) return String(returnTo);
+    try {
+      const qs = new URLSearchParams(location.search);
+      const q = qs.get("returnTo");
+      return q ? String(q) : "";
+    } catch {
+      return "";
+    }
+  }, [returnTo, location.search]);
+
+  const handleClose = useMemo(() => {
+    return () => {
+      if (onClose) onClose();
+      if (effectiveReturnTo) {
+        // If you're already on that page, this won't break; it just re-navigates.
+        navigate(effectiveReturnTo, { replace: true });
+      }
+    };
+  }, [onClose, navigate, effectiveReturnTo]);
 
   const [name, setName] = useState(defaultName);
   const [phone, setPhone] = useState(defaultPhone);
@@ -327,11 +342,11 @@ export default function RequestModal({
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e) => {
-      if (e.key === "Escape" && !loading) onClose?.();
+      if (e.key === "Escape" && !loading) handleClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, loading, onClose]);
+  }, [open, loading, handleClose]);
 
   const canPay = useMemo(() => {
     return name.trim().length > 0 && phone.trim().length > 0 && isValidEmail(email) && !loading;
@@ -399,7 +414,11 @@ export default function RequestModal({
 
         requestUploadMeta:
           enableAttachments && fileMetas.length > 0
-            ? { count: fileMetas.length, files: fileMetas, note: "User selected PDF files (metadata only)." }
+            ? {
+                count: fileMetas.length,
+                files: fileMetas,
+                note: "User selected PDF files (metadata only).",
+              }
             : null,
 
         paid: true,
@@ -432,7 +451,6 @@ export default function RequestModal({
 
   const focusProps = {
     onFocus: (e) => scrollFieldIntoView(e.currentTarget, scrollRef.current),
-    // ✅ IMPORTANT: gesture-bound warm up happens BEFORE focus is applied by the browser
     onPointerDownCapture: (e) => warmUpKeyboardOnceAndRefocus(e.currentTarget),
   };
 
@@ -442,14 +460,19 @@ export default function RequestModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50" aria-modal="true" role="dialog" style={{ overscrollBehavior: "contain" }}>
+    <div
+      className="fixed inset-0 z-50"
+      aria-modal="true"
+      role="dialog"
+      style={{ overscrollBehavior: "contain" }}
+    >
       {/* ✅ Overlay: close ONLY if pointer started on overlay (not inside modal) */}
       <div
         className={`absolute inset-0 ${overlayCls}`}
         aria-hidden="true"
-        onPointerDown={(e) => {
+        onPointerDown={() => {
           if (startedInsidePanelRef.current) return;
-          if (!loading) onClose?.();
+          if (!loading) handleClose();
         }}
         style={{ touchAction: "manipulation" }}
       />
@@ -476,20 +499,24 @@ export default function RequestModal({
         >
           {/* Build indicator */}
           <div className="absolute right-3 top-3 z-50 rounded-full border border-zinc-200 bg-white/80 px-2 py-1 text-[10px] font-extrabold text-zinc-700">
-            REQMODAL BUILD 2026-02-18 FINAL-KC
+            REQMODAL BUILD 2026-02-18 FINAL-KC + RETURNTO
           </div>
 
           {/* Header */}
           <div className="px-5 pt-5 shrink-0">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">{title}</h2>
-                {subtitle ? <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{subtitle}</p> : null}
+                <h2 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                  {title}
+                </h2>
+                {subtitle ? (
+                  <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{subtitle}</p>
+                ) : null}
               </div>
 
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleClose}
                 disabled={loading}
                 className="shrink-0 rounded-xl border border-zinc-200 bg-white p-2 text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
                 aria-label="Close"
@@ -514,7 +541,9 @@ export default function RequestModal({
               <div className="grid gap-4">
                 {/* Name */}
                 <div>
-                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Full name</label>
+                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                    Full name
+                  </label>
                   <div className={fieldWrap}>
                     <IconUser className="h-5 w-5 text-zinc-500" />
                     <input
@@ -535,7 +564,9 @@ export default function RequestModal({
 
                 {/* Phone */}
                 <div>
-                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Phone / WhatsApp</label>
+                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                    Phone / WhatsApp
+                  </label>
                   <div className={fieldWrap}>
                     <IconPhone className="h-5 w-5 text-zinc-500" />
                     <input
@@ -573,13 +604,17 @@ export default function RequestModal({
                   </div>
 
                   {String(email || "").trim().length > 0 && !isValidEmail(email) ? (
-                    <div className="mt-1 text-xs text-rose-600">Enter a valid email (example: you@gmail.com)</div>
+                    <div className="mt-1 text-xs text-rose-600">
+                      Enter a valid email (example: you@gmail.com)
+                    </div>
                   ) : null}
                 </div>
 
                 {/* City */}
                 <div>
-                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">City / Town (optional)</label>
+                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                    City / Town (optional)
+                  </label>
                   <div className={fieldWrap}>
                     <IconPin className="h-5 w-5 text-zinc-500" />
                     <input
@@ -635,7 +670,9 @@ export default function RequestModal({
 
                 {/* Note */}
                 <div>
-                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Note (optional)</label>
+                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                    Note (optional)
+                  </label>
                   <div className={fieldWrap + " items-start"}>
                     <IconNote className="h-5 w-5 text-zinc-500 mt-0.5" />
                     <textarea
@@ -693,7 +730,7 @@ export default function RequestModal({
 
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleClose}
                   disabled={loading}
                   className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
                 >

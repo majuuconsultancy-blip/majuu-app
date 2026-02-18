@@ -1,5 +1,8 @@
 // ✅ WorkWeHelp.jsx (FULL COPY-PASTE)
 // CHANGE: Replace + add new icons (lucide-react). No custom SVG icon components.
+// ✅ ADD: Android hardware back ALWAYS goes to TrackScreen (/app/work)
+// - Uses history.pushState + popstate trap (PWA-safe)
+// - On-screen Back also goes to /app/work
 // Logic/backend wiring untouched.
 
 import { useEffect, useMemo, useState } from "react";
@@ -186,9 +189,30 @@ export default function WorkWeHelp() {
 
   const canUseWeHelp = missing.length === 0 && profileChecked;
 
+  // ✅ TrackScreen destination
+  const backUrl = `/app/work?country=${encodeURIComponent(country)}&from=choice`;
+
   const goBackToChoice = () => {
-    navigate(`/app/work?country=${encodeURIComponent(country)}&from=choice`);
+    navigate(backUrl, { replace: true });
   };
+
+  // ✅ HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/work)
+  useEffect(() => {
+    try {
+      window.history.pushState(
+        { __majuu_wehelp_back_trap: true },
+        "",
+        window.location.href
+      );
+    } catch {}
+
+    const onPopState = () => {
+      navigate(backUrl, { replace: true });
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [navigate, backUrl]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {

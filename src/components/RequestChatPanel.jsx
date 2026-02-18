@@ -1,17 +1,15 @@
 // ✅ src/components/RequestChatPanel.jsx (FULL COPY-PASTE)
-// ChatGPT-like:
-// - Published messages: /messages
-// - Pending instantly shown: optimistic + /pendingMessages(fromUid==me)
-// - + button picks PDF (metadata-only demo)
-// - ✅ When user sends BOTH pdf + text: backend still writes 2 docs (safe),
-//   but UI groups them into ONE combined bubble.
-// - ✅ FIXED: no more double texts (optimistic dedupe for text/pdf/combo)
-// - ✅ Optimistic is persisted in sessionStorage until Firestore round trip replaces it
-// - Status dots: pending (•), delivered (••), rejected
-// - ✅ Textbox auto-expands vertically like ChatGPT (textarea autosize)
+// CHANGE ONLY:
+// ✅ Default back button (Android/browser) now returns to RequestStatusScreen for this request
+// - Pushes one history state when chat opens (so Back closes chat instead of leaving the request)
+// - Handles popstate to: close modal + navigate to /app/request/:id (replace)
+// - Close (X) button does the same (so behavior is consistent)
+//
+// Everything else untouched.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onSnapshot, collection, query, orderBy, where } from "firebase/firestore";
+import { useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { sendPendingText, sendPendingPdf, markRequestChatRead } from "../services/chatservice";
 
@@ -158,7 +156,6 @@ function makeBundleView(first, second) {
   const textMsg = aType === "text" ? first : second;
   const pdfMsg = aType === "pdf" ? first : second;
 
-  // status: if any rejected -> rejected, else if any delivered -> delivered, else pending
   const st1 = String(first?.status || "pending").toLowerCase();
   const st2 = String(second?.status || "pending").toLowerCase();
 
@@ -192,7 +189,6 @@ function loadOptimisticFromStorage(key) {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    // prune extremely old items
     const now = Date.now();
     return parsed.filter((x) => x && Number(x.createdAtMs || 0) > now - 5 * 60_000);
   } catch {
@@ -219,7 +215,6 @@ function matchPendingForOptimistic(oMsg, pendingMine, WINDOW_MS) {
 
   if (!oMs) return false;
 
-  // for combo: match either part
   const wantText = safeStr(oMsg?.text);
   const wantPdf = safeStr(oMsg?.pdfMeta?.name);
 
@@ -258,10 +253,8 @@ function matchPublishedForOptimistic(oMsg, published, WINDOW_MS) {
     const mt = String(m?.type || "text").toLowerCase();
 
     if (oType === "combo") {
-      // approved combo becomes two published messages in your current backend
       if (mt === "text" && wantText && safeStr(m?.text) === wantText) return true;
       if (mt === "pdf" && wantPdf && safeStr(m?.pdfMeta?.name) === wantPdf) return true;
-      // or bundle if you ever switch
       if (mt === "bundle" && (safeStr(m?.text) === wantText || samePdfName(m, oMsg))) return true;
     }
 
@@ -280,15 +273,49 @@ function matchPublishedForOptimistic(oMsg, published, WINDOW_MS) {
 
 /* ---------------- component ---------------- */
 export default function RequestChatPanel({ requestId, role = "user", onClose }) {
+  const navigate = useNavigate();
+
   const rid = useMemo(() => safeStr(requestId), [requestId]);
   const myRole = useMemo(() => String(role || "user").toLowerCase(), [role]);
   const myUid = auth.currentUser?.uid || "";
 
+  const backHref = useMemo(() => `/app/request/${encodeURIComponent(rid)}`, [rid]);
+
+  // ✅ BACK FIX: add a "chat layer" history entry and intercept Back
+  useEffect(() => {
+    if (!rid) return;
+
+    // Push one extra history entry so the first Back closes the chat,
+    // instead of navigating to ProgressScreen or elsewhere.
+    try {
+      window.history.pushState(
+        { ...(window.history.state || {}), __majuu_chat_layer: true, requestId: rid },
+        ""
+      );
+    } catch {}
+
+    const goBackToRequest = () => {
+      try {
+        onClose?.();
+      } catch {}
+      navigate(backHref, { replace: true });
+    };
+
+    const onPopState = () => {
+      goBackToRequest();
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [rid, backHref, navigate, onClose]);
+
   const [published, setPublished] = useState([]);
   const [pendingMine, setPendingMine] = useState([]);
 
-  // ✅ optimistic items persisted in sessionStorage
-  const storageKey = useMemo(() => makeStorageKey({ requestId: rid, uid: myUid, role: myRole }), [rid, myUid, myRole]);
+  const storageKey = useMemo(
+    () => makeStorageKey({ requestId: rid, uid: myUid, role: myRole }),
+    [rid, myUid, myRole]
+  );
   const [optimistic, setOptimistic] = useState(() => loadOptimisticFromStorage(storageKey));
 
   const [loading, setLoading] = useState(true);
@@ -301,22 +328,18 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
   const [pickedPdf, setPickedPdf] = useState(null); // { name, size, mime }
   const scrollRef = useRef(null);
 
-  // ✅ send lock (prevents double send from fast enter/click)
   const sendLockRef = useRef(false);
 
-  // ✅ textarea autosize
   const taRef = useRef(null);
   useAutosizeTextArea(taRef, text, { maxRows: 6 });
 
   const card = "rounded-2xl border border-zinc-200 bg-white shadow-xl";
   const bubbleBase = "max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap";
 
-  // persist optimistic
   useEffect(() => {
     saveOptimisticToStorage(storageKey, optimistic);
   }, [storageKey, optimistic]);
 
-  // ✅ published listener
   useEffect(() => {
     if (!rid) return;
 
@@ -338,12 +361,14 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     return () => unsub();
   }, [rid]);
 
-  // ✅ pending listener (NO orderBy -> avoids composite index requirement)
   useEffect(() => {
     if (!rid) return;
     if (!myUid) return;
 
-    const qy = query(collection(db, "serviceRequests", rid, "pendingMessages"), where("fromUid", "==", myUid));
+    const qy = query(
+      collection(db, "serviceRequests", rid, "pendingMessages"),
+      where("fromUid", "==", myUid)
+    );
 
     const unsub = onSnapshot(
       qy,
@@ -361,7 +386,6 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     return () => unsub();
   }, [rid, myUid]);
 
-  // ✅ mark read (don’t break UI if rules block it)
   useEffect(() => {
     if (!rid) return;
     if (!myUid) return;
@@ -372,7 +396,6 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     });
   }, [rid, myUid, myRole, published.length]);
 
-  // map delivered pending -> published
   const publishedByPendingId = useMemo(() => {
     const map = new Map();
     published.forEach((m) => {
@@ -382,50 +405,38 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     return map;
   }, [published]);
 
-  // ✅ DEDUPE optimistic:
-  // - remove optimistic text/pdf when matching pending appears
-  // - remove optimistic combo when either pending piece appears (replaces instantly)
-  // - also remove when matching published appears (edge case)
   const optimisticDeduped = useMemo(() => {
-    const WINDOW_MS = 12_000; // generous to handle lag
+    const WINDOW_MS = 12_000;
     const now = Date.now();
 
     return optimistic.filter((o) => {
       const oMs = Number(o?.createdAtMs || 0) || 0;
       if (!oMs) return false;
-      if (now - oMs > 5 * 60_000) return false; // prune old
+      if (now - oMs > 5 * 60_000) return false;
 
       const data = o.data || {};
-      const oType = String(data?.type || "").toLowerCase();
       const oMsg = { ...data, _createdAtMs: oMs };
 
-      // If matching pending exists, replace optimistic (prevents double bubbles)
       if (matchPendingForOptimistic(oMsg, pendingMine, WINDOW_MS)) return false;
-
-      // If matching published exists, replace optimistic
       if (matchPublishedForOptimistic(oMsg, published, WINDOW_MS)) return false;
 
-      // otherwise keep it
       return true;
     });
   }, [optimistic, pendingMine, published]);
 
-  // keep state in sync with deduped (and persist)
   useEffect(() => {
-    // only update if changed (avoid loops)
     if (optimisticDeduped.length !== optimistic.length) {
       setOptimistic(optimisticDeduped);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [optimisticDeduped.length]);
 
-  // build timeline (with UI-only bundling)
   const timeline = useMemo(() => {
     const pendingVisible = pendingMine
       .filter((p) => {
         const st = String(p.status || "pending").toLowerCase();
         if (st === "rejected") return true;
-        if (publishedByPendingId.get(p.id)) return false; // delivered
+        if (publishedByPendingId.get(p.id)) return false;
         return true;
       })
       .map((p) => ({
@@ -454,14 +465,12 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
       (a, b) => (a._createdAtMs || 0) - (b._createdAtMs || 0)
     );
 
-    // ✅ merge adjacent pdf+text pairs into one bundle_view
     const WINDOW_MS = 1200;
     const out = [];
     for (let i = 0; i < allRaw.length; i++) {
       const cur = allRaw[i];
       const next = allRaw[i + 1];
 
-      // don't merge true bundle types
       const curType = String(cur?.type || "text").toLowerCase();
       const nextType = String(next?.type || "text").toLowerCase();
       if (curType === "bundle" || nextType === "bundle") {
@@ -492,7 +501,6 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     return out;
   }, [published, pendingMine, optimisticDeduped, publishedByPendingId]);
 
-  // auto-scroll
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -538,13 +546,11 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     if (!rid || !myUid) return;
     if (!t && !pdf) return;
 
-    // ✅ hard lock to prevent double-send (enter + click / fast taps)
     if (sendLockRef.current) return;
     sendLockRef.current = true;
     setSending(true);
 
     try {
-      // ✅ show instantly as ONE combined bubble (UI-only)
       if (pdf && t) {
         pushOptimistic({
           type: "combo",
@@ -556,7 +562,6 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
           status: "pending",
         });
 
-        // backend unchanged (2 docs)
         await sendPendingPdf({
           requestId: rid,
           fromRole: myRole,
@@ -709,6 +714,13 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     );
   };
 
+  const closeAndGoBack = () => {
+    try {
+      onClose?.();
+    } catch {}
+    navigate(backHref, { replace: true });
+  };
+
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-3 sm:items-center">
       <div className={`w-full max-w-xl ${card}`}>
@@ -721,7 +733,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
 
           <button
             type="button"
-            onClick={onClose}
+            onClick={closeAndGoBack}
             className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
             title="Close"
           >

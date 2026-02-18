@@ -1,8 +1,9 @@
 // ✅ ProgressScreen.jsx (FULL COPY-PASTE)
 // CHANGE ONLY (as requested):
-// ✅ When you VIEW a request (or Continue into a request), ALL unread notifications
-//    for that request are marked read automatically (so the top banner count drops).
-// ✅ No backend changes. Uses existing users/{uid}/notifications update (readAt only).
+// ✅ Back button from ProgressScreen goes to TrackScreen (activeTrack) instead of previous history.
+//    - Android hardware back + browser back handled via popstate
+//    - We "trap" this screen as a history anchor and redirect on back.
+// ✅ Existing notification auto-clear behavior preserved.
 // Everything else preserved.
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -240,6 +241,40 @@ export default function ProgressScreen() {
   useEffect(() => {
     pinnedIdsRef.current = pinnedIds;
   }, [pinnedIds]);
+
+  // ✅ NEW: active track used as the "back target" for this screen
+  const activeTrackForBack = useMemo(() => {
+    const t = String(state?.activeTrack || "").toLowerCase();
+    if (t === "work" || t === "travel" || t === "study") return t;
+    // fallback if state is missing
+    return "study";
+  }, [state?.activeTrack]);
+
+  const backHref = useMemo(
+    () => `/app/${encodeURIComponent(activeTrackForBack)}`,
+    [activeTrackForBack]
+  );
+
+  // ✅ NEW: Hardware/back button from Progress -> TrackScreen
+  useEffect(() => {
+    // mark this page as an anchor in history state
+    try {
+      window.history.replaceState(
+        { ...(window.history.state || {}), __majuu_progress: true },
+        ""
+      );
+    } catch {}
+
+    const onPopState = (e) => {
+      try {
+        e.preventDefault?.();
+      } catch {}
+      navigate(backHref, { replace: true });
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [navigate, backHref]);
 
   async function deleteRequestDeep(requestId) {
     const attRef = collection(db, "serviceRequests", requestId, "attachments");
@@ -637,29 +672,31 @@ export default function ProgressScreen() {
                 Current process
               </h2>
               <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                {hasActive ? "Live" : "Idle"}
+                {Boolean(state?.hasActiveProcess) ? "Live" : "Idle"}
               </span>
             </div>
 
-            {hasActive ? (
+            {Boolean(state?.hasActiveProcess) ? (
               <div className="mt-4 grid gap-3">
                 <div className="grid gap-2 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-zinc-500 dark:text-zinc-400">Track</span>
                     <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {activeTrack}
+                      {String(state?.activeTrack || "-")}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-zinc-500 dark:text-zinc-400">Country</span>
                     <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {activeCountry}
+                      {String(state?.activeCountry || "-")}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-zinc-500 dark:text-zinc-400">Mode</span>
                     <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {activeMode}
+                      {String(state?.activeHelpType || "").toLowerCase() === "we"
+                        ? "We-Help"
+                        : "Self-Help"}
                     </span>
                   </div>
                 </div>
@@ -687,7 +724,7 @@ export default function ProgressScreen() {
                 We-Help requests
               </h2>
               <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                {requestsCountLabel}
+                {requests.length === 1 ? "1 request" : `${requests.length} requests`}
               </span>
             </div>
 
@@ -766,7 +803,6 @@ export default function ProgressScreen() {
                     );
                   };
 
-                  // ✅ FIX: open request clears chat pill + clears request notifications immediately
                   const openRequestAndClearChatPill = async () => {
                     const nowSec = Math.floor(Date.now() / 1000);
 
@@ -793,7 +829,6 @@ export default function ProgressScreen() {
                               {titleLeft}
                             </div>
 
-                            {/* ✅ animated unread pill */}
                             <AnimatePresence initial={false}>
                               {hasChatUnread ? (
                                 <motion.span
@@ -861,7 +896,6 @@ export default function ProgressScreen() {
                               try {
                                 await deleteRequestDeep(r.id);
 
-                                // ✅ if deleted request was pinned, remove from pins
                                 const user = auth.currentUser;
                                 if (user) {
                                   setPinnedIds((prev) => {
@@ -894,7 +928,6 @@ export default function ProgressScreen() {
                         </div>
                       ) : null}
 
-                      {/* ✅ Pin button bottom-right, icon-only, PinOff when pinned */}
                       <motion.button
                         whileTap={{ scale: 0.98 }}
                         onClick={() => togglePin(rid)}

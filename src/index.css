@@ -1,19 +1,24 @@
 @import "tailwindcss";
 
-/* Global base so screens change even if they don't have dark: classes */
+/* Enable class-based dark mode in Tailwind v4 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Global base so pages change even without explicit dark: classes */
 @layer base {
   html, body {
-    @apply bg-white text-zinc-900;
+    @apply bg-white text-zinc-900 transition-colors duration-200;
   }
 
-  html.dark, html.dark body {
-    @apply bg-zinc-950 text-zinc-100;
+  /* ✅ Use Tailwind variant, NOT html.dark selector */
+  :root {
+    @apply dark:bg-zinc-950 dark:text-zinc-100;
   }
 }
 
-/* Optional: better mobile typography behavior */
+/* Optional mobile typography fix */
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
+
 svg { display: block; }

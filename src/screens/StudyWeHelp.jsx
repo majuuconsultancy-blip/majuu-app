@@ -1,5 +1,8 @@
 // ✅ StudyWeHelp.jsx (FULL COPY-PASTE)
 // CHANGE: Replace + add icons (lucide-react). No custom SVG icon components.
+// ✅ ADD: Android hardware back ALWAYS goes to TrackScreen (/app/study)
+// - Uses history.pushState + popstate trap (PWA-safe)
+// - On-screen Back also goes to /app/study
 // Backend/logic untouched.
 
 import { useEffect, useMemo, useState } from "react";
@@ -82,7 +85,6 @@ function Chip({ active, children, onClick }) {
           : "border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white",
       ].join(" ")}
     >
-      {/* ✅ icon added for chips */}
       <Tags className="h-3.5 w-3.5 opacity-80" />
       {children}
     </button>
@@ -90,7 +92,6 @@ function Chip({ active, children, onClick }) {
 }
 
 function ServiceIcon({ tag, title }) {
-  // ✅ Icons “where appropriate” based on tag/title
   const cls = "h-4.5 w-4.5";
   if (title === "Document Review") return <FileCheck2 className={cls} />;
   if (title === "Passport Application") return <IdCard className={cls} />;
@@ -123,7 +124,6 @@ function ServiceTile({ s, disabled, onClick }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            {/* ✅ icon added to tag chip */}
             <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white/70 px-2 py-0.5 text-[11px] font-extrabold text-zinc-700">
               <ServiceIcon tag={s.tag} title={s.title} />
               {s.tag}
@@ -187,9 +187,30 @@ export default function StudyWeHelp() {
 
   const canUseWeHelp = missing.length === 0 && profileChecked;
 
+  // ✅ TrackScreen destination (NOT TrackSelectScreen)
+  const backUrl = `/app/study?country=${encodeURIComponent(country)}&from=choice`;
+
   const goBackToChoice = () => {
-    navigate(`/app/study?country=${encodeURIComponent(country)}&from=choice`);
+    navigate(backUrl, { replace: true });
   };
+
+  // ✅ HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/study)
+  useEffect(() => {
+    try {
+      window.history.pushState(
+        { __majuu_study_wehelp_back_trap: true },
+        "",
+        window.location.href
+      );
+    } catch {}
+
+    const onPopState = () => {
+      navigate(backUrl, { replace: true });
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [navigate, backUrl]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -396,7 +417,6 @@ export default function StudyWeHelp() {
               Get help with your study process
             </h1>
 
-            {/* ✅ add icon near destination */}
             <p className="mt-1 flex items-center gap-2 text-sm text-zinc-600">
               <MapPinned className="h-4 w-4 text-emerald-700" />
               Destination: <span className="font-semibold text-zinc-900">{country}</span>
@@ -487,7 +507,6 @@ export default function StudyWeHelp() {
               </p>
             </div>
 
-            {/* ✅ add package icon tile */}
             <span className="shrink-0 inline-flex h-12 w-12 items-center justify-center rounded-3xl border border-emerald-100 bg-emerald-50/80 text-emerald-800 shadow-sm">
               <Package className="h-6 w-6" />
             </span>
@@ -496,7 +515,6 @@ export default function StudyWeHelp() {
           <ul className="mt-4 grid gap-2 text-sm text-zinc-700">
             {FULL_PACKAGE.map((item) => (
               <li key={item} className="flex items-start gap-2">
-                {/* ✅ add check icon for list */}
                 <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50/70 text-emerald-800">
                   <BadgeCheck className="h-3.5 w-3.5" />
                 </span>
@@ -567,7 +585,6 @@ export default function StudyWeHelp() {
                 </button>
               ) : null}
 
-              {/* ✅ filter icon */}
               <span className="hidden sm:inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 text-zinc-700">
                 <Filter className="h-5 w-5" />
               </span>
