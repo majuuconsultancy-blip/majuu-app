@@ -67,9 +67,9 @@ export default function StaffStartWorkModalScreen() {
 
   const [req, setReq] = useState(null);
 
-  const card = "rounded-2xl border border-zinc-200 bg-white/80 shadow-sm backdrop-blur";
+  const card = "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 shadow-sm backdrop-blur";
   const pageBg =
-    "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white";
+    "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -179,7 +179,7 @@ export default function StaffStartWorkModalScreen() {
     return (
       <div className={pageBg}>
         <div className="max-w-xl mx-auto px-5 py-6">
-          <div className={`${card} p-4 text-sm text-zinc-600`}>Preparing…</div>
+          <div className={`${card} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>Preparing…</div>
         </div>
       </div>
     );
@@ -198,9 +198,9 @@ export default function StaffStartWorkModalScreen() {
         ) : null}
 
         {loading ? (
-          <div className={`${card} p-5 text-sm text-zinc-600`}>Loading…</div>
+          <div className={`${card} p-5 text-sm text-zinc-600 dark:text-zinc-300`}>Loading…</div>
         ) : !req ? (
-          <div className={`${card} p-5 text-sm text-zinc-600`}>
+          <div className={`${card} p-5 text-sm text-zinc-600 dark:text-zinc-300`}>
             Request not available.
           </div>
         ) : (
@@ -227,22 +227,22 @@ export default function StaffStartWorkModalScreen() {
                 animation: "ssw_slideUp 220ms cubic-bezier(.2,.8,.2,1) both",
               }}
             >
-              <div className="w-full max-w-md overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl">
+              <div className="w-full max-w-md overflow-hidden rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-2xl">
                 {/* header */}
                 <div className="p-5 sm:p-6">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800">
-                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-emerald-100 bg-white/80">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-emerald-100 bg-white/80 dark:bg-zinc-900/60">
                           <IconBolt className="h-4 w-4 text-emerald-700" />
                         </span>
                         Start work
                       </div>
 
-                      <div className="mt-3 text-xl font-semibold tracking-tight text-zinc-900">
+                      <div className="mt-3 text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                         Ready to begin?
                       </div>
-                      <div className="mt-1 text-sm text-zinc-600">
+                      <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                         This will move the task to <span className="font-semibold">Ongoing</span>{" "}
                         and start the timer fields.
                       </div>
@@ -251,7 +251,7 @@ export default function StaffStartWorkModalScreen() {
                     <button
                       type="button"
                       onClick={() => navigate("/staff/tasks", { replace: true })}
-                      className="shrink-0 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 transition hover:bg-zinc-50 active:scale-[0.98]"
+                      className="shrink-0 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition hover:bg-zinc-50 active:scale-[0.98]"
                       title="Close"
                     >
                       <IconX className="h-5 w-5" />
@@ -259,14 +259,14 @@ export default function StaffStartWorkModalScreen() {
                   </div>
 
                   {/* request card */}
-                  <div className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4">
+                  <div className="mt-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/40 p-4">
                     <div className="text-[11px] font-semibold text-zinc-500">
                       Request
                     </div>
-                    <div className="mt-1 text-sm font-semibold text-zinc-900">
+                    <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                       {title}
                     </div>
-                    <div className="mt-1 text-xs text-zinc-600">
+                    <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
                       ID: <span className="font-mono">{rid}</span>
                     </div>
                   </div>
@@ -282,7 +282,7 @@ export default function StaffStartWorkModalScreen() {
                       <span
                         className={[
                           "inline-flex h-9 w-9 items-center justify-center rounded-2xl",
-                          "bg-white/15 border border-white/15",
+                          "bg-white/15 dark:bg-zinc-900/60 border border-white/15",
                         ].join(" ")}
                       >
                         <IconPlay className="h-5 w-5 text-white" />
@@ -294,7 +294,7 @@ export default function StaffStartWorkModalScreen() {
                       type="button"
                       onClick={() => navigate("/staff/tasks", { replace: true })}
                       disabled={busy}
-                      className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] disabled:opacity-60"
+                      className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] disabled:opacity-60"
                     >
                       Not now
                     </button>
@@ -330,3 +330,5 @@ export default function StaffStartWorkModalScreen() {
     </div>
   );
 }
+
+

@@ -37,6 +37,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { auth, db } from "../firebase";
 
 import StaffRequestChatPanel from "../components/StaffRequestChatPanel";
+import { smartBack } from "../utils/navBack";
 
 /* ---------- Minimal icons ---------- */
 function IconChevronLeft(props) {
@@ -170,14 +171,14 @@ function formatDT(createdAt) {
 
 function pill(status) {
   const s = String(status || "new").toLowerCase();
-  if (s === "new") return { label: "New", cls: "bg-zinc-100 text-zinc-700 border border-zinc-200" };
+  if (s === "new") return { label: "New", cls: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800" };
   if (s === "contacted")
     return { label: "In Progress", cls: "bg-emerald-50 text-emerald-800 border border-emerald-100" };
   if (s === "closed")
     return { label: "Accepted", cls: "bg-emerald-100 text-emerald-800 border border-emerald-200" };
   if (s === "rejected")
     return { label: "Rejected", cls: "bg-rose-50 text-rose-700 border border-rose-100" };
-  return { label: s, cls: "bg-zinc-100 text-zinc-700 border border-zinc-200" };
+  return { label: s, cls: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800" };
 }
 
 function safeMinutesBetween(startTs, endMs) {
@@ -217,15 +218,15 @@ export default function StaffRequestDetailsScreen() {
   const [draftUrl, setDraftUrl] = useState("");
 
   // ✅ polish tokens
-  const softBg = "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white";
+  const softBg = "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
   const card =
-    "rounded-3xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60";
+    "rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60";
 
   const floatCard =
-    "rounded-3xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur transition duration-300 ease-out hover:-translate-y-[2px] hover:shadow-md hover:border-emerald-200 active:translate-y-0 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/60";
+    "rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur transition duration-300 ease-out hover:-translate-y-[2px] hover:shadow-md hover:border-emerald-200 active:translate-y-0 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/60";
 
   const inputBase =
-    "w-full rounded-2xl border border-zinc-200 bg-white/70 px-3 py-3 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-emerald-300/20";
+    "w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-3 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-emerald-300/20";
 
   // ✅ entrance animation
   const [enter, setEnter] = useState(false);
@@ -546,11 +547,11 @@ export default function StaffRequestDetailsScreen() {
   }
 
   const warnBox =
-    "rounded-3xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300";
+    "rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300";
   const warnAmber =
     "rounded-3xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-900 shadow-sm";
   const btnGhost =
-    "inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100";
+    "inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100";
   const btnPrimary =
     "inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60";
   const btnDanger =
@@ -563,14 +564,14 @@ export default function StaffRequestDetailsScreen() {
         <div className="sticky top-0 z-10 -mx-5 px-5 pb-3 pt-2 backdrop-blur supports-[backdrop-filter]:bg-white/50 dark:supports-[backdrop-filter]:bg-zinc-950/40">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <button type="button" onClick={() => navigate(-1)} className={btnGhost}>
+              <button type="button" onClick={() => smartBack(navigate, "/staff/tasks")} className={btnGhost}>
                 <IconChevronLeft className="h-4 w-4" />
                 Back
               </button>
 
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
-                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 border border-emerald-100 dark:bg-zinc-900/60 dark:border-zinc-700">
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 dark:bg-zinc-900/60 border border-emerald-100 dark:bg-zinc-900/60 dark:border-zinc-700">
                     <IconDoc className="h-4 w-4 text-emerald-700 dark:text-emerald-200" />
                   </span>
                   Staff review
@@ -581,7 +582,7 @@ export default function StaffRequestDetailsScreen() {
                     <span className={`rounded-full px-2.5 py-1 text-xs ${statusPill.cls}`}>
                       {statusPill.label}
                     </span>
-                    <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold border border-zinc-200 bg-white/60 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">
+                    <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">
                       Staff: {staffStatus.replace("_", " ")}
                     </span>
                   </>
@@ -631,14 +632,14 @@ export default function StaffRequestDetailsScreen() {
                 </div>
 
                 <div className="shrink-0 flex flex-col items-end gap-2">
-                  <span className="rounded-full border border-zinc-200 bg-white/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">
+                  <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">
                     Staff: {staffStatus.replace("_", " ")}
                   </span>
                 </div>
               </div>
 
               {!canWork ? (
-                <div className="mt-4 rounded-3xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+                <div className="mt-4 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
                   Admin already finalized this request. You can view only.
                 </div>
               ) : staffStatus !== "in_progress" && staffStatus !== "done" ? (
@@ -663,7 +664,7 @@ export default function StaffRequestDetailsScreen() {
                 <button
                   type="button"
                   onClick={() => navigate(`/staff/request/${req?.id}/documents`)}
-                  className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
+                  className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
                              dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 dark:hover:bg-zinc-900"
                 >
                   Applicant docs
@@ -682,7 +683,7 @@ export default function StaffRequestDetailsScreen() {
                 </div>
 
                 {req?.note ? (
-                  <div className="rounded-3xl border border-zinc-200 bg-white/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+                  <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
                     <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                       Applicant note
                     </div>
@@ -721,7 +722,7 @@ export default function StaffRequestDetailsScreen() {
               ) : null}
 
               {!canWork || isDone ? (
-                <div className="mt-4 rounded-3xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+                <div className="mt-4 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
                   Attachments are locked after you submit.
                 </div>
               ) : (
@@ -771,11 +772,11 @@ export default function StaffRequestDetailsScreen() {
                   drafts.map((d) => (
                     <div
                       key={d.id}
-                      className="rounded-3xl border border-zinc-200 bg-white/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+                      className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="font-semibold text-sm text-zinc-900 break-words dark:text-zinc-100">
+                          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 break-words dark:text-zinc-100">
                             {d.name || "File"}
                           </div>
 
@@ -838,7 +839,7 @@ export default function StaffRequestDetailsScreen() {
                 rows={5}
                 placeholder="What did you find? What’s missing? Next steps?"
                 disabled={!canWork || isDone}
-                className="mt-4 w-full rounded-2xl border border-zinc-200 bg-white/70 p-3 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 min-h-[120px] disabled:opacity-70
+                className="mt-4 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-3 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 min-h-[120px] disabled:opacity-70
                            dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-emerald-300/20"
               />
             </div>
@@ -851,7 +852,7 @@ export default function StaffRequestDetailsScreen() {
               </div>
 
               <div className="mt-4 grid gap-3">
-                <div className="grid gap-2 rounded-3xl border border-zinc-200 bg-white/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+                <div className="grid gap-2 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
                   <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                     Recommendation
                   </div>
@@ -865,7 +866,7 @@ export default function StaffRequestDetailsScreen() {
                         "rounded-2xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60",
                         decision === "recommend_accept"
                           ? "border-emerald-200 bg-emerald-50/70 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
-                          : "border-zinc-200 bg-white/70 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900",
+                          : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900",
                       ].join(" ")}
                     >
                       <span className="inline-flex items-center gap-2">
@@ -885,7 +886,7 @@ export default function StaffRequestDetailsScreen() {
                         "rounded-2xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60",
                         decision === "recommend_reject"
                           ? "border-rose-200 bg-rose-50/70 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200"
-                          : "border-zinc-200 bg-white/70 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900",
+                          : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900",
                       ].join(" ")}
                     >
                       <span className="inline-flex items-center gap-2">
@@ -922,3 +923,5 @@ export default function StaffRequestDetailsScreen() {
     </div>
   );
 }
+
+

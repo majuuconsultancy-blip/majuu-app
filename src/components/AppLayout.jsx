@@ -1,24 +1,20 @@
 import { Outlet, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import {
-  doc,
-  onSnapshot,
-  collection,
-  query,
-  orderBy,
-  limit,
-} from "firebase/firestore";
+import { doc, onSnapshot, collection, query, orderBy, limit } from "firebase/firestore";
 
 import { auth, db } from "../firebase";
 import ScreenLoader from "./ScreenLoader";
 
-import { motion, AnimatePresence } from "../utils/motionProxy";
+import { AnimatePresence } from "../utils/motionProxy";
 import PageTransitions from "./PageTransitions";
 
-// ✅ NEW: offline banner + online status
+// ✅ offline banner + online status
 import { useNetworkStatus } from "../hooks/useNetworkStatus";
 import OfflineBanner from "./OfflineBanner";
+
+// ✅ if you added this in firebase.js (recommended). If not, remove this import + await below.
+import { authPersistenceReady } from "../firebase";
 
 const VALID_TRACKS = new Set(["study", "work", "travel"]);
 
@@ -35,7 +31,6 @@ function IconHome(props) {
   );
 }
 
-/* ✅ Minimal uptrend icon */
 function IconProgress(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
@@ -56,11 +51,7 @@ function IconProgress(props) {
 function IconUser(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M20 21a8 8 0 1 0-16 0"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
+      <path d="M20 21a8 8 0 1 0-16 0" stroke="currentColor" strokeWidth="1.8" />
       <path
         d="M12 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z"
         stroke="currentColor"
@@ -73,8 +64,6 @@ function IconUser(props) {
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
-
-  // ✅ NEW: online/offline status for banner + action guarding later
   const online = useNetworkStatus();
 
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -82,13 +71,9 @@ export default function AppLayout() {
   const [activeTrack, setActiveTrack] = useState(null);
   const [hasActiveProcess, setHasActiveProcess] = useState(false);
 
-  /* ✅ NEW: unread notifications count (for badge) */
   const [unreadCount, setUnreadCount] = useState(0);
-
-  /* ✅ scroll tracking for fade */
   const [scrollY, setScrollY] = useState(0);
 
-  // ✅ tiny perf fix: update scrollY at most once per animation frame
   const rafRef = useRef(null);
   useEffect(() => {
     const onScroll = () => {
@@ -107,11 +92,16 @@ export default function AppLayout() {
     };
   }, []);
 
+  // ✅ critical: logout-confirm timer ref (prevents “false logout”)
+  const logoutTimerRef = useRef(null);
+
   useEffect(() => {
     let unsubUserDoc = null;
     let unsubNotifs = null;
+    let unsubAuth = null;
+    let cancelled = false;
 
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
+    const cleanupRealtime = () => {
       if (unsubUserDoc) {
         unsubUserDoc();
         unsubUserDoc = null;
@@ -120,65 +110,109 @@ export default function AppLayout() {
         unsubNotifs();
         unsubNotifs = null;
       }
+    };
 
-      if (!user) {
-        setUid(null);
-        setHasActiveProcess(false);
-        setActiveTrack(null);
-        setUnreadCount(0);
-        setCheckingAuth(false);
-        navigate("/login", { replace: true });
-        return;
+    const clearLogoutTimer = () => {
+      if (logoutTimerRef.current) {
+        clearTimeout(logoutTimerRef.current);
+        logoutTimerRef.current = null;
       }
+    };
 
-      setUid(user.uid);
+    (async () => {
+      // ✅ wait for persistence (prevents “null user” on resume if storage is slow)
+      try {
+        await authPersistenceReady;
+      } catch {
+        // ignore if not available / failed
+      }
+      if (cancelled) return;
 
-      // ✅ user doc listener (existing)
-      unsubUserDoc = onSnapshot(
-        doc(db, "users", user.uid),
-        (snap) => {
-          const state = snap.exists() ? snap.data() : null;
-          const active = String(state?.activeTrack || "").toLowerCase();
+      unsubAuth = onAuthStateChanged(auth, (user) => {
+        // if auth recovers, cancel any pending logout
+        if (user) clearLogoutTimer();
 
-          setHasActiveProcess(Boolean(state?.hasActiveProcess));
-          setActiveTrack(VALID_TRACKS.has(active) ? active : null);
-          setCheckingAuth(false);
-        },
-        () => {
-          setHasActiveProcess(false);
-          setActiveTrack(null);
-          setCheckingAuth(false);
+        // always reset listeners when auth changes
+        cleanupRealtime();
+
+        // ✅ if Firebase emits null briefly (PWA resume), DO NOT redirect immediately
+        if (!user) {
+          setCheckingAuth(true);
+
+          clearLogoutTimer();
+          logoutTimerRef.current = setTimeout(() => {
+            const u2 = auth.currentUser;
+
+            // still no user -> confirmed logout
+            if (!u2) {
+              setUid(null);
+              setHasActiveProcess(false);
+              setActiveTrack(null);
+              setUnreadCount(0);
+              setCheckingAuth(false);
+              navigate("/login", { replace: true, state: { from: location.pathname } });
+              return;
+            }
+
+            // user came back -> keep session
+            setCheckingAuth(false);
+          }, 2500);
+
+          return;
         }
-      );
 
-      // ✅ notifications listener for badge
-      const nRef = collection(db, "users", user.uid, "notifications");
-      const nQ = query(nRef, orderBy("createdAt", "desc"), limit(50));
+        // ✅ signed in
+        setUid(user.uid);
 
-      unsubNotifs = onSnapshot(
-        nQ,
-        (snap) => {
-          // unread = no readAt
-          let count = 0;
-          snap.forEach((d) => {
-            const data = d.data();
-            if (!data?.readAt) count += 1;
-          });
-          setUnreadCount(count);
-        },
-        () => {
-          // if permissions fail etc., just hide badge
-          setUnreadCount(0);
-        }
-      );
-    });
+        // user doc listener
+        unsubUserDoc = onSnapshot(
+          doc(db, "users", user.uid),
+          (snap) => {
+            const state = snap.exists() ? snap.data() : null;
+            const active = String(state?.activeTrack || "").toLowerCase();
+
+            setHasActiveProcess(Boolean(state?.hasActiveProcess));
+            setActiveTrack(VALID_TRACKS.has(active) ? active : null);
+            setCheckingAuth(false);
+          },
+          () => {
+            setHasActiveProcess(false);
+            setActiveTrack(null);
+            setCheckingAuth(false);
+          }
+        );
+
+        // notifications listener for badge
+        const nRef = collection(db, "users", user.uid, "notifications");
+        const nQ = query(nRef, orderBy("createdAt", "desc"), limit(50));
+
+        unsubNotifs = onSnapshot(
+          nQ,
+          (snap) => {
+            let count = 0;
+            snap.forEach((d) => {
+              const data = d.data();
+              if (!data?.readAt) count += 1;
+            });
+            setUnreadCount(count);
+          },
+          () => {
+            setUnreadCount(0);
+          }
+        );
+      });
+    })();
 
     return () => {
-      unsubAuth();
-      if (unsubUserDoc) unsubUserDoc();
-      if (unsubNotifs) unsubNotifs();
+      cancelled = true;
+      if (unsubAuth) unsubAuth();
+      cleanupRealtime();
+      if (logoutTimerRef.current) {
+        clearTimeout(logoutTimerRef.current);
+        logoutTimerRef.current = null;
+      }
     };
-  }, [navigate]);
+  }, [navigate, location.pathname]);
 
   const goSmartHome = () => {
     if (hasActiveProcess && activeTrack) {
@@ -189,17 +223,11 @@ export default function AppLayout() {
   };
 
   const progressActive = useMemo(() => {
-    return (
-      location.pathname === "/app/progress" ||
-      location.pathname.startsWith("/app/progress/")
-    );
+    return location.pathname === "/app/progress" || location.pathname.startsWith("/app/progress/");
   }, [location.pathname]);
 
   const profileActive = useMemo(() => {
-    return (
-      location.pathname === "/app/profile" ||
-      location.pathname.startsWith("/app/profile/")
-    );
+    return location.pathname === "/app/profile" || location.pathname.startsWith("/app/profile/");
   }, [location.pathname]);
 
   const homeActive = useMemo(() => {
@@ -212,10 +240,7 @@ export default function AppLayout() {
 
   if (checkingAuth) {
     return (
-      <ScreenLoader
-        title="Preparing your session…"
-        subtitle="Checking your account and syncing progress"
-      />
+      <ScreenLoader title="Preparing your session…" subtitle="Checking your account and syncing progress" />
     );
   }
 
@@ -223,14 +248,12 @@ export default function AppLayout() {
     "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition active:scale-[0.99]";
   const itemOn = "bg-emerald-600 text-white shadow-sm";
   const itemOff =
-    "text-zinc-700 hover:bg-emerald-50/70 dark:text-zinc-200 dark:hover:bg-zinc-900/60";
+    "text-zinc-700 dark:text-zinc-300 hover:bg-emerald-50/70 dark:text-zinc-200 dark:hover:bg-zinc-900/60";
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      {/* ✅ Offline banner: applies to /app/* shell only */}
+    <div className="min-h-screen overflow-x-hidden bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
       <OfflineBanner online={online} />
 
-      {/* background + constrained app column */}
       <div
         className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-28
                    dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950"
@@ -244,7 +267,6 @@ export default function AppLayout() {
         </div>
       </div>
 
-      {/* ✅ Active track (fades on scroll) - constrained to same width as nav */}
       {uid && hasActiveProcess && activeTrack && (
         <div
           className="fixed left-0 right-0 z-40 pointer-events-none px-4"
@@ -263,34 +285,25 @@ export default function AppLayout() {
         </div>
       )}
 
-      {/* bottom nav */}
       <nav className="fixed bottom-4 left-0 right-0 z-50 px-4 pb-[env(safe-area-inset-bottom)]">
         <div className="max-w-xl mx-auto">
-          <div className="rounded-2xl border border-zinc-200 bg-white/70 backdrop-blur px-2 py-2 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/70">
+          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 backdrop-blur px-2 py-2 shadow-sm">
             <div className="flex items-center justify-between">
-              <button
-                onClick={goSmartHome}
-                className={`${itemBase} ${homeActive ? itemOn : itemOff}`}
-              >
+              <button onClick={goSmartHome} className={`${itemBase} ${homeActive ? itemOn : itemOff}`}>
                 <IconHome className="h-5 w-5" />
                 <span>Home</span>
               </button>
 
               <NavLink
                 to="/app/progress"
-                className={({ isActive }) =>
-                  `${itemBase} ${isActive ? itemOn : itemOff} relative`
-                }
+                className={({ isActive }) => `${itemBase} ${isActive ? itemOn : itemOff} relative`}
               >
-                {/* icon + badge wrapper */}
                 <span className="relative">
                   <IconProgress className="h-5 w-5" />
-
-                  {/* ✅ unread badge */}
                   {unreadCount > 0 ? (
                     <span
                       className={`absolute -top-2 -right-19 h-2.5 w-2.5 rounded-full ${
-                        progressActive ? "bg-white" : "bg-rose-600"
+                        progressActive ? "bg-white dark:bg-zinc-900/60" : "bg-rose-600"
                       }`}
                       aria-label={`${unreadCount} unread notifications`}
                       title={`${unreadCount} unread notifications`}
@@ -300,12 +313,11 @@ export default function AppLayout() {
 
                 <span>Progress</span>
 
-                {/* optional count pill (only shows when 10+ unread) */}
                 {unreadCount >= 10 ? (
                   <span
                     className={`ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-2 text-[11px] font-semibold ${
                       progressActive
-                        ? "bg-white/90 text-emerald-900"
+                        ? "bg-white/90 dark:bg-zinc-900/60 text-emerald-900"
                         : "bg-rose-600 text-white"
                     }`}
                     aria-hidden="true"
@@ -315,12 +327,7 @@ export default function AppLayout() {
                 ) : null}
               </NavLink>
 
-              <NavLink
-                to="/app/profile"
-                className={({ isActive }) =>
-                  `${itemBase} ${isActive ? itemOn : itemOff}`
-                }
-              >
+              <NavLink to="/app/profile" className={({ isActive }) => `${itemBase} ${isActive ? itemOn : itemOff}`}>
                 <IconUser className="h-5 w-5" />
                 <span>Profile</span>
               </NavLink>

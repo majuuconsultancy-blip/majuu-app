@@ -150,7 +150,7 @@ export default function RequestChatLauncher({ requestId }) {
         <IconChat className="h-5 w-5" />
         CHAT
         {unreadCount > 0 ? (
-          <span className="ml-2 inline-flex min-w-[22px] items-center justify-center rounded-full bg-white/90 px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+          <span className="ml-2 inline-flex min-w-[22px] items-center justify-center rounded-full bg-white/90 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-bold text-emerald-800">
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         ) : null}
@@ -160,3 +160,4 @@ export default function RequestChatLauncher({ requestId }) {
     </>
   );
 }
+

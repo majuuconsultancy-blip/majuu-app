@@ -4,6 +4,7 @@ import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 
 import { auth, db } from "../firebase";
+import { smartBack } from "../utils/navBack";
 
 function IconChevronLeft(props) {
   return (
@@ -109,7 +110,7 @@ export default function StaffOnboardingScreen() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white dark:bg-zinc-950">
+      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
         <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
           <div className="max-w-xl mx-auto px-5 py-10">
             <div className="mx-auto h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70 dark:border-zinc-800 dark:bg-zinc-900/60" />
@@ -123,16 +124,16 @@ export default function StaffOnboardingScreen() {
   }
 
   const card =
-    "rounded-2xl border border-zinc-200 bg-white/70 backdrop-blur p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60";
+    "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 backdrop-blur p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60";
 
   return (
-    <div className="min-h-screen bg-white dark:bg-zinc-950">
-      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-6 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950 pb-6">
         <div className="max-w-xl mx-auto px-5 py-6">
           <button
             type="button"
-            onClick={() => navigate(-1)}
-            className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/60 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
+            onClick={() => smartBack(navigate, "/staff/tasks")}
+            className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
                        dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
           >
             <IconChevronLeft className="h-4 w-4" />
@@ -160,7 +161,7 @@ export default function StaffOnboardingScreen() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Brian"
-              className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white/70 px-4 py-3 text-sm text-zinc-900 outline-none focus:border-emerald-200
+              className="mt-2 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-4 py-3 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200
                          dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
             />
           </div>
@@ -182,7 +183,7 @@ export default function StaffOnboardingScreen() {
                       "w-full text-left rounded-2xl border px-4 py-3 text-sm font-semibold transition active:scale-[0.99]",
                       on
                         ? "border-emerald-200 bg-emerald-50/70 text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-100"
-                        : "border-zinc-200 bg-white/60 text-zinc-900 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900",
+                        : "border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900",
                     ].join(" ")}
                   >
                     {o.label}
@@ -207,3 +208,6 @@ export default function StaffOnboardingScreen() {
     </div>
   );
 }
+
+
+

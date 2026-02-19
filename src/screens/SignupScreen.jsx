@@ -270,22 +270,22 @@ export default function SignupScreen() {
   };
 
   return (
-    <div className="min-h-screen bg-white">
-      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
         <div className="max-w-xl mx-auto px-5 py-10">
           {/* Header */}
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Create your account
               </h1>
-              <p className="mt-1 text-sm text-zinc-600">Sign up to start your journey.</p>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">Sign up to start your journey.</p>
             </div>
             <div className="h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70" />
           </div>
 
           {/* Card */}
-          <div className="mt-7 rounded-2xl border border-zinc-200 bg-white/70 p-5 shadow-sm backdrop-blur">
+          <div className="mt-7 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 shadow-sm backdrop-blur">
             <div className="grid gap-3">
               {/* Google (Google-themed) */}
               <button
@@ -293,8 +293,8 @@ export default function SignupScreen() {
                 onClick={handleGoogle}
                 disabled={loading}
                 className="
-                  w-full rounded-xl border border-zinc-200
-                  bg-white px-4 py-3 text-sm font-semibold text-zinc-900
+                  w-full rounded-xl border border-zinc-200 dark:border-zinc-800
+                  bg-white dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100
                   shadow-sm transition
                   hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60
                   flex items-center justify-center gap-2
@@ -315,12 +315,12 @@ export default function SignupScreen() {
                 {/* Email */}
                 <div>
                   <label className="text-sm font-medium text-zinc-800">Email</label>
-                  <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
+                  <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
                     <IconMail className="h-5 w-5 text-zinc-500" />
                     <input
                       type="email"
                       placeholder="name@email.com"
-                      className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
+                      className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       autoComplete="email"
@@ -333,12 +333,12 @@ export default function SignupScreen() {
                 {/* Password */}
                 <div>
                   <label className="text-sm font-medium text-zinc-800">Password</label>
-                  <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
+                  <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
                     <IconLock className="h-5 w-5 text-zinc-500" />
                     <input
                       type={showPass ? "text" : "password"}
                       placeholder="At least 6 characters"
-                      className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
+                      className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       autoComplete="new-password"
@@ -382,12 +382,12 @@ export default function SignupScreen() {
                 {/* Confirm */}
                 <div>
                   <label className="text-sm font-medium text-zinc-800">Confirm password</label>
-                  <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
+                  <div className="mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100">
                     <IconShield className="h-5 w-5 text-zinc-500" />
                     <input
                       type={showConfirm ? "text" : "password"}
                       placeholder="Repeat password"
-                      className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
+                      className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
                       value={confirm}
                       onChange={(e) => setConfirm(e.target.value)}
                       autoComplete="new-password"
@@ -443,7 +443,7 @@ export default function SignupScreen() {
                   type="button"
                   onClick={() => navigate("/login")}
                   disabled={loading}
-                  className="w-full rounded-xl border border-zinc-200 bg-white/40 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
+                  className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/40 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
                 >
                   I already have an account
                 </button>
@@ -463,3 +463,5 @@ export default function SignupScreen() {
     </div>
   );
 }
+
+

@@ -32,6 +32,7 @@ import { motion, AnimatePresence } from "../utils/motionProxy";
 import { ChevronLeft, Bell, ChevronRight, Trash2, MessageCircle } from "lucide-react";
 
 import { auth, db } from "../firebase";
+import { smartBack } from "../utils/navBack";
 
 /* ✅ safe createdAt formatter */
 function formatCreatedAt(createdAt) {
@@ -135,11 +136,11 @@ export default function NotificationsScreen() {
 
   // Frosted glass base
   const glassCard =
-    "rounded-3xl border border-white/50 bg-white/45 shadow-[0_18px_50px_rgba(0,0,0,0.06)] backdrop-blur-xl " +
+    "rounded-3xl border border-white/50 bg-white/45 dark:bg-zinc-900/60 shadow-[0_18px_50px_rgba(0,0,0,0.06)] backdrop-blur-xl " +
     "dark:border-zinc-700/50 dark:bg-zinc-900/40";
 
   const tileBase =
-    "rounded-3xl border border-white/60 bg-white/45 p-4 shadow-[0_14px_40px_rgba(0,0,0,0.06)] backdrop-blur-xl " +
+    "rounded-3xl border border-white/60 bg-white/45 dark:bg-zinc-900/60 p-4 shadow-[0_14px_40px_rgba(0,0,0,0.06)] backdrop-blur-xl " +
     "dark:border-zinc-700/50 dark:bg-zinc-900/40";
 
   const tileHover =
@@ -304,7 +305,7 @@ export default function NotificationsScreen() {
   const isClearing = busyId === "clear_inbox" || busyId === "clear_history";
 
   return (
-    <div className="min-h-screen bg-white dark:bg-zinc-950">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       {/* Background blobs */}
       <div className="relative min-h-screen overflow-hidden">
         <div className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-emerald-200/35 blur-3xl dark:bg-emerald-500/10" />
@@ -323,8 +324,8 @@ export default function NotificationsScreen() {
               <div className="min-w-0">
                 <button
                   type="button"
-                  onClick={() => navigate(-1)}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-white/60 bg-white/55 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm backdrop-blur-xl transition hover:bg-white/70 active:scale-[0.99]
+                  onClick={() => smartBack(navigate, "/app/home")}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-white/60 bg-white/55 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm backdrop-blur-xl transition hover:bg-white/70 active:scale-[0.99]
                              dark:border-zinc-700/60 dark:bg-zinc-900/45 dark:text-zinc-100 dark:hover:bg-zinc-900/55"
                 >
                   <ChevronLeft className="h-4 w-4" />
@@ -339,7 +340,7 @@ export default function NotificationsScreen() {
                 </p>
               </div>
 
-              <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/60 bg-white/55 shadow-sm backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/45">
+              <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/60 bg-white/55 dark:bg-zinc-900/60 shadow-sm backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/45">
                 <Bell className="h-5 w-5 text-emerald-700 dark:text-emerald-200" />
               </div>
             </div>
@@ -355,7 +356,7 @@ export default function NotificationsScreen() {
             <div className={`mt-6 ${glassCard} p-2`}>
               <div className="flex items-center justify-between gap-3">
                 {/* Tabs */}
-                <div className="relative flex items-center gap-1 rounded-2xl border border-white/60 bg-white/40 p-1 backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/35">
+                <div className="relative flex items-center gap-1 rounded-2xl border border-white/60 bg-white/40 dark:bg-zinc-900/60 p-1 backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/35">
                   <motion.div
                     layout
                     transition={{ type: "spring", stiffness: 520, damping: 40 }}
@@ -372,7 +373,7 @@ export default function NotificationsScreen() {
                     className={`relative z-10 rounded-xl px-3 py-2 text-xs font-semibold transition ${
                       tab === "inbox"
                         ? "text-emerald-900 dark:text-emerald-200"
-                        : "text-zinc-700 hover:text-zinc-900 dark:text-zinc-200 dark:hover:text-zinc-100"
+                        : "text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:text-zinc-200 dark:hover:text-zinc-100"
                     }`}
                   >
                     Inbox <span className="ml-1 opacity-70">({inbox.length})</span>
@@ -384,7 +385,7 @@ export default function NotificationsScreen() {
                     className={`relative z-10 rounded-xl px-3 py-2 text-xs font-semibold transition ${
                       tab === "history"
                         ? "text-emerald-900 dark:text-emerald-200"
-                        : "text-zinc-700 hover:text-zinc-900 dark:text-zinc-200 dark:hover:text-zinc-100"
+                        : "text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:text-zinc-200 dark:hover:text-zinc-100"
                     }`}
                   >
                     History <span className="ml-1 opacity-70">({history.length})</span>
@@ -421,7 +422,7 @@ export default function NotificationsScreen() {
             ) : shown.length === 0 ? (
               <div className="mt-4">
                 <div className={`${tileBase} text-center`}>
-                  <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/60 bg-white/45 backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/35">
+                  <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/60 bg-white/45 dark:bg-zinc-900/60 backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/35">
                     <Bell className="h-6 w-6 text-emerald-700 dark:text-emerald-200" />
                   </div>
                   <div className="mt-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -516,7 +517,7 @@ export default function NotificationsScreen() {
                               className={`rounded-full px-2.5 py-1 text-xs border backdrop-blur-xl ${
                                 unread
                                   ? "bg-rose-50/55 text-rose-700 border-rose-200/60 dark:bg-rose-950/25 dark:text-rose-200 dark:border-rose-900/40"
-                                  : "bg-white/40 text-zinc-700 border-white/60 dark:bg-zinc-900/35 dark:text-zinc-200 dark:border-zinc-700/60"
+                                  : "bg-white/40 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 border-white/60 dark:bg-zinc-900/35 dark:text-zinc-200 dark:border-zinc-700/60"
                               }`}
                             >
                               {unread ? "Inbox" : "History"}
@@ -550,3 +551,5 @@ export default function NotificationsScreen() {
     </div>
   );
 }
+
+

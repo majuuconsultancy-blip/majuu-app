@@ -33,10 +33,15 @@ function IconSun(props) {
 }
 
 export default function ThemeToggle() {
-  const [mode, setMode] = useState("light"); // "light" | "dark"
+  const [mode, setMode] = useState(() => getThemeMode()); // no flash
 
   useEffect(() => {
-    setMode(getThemeMode()); // returns only "light" or "dark"
+    // keep in sync if something else changes theme
+    const onStorage = (e) => {
+      if (e.key === "theme") setMode(getThemeMode());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   const toggle = () => {
@@ -52,10 +57,12 @@ export default function ThemeToggle() {
       type="button"
       onClick={toggle}
       className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
-             dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
-      title={isDark ? "Dark mode" : "Light mode"}
+                 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
+      title={isDark ? "Switch to light" : "Switch to dark"}
     >
-      <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200 bg-white/60 dark:border-zinc-700 dark:bg-zinc-950/50">
+      <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200 bg-white/60 text-zinc-700
+                       dark:border-zinc-700 dark:bg-zinc-950/50 dark:text-zinc-100"
+      >
         {isDark ? <IconMoon className="h-4 w-4" /> : <IconSun className="h-4 w-4" />}
       </span>
       <span className="text-xs">{isDark ? "Dark" : "Light"}</span>

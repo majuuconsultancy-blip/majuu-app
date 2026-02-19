@@ -1,20 +1,17 @@
 // ✅ StaffTasksScreen.jsx (FULL COPY-PASTE)
-// Polishes added (UI only — backend untouched):
-// - ✅ Apple-ish entrance animation (fade + lift)
-// - ✅ Sticky top header (Back + Logout stay visible while scrolling)
-// - ✅ “Floaty” task cards (soft shadow + hover lift)
-// - ✅ Cleaner background gradient + subtle divider line
-// - ✅ Search input gets smoother focus ring + backdrop blur
-// - ✅ Back button ALWAYS goes to "/dashboard" (kept)
 //
-// ✅ NEW (your request):
-// - ✅ Banner counts “requests with unread chat” (NOT message count)
-// - ✅ Uses users/{staffUid}/notifications where readAt == null
-// - ✅ Counts unique requestId per tab
-// - ✅ When you tap a request card, it marks that request’s notifications as read
-//    so banner drops (10 -> 9) exactly like you described.
+// ✅ Unread banner logic:
+// - Reads staff chat notifications from: users/{uid}/notifications
+// - Unread = (readAt == null) OR (readAt field missing)
+// - Primary listener: where(type=="chat_message" && readAt==null)
+// - Fallback listener ONLY if primary query errors (index/rules), then:
+//     where(type=="chat_message") and filter unread in JS
+//
+// ✅ Also:
+// - Prevents setState after unmount during async request details fetch
+// - Keeps UI the same (no backend/routing changes)
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
@@ -31,6 +28,7 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../firebase";
+import { smartBack } from "../utils/navBack";
 
 /* ---------- Icons ---------- */
 function IconChevronLeft(props) {
@@ -74,7 +72,12 @@ function IconLogout(props) {
         strokeWidth="1.8"
         strokeLinecap="round"
       />
-      <path d="M4 12h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path
+        d="M4 12h10"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
       <path
         d="M7 9l-3 3 3 3"
         stroke="currentColor"
@@ -90,7 +93,10 @@ function IconLogout(props) {
 function taskPillByStaffStatus(staffStatus) {
   const s = String(staffStatus || "assigned").toLowerCase();
   if (s === "done") {
-    return { label: "Done", cls: "bg-zinc-100 text-zinc-700 border border-zinc-200" };
+    return {
+      label: "Done",
+      cls: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800",
+    };
   }
   if (s === "in_progress") {
     return {
@@ -98,7 +104,10 @@ function taskPillByStaffStatus(staffStatus) {
       cls: "bg-emerald-100 text-emerald-800 border border-emerald-200",
     };
   }
-  return { label: "New", cls: "bg-zinc-100 text-zinc-700 border border-zinc-200" };
+  return {
+    label: "New",
+    cls: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800",
+  };
 }
 
 function recPill(staffDecision) {
@@ -154,17 +163,26 @@ export default function StaffTasksScreen() {
   const [uid, setUid] = useState("");
   const [busy, setBusy] = useState("");
 
-  // ✅ NEW: unread notifications aggregated by requestId
+  // ✅ unread notifications aggregated by requestId
   const [unreadReqIds, setUnreadReqIds] = useState(() => new Set());
 
-  // ✅ Apple-ish entrance animation (CSS only)
+  // ✅ entrance animation
   const [enter, setEnter] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setEnter(true), 10);
     return () => clearTimeout(t);
   }, []);
 
-  // keep URL state in sync (Back button friendly)
+  // ✅ prevent setState after unmount during async request detail fetch
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+
+  // keep URL state in sync
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     next.set("tab", tab);
@@ -199,6 +217,7 @@ export default function StaffTasksScreen() {
         tQ,
         async (snap) => {
           const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          if (!aliveRef.current) return;
           setTasks(list);
 
           const nextMap = {};
@@ -209,17 +228,19 @@ export default function StaffTasksScreen() {
               try {
                 const rSnap = await getDoc(doc(db, "serviceRequests", rid));
                 if (rSnap.exists()) nextMap[rid] = { id: rSnap.id, ...rSnap.data() };
-              } catch (e) {
+              } catch {
                 // ignore per-item
               }
             })
           );
 
+          if (!aliveRef.current) return;
           setRequestsMap(nextMap);
           setLoading(false);
         },
         (e) => {
           console.error(e);
+          if (!aliveRef.current) return;
           setErr(e?.message || "Failed to load tasks.");
           setLoading(false);
         }
@@ -232,21 +253,45 @@ export default function StaffTasksScreen() {
     };
   }, [navigate]);
 
-  // ✅ NEW: live unread-by-request from notifications (readAt == null)
+  // ✅ live unread-by-request from notifications (users/{uid}/notifications)
   useEffect(() => {
     if (!uid) return;
 
     const nRef = collection(db, "users", uid, "notifications");
 
-    // only unread chat notifications
-    const qy = query(
+    let unsubFallback = null;
+
+    const subscribeFallback = () => {
+      if (unsubFallback) return;
+
+      const fallbackQ = query(nRef, where("type", "==", "chat_message"));
+      unsubFallback = onSnapshot(
+        fallbackQ,
+        (snap) => {
+          const set = new Set();
+          snap.docs.forEach((d) => {
+            const data = d.data() || {};
+            const unread = data.readAt == null || !("readAt" in data);
+            if (!unread) return;
+            const rid = String(data.requestId || "").trim();
+            if (rid) set.add(rid);
+          });
+          setUnreadReqIds(set);
+        },
+        () => {
+          // silent
+        }
+      );
+    };
+
+    const primaryQ = query(
       nRef,
       where("type", "==", "chat_message"),
       where("readAt", "==", null)
     );
 
-    const unsub = onSnapshot(
-      qy,
+    const unsubPrimary = onSnapshot(
+      primaryQ,
       (snap) => {
         const set = new Set();
         snap.docs.forEach((d) => {
@@ -254,42 +299,59 @@ export default function StaffTasksScreen() {
           const rid = String(data.requestId || "").trim();
           if (rid) set.add(rid);
         });
+
+        // If primary works, use it (even if 0 unread)
         setUnreadReqIds(set);
+
+        // If fallback was running from a past error, stop it now
+        if (unsubFallback) {
+          unsubFallback();
+          unsubFallback = null;
+        }
       },
       () => {
-        // silent: we don't want this to break tasks view if rules block it
+        // only on error: fallback
+        subscribeFallback();
       }
     );
 
-    return () => unsub();
+    return () => {
+      unsubPrimary();
+      if (unsubFallback) unsubFallback();
+    };
   }, [uid]);
 
-  // ✅ NEW: when user opens a request card, mark that request’s notifications as read
+  // ✅ mark this request's notifications as read
   const markRequestNotifsRead = async (requestId) => {
     const rid = String(requestId || "").trim();
     if (!uid || !rid) return;
 
     try {
       const nRef = collection(db, "users", uid, "notifications");
-      const qy = query(
-        nRef,
-        where("type", "==", "chat_message"),
-        where("requestId", "==", rid),
-        where("readAt", "==", null)
-      );
+      const qy = query(nRef, where("type", "==", "chat_message"));
 
       const snap = await getDocs(qy);
       if (snap.empty) return;
 
       const batch = writeBatch(db);
+      let hasWrites = false;
+
       snap.docs.forEach((d) => {
+        const data = d.data() || {};
+        const docRid = String(data.requestId || "").trim();
+        const unread = data.readAt == null || !("readAt" in data);
+        if (docRid !== rid || !unread) return;
+
+        hasWrites = true;
         batch.update(doc(db, "users", uid, "notifications", d.id), {
           readAt: serverTimestamp(),
         });
       });
+
+      if (!hasWrites) return;
       await batch.commit();
     } catch {
-      // ignore (banner may not clear if rules disallow, but navigation still works)
+      // ignore
     }
   };
 
@@ -340,7 +402,7 @@ export default function StaffTasksScreen() {
       });
   }, [enriched, tab, search]);
 
-  // ✅ NEW: unread “requests count” per tab (not messages)
+  // ✅ unread “requests count” per tab (not messages)
   const unreadCountsByTab = useMemo(() => {
     const c = { new: 0, ongoing: 0, done: 0 };
     if (!unreadReqIds || unreadReqIds.size === 0) return c;
@@ -373,7 +435,7 @@ export default function StaffTasksScreen() {
   const tabBtnOn =
     "border-emerald-200 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700";
   const tabBtnOff =
-    "border-zinc-200 bg-white/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900";
+    "border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900";
 
   const activeLabel = useMemo(() => {
     return TABS.find((t) => t.key === tab)?.label || "New";
@@ -386,7 +448,7 @@ export default function StaffTasksScreen() {
   const enterCls = enter ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2";
 
   const floatCard =
-    "rounded-3xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur transition duration-300 ease-out hover:-translate-y-[2px] hover:shadow-md hover:border-emerald-200 active:translate-y-0 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/60";
+    "rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur transition duration-300 ease-out hover:-translate-y-[2px] hover:shadow-md hover:border-emerald-200 active:translate-y-0 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/60";
 
   return (
     <div className={`min-h-screen ${softBg}`}>
@@ -398,8 +460,8 @@ export default function StaffTasksScreen() {
             <div>
               <button
                 type="button"
-                onClick={() => navigate("/dashboard", { replace: true })}
-                className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
+                onClick={() => smartBack(navigate, "/staff/tasks")}
+                className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
                            dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
               >
                 <IconChevronLeft className="h-4 w-4" />
@@ -419,7 +481,7 @@ export default function StaffTasksScreen() {
               type="button"
               onClick={doLogout}
               disabled={busy === "logout" || !uid}
-              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-rose-200 hover:bg-rose-50/60 active:scale-[0.99] disabled:opacity-60
+              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-rose-200 hover:bg-rose-50/60 active:scale-[0.99] disabled:opacity-60
                          dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
               title="Logout"
             >
@@ -448,11 +510,11 @@ export default function StaffTasksScreen() {
               type="button"
             >
               {t.label}
-              <span className="ml-2 rounded-full border border-zinc-200 bg-white/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">
+              <span className="ml-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                 {t.key === "new" ? counts.new : t.key === "ongoing" ? counts.ongoing : counts.done}
               </span>
 
-              {/* ✅ NEW: unread request badge per tab */}
+              {/* unread request badge per tab */}
               {unreadCountsByTab[t.key] > 0 ? (
                 <span className="ml-2 rounded-full border border-amber-200 bg-amber-50/70 px-2 py-0.5 text-[11px] font-bold text-amber-900">
                   {unreadCountsByTab[t.key]}
@@ -462,12 +524,12 @@ export default function StaffTasksScreen() {
           ))}
         </div>
 
-        {/* ✅ NEW: banner for active tab (counts requests with unread chat) */}
+        {/* banner for active tab */}
         {unreadInActiveTab > 0 ? (
           <div className="mt-4 rounded-3xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-900 shadow-sm">
             <div className="font-semibold">
               New messages in{" "}
-              <span className="rounded-full border border-amber-200 bg-white/60 px-2 py-0.5 text-[12px] font-bold">
+              <span className="rounded-full border border-amber-200 bg-white/60 dark:bg-zinc-900/60 px-2 py-0.5 text-[12px] font-bold">
                 {unreadInActiveTab}
               </span>{" "}
               {unreadInActiveTab === 1 ? "request" : "requests"}
@@ -478,16 +540,16 @@ export default function StaffTasksScreen() {
           </div>
         ) : null}
 
-        {/* Search + counters */}
+        {/* Search */}
         <div className="mt-5">
           <label className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
             Search
           </label>
-          <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2.5 shadow-sm backdrop-blur transition focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100/80
+          <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 shadow-sm backdrop-blur transition focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100/80
                           dark:border-zinc-800 dark:bg-zinc-900/60 dark:focus-within:ring-emerald-300/20">
             <IconSearch className="h-5 w-5 text-zinc-500" />
             <input
-              className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
+              className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
               placeholder="Track, country, applicant, service, ID…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -511,18 +573,20 @@ export default function StaffTasksScreen() {
 
         {/* States */}
         {loading ? (
-          <div className="mt-6 rounded-3xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
+          <div className="mt-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300 shadow-sm backdrop-blur">
             Loading…
           </div>
         ) : tasks.length === 0 ? (
-          <div className="mt-6 rounded-3xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
-            <div className="font-semibold text-zinc-900 dark:text-zinc-100">No tasks assigned</div>
+          <div className="mt-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300 shadow-sm backdrop-blur">
+            <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+              No tasks assigned
+            </div>
             <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
               Wait for assignments from admin.
             </div>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="mt-6 rounded-3xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
+          <div className="mt-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300 shadow-sm backdrop-blur">
             No requests found in this tab.
           </div>
         ) : (
@@ -554,7 +618,6 @@ export default function StaffTasksScreen() {
                   key={task.id}
                   type="button"
                   onClick={async () => {
-                    // ✅ clear this request from banner by marking its notifications read
                     await markRequestNotifsRead(rid);
                     navigate(goTo);
                   }}
@@ -567,7 +630,6 @@ export default function StaffTasksScreen() {
                           {title}
                         </div>
 
-                        {/* ✅ per-request unread dot */}
                         {hasUnread ? (
                           <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50/70 px-2 py-0.5 text-[11px] font-bold text-amber-900">
                             New
@@ -575,7 +637,9 @@ export default function StaffTasksScreen() {
                         ) : null}
                       </div>
 
-                      <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{sub}</div>
+                      <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                        {sub}
+                      </div>
 
                       {rp ? (
                         <div className="mt-2">

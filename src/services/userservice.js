@@ -117,6 +117,8 @@ export async function ensureUserDoc({ uid, email }) {
     setIfMissing("activeCountry", null);
     setIfMissing("activeHelpType", null);
     setIfMissing("activeRequestId", null);
+
+    // NOTE: do NOT overwrite createdAt unless missing
     setIfMissing("createdAt", serverTimestamp());
 
     // Only write if there is something to repair
@@ -135,7 +137,7 @@ export async function getUserState(uid, emailIfKnown = "") {
   const snap = await getDoc(ref);
 
   if (!snap.exists()) {
-    // ✅ This prevents Profile from loading null and looking “wiped”
+    // ✅ prevents Profile from loading null and looking “wiped”
     await ensureUserDoc({ uid, email: emailIfKnown || "" });
     const again = await getDoc(ref);
     return again.exists() ? again.data() : null;
@@ -174,7 +176,10 @@ export async function setActiveProcessDetails(uid, details) {
   });
 }
 
-export async function setActiveContext(uid, { hasActiveProcess, activeTrack, activeCountry, activeHelpType }) {
+export async function setActiveContext(
+  uid,
+  { hasActiveProcess, activeTrack, activeCountry, activeHelpType }
+) {
   const ref = doc(db, "users", uid);
   await updateDoc(ref, {
     hasActiveProcess: Boolean(hasActiveProcess),
@@ -253,7 +258,7 @@ export async function updateUserProfile(uid, { name, phone, countryOfResidence }
     await ensureUserDoc({ uid, email: "" });
   }
 
-  // ✅ validate input (and prevents blank writes)
+  // ✅ validate input (prevents blank writes)
   validateProfilePayload({ name, phone, countryOfResidence });
 
   // determine residence for phone normalization
@@ -268,9 +273,7 @@ export async function updateUserProfile(uid, { name, phone, countryOfResidence }
     residence = String(existing?.countryOfResidence || "").trim();
   }
 
-  const payload = {
-    updatedAt: serverTimestamp(),
-  };
+  const payload = { updatedAt: serverTimestamp() };
 
   if (typeof name !== "undefined") payload.name = normalizeName(name);
   if (typeof countryOfResidence !== "undefined")

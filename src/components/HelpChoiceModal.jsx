@@ -237,17 +237,17 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
   };
 
   const rootCard =
-    "relative w-[92vw] max-w-sm rounded-3xl border border-zinc-200/70 bg-white/80 shadow-[0_18px_55px_rgba(0,0,0,0.20)] backdrop-blur-xl";
+    "relative w-[92vw] max-w-sm rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 shadow-[0_18px_55px_rgba(0,0,0,0.20)] backdrop-blur-xl";
   const subText = "text-xs text-zinc-500";
-  const titleText = "text-[13px] font-semibold text-zinc-700";
-  const headline = "text-lg font-extrabold tracking-tight text-zinc-900";
+  const titleText = "text-[13px] font-semibold text-zinc-700 dark:text-zinc-300";
+  const headline = "text-lg font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100";
 
   const btnBase =
     "w-full rounded-2xl px-4 py-3 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed";
   const btnSelf =
     "bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-200";
   const btnWe =
-    "border border-zinc-200 bg-white/70 text-zinc-900 hover:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200";
+    "border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 hover:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200";
   const chip =
     "inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800";
 
@@ -279,7 +279,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
             <button
               type="button"
               onClick={goBackToTrack}
-              className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white/70 text-zinc-600 transition hover:bg-white active:scale-[0.98] disabled:opacity-60"
+              className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-600 dark:text-zinc-300 transition hover:bg-white active:scale-[0.98] disabled:opacity-60"
               disabled={busy}
               aria-label="Close modal"
             >
@@ -294,7 +294,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
                 Pick one
               </span>
             </div>
-            <p className="mt-2 text-sm text-zinc-600">
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
               Self-Help is <span className="font-semibold text-emerald-700">free</span>. We-Help is guided by the MAJUU
               team.
             </p>
@@ -315,7 +315,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
                 className={`${btnBase} ${btnSelf} flex items-center justify-between`}
               >
                 <span className="inline-flex items-center gap-2">
-                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/15">
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/15 dark:bg-zinc-900/60">
                     <IconBolt className="h-5 w-5" />
                   </span>
                   <span className="text-left">
@@ -339,22 +339,22 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
                 className={`${btnBase} ${btnWe} flex items-center justify-between`}
               >
                 <span className="inline-flex items-center gap-2">
-                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white">
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
                     <IconSpark className="h-5 w-5 text-emerald-700" />
                   </span>
                   <span className="text-left">
                     <div className="leading-tight">We-Help</div>
-                    <div className="text-[12px] font-medium text-zinc-600">
+                    <div className="text-[12px] font-medium text-zinc-600 dark:text-zinc-300">
                       Guided support (Login required)
                     </div>
                   </span>
                 </span>
 
-                {busy ? <Spinner className="h-4 w-4 text-zinc-700" /> : <span className="text-[12px]">Continue</span>}
+                {busy ? <Spinner className="h-4 w-4 text-zinc-700 dark:text-zinc-300" /> : <span className="text-[12px]">Continue</span>}
               </motion.button>
 
               {/* Footer note */}
-              <div className="mt-1 rounded-2xl border border-zinc-200 bg-white/55 p-3">
+              <div className="mt-1 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/55 dark:bg-zinc-900/60 p-3">
                 <p className={subText}>
                   We-Help requires login (and verification) so we can keep your request secure and support you properly.
                 </p>
@@ -365,7 +365,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
                 type="button"
                 onClick={goBackToTrack}
                 disabled={busy}
-                className="mt-1 w-full rounded-2xl px-4 py-2.5 text-sm font-semibold text-zinc-600 transition hover:text-zinc-900 active:scale-[0.99] disabled:opacity-60"
+                className="mt-1 w-full rounded-2xl px-4 py-2.5 text-sm font-semibold text-zinc-600 dark:text-zinc-300 transition hover:text-zinc-900 active:scale-[0.99] disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -376,3 +376,4 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
     </AnimatePresence>
   );
 }
+

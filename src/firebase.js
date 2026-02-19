@@ -1,17 +1,17 @@
-// ✅ firebase.js (FULL COPY-PASTE — ANDROID/PWA AUTH PERSISTENCE HARD FIX)
+// ✅ firebase.js (FULL COPY-PASTE — PWA/Android auth persistence hard fix)
 
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import {
-  initializeAuth,
+  getAuth,
+  setPersistence,
   indexedDBLocalPersistence,
   browserLocalPersistence,
   GoogleAuthProvider,
 } from "firebase/auth";
 import {
-  getFirestore,
+  initializeFirestore,
   enableIndexedDbPersistence,
   CACHE_SIZE_UNLIMITED,
-  initializeFirestore,
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -23,24 +23,35 @@ const firebaseConfig = {
   appId: "1:7815638736:web:3cda5edc7add402454f8d5",
 };
 
-const app = initializeApp(firebaseConfig);
+// ✅ Prevent duplicate init (Vite/HMR safe)
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 /**
  * ✅ AUTH (CRITICAL)
- * Force persistence order:
- * 1) indexedDB (best for Android/PWA/Capacitor)
+ * Use web-safe auth init + explicit persistence with fallback:
+ * 1) IndexedDB (best for PWA/Android)
  * 2) localStorage fallback
- *
- * This prevents “random logout” / “session forgotten” behavior.
  */
-export const auth = initializeAuth(app, {
-  persistence: [indexedDBLocalPersistence, browserLocalPersistence],
-});
+export const auth = getAuth(app);
+
+// Optional: export a promise you can await in gates if you want later
+export const authPersistenceReady = (async () => {
+  try {
+    await setPersistence(auth, indexedDBLocalPersistence);
+  } catch (e1) {
+    console.warn("Auth IndexedDB persistence failed, falling back:", e1?.code || e1);
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+    } catch (e2) {
+      console.warn("Auth localStorage persistence also failed:", e2?.code || e2);
+      // If both fail, Firebase will fall back internally (usually in-memory/session).
+    }
+  }
+})();
 
 /**
  * ✅ FIRESTORE
- * Use initializeFirestore so we can safely set cache settings.
- * (Still works like getFirestore, just more controlled.)
+ * Keep controlled init + unlimited cache.
  */
 export const db = initializeFirestore(app, {
   cacheSizeBytes: CACHE_SIZE_UNLIMITED,

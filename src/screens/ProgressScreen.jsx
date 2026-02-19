@@ -45,7 +45,7 @@ function statusUI(status) {
     return {
       label: "Submitted",
       badge:
-        "bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-900/60 dark:text-zinc-200 dark:border-zinc-700",
+        "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-200 dark:border-zinc-700",
       dot: "bg-zinc-400 dark:bg-zinc-500",
     };
 
@@ -76,7 +76,7 @@ function statusUI(status) {
   return {
     label: s,
     badge:
-      "bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-900/60 dark:text-zinc-200 dark:border-zinc-700",
+      "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-200 dark:border-zinc-700",
     dot: "bg-zinc-400 dark:bg-zinc-500",
   };
 }
@@ -494,13 +494,13 @@ export default function ProgressScreen() {
       : "Self-Help";
 
   const cardBase =
-    "rounded-3xl border border-zinc-200 bg-white/70 backdrop-blur p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60";
+    "rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 backdrop-blur p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60";
   const cardHover =
     "transition hover:border-emerald-200 hover:bg-white hover:shadow-md active:scale-[0.99] dark:hover:border-emerald-900/40 dark:hover:bg-zinc-900";
   const primaryBtn =
     "w-full rounded-3xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60";
   const ghostBtn =
-    "rounded-3xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900";
+    "rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900";
 
   const requestsCountLabel = useMemo(() => {
     const n = requests.length;
@@ -545,7 +545,7 @@ export default function ProgressScreen() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white dark:bg-zinc-950">
+      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
         <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
           <div className="max-w-xl mx-auto px-5 py-10">
             <div className="mx-auto h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70 dark:border-zinc-800 dark:bg-zinc-900/60" />
@@ -559,8 +559,8 @@ export default function ProgressScreen() {
   }
 
   return (
-    <div className="min-h-screen bg-white dark:bg-zinc-950">
-      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-6 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950 pb-6">
         <motion.div
           className="max-w-xl mx-auto px-5 py-6"
           variants={pageIn}
@@ -568,7 +568,7 @@ export default function ProgressScreen() {
           animate="show"
         >
           {/* Header (premium) */}
-          <div className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white/60 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/50">
+          <div className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white/60 dark:bg-zinc-900/60 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/50">
             <motion.div
               aria-hidden="true"
               className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-emerald-300/25 blur-3xl dark:bg-emerald-400/10"
@@ -585,7 +585,7 @@ export default function ProgressScreen() {
             <div className="relative flex items-end justify-between gap-3">
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-emerald-200">
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-100 bg-white/70 dark:border-zinc-700 dark:bg-zinc-950/40">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-100 bg-white/70 dark:bg-zinc-900/60 dark:border-zinc-700 dark:bg-zinc-950/40">
                     <Activity className="h-4 w-4 text-emerald-700 dark:text-emerald-200" />
                   </span>
                   Progress
@@ -875,7 +875,7 @@ export default function ProgressScreen() {
                           <motion.button
                             whileTap={{ scale: 0.99 }}
                             onClick={handleTryAgain}
-                            className="rounded-3xl border border-zinc-200 bg-white/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
+                            className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
                                        dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
                           >
                             Try again
@@ -939,7 +939,7 @@ export default function ProgressScreen() {
                           ${
                             isPinned
                               ? "border-emerald-200 bg-emerald-50/60 text-emerald-800 ring-2 ring-emerald-300/60 shadow-[0_0_0_1px_rgba(16,185,129,0.25),0_10px_30px_rgba(16,185,129,0.18)] dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-200 dark:ring-emerald-500/30 dark:shadow-[0_0_0_1px_rgba(16,185,129,0.18),0_10px_30px_rgba(16,185,129,0.12)]"
-                              : "border-zinc-200 bg-white/60 text-zinc-700 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                              : "border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200 dark:hover:bg-zinc-900"
                           }`}
                       >
                         {isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
@@ -957,3 +957,6 @@ export default function ProgressScreen() {
     </div>
   );
 }
+
+
+

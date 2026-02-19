@@ -22,6 +22,7 @@ import {
 } from "../services/adminfileservice";
 import AssignStaffPanel from "../components/AssignStaffPanel";
 import AdminRequestChatLauncher from "../components/AdminRequestChatLauncher";
+import { smartBack } from "../utils/navBack";
 
 /* ---------- Minimal icons ---------- */
 function IconBack(props) {
@@ -160,7 +161,7 @@ function pill(status) {
   if (s === "new")
     return {
       label: "New",
-      cls: "bg-zinc-100 text-zinc-700 border border-zinc-200",
+      cls: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800",
     };
   if (s === "closed")
     return {
@@ -179,7 +180,7 @@ function pill(status) {
     };
   return {
     label: s,
-    cls: "bg-zinc-100 text-zinc-700 border border-zinc-200",
+    cls: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800",
   };
 }
 
@@ -207,7 +208,7 @@ export default function AdminRequestDetailsScreen() {
 
   const goBackToList = () => {
     const qs = String(location?.search || "");
-    navigate(`/app/admin${qs}`, { replace: true });
+    smartBack(navigate, `/app/admin${qs}`);
   };
 
   const [loading, setLoading] = useState(true);
@@ -245,9 +246,9 @@ export default function AdminRequestDetailsScreen() {
       : "border-rose-200 bg-rose-600 text-white";
 
   const card =
-    "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur";
+    "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur";
   const pageBg =
-    "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white";
+    "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
 
   const load = async () => {
     setLoading(true);
@@ -503,7 +504,7 @@ export default function AdminRequestDetailsScreen() {
     return (
       <div className={pageBg}>
         <div className="max-w-xl mx-auto px-5 py-6">
-          <div className={`${card} p-4 text-sm text-zinc-600`}>Loading…</div>
+          <div className={`${card} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>Loading…</div>
         </div>
       </div>
     );
@@ -515,12 +516,12 @@ export default function AdminRequestDetailsScreen() {
         <div className="max-w-xl mx-auto px-5 py-6">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h1 className="text-xl font-semibold text-zinc-900">Request</h1>
-              <p className="text-sm text-zinc-600">Admin view</p>
+              <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Request</h1>
+              <p className="text-sm text-zinc-600 dark:text-zinc-300">Admin view</p>
             </div>
             <button
               onClick={goBackToList}
-              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
+              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
               type="button"
             >
               <IconBack className="h-5 w-5 text-emerald-700" />
@@ -560,16 +561,16 @@ export default function AdminRequestDetailsScreen() {
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800">
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 border border-emerald-100">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 dark:bg-zinc-900/60 border border-emerald-100">
                 <IconDoc className="h-4 w-4 text-emerald-700" />
               </span>
               Review request
             </div>
 
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900">
+            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               {headerLeft}
             </h1>
-            <p className="mt-1 text-sm text-zinc-600">{headerRight}</p>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{headerRight}</p>
           </div>
 
           <div className="shrink-0 flex items-center gap-2">
@@ -595,7 +596,7 @@ export default function AdminRequestDetailsScreen() {
 
             <button
               onClick={goBackToList}
-              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
+              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
               type="button"
             >
               <IconBack className="h-5 w-5 text-emerald-700" />
@@ -612,13 +613,13 @@ export default function AdminRequestDetailsScreen() {
                 <div className="text-xs font-semibold text-zinc-500">
                   Request ID
                 </div>
-                <div className="mt-1 font-mono text-sm text-zinc-900 break-words">
+                <div className="mt-1 font-mono text-sm text-zinc-900 dark:text-zinc-100 break-words">
                   {req?.id}
                 </div>
                 {createdLabel ? (
                   <div className="mt-2 text-xs text-zinc-500">
                     Submitted:{" "}
-                    <span className="font-medium text-zinc-700">
+                    <span className="font-medium text-zinc-700 dark:text-zinc-300">
                       {createdLabel}
                     </span>
                   </div>
@@ -633,16 +634,16 @@ export default function AdminRequestDetailsScreen() {
           </div>
 
           <div className={`${card} p-4`}>
-            <div className="text-sm font-semibold text-zinc-900">
+            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
               Review status
             </div>
-            <div className="mt-1 text-sm text-zinc-600">{actionHint}</div>
+            <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{actionHint}</div>
 
             {!decisionLocked && status === "new" ? (
               <button
                 type="button"
                 onClick={setContacted}
-                className="mt-3 inline-flex items-center justify-center rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
+                className="mt-3 inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
               >
                 Mark In Progress
               </button>
@@ -654,7 +655,7 @@ export default function AdminRequestDetailsScreen() {
         {req && !decisionLocked ? (
           <AssignStaffPanel request={req} />
         ) : (
-          <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+          <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
             Staff assignment is disabled because this request is already
             finalized.
           </div>
@@ -664,8 +665,8 @@ export default function AdminRequestDetailsScreen() {
         <div className={`mt-6 ${card} p-5`}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-zinc-900">Applicant</h2>
-              <p className="mt-1 text-sm text-zinc-600">
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Applicant</h2>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 Basic details and uploaded files.
               </p>
             </div>
@@ -673,7 +674,7 @@ export default function AdminRequestDetailsScreen() {
             <button
               type="button"
               onClick={() => navigate(`/app/admin/request/${requestId}/documents`)}
-              className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
+              className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
             >
               Applicant docs
               <IconChevronRight className="h-5 w-5 text-emerald-700" />
@@ -683,25 +684,25 @@ export default function AdminRequestDetailsScreen() {
           <div className="mt-4 grid gap-3 text-sm">
             <div className="grid gap-1">
               <div className="text-xs font-semibold text-zinc-500">Full name</div>
-              <div className="font-semibold text-zinc-900">{req?.name || "-"}</div>
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">{req?.name || "-"}</div>
             </div>
 
             <div className="grid gap-1">
               <div className="text-xs font-semibold text-zinc-500">
                 Phone / WhatsApp
               </div>
-              <div className="font-semibold text-zinc-900">{req?.phone || "-"}</div>
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">{req?.phone || "-"}</div>
             </div>
 
             <div className="grid gap-1">
               <div className="text-xs font-semibold text-zinc-500">Email</div>
-              <div className="font-semibold text-zinc-900 break-words">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100 break-words">
                 {req?.email || "-"}
               </div>
             </div>
 
             {req?.note ? (
-              <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4">
+              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4">
                 <div className="text-xs font-semibold text-zinc-500">
                   Applicant note
                 </div>
@@ -710,7 +711,7 @@ export default function AdminRequestDetailsScreen() {
                 </div>
               </div>
             ) : (
-              <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
                 No note provided.
               </div>
             )}
@@ -721,10 +722,10 @@ export default function AdminRequestDetailsScreen() {
         <div className={`mt-6 ${card} p-5`}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-zinc-900">
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 Message to applicant
               </h2>
-              <p className="mt-1 text-sm text-zinc-600">
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 This shows on the applicant’s Request Details. Required if
                 rejecting.
               </p>
@@ -736,7 +737,7 @@ export default function AdminRequestDetailsScreen() {
           </div>
 
           <textarea
-            className="mt-4 w-full rounded-2xl border border-zinc-200 bg-white/60 p-3 text-sm text-zinc-900 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 min-h-[120px] disabled:opacity-70"
+            className="mt-4 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-3 text-sm text-zinc-900 dark:text-zinc-100 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 min-h-[120px] disabled:opacity-70"
             value={note}
             onChange={(e) => setNote(e.target.value)}
             disabled={saving || decisionLocked}
@@ -748,10 +749,10 @@ export default function AdminRequestDetailsScreen() {
         <div className={`mt-6 ${card} p-5`}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-zinc-900">
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 Staff suggested files
               </h2>
-              <p className="mt-1 text-sm text-zinc-600">
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 These are links staff added. If staff recommended accept, they
                 auto-fill your “Attach files” section.
               </p>
@@ -762,7 +763,7 @@ export default function AdminRequestDetailsScreen() {
                 Autofilling…
               </span>
             ) : (
-              <span className="rounded-full border border-zinc-200 bg-white/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700">
+              <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                 {staffDrafts.length} items
               </span>
             )}
@@ -775,7 +776,7 @@ export default function AdminRequestDetailsScreen() {
           ) : null}
 
           {staffDrafts.length === 0 ? (
-            <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+            <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
               No staff file links yet.
             </div>
           ) : (
@@ -788,11 +789,11 @@ export default function AdminRequestDetailsScreen() {
                 return (
                   <div
                     key={d.id}
-                    className="rounded-2xl border border-zinc-200 bg-white/60 p-4"
+                    className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="font-semibold text-sm text-zinc-900 break-words">
+                        <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 break-words">
                           {safeStr(d?.name) || "Staff file"}
                         </div>
 
@@ -843,10 +844,10 @@ export default function AdminRequestDetailsScreen() {
         <div className={`mt-6 ${card} p-5`}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-zinc-900">
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 Attach files for applicant
               </h2>
-              <p className="mt-1 text-sm text-zinc-600">
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 Add links (Google Drive / Dropbox). Files are sent only after
                 you accept.
               </p>
@@ -869,7 +870,7 @@ export default function AdminRequestDetailsScreen() {
                 value={draftName}
                 onChange={(e) => setDraftName(e.target.value)}
                 placeholder="File name (e.g. SOP Template)"
-                className="w-full rounded-2xl border border-zinc-200 bg-white/60 p-3 text-sm text-zinc-900 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-3 text-sm text-zinc-900 dark:text-zinc-100 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
                 disabled={saving || addingDraft}
               />
 
@@ -882,7 +883,7 @@ export default function AdminRequestDetailsScreen() {
                     value={draftUrl}
                     onChange={(e) => setDraftUrl(e.target.value)}
                     placeholder="Paste file link (https://...)"
-                    className="w-full rounded-2xl border border-zinc-200 bg-white/60 pl-11 pr-3 py-3 text-sm text-zinc-900 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                    className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 pl-11 pr-3 py-3 text-sm text-zinc-900 dark:text-zinc-100 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
                     disabled={saving || addingDraft}
                   />
                 </div>
@@ -903,25 +904,25 @@ export default function AdminRequestDetailsScreen() {
               </div>
             </div>
           ) : (
-            <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+            <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
               Decision is locked — attachments can’t be changed.
             </div>
           )}
 
           <div className="mt-4 grid gap-2">
             {drafts.length === 0 ? (
-              <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
                 No files staged yet.
               </div>
             ) : (
               drafts.map((d) => (
                 <div
                   key={d.id}
-                  className="rounded-2xl border border-zinc-200 bg-white/60 p-4"
+                  className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="font-semibold text-sm text-zinc-900 break-words">
+                      <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 break-words">
                         {d.name || "File"}
                       </div>
 
@@ -960,8 +961,8 @@ export default function AdminRequestDetailsScreen() {
 
         {/* Actions LAST */}
         <div className={`mt-6 ${card} p-5`}>
-          <h2 className="text-sm font-semibold text-zinc-900">Final decision</h2>
-          <p className="mt-1 text-sm text-zinc-600">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Final decision</h2>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
             Once you accept or reject, the decision is locked.
           </p>
 
@@ -1008,3 +1009,5 @@ export default function AdminRequestDetailsScreen() {
     </div>
   );
 }
+
+

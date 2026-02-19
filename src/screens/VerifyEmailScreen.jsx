@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { auth } from "../firebase";
 import { sendEmailVerification } from "firebase/auth";
+import { smartBack } from "../utils/navBack";
 
 export default function VerifyEmailScreen() {
   const navigate = useNavigate();
@@ -66,21 +67,21 @@ export default function VerifyEmailScreen() {
   };
 
   return (
-    <div className="min-h-screen bg-white">
-      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
         <div className="max-w-xl mx-auto px-5 py-10">
-          <div className="rounded-2xl border border-zinc-200 bg-white/70 p-5 shadow-sm backdrop-blur">
-            <h1 className="text-xl font-semibold tracking-tight text-zinc-900">
+          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 shadow-sm backdrop-blur">
+            <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Verify your email
             </h1>
-            <p className="mt-2 text-sm text-zinc-600">
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
               We sent a verification link to{" "}
-              <span className="font-semibold text-zinc-900">{emailHint || "your email"}</span>.
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{emailHint || "your email"}</span>.
               Open it, then come back here.
             </p>
 
             {msg ? (
-              <div className="mt-4 rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-sm text-zinc-700">
+              <div className="mt-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300">
                 {msg}
               </div>
             ) : null}
@@ -99,16 +100,16 @@ export default function VerifyEmailScreen() {
                 type="button"
                 onClick={resend}
                 disabled={busy || cooldown > 0}
-                className="w-full rounded-xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-white active:scale-[0.99] disabled:opacity-60"
+                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-white active:scale-[0.99] disabled:opacity-60"
               >
                 {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend email"}
               </button>
 
               <button
                 type="button"
-                onClick={() => navigate("/login")}
+                onClick={() => smartBack(navigate, "/login")}
                 disabled={busy}
-                className="w-full rounded-xl border border-zinc-200 bg-white/40 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
+                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/40 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
               >
                 Back to login
               </button>  
@@ -123,3 +124,5 @@ export default function VerifyEmailScreen() {
     </div>
   );
 }
+
+

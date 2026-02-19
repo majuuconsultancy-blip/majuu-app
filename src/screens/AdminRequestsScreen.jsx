@@ -53,7 +53,7 @@ const LIMIT_PENDING = 1000;
 function pill(status) {
   const s = String(status || "new").toLowerCase();
   if (s === "new")
-    return { label: "New", cls: "bg-zinc-100 text-zinc-700 border border-zinc-200" };
+    return { label: "New", cls: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800" };
   if (s === "contacted")
     return {
       label: "In Progress",
@@ -66,7 +66,7 @@ function pill(status) {
     };
   if (s === "rejected")
     return { label: "Rejected", cls: "bg-rose-50 text-rose-700 border border-rose-100" };
-  return { label: s, cls: "bg-zinc-100 text-zinc-700 border border-zinc-200" };
+  return { label: s, cls: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800" };
 }
 
 function staffPill(staffStatus) {
@@ -83,7 +83,7 @@ function staffPill(staffStatus) {
       cls: "bg-emerald-100 text-emerald-800 border border-emerald-200",
     };
   }
-  return { label: "Staff: Assigned", cls: "bg-zinc-100 text-zinc-700 border border-zinc-200" };
+  return { label: "Staff: Assigned", cls: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800" };
 }
 
 function staffRecPill(staffDecision) {
@@ -170,14 +170,14 @@ function StaffAccessPanel() {
   }, [specText]);
 
   const shell =
-    "rounded-3xl border border-zinc-200 bg-white/65 shadow-sm backdrop-blur transition dark:border-zinc-800 dark:bg-zinc-900/40";
+    "rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/65 dark:bg-zinc-900/60 shadow-sm backdrop-blur transition dark:border-zinc-800 dark:bg-zinc-900/40";
   const headerBtn =
     "w-full text-left flex items-center justify-between gap-3 px-4 py-3 transition active:scale-[0.99]";
   const smallTitle = "text-sm font-semibold text-zinc-900 dark:text-zinc-100";
   const smallSub = "mt-0.5 text-xs text-zinc-500 dark:text-zinc-400";
 
   const input =
-    "w-full rounded-2xl border border-zinc-200 bg-white/70 px-4 py-2.5 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-4 focus:ring-emerald-100/60 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-100 dark:focus:ring-emerald-500/10";
+    "w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-4 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-4 focus:ring-emerald-100/60 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-100 dark:focus:ring-emerald-500/10";
   const btnBase =
     "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold shadow-sm transition active:scale-[0.99] disabled:opacity-60";
   const grantBtn =
@@ -229,7 +229,7 @@ function StaffAccessPanel() {
             </span>
 
             <span
-              className={`inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 text-zinc-700 transition dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-200 ${
+              className={`inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-200 ${
                 open ? "rotate-180" : "rotate-0"
               }`}
             >
@@ -241,7 +241,7 @@ function StaffAccessPanel() {
         <div className={`grid transition-all duration-300 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
           <div className="overflow-hidden">
             <div className="px-4 pb-4">
-              <div className="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/45">
+              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/45">
                 <div className="text-xs text-zinc-500 dark:text-zinc-400">
                   The staff member must already be signed up in the app to be activated.
                 </div>
@@ -630,16 +630,16 @@ export default function AdminRequestsScreen() {
   const enterCls = enter ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2";
 
   const card =
-    "rounded-3xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur transition duration-300 ease-out dark:border-zinc-800 dark:bg-zinc-900/45";
+    "rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur transition duration-300 ease-out dark:border-zinc-800 dark:bg-zinc-900/45";
   const tile =
-    "w-full text-left rounded-3xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur transition duration-300 ease-out hover:-translate-y-[2px] hover:shadow-md hover:border-emerald-200 active:translate-y-0 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/45 dark:hover:border-emerald-900/40";
+    "w-full text-left rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur transition duration-300 ease-out hover:-translate-y-[2px] hover:shadow-md hover:border-emerald-200 active:translate-y-0 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/45 dark:hover:border-emerald-900/40";
 
   const tabBtnBase =
     "rounded-2xl border px-3.5 py-2 text-sm font-semibold transition active:scale-[0.99]";
   const tabBtnOn =
     "border-emerald-200 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700";
   const tabBtnOff =
-    "border-zinc-200 bg-white/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-100 dark:hover:bg-zinc-900";
+    "border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-100 dark:hover:bg-zinc-900";
 
   const anyFiltersActive = useMemo(() => {
     return (
@@ -685,7 +685,7 @@ export default function AdminRequestsScreen() {
 
             <button
               onClick={load}
-              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/45 dark:text-zinc-100 dark:hover:bg-zinc-900"
+              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/45 dark:text-zinc-100 dark:hover:bg-zinc-900"
               type="button"
             >
               <RefreshCw className="h-5 w-5 text-emerald-700 dark:text-emerald-200" />
@@ -724,10 +724,10 @@ export default function AdminRequestsScreen() {
           <label className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Search</label>
 
           <div className="mt-2 flex items-center gap-2">
-            <div className="flex-1 flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2.5 shadow-sm backdrop-blur transition focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100 dark:border-zinc-800 dark:bg-zinc-900/45 dark:focus-within:ring-emerald-500/10">
+            <div className="flex-1 flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 shadow-sm backdrop-blur transition focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100 dark:border-zinc-800 dark:bg-zinc-900/45 dark:focus-within:ring-emerald-500/10">
               <Search className="h-5 w-5 text-zinc-500 dark:text-zinc-400" />
               <input
-                className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
+                className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 dark:text-zinc-100"
                 placeholder="Track, country, name, email, ID, staff…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -741,7 +741,7 @@ export default function AdminRequestsScreen() {
                 ${
                   anyFiltersActive
                     ? "border-rose-200 bg-rose-50/70 text-rose-700 hover:bg-rose-100 dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-200 dark:hover:bg-rose-950/35"
-                    : "border-zinc-200 bg-white/70 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-800 dark:bg-zinc-900/45 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                    : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-800 dark:bg-zinc-900/45 dark:text-zinc-100 dark:hover:bg-zinc-900"
                 }`}
               title="Filters"
             >
@@ -758,9 +758,9 @@ export default function AdminRequestsScreen() {
           <div className="mt-2 flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
             <span>
               Showing{" "}
-              <span className="font-semibold text-zinc-700 dark:text-zinc-200">{filtered.length}</span>{" "}
+              <span className="font-semibold text-zinc-700 dark:text-zinc-300 dark:text-zinc-200">{filtered.length}</span>{" "}
               of{" "}
-              <span className="font-semibold text-zinc-700 dark:text-zinc-200">{items.length}</span>
+              <span className="font-semibold text-zinc-700 dark:text-zinc-300 dark:text-zinc-200">{items.length}</span>
             </span>
 
             <span className="rounded-full border border-emerald-100 bg-emerald-50/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
@@ -776,7 +776,7 @@ export default function AdminRequestsScreen() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 8, scale: 0.99 }}
                 transition={{ duration: 0.16 }}
-                className="mt-3 rounded-3xl border border-zinc-200 bg-white/75 p-4 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/55"
+                className="mt-3 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/75 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/55"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Filters</div>
@@ -786,7 +786,7 @@ export default function AdminRequestsScreen() {
                       <button
                         type="button"
                         onClick={resetFilters}
-                        className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/60 px-3 py-2 text-xs font-semibold text-zinc-800 transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-100"
+                        className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3 py-2 text-xs font-semibold text-zinc-800 transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-100"
                       >
                         Reset
                       </button>
@@ -795,7 +795,7 @@ export default function AdminRequestsScreen() {
                     <button
                       type="button"
                       onClick={() => setFiltersOpen(false)}
-                      className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 p-2 text-zinc-700 transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-200"
+                      className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-2 text-zinc-700 dark:text-zinc-300 transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-200"
                       aria-label="Close filters"
                       title="Close"
                     >
@@ -806,40 +806,40 @@ export default function AdminRequestsScreen() {
 
                 <div className="mt-4 grid gap-3">
                   <div className="grid grid-cols-2 gap-3">
-                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 dark:text-zinc-200">
                       From
-                      <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/45">
+                      <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/45">
                         <Calendar className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
                         <input
                           type="date"
                           value={filters.from}
                           onChange={(e) => setFilters((p) => ({ ...p, from: e.target.value }))}
-                          className="w-full bg-transparent text-sm text-zinc-900 outline-none dark:text-zinc-100"
+                          className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none dark:text-zinc-100"
                         />
                       </div>
                     </label>
 
-                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 dark:text-zinc-200">
                       To
-                      <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/45">
+                      <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/45">
                         <Calendar className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
                         <input
                           type="date"
                           value={filters.to}
                           onChange={(e) => setFilters((p) => ({ ...p, to: e.target.value }))}
-                          className="w-full bg-transparent text-sm text-zinc-900 outline-none dark:text-zinc-100"
+                          className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none dark:text-zinc-100"
                         />
                       </div>
                     </label>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 dark:text-zinc-200">
                       Assigned
                       <select
                         value={filters.assigned}
                         onChange={(e) => setFilters((p) => ({ ...p, assigned: e.target.value }))}
-                        className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-4 focus:ring-emerald-100/60 dark:border-zinc-700 dark:bg-zinc-900/45 dark:text-zinc-100 dark:focus:ring-emerald-500/10"
+                        className="mt-2 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-4 focus:ring-emerald-100/60 dark:border-zinc-700 dark:bg-zinc-900/45 dark:text-zinc-100 dark:focus:ring-emerald-500/10"
                       >
                         <option value="any">Any</option>
                         <option value="assigned">Assigned</option>
@@ -847,12 +847,12 @@ export default function AdminRequestsScreen() {
                       </select>
                     </label>
 
-                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 dark:text-zinc-200">
                       Staff status
                       <select
                         value={filters.staffStatus}
                         onChange={(e) => setFilters((p) => ({ ...p, staffStatus: e.target.value }))}
-                        className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-4 focus:ring-emerald-100/60 dark:border-zinc-700 dark:bg-zinc-900/45 dark:text-zinc-100 dark:focus:ring-emerald-500/10"
+                        className="mt-2 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-4 focus:ring-emerald-100/60 dark:border-zinc-700 dark:bg-zinc-900/45 dark:text-zinc-100 dark:focus:ring-emerald-500/10"
                       >
                         <option value="any">Any</option>
                         <option value="assigned">assigned</option>
@@ -863,12 +863,12 @@ export default function AdminRequestsScreen() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 dark:text-zinc-200">
                       Recommendation
                       <select
                         value={filters.staffDecision}
                         onChange={(e) => setFilters((p) => ({ ...p, staffDecision: e.target.value }))}
-                        className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-4 focus:ring-emerald-100/60 dark:border-zinc-700 dark:bg-zinc-900/45 dark:text-zinc-100 dark:focus:ring-emerald-500/10"
+                        className="mt-2 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-4 focus:ring-emerald-100/60 dark:border-zinc-700 dark:bg-zinc-900/45 dark:text-zinc-100 dark:focus:ring-emerald-500/10"
                       >
                         <option value="any">Any</option>
                         <option value="recommend_accept">recommend_accept</option>
@@ -877,9 +877,9 @@ export default function AdminRequestsScreen() {
                       </select>
                     </label>
 
-                    <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+                    <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 dark:text-zinc-200">
                       Soon...
-                      <div className="mt-2 rounded-2xl border border-zinc-200 bg-white/60 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-300">
+                      <div className="mt-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-300">
                         More filters to come.
                       </div>
                     </div>
@@ -971,7 +971,7 @@ export default function AdminRequestsScreen() {
                         </span>
                       ) : null}
 
-                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-3xl border border-zinc-200 bg-white/60 text-zinc-700 transition hover:border-emerald-200 hover:bg-emerald-50/60 hover:text-emerald-800 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-200 dark:hover:bg-zinc-900">
+                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition hover:border-emerald-200 hover:bg-emerald-50/60 hover:text-emerald-800 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-200 dark:hover:bg-zinc-900">
                         <ChevronRight className="h-5 w-5" />
                       </span>
                     </div>
@@ -987,3 +987,4 @@ export default function AdminRequestsScreen() {
     </div>
   );
 }
+

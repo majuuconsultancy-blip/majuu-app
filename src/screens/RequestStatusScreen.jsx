@@ -23,6 +23,7 @@ import RequestChatLauncher from "../components/RequestChatLauncher";
 
 import { auth, db } from "../firebase";
 import { clearActiveProcess } from "../services/userservice";
+import { smartBack } from "../utils/navBack";
 
 /* ---------------- Minimal icons ---------------- */
 function IconReceipt(props) {
@@ -111,7 +112,7 @@ function statusUI(status) {
   if (s === "new")
     return {
       label: "Submitted",
-      badge: "bg-zinc-100 text-zinc-700 border border-zinc-200",
+      badge: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800",
     };
 
   if (s === "contacted")
@@ -134,7 +135,7 @@ function statusUI(status) {
 
   return {
     label: s,
-    badge: "bg-zinc-100 text-zinc-700 border border-zinc-200",
+    badge: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800",
   };
 }
 
@@ -341,10 +342,10 @@ export default function RequestStatusScreen() {
 
   // ✅ keep your original base styles, just slightly upgraded
   const cardBase =
-    "rounded-2xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur transition duration-300 ease-out";
+    "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur transition duration-300 ease-out";
   const cardPolish =
     "hover:shadow-[0_14px_45px_rgba(0,0,0,0.08)] hover:border-emerald-200/80 active:shadow-sm";
-  const softBg = "bg-gradient-to-b from-emerald-50/40 via-white to-white";
+  const softBg = "bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
 
   const enterWrap =
     "transition duration-500 ease-out will-change-transform will-change-opacity";
@@ -355,7 +356,7 @@ export default function RequestStatusScreen() {
       <div className={`min-h-screen ${softBg} ${TOP_LAYER_CLS}`}>
         <div className="max-w-xl mx-auto px-5 py-10">
           <div className={`${cardBase} p-5`}>
-            <p className="text-sm text-zinc-600">Loading request…</p>
+            <p className="text-sm text-zinc-600 dark:text-zinc-300">Loading request…</p>
           </div>
         </div>
       </div>
@@ -371,8 +372,8 @@ export default function RequestStatusScreen() {
           </div>
 
           <button
-            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-white active:scale-[0.99]"
-            onClick={() => navigate("/app/progress")}
+            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-white active:scale-[0.99]"
+            onClick={() => smartBack(navigate, "/app/progress")}
           >
             <IconArrowLeft className="h-4 w-4" />
             Back to Progress
@@ -481,7 +482,7 @@ export default function RequestStatusScreen() {
               <IconReceipt className="h-5 w-5 text-emerald-800" />
             </span>
             <div className="min-w-0">
-              <div className="text-sm font-bold text-zinc-900">Application Request</div>
+              <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Application Request</div>
               <div className="text-xs text-zinc-500">Details & documents</div>
             </div>
           </div>
@@ -497,7 +498,7 @@ export default function RequestStatusScreen() {
             <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-4`}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-zinc-900">Chat with MAJUU team</div>
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Chat with MAJUU team</div>
                   <div className="mt-1 text-xs text-zinc-500">
                     Ask questions, follow up, and get updates.
                   </div>
@@ -516,8 +517,8 @@ export default function RequestStatusScreen() {
             <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-base font-semibold tracking-tight text-zinc-900">{serviceTitle}</div>
-                  <div className="mt-1 text-sm font-semibold text-zinc-700">{serviceSub}</div>
+                  <div className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">{serviceTitle}</div>
+                  <div className="mt-1 text-sm font-semibold text-zinc-700 dark:text-zinc-300">{serviceSub}</div>
                 </div>
 
                 <div className="shrink-0 text-right">
@@ -529,22 +530,22 @@ export default function RequestStatusScreen() {
               <div className="mt-4 grid gap-2 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-zinc-500">Full name</span>
-                  <span className="font-medium text-zinc-900">{req?.name || "-"}</span>
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100">{req?.name || "-"}</span>
                 </div>
 
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-zinc-500">Phone</span>
-                  <span className="font-medium text-zinc-900">{req?.phone || "-"}</span>
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100">{req?.phone || "-"}</span>
                 </div>
 
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-zinc-500">Email</span>
-                  <span className="font-medium text-zinc-900">{req?.email || "-"}</span>
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100">{req?.email || "-"}</span>
                 </div>
 
                 {req?.note ? (
-                  <div className="mt-2 rounded-2xl border border-zinc-200 bg-white/60 p-4 transition hover:bg-white/70">
-                    <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700">
+                  <div className="mt-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 transition hover:bg-white/70">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
                       <IconNote className="h-4 w-4 text-zinc-500" />
                       Your note
                     </div>
@@ -556,7 +557,7 @@ export default function RequestStatusScreen() {
               {(st === "rejected" || st === "closed" || st === "contacted") && adminNote ? (
                 <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 transition hover:bg-amber-50/80">
                   <div className="flex items-center gap-2 text-xs font-semibold text-amber-900">
-                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-amber-200 bg-white/70">
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-amber-200 bg-white/70 dark:bg-zinc-900/60">
                       <IconNote className="h-4 w-4 text-amber-800" />
                     </span>
                     Note from MAJUU
@@ -566,7 +567,7 @@ export default function RequestStatusScreen() {
               ) : null}
 
               {st === "new" ? (
-                <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-700">
+                <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-700 dark:text-zinc-300">
                   Received. We’ll review and update you here.
                 </div>
               ) : null}
@@ -600,7 +601,7 @@ export default function RequestStatusScreen() {
                     <IconFile className="h-5 w-5 text-emerald-800" />
                   </span>
                   <div className="min-w-0">
-                    <div className="font-semibold text-zinc-900">Submitted documents</div>
+                    <div className="font-semibold text-zinc-900 dark:text-zinc-100">Submitted documents</div>
                     <div className="text-xs text-zinc-500">Your uploads for this request.</div>
                   </div>
                 </div>
@@ -615,7 +616,7 @@ export default function RequestStatusScreen() {
 
               <div className="mt-4 grid gap-2">
                 {attachments.length === 0 ? (
-                  <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+                  <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
                     No documents submitted yet.
                   </div>
                 ) : (
@@ -625,14 +626,14 @@ export default function RequestStatusScreen() {
                       initial={{ opacity: 0, y: 6 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: Math.min(0.2, idx * 0.03), duration: 0.18 }}
-                      className="rounded-2xl border border-zinc-200 bg-white/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
+                      className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="font-semibold text-sm text-zinc-900 break-words">
+                          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 break-words">
                             {a.name || "PDF"}
                           </div>
-                          <div className="mt-1 text-xs text-zinc-600">
+                          <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
                             Status:{" "}
                             <span className="font-semibold text-zinc-800">
                               {attachmentStatusLabel(a.status)}
@@ -641,7 +642,7 @@ export default function RequestStatusScreen() {
                           </div>
                         </div>
 
-                        <span className="shrink-0 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-700">
+                        <span className="shrink-0 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                           {String(a.status || "pending_upload").toLowerCase()}
                         </span>
                       </div>
@@ -661,7 +662,7 @@ export default function RequestStatusScreen() {
                     <IconFile className="h-5 w-5 text-emerald-800" />
                   </span>
                   <div className="min-w-0">
-                    <div className="font-semibold text-zinc-900">Documents from MAJUU</div>
+                    <div className="font-semibold text-zinc-900 dark:text-zinc-100">Documents from MAJUU</div>
                     <div className="text-xs text-zinc-500">Templates, SOPs, forms.</div>
                   </div>
                 </div>
@@ -676,7 +677,7 @@ export default function RequestStatusScreen() {
 
               <div className="mt-4 grid gap-2">
                 {adminFiles.length === 0 ? (
-                  <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 text-sm text-zinc-600">
+                  <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
                     No documents sent yet.
                   </div>
                 ) : (
@@ -690,14 +691,14 @@ export default function RequestStatusScreen() {
                         initial={{ opacity: 0, y: 6 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: Math.min(0.2, idx * 0.03), duration: 0.18 }}
-                        className="rounded-2xl border border-zinc-200 bg-white/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
+                        className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="font-semibold text-sm text-zinc-900 break-words">
+                            <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 break-words">
                               {name}
                             </div>
-                            <div className="mt-1 text-xs text-zinc-600">Open to download</div>
+                            <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">Open to download</div>
                           </div>
 
                           <a
@@ -707,7 +708,7 @@ export default function RequestStatusScreen() {
                             className={`shrink-0 inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] ${
                               url
                                 ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
-                                : "border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed pointer-events-none"
+                                : "border-zinc-200 dark:border-zinc-800 bg-zinc-100 text-zinc-400 cursor-not-allowed pointer-events-none"
                             }`}
                           >
                             Open
@@ -757,8 +758,8 @@ export default function RequestStatusScreen() {
         {/* Back button */}
         <div className="mt-3">
           <button
-            className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-white active:scale-[0.99]"
-            onClick={() => navigate("/app/progress")}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-white active:scale-[0.99]"
+            onClick={() => smartBack(navigate, "/app/progress")}
           >
             <IconArrowLeft className="h-4 w-4" />
             Back to Progress
@@ -770,3 +771,5 @@ export default function RequestStatusScreen() {
     </div>
   );
 }
+
+

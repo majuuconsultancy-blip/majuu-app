@@ -68,20 +68,20 @@ export default function SmartHome() {
   }, [navigate]);
 
   return (
-    <div className="min-h-screen bg-white">
-      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
         <div className="max-w-xl mx-auto px-5 py-10">
-          <div className="mt-10 rounded-2xl border border-zinc-200 bg-white/70 p-6 shadow-sm backdrop-blur">
+          <div className="mt-10 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-6 shadow-sm backdrop-blur">
             <div className="flex items-center gap-3">
               <div className="grid place-items-center h-11 w-11 rounded-2xl border border-emerald-100 bg-emerald-50/70">
                 <IconSpinner className="h-5 w-5 text-emerald-700 animate-spin" />
               </div>
 
               <div>
-                <div className="text-sm font-semibold text-zinc-900">
+                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                   Preparing your workspace
                 </div>
-                <div className="mt-1 text-xs text-zinc-600">
+                <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
                   Redirecting you to where you left off…
                 </div>
               </div>
@@ -100,3 +100,5 @@ export default function SmartHome() {
     </div>
   );
 }
+
+

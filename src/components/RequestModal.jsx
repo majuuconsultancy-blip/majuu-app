@@ -434,20 +434,20 @@ export default function RequestModal({
   // ✅ lighter styles in standalone (no blur, no heavy shadows)
   const overlayCls = STANDALONE ? "bg-black/40" : "bg-black/35 backdrop-blur-[2px]";
   const panelCls = STANDALONE
-    ? "w-full max-w-md rounded-3xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 flex flex-col"
-    : "w-full max-w-md rounded-3xl border border-zinc-200 bg-white/75 shadow-xl backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/75 flex flex-col";
+    ? "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 dark:border-zinc-800 dark:bg-zinc-950 flex flex-col"
+    : "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/75 dark:bg-zinc-900/60 shadow-xl backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/75 flex flex-col";
 
   const ctaWrapCls = STANDALONE
-    ? "rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 px-3 py-3"
-    : "rounded-2xl border border-zinc-200 bg-white/80 shadow-lg backdrop-blur px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950/70";
+    ? "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 dark:border-zinc-800 dark:bg-zinc-950 px-3 py-3"
+    : "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 shadow-lg backdrop-blur px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950/70";
 
   const fieldWrap =
-    "mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 " +
+    "mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2.5 " +
     "focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100 " +
     "dark:border-zinc-800 dark:bg-zinc-950";
 
   const inputBase =
-    "w-full bg-transparent text-sm outline-none placeholder:text-zinc-400 text-zinc-900 dark:text-zinc-100";
+    "w-full bg-transparent text-sm outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 text-zinc-900 dark:text-zinc-100";
 
   const focusProps = {
     onFocus: (e) => scrollFieldIntoView(e.currentTarget, scrollRef.current),
@@ -497,10 +497,6 @@ export default function RequestModal({
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Build indicator */}
-          <div className="absolute right-3 top-3 z-50 rounded-full border border-zinc-200 bg-white/80 px-2 py-1 text-[10px] font-extrabold text-zinc-700">
-            REQMODAL BUILD 2026-02-18 FINAL-KC + RETURNTO
-          </div>
 
           {/* Header */}
           <div className="px-5 pt-5 shrink-0">
@@ -518,7 +514,7 @@ export default function RequestModal({
                 type="button"
                 onClick={handleClose}
                 disabled={loading}
-                className="shrink-0 rounded-xl border border-zinc-200 bg-white p-2 text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
+                className="shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-2 text-zinc-700 dark:text-zinc-300 transition hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
                 aria-label="Close"
                 title="Close"
               >
@@ -635,7 +631,7 @@ export default function RequestModal({
                     <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
                       Upload documents (optional)
                     </label>
-                    <div className="mt-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+                    <div className="mt-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950">
                       <input
                         type="file"
                         multiple
@@ -657,7 +653,7 @@ export default function RequestModal({
                           {pickedFiles.map((f, idx) => (
                             <div
                               key={`${f.name}-${idx}`}
-                              className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
+                              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
                             >
                               {f.name} • {Math.round((f.size || 0) / 1024)} KB
                             </div>
@@ -713,7 +709,7 @@ export default function RequestModal({
                   className={`w-full rounded-xl border px-4 py-3 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60 ${
                     paid
                       ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                      : "border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                      : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
                   }`}
                 >
                   {paid ? "Payment confirmed ✓" : "Pay to unlock request"}
@@ -732,7 +728,7 @@ export default function RequestModal({
                   type="button"
                   onClick={handleClose}
                   disabled={loading}
-                  className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                  className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
                 >
                   Cancel
                 </button>
@@ -748,3 +744,4 @@ export default function RequestModal({
     </div>
   );
 }
+

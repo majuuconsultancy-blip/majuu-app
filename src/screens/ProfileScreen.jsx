@@ -147,7 +147,7 @@ export default function ProfileScreen() {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
         <div className="mx-auto max-w-xl p-5">
-          <div className="animate-pulse rounded-3xl border border-zinc-200 bg-white/70 p-5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
+          <div className="animate-pulse rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
             <div className="h-6 w-28 rounded bg-zinc-200 dark:bg-zinc-700" />
             <div className="mt-2 h-4 w-64 rounded bg-zinc-200 dark:bg-zinc-700" />
             <div className="mt-6 h-24 rounded-2xl bg-zinc-200 dark:bg-zinc-700" />
@@ -163,7 +163,7 @@ export default function ProfileScreen() {
     "bg-gradient-to-b from-emerald-50/60 via-white to-zinc-50 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
 
   const glass =
-    "border border-white/40 bg-white/55 backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.10)] dark:border-zinc-800/70 dark:bg-zinc-900/55";
+    "border border-white/40 bg-white/55 dark:bg-zinc-900/60 backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.10)] dark:border-zinc-800/70 dark:bg-zinc-900/55";
 
   const tile = `rounded-2xl ${glass} transition will-change-transform`;
   const tileHover =
@@ -197,10 +197,6 @@ export default function ProfileScreen() {
           <div className="flex items-center justify-end gap-2">
             <ThemeToggle />
           </div>
-        </div>
-
-        <div className="fixed bottom-3 right-3 z-[99999] rounded-full border border-zinc-200 bg-white/80 px-2 py-1 text-[10px] font-extrabold text-zinc-700">
-          PROFILE BUILD 2026-02-17 ROUTE EDIT
         </div>
 
         {err ? (
@@ -393,3 +389,4 @@ export default function ProfileScreen() {
     </div>
   );
 }
+

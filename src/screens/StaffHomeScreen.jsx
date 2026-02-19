@@ -53,7 +53,7 @@ export default function StaffHomeScreen() {
   const [err, setErr] = useState("");
 
   const cardBase =
-    "rounded-2xl border border-zinc-200 bg-white/70 backdrop-blur p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60";
+    "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 backdrop-blur p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60";
   const cardHover =
     "transition hover:border-emerald-200 hover:bg-white hover:shadow-md dark:hover:border-emerald-900/40 dark:hover:bg-zinc-900";
 
@@ -105,7 +105,7 @@ export default function StaffHomeScreen() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white dark:bg-zinc-950">
+      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
         <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
           <div className="max-w-xl mx-auto px-5 py-10">
             <div className="mx-auto h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70 dark:border-zinc-800 dark:bg-zinc-900/60" />
@@ -119,13 +119,13 @@ export default function StaffHomeScreen() {
   }
 
   return (
-    <div className="min-h-screen bg-white dark:bg-zinc-950">
-      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-6 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950 pb-6">
         <div className="max-w-xl mx-auto px-5 py-6">
           <div className="flex items-end justify-between gap-3">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-emerald-200">
-                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-100 bg-white/70 dark:border-zinc-700 dark:bg-zinc-950/40">
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-100 bg-white/70 dark:bg-zinc-900/60 dark:border-zinc-700 dark:bg-zinc-950/40">
                   <IconBriefcase className="h-4 w-4 text-emerald-700 dark:text-emerald-200" />
                 </span>
                 Staff portal
@@ -157,7 +157,7 @@ export default function StaffHomeScreen() {
                 specialties.map((s) => (
                   <span
                     key={s}
-                    className="rounded-full border border-zinc-200 bg-white/60 px-3 py-1 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200"
+                    className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3 py-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200"
                   >
                     {s}
                   </span>
@@ -179,7 +179,7 @@ export default function StaffHomeScreen() {
 
               <button
                 onClick={() => navigate("/staff/onboarding")}
-                className="w-full rounded-2xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
+                className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
                            dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
               >
                 Edit onboarding
@@ -202,3 +202,6 @@ export default function StaffHomeScreen() {
     </div>
   );
 }
+
+
+

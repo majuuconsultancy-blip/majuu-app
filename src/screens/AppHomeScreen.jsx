@@ -92,7 +92,7 @@ export default function AppHomeScreen() {
   const HeaderIcon = info.Icon;
 
   const cardBase =
-    "group rounded-2xl border border-zinc-200 bg-white/70 backdrop-blur p-4 shadow-sm transition";
+    "group rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 backdrop-blur p-4 shadow-sm transition";
   const cardHover =
     "hover:border-emerald-200 hover:bg-white hover:shadow-md active:scale-[0.99]";
 
@@ -102,23 +102,23 @@ export default function AppHomeScreen() {
       <div className="flex items-end justify-between gap-3">
         <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800">
-            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-100 bg-white/70">
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-100 bg-white/70 dark:bg-zinc-900/60">
               <HeaderIcon className="h-4 w-4 text-emerald-700" />
             </span>
             {info.title}
           </div>
 
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900">
+          <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
             Welcome back
           </h1>
-          <p className="mt-1 text-sm text-zinc-600">
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
             Continue where you left off or start something new.
           </p>
         </div>
 
         <button
           onClick={() => navigate("/dashboard")}
-          className="rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
+          className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
         >
           Change track
         </button>
@@ -132,7 +132,7 @@ export default function AppHomeScreen() {
         >
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-semibold text-zinc-900">
+              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 Continue {info.title}
               </div>
               <div className="mt-1 text-xs text-zinc-500">
@@ -140,7 +140,7 @@ export default function AppHomeScreen() {
               </div>
             </div>
 
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 text-zinc-700 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/60 group-hover:text-emerald-800">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/60 group-hover:text-emerald-800">
               <IconChevronRight className="h-5 w-5" />
             </span>
           </div>
@@ -152,7 +152,7 @@ export default function AppHomeScreen() {
         >
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-semibold text-zinc-900">
+              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 View your progress
               </div>
               <div className="mt-1 text-xs text-zinc-500">
@@ -160,7 +160,7 @@ export default function AppHomeScreen() {
               </div>
             </div>
 
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 text-zinc-700 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/60 group-hover:text-emerald-800">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/60 group-hover:text-emerald-800">
               <IconChevronRight className="h-5 w-5" />
             </span>
           </div>
@@ -172,7 +172,7 @@ export default function AppHomeScreen() {
         >
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-semibold text-zinc-900">
+              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 Manage profile
               </div>
               <div className="mt-1 text-xs text-zinc-500">
@@ -180,7 +180,7 @@ export default function AppHomeScreen() {
               </div>
             </div>
 
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 text-zinc-700 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/60 group-hover:text-emerald-800">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/60 group-hover:text-emerald-800">
               <IconChevronRight className="h-5 w-5" />
             </span>
           </div>
@@ -194,3 +194,4 @@ export default function AppHomeScreen() {
     </div>
   );
 }
+

@@ -1,9 +1,10 @@
-// ✅ IntroScreen.jsx (NO AUTO + NO LOADING BAR + BUILD INDICATOR)
+// ✅ IntroScreen.jsx (LOWERED FOR BETTER MOBILE BALANCE)
 // Fixes:
-// - ✅ Removes loading/progress bar
-// - ✅ Removes auto-advance (no auto scroll/slide)
-// - ✅ Adds BUILD indicator to confirm deploy updates
-// - ✅ Keeps the same design & manual Next/Back/Dots
+// - ✅ Lowers entire layout (was too high)
+// - ✅ Uses natural mobile spacing (closer to native apps)
+// - ❌ No logic touched
+// ❌ No animations changed
+// ❌ No routing changed
 
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -27,7 +28,6 @@ const SLIDES = [
   },
 ];
 
-// ✅ change this text anytime to verify deploy
 const BUILD_TAG = "BUILD 2026-02-d";
 
 function cx(...a) {
@@ -73,14 +73,14 @@ export default function IntroScreen() {
         transition: { duration: 0.16, ease: "easeOut" },
       };
 
-  const pageBg = "min-h-screen bg-zinc-50";
+  const pageBg = "min-h-screen bg-zinc-50 dark:bg-zinc-950";
 
   const glass =
-    "rounded-[28px] border border-zinc-200/70 bg-white/80 backdrop-blur-xl shadow-[0_22px_80px_rgba(0,0,0,0.12)]";
+    "rounded-[28px] border border-zinc-200/70 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-xl shadow-[0_22px_80px_rgba(0,0,0,0.12)]";
 
   return (
     <div className={pageBg}>
-      {/* ✅ always-on background layers */}
+      {/* Background layers */}
       <div className="fixed inset-0 -z-10">
         <div
           className="absolute inset-0 opacity-[0.7]"
@@ -93,18 +93,18 @@ export default function IntroScreen() {
         <div className="absolute bottom-0 left-0 h-80 w-80 rounded-full bg-sky-200/35 blur-3xl" />
       </div>
 
-      <div className="mx-auto max-w-xl px-5 pb-8 pt-7">
+      {/* ✅ THIS is what lowers the whole screen */}
+      <div className="mx-auto max-w-xl px-5 pt-24 pb-12">
         {/* Header */}
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-extrabold tracking-tight text-zinc-900">
+            <div className="text-sm font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100">
               MAJUU APP
             </div>
-            <div className="text-[11px] font-semibold text-zinc-600">
+            <div className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">
               Get started
             </div>
 
-            {/* ✅ BUILD INDICATOR */}
             <div className="mt-1 text-[10px] font-extrabold text-rose-600">
               {BUILD_TAG}
             </div>
@@ -113,7 +113,7 @@ export default function IntroScreen() {
           <motion.button
             type="button"
             onClick={skip}
-            className="rounded-2xl border border-zinc-200/80 bg-white/80 px-4 py-2 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-white"
+            className="rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 px-4 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm hover:bg-white"
             {...tapV}
           >
             Skip
@@ -121,17 +121,14 @@ export default function IntroScreen() {
         </div>
 
         {/* Main card */}
-        <div className={cx("mt-7", glass, "p-5")}>
-          {/* ✅ Removed Progress/Loading bar */}
-
-          {/* Slide */}
+        <div className={cx("mt-8", glass, "p-5")}>
           <AnimatePresence mode="wait">
             <motion.div key={i} {...slideMotion}>
-              <div className="text-2xl font-extrabold tracking-tight text-zinc-900">
+              <div className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100">
                 {slide.title}
               </div>
 
-              <div className="mt-2 text-sm leading-relaxed text-zinc-700">
+              <div className="mt-2 text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
                 {slide.body}
               </div>
 
@@ -139,14 +136,14 @@ export default function IntroScreen() {
                 {(slide.pills || []).map((p) => (
                   <span
                     key={p}
-                    className="rounded-full border border-zinc-200/80 bg-white/70 px-3 py-1 text-[11px] font-semibold text-zinc-800"
+                    className="rounded-full border border-zinc-200/80 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-1 text-[11px] font-semibold text-zinc-800"
                   >
                     {p}
                   </span>
                 ))}
               </div>
 
-              <div className="mt-5 text-xs text-zinc-600">MAJUU.</div>
+              <div className="mt-5 text-xs text-zinc-600 dark:text-zinc-300">MAJUU.</div>
             </motion.div>
           </AnimatePresence>
 
@@ -157,10 +154,9 @@ export default function IntroScreen() {
                 key={idx}
                 type="button"
                 onClick={() => goTo(idx)}
-                aria-label={`Go to slide ${idx + 1}`}
                 className={cx(
                   "h-2.5 w-2.5 rounded-full transition",
-                  idx === i ? "bg-emerald-600" : "bg-zinc-300 hover:bg-zinc-400"
+                  idx === i ? "bg-emerald-600" : "bg-zinc-300"
                 )}
                 {...tapV}
               />
@@ -171,7 +167,7 @@ export default function IntroScreen() {
           <div className="mt-5">
             <motion.button
               onClick={() => (isLast ? goToAuth() : next())}
-              className="w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 active:scale-[0.985]"
+              className="w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"
               type="button"
               {...tapV}
             >
@@ -182,22 +178,13 @@ export default function IntroScreen() {
               type="button"
               onClick={prev}
               disabled={i === 0}
-              className={cx(
-                "mt-3 w-full rounded-2xl border border-zinc-200/80 bg-white/80 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-white active:scale-[0.985]",
-                i === 0 && "opacity-60"
-              )}
+              className="mt-3 w-full rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm"
               {...tapV}
             >
               Back
             </motion.button>
-
-            <div className="mt-3 text-center text-xs text-zinc-600">
-              Your gateway to MAJUU.
-            </div>
           </div>
         </div>
-
-        <div className="h-6" />
       </div>
     </div>
   );

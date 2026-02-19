@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { motion, AnimatePresence } from "../utils/motionProxy";
+import { smartBack } from "../utils/navBack";
 
 import {
   Briefcase,
@@ -84,7 +85,7 @@ function Chip({ active, children, onClick }) {
         "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-extrabold transition active:scale-[0.99]",
         active
           ? "border-emerald-200 bg-emerald-50/80 text-emerald-900"
-          : "border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white",
+          : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-white",
       ].join(" ")}
     >
       <Tags className="h-3.5 w-3.5 opacity-80" />
@@ -119,14 +120,14 @@ function ServiceTile({ s, disabled, onClick }) {
       className={[
         "w-full text-left rounded-3xl border p-4 shadow-[0_14px_40px_rgba(0,0,0,0.08)] backdrop-blur-xl transition",
         disabled
-          ? "border-zinc-200/70 bg-white/55 opacity-60 cursor-not-allowed"
-          : "border-zinc-200/70 bg-white/72 hover:border-emerald-200 hover:bg-white/85",
+          ? "border-zinc-200/70 dark:border-zinc-800 bg-white/55 dark:bg-zinc-900/60 opacity-60 cursor-not-allowed"
+          : "border-zinc-200/70 dark:border-zinc-800 bg-white/72 dark:bg-zinc-900/60 hover:border-emerald-200 hover:bg-white/85",
       ].join(" ")}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white/70 px-2 py-0.5 text-[11px] font-extrabold text-zinc-700">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-extrabold text-zinc-700 dark:text-zinc-300">
               <ServiceIcon tag={s.tag} title={s.title} />
               {s.tag}
             </span>
@@ -139,8 +140,8 @@ function ServiceTile({ s, disabled, onClick }) {
             ) : null}
           </div>
 
-          <div className="mt-2 font-extrabold text-zinc-900">{s.title}</div>
-          <div className="mt-1 text-sm text-zinc-600">{s.note}</div>
+          <div className="mt-2 font-extrabold text-zinc-900 dark:text-zinc-100">{s.title}</div>
+          <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{s.note}</div>
         </div>
 
         <span className="inline-flex h-11 w-11 items-center justify-center rounded-3xl border border-emerald-100 bg-emerald-50/70 text-emerald-800 shadow-sm">
@@ -193,7 +194,7 @@ export default function WorkWeHelp() {
   const backUrl = `/app/work?country=${encodeURIComponent(country)}&from=choice`;
 
   const goBackToChoice = () => {
-    navigate(backUrl, { replace: true });
+    smartBack(navigate, "/app/home");
   };
 
   // ✅ HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/work)
@@ -381,7 +382,7 @@ export default function WorkWeHelp() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-emerald-50/60 via-white to-white">
+    <div className="min-h-screen bg-gradient-to-b from-emerald-50/60 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
       {/* soft background glow */}
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-200/30 blur-3xl" />
@@ -398,7 +399,7 @@ export default function WorkWeHelp() {
         {/* Back */}
         <button
           onClick={goBackToChoice}
-          className="mb-4 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:bg-white active:scale-[0.99]"
+          className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-white/60 px-3 py-2 text-sm font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-50/70 hover:border-emerald-300 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-emerald-200 dark:border-emerald-900/40 dark:bg-zinc-900/60 dark:text-emerald-200 dark:hover:bg-emerald-950/25 dark:focus:ring-emerald-300/30"
         >
           <ArrowLeft className="h-4 w-4" />
           Back
@@ -408,19 +409,19 @@ export default function WorkWeHelp() {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-extrabold text-emerald-900">
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/80 border border-emerald-100">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/80 dark:bg-zinc-900/60 border border-emerald-100">
                 <Briefcase className="h-4 w-4 text-emerald-700" />
               </span>
               Work · We-Help
             </div>
 
-            <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-zinc-900">
+            <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100">
               Get help with your work process
             </h1>
 
-            <p className="mt-1 flex items-center gap-2 text-sm text-zinc-600">
+            <p className="mt-1 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
               <MapPinned className="h-4 w-4 text-emerald-700" />
-              Destination: <span className="font-semibold text-zinc-900">{country}</span>
+              Destination: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{country}</span>
             </p>
           </div>
 
@@ -458,15 +459,15 @@ export default function WorkWeHelp() {
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-sm font-extrabold text-zinc-900">
+                <div className="text-sm font-extrabold text-zinc-900 dark:text-zinc-100">
                   Complete your profile to continue
                 </div>
-                <div className="mt-1 text-sm text-zinc-700">
+                <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
                   Missing: <span className="font-semibold">{missing.join(", ")}</span>
                 </div>
               </div>
 
-              <span className="inline-flex h-11 w-11 items-center justify-center rounded-3xl border border-amber-200 bg-white/70 text-amber-900 shadow-sm">
+              <span className="inline-flex h-11 w-11 items-center justify-center rounded-3xl border border-amber-200 bg-white/70 dark:bg-zinc-900/60 text-amber-900 shadow-sm">
                 <ShieldCheck className="h-5 w-5" />
               </span>
             </div>
@@ -489,8 +490,8 @@ export default function WorkWeHelp() {
           className={[
             "mt-6 rounded-3xl border p-5 shadow-[0_18px_55px_rgba(0,0,0,0.10)] backdrop-blur-xl",
             canUseWeHelp
-              ? "border-emerald-200/80 bg-white/75"
-              : "border-zinc-200/70 bg-white/60 opacity-70",
+              ? "border-emerald-200/80 bg-white/75 dark:bg-zinc-900/60"
+              : "border-zinc-200/70 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 opacity-70",
           ].join(" ")}
         >
           <div className="flex items-start justify-between gap-3">
@@ -500,10 +501,10 @@ export default function WorkWeHelp() {
                 Full package · Best value
               </div>
 
-              <h2 className="mt-3 text-lg font-extrabold text-zinc-900">
+              <h2 className="mt-3 text-lg font-extrabold text-zinc-900 dark:text-zinc-100">
                 End-to-end work support, organized in one place
               </h2>
-              <p className="mt-1 text-sm text-zinc-600">
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 We help you with documents, submissions, and next steps — inside MAJUU.
               </p>
             </div>
@@ -513,7 +514,7 @@ export default function WorkWeHelp() {
             </span>
           </div>
 
-          <ul className="mt-4 grid gap-2 text-sm text-zinc-700">
+          <ul className="mt-4 grid gap-2 text-sm text-zinc-700 dark:text-zinc-300">
             {FULL_PACKAGE.map((item) => (
               <li key={item} className="flex items-start gap-2">
                 <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50/70 text-emerald-800">
@@ -531,7 +532,7 @@ export default function WorkWeHelp() {
               "mt-5 w-full rounded-2xl border px-4 py-3 text-sm font-extrabold shadow-sm transition active:scale-[0.99]",
               canUseWeHelp
                 ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
-                : "border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed",
+                : "border-zinc-200 dark:border-zinc-800 bg-zinc-100 text-zinc-400 cursor-not-allowed",
             ].join(" ")}
           >
             Request full package
@@ -548,8 +549,8 @@ export default function WorkWeHelp() {
         <div className="mt-6">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h2 className="text-base font-extrabold text-zinc-900">Single packages</h2>
-              <p className="mt-1 text-sm text-zinc-600">
+              <h2 className="text-base font-extrabold text-zinc-900 dark:text-zinc-100">Single packages</h2>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 Choose one service you want help with.
               </p>
             </div>
@@ -559,7 +560,7 @@ export default function WorkWeHelp() {
           </div>
 
           {/* Search */}
-          <div className="mt-4 rounded-3xl border border-zinc-200/70 bg-white/72 p-3 shadow-sm backdrop-blur-xl">
+          <div className="mt-4 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/72 dark:bg-zinc-900/60 p-3 shadow-sm backdrop-blur-xl">
             <div className="flex items-center gap-2">
               <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/70 text-emerald-800">
                 <Search className="h-5 w-5" />
@@ -570,7 +571,7 @@ export default function WorkWeHelp() {
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                   placeholder="Search services… (visa, CV, interview, documents)"
-                  className="w-full bg-transparent text-sm font-semibold text-zinc-900 placeholder:text-zinc-400 outline-none"
+                  className="w-full bg-transparent text-sm font-semibold text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 outline-none"
                 />
               </div>
 
@@ -578,7 +579,7 @@ export default function WorkWeHelp() {
                 <button
                   type="button"
                   onClick={() => setQ("")}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/70 text-zinc-700 transition hover:bg-white active:scale-[0.99]"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition hover:bg-white active:scale-[0.99]"
                   aria-label="Clear search"
                   title="Clear"
                 >
@@ -586,7 +587,7 @@ export default function WorkWeHelp() {
                 </button>
               ) : null}
 
-              <span className="hidden sm:inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 text-zinc-700">
+              <span className="hidden sm:inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300">
                 <Filter className="h-5 w-5" />
               </span>
             </div>
@@ -604,7 +605,7 @@ export default function WorkWeHelp() {
           {/* Tiles */}
           <div className="mt-4 grid gap-3">
             {filteredSingles.length === 0 ? (
-              <div className="rounded-3xl border border-zinc-200/70 bg-white/70 p-5 text-sm text-zinc-600 shadow-sm backdrop-blur">
+              <div className="rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 text-sm text-zinc-600 dark:text-zinc-300 shadow-sm backdrop-blur">
                 No results. Try a different keyword (e.g. “visa”, “CV”, “interview”).
               </div>
             ) : (
@@ -647,3 +648,5 @@ export default function WorkWeHelp() {
     </div>
   );
 }
+
+

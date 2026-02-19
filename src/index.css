@@ -1,17 +1,11 @@
 @import "tailwindcss";
 
-/* Enable class-based dark mode in Tailwind v4 */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Global base so pages change even without explicit dark: classes */
 @layer base {
-  html, body {
-    @apply bg-white text-zinc-900 transition-colors duration-200;
-  }
-
-  /* ✅ Use Tailwind variant, NOT html.dark selector */
-  :root {
-    @apply dark:bg-zinc-950 dark:text-zinc-100;
+  html,
+  body {
+    @apply bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 transition-colors duration-200;
   }
 }
 
@@ -21,4 +15,6 @@ html {
   text-size-adjust: 100%;
 }
 
-svg { display: block; }
+svg {
+  display: block;
+}

@@ -56,10 +56,10 @@ export default function StaffRequestChatLauncher({ requestId }) {
 
       {open ? (
         <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/40 p-3 sm:items-center">
-          <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl">
-            <div className="flex items-center justify-between gap-3 border-b border-zinc-200 p-4">
+          <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-xl">
+            <div className="flex items-center justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 p-4">
               <div>
-                <div className="text-sm font-semibold text-zinc-900">Staff chat</div>
+                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Staff chat</div>
                 <div className="text-xs text-zinc-500">
                   Messages go to admin moderation first. Approved ones reach the user.
                 </div>
@@ -68,7 +68,7 @@ export default function StaffRequestChatLauncher({ requestId }) {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50"
                 title="Close"
               >
                 <IconX className="h-5 w-5" />
@@ -85,3 +85,4 @@ export default function StaffRequestChatLauncher({ requestId }) {
     </>
   );
 }
+

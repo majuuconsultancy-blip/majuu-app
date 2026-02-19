@@ -269,7 +269,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     >
       {/* ✅ SUPER FROSTED BACKDROP */}
       <div className="absolute inset-0 bg-black/30 backdrop-blur-lg" />
-      <div className="absolute inset-0 bg-white/[0.06]" />
+      <div className="absolute inset-0 bg-white/[0.06] dark:bg-white/[0.03]" />
 
       <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-200/25 blur-3xl" />
       <div className="pointer-events-none absolute bottom-0 left-0 h-72 w-72 rounded-full bg-sky-200/20 blur-3xl" />
@@ -280,7 +280,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
           "relative w-full max-w-md",
           "h-[78vh] max-h-[78vh]",
           "rounded-[22px]",
-          "border border-white/40 bg-white/55",
+          "border border-white/40 bg-white/55 dark:bg-zinc-900/60",
           "shadow-[0_20px_70px_rgba(0,0,0,0.18)] backdrop-blur-2xl",
           "ring-1 ring-white/20",
           "flex flex-col overflow-hidden",
@@ -293,7 +293,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
         style={{ isolation: "isolate" }}
       >
         {/* Header */}
-        <div className="shrink-0 border-b border-white/25 bg-white/45 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/45">
+        <div className="shrink-0 border-b border-white/25 bg-white/45 dark:bg-zinc-900/60 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/45">
           <div className="flex items-start justify-between gap-3 px-5 py-2">
             <div className="min-w-0">
               <div className="text-[12px] font-extrabold text-emerald-900/85 dark:text-emerald-200/90">
@@ -307,13 +307,9 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
               </p>
             </div>
 
-            <div className="absolute right-3 top-3 z-50 rounded-full border border-white/35 bg-white/55 px-2 py-1 text-[10px] font-extrabold text-zinc-700 backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/55 dark:text-zinc-200">
-              FDIAG BUILD 2026-02-18 NO-TRANSFORM-B
-            </div>
-
             <button
               onClick={onClose}
-              className="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-white/35 bg-white/55 text-zinc-700 transition hover:bg-white/70 active:scale-[0.99] backdrop-blur-xl
+              className="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-white/35 bg-white/55 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition hover:bg-white/70 active:scale-[0.99] backdrop-blur-xl
                          dark:border-zinc-700/60 dark:bg-zinc-900/55 dark:text-zinc-200"
               aria-label="Close"
               type="button"
@@ -324,9 +320,9 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
         </div>
 
         {/* Summary */}
-        <div className="shrink-0 border-b border-white/20 bg-white/40 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/40">
+        <div className="shrink-0 border-b border-white/20 bg-white/40 dark:bg-zinc-900/60 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/40">
           <div className="px-5 py-2">
-            <div className="rounded-3xl border border-white/35 bg-white/45 px-4 py-2.5 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/45">
+            <div className="rounded-3xl border border-white/35 bg-white/45 dark:bg-zinc-900/60 px-4 py-2.5 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/45">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-[10.5px] font-extrabold text-zinc-600 dark:text-zinc-300">
@@ -335,7 +331,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
                   <div
                     className={[
-                      "mt-0.5 text-[18px] font-extrabold text-zinc-900 tabular-nums leading-none dark:text-zinc-100",
+                      "mt-0.5 text-[18px] font-extrabold text-zinc-900 dark:text-zinc-100 tabular-nums leading-none dark:text-zinc-100",
                       pricePulse ? "scale-[1.02]" : "scale-100",
                       "transition-transform duration-150 ease-out",
                     ].join(" ")}
@@ -436,8 +432,8 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                       "shadow-[0_12px_36px_rgba(0,0,0,0.06)] backdrop-blur-2xl",
                       "min-h-[78px]",
                       isOn
-                        ? "border-emerald-200 bg-white/55 dark:bg-zinc-900/55"
-                        : "border-white/35 bg-white/40 hover:bg-white/50 hover:border-emerald-200/60 dark:border-zinc-800/60 dark:bg-zinc-900/40",
+                        ? "border-emerald-200 bg-white/55 dark:bg-zinc-900/60 dark:bg-zinc-900/55"
+                        : "border-white/35 bg-white/40 dark:bg-zinc-900/60 hover:bg-white/50 hover:border-emerald-200/60 dark:border-zinc-800/60 dark:bg-zinc-900/40",
                     ].join(" ")}
                     style={{
                       touchAction: "manipulation",
@@ -453,7 +449,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                             "inline-flex h-9 w-9 items-center justify-center rounded-2xl border",
                             isOn
                               ? "border-emerald-200 bg-emerald-50/60 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200"
-                              : "border-white/35 bg-white/45 text-zinc-700 dark:border-zinc-700/60 dark:bg-zinc-950/30 dark:text-zinc-200",
+                              : "border-white/35 bg-white/45 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 dark:border-zinc-700/60 dark:bg-zinc-950/30 dark:text-zinc-200",
                           ].join(" ")}
                         >
                           {isOn ? (
@@ -483,7 +479,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
             </div>
 
             {/* actions */}
-            <div className="mt-4 rounded-3xl border border-white/35 bg-white/45 p-4 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/45">
+            <div className="mt-4 rounded-3xl border border-white/35 bg-white/45 dark:bg-zinc-900/60 p-4 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/45">
               <button
                 onClick={handleProceed}
                 disabled={!canProceed}
@@ -491,7 +487,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                   "w-full rounded-2xl border px-4 py-2.5 text-sm font-extrabold shadow-sm transition active:scale-[0.99]",
                   canProceed
                     ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
-                    : "border-white/30 bg-white/30 text-zinc-400 cursor-not-allowed dark:border-zinc-800/60 dark:bg-zinc-950/20",
+                    : "border-white/30 bg-white/30 dark:bg-zinc-900/60 text-zinc-400 cursor-not-allowed dark:border-zinc-800/60 dark:bg-zinc-950/20",
                 ].join(" ")}
                 type="button"
               >
@@ -500,7 +496,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
               <button
                 onClick={onClose}
-                className="mt-2.5 w-full rounded-2xl border border-white/35 bg-white/45 px-4 py-2.5 text-sm font-extrabold text-zinc-800 transition hover:bg-white/60 active:scale-[0.99] backdrop-blur-2xl
+                className="mt-2.5 w-full rounded-2xl border border-white/35 bg-white/45 dark:bg-zinc-900/60 px-4 py-2.5 text-sm font-extrabold text-zinc-800 transition hover:bg-white/60 active:scale-[0.99] backdrop-blur-2xl
                            dark:border-zinc-800/60 dark:bg-zinc-900/45 dark:text-zinc-100"
                 type="button"
               >
@@ -519,3 +515,4 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     </div>
   );
 }
+

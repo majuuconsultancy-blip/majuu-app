@@ -1,47 +1,43 @@
+// ScreenLoader.jsx
+// Global full-screen loader used during auth/session checks and blocking states.
+// Props:
+// - title: string
+// - subtitle: string (optional)
+// - hint: string (optional)
+// - variant: "default" | "minimal" (optional)
+
 export default function ScreenLoader({
-  title = "Loading…",
-  subtitle = "Please wait a moment",
-  full = true,
+  title = "Loading...",
+  subtitle = "",
+  hint = "",
+  variant = "default",
 }) {
-  const Wrap = ({ children }) =>
-    full ? (
-      <div className="min-h-screen bg-white">
-        <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white flex items-center justify-center px-5">
-          {children}
-        </div>
-      </div>
-    ) : (
-      <div className="flex items-center justify-center px-5 py-10">{children}</div>
-    );
+  const isMinimal = variant === "minimal";
 
   return (
-    <Wrap>
-      <div className="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white/70 p-6 shadow-sm backdrop-blur">
-        {/* top icon + spinner */}
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70 flex items-center justify-center">
-            <div className="h-5 w-5 rounded-full border-2 border-emerald-600 border-t-transparent animate-spin" />
+    <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 px-6">
+      <div className="mx-auto max-w-xl min-h-screen grid place-items-center">
+        <div className={`w-full text-center ${isMinimal ? "max-w-sm" : "max-w-md"}`}>
+          <div className="relative mx-auto h-24 w-24">
+            <div className="absolute inset-0 rounded-full bg-emerald-500/20 dark:bg-emerald-400/20 blur-2xl animate-pulse" />
+            <div className="relative flex h-full w-full items-center justify-center">
+              <span className="text-6xl font-black tracking-tight text-emerald-500 dark:text-emerald-400 animate-pulse">
+                M
+              </span>
+            </div>
           </div>
 
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-zinc-900">{title}</p>
-            <p className="text-xs text-zinc-600">{subtitle}</p>
-          </div>
-        </div>
+          <div className="mt-5 text-base font-semibold leading-snug">{title}</div>
 
-        {/* shimmer skeleton */}
-        <div className="mt-5 space-y-3">
-          <div className="h-3 w-4/5 rounded bg-zinc-100 overflow-hidden relative">
-            <div className="absolute inset-0 animate-shimmer bg-gradient-to-r from-zinc-100 via-zinc-200 to-zinc-100" />
-          </div>
-          <div className="h-3 w-3/5 rounded bg-zinc-100 overflow-hidden relative">
-            <div className="absolute inset-0 animate-shimmer bg-gradient-to-r from-zinc-100 via-zinc-200 to-zinc-100" />
-          </div>
-          <div className="h-3 w-2/3 rounded bg-zinc-100 overflow-hidden relative">
-            <div className="absolute inset-0 animate-shimmer bg-gradient-to-r from-zinc-100 via-zinc-200 to-zinc-100" />
-          </div>
+          {subtitle ? (
+            <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{subtitle}</div>
+          ) : null}
+
+          {hint ? (
+            <div className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">{hint}</div>
+          ) : null}
         </div>
       </div>
-    </Wrap>
+    </div>
   );
 }

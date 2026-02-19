@@ -1,70 +1,97 @@
-// ✅ StaffGate.jsx (FULL COPY-PASTE)
-// Improvements:
-// - ✅ Treats onboarded missing/undefined as NOT onboarded (safer)
-// - ✅ Avoids onboarding redirect loops by allowing onboarding path
-
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { auth, db } from "../firebase";
+import { auth, db, authPersistenceReady } from "../firebase";
 import ScreenLoader from "./ScreenLoader";
+
+const AUTH_NULL_GRACE_MS = 1100;
 
 export default function StaffGate({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
 
   const [checking, setChecking] = useState(true);
+  const logoutTimerRef = useRef(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        navigate("/login", { replace: true, state: { from: location.pathname } });
-        return;
-      }
+    let cancelled = false;
 
+    const clearTimer = () => {
+      if (logoutTimerRef.current) {
+        clearTimeout(logoutTimerRef.current);
+        logoutTimerRef.current = null;
+      }
+    };
+
+    const unsubPromise = (async () => {
       try {
-        const staffRef = doc(db, "staff", user.uid);
-        const staffSnap = await getDoc(staffRef);
+        await authPersistenceReady;
+      } catch {}
+      if (cancelled) return () => {};
 
-        if (!staffSnap.exists()) {
+      const unsub = onAuthStateChanged(auth, async (user) => {
+        if (user) clearTimer();
+
+        if (!user) {
+          setChecking(true);
+
+          clearTimer();
+          logoutTimerRef.current = setTimeout(() => {
+            const u2 = auth.currentUser;
+            if (!u2) {
+              setChecking(false);
+              navigate("/login", { replace: true, state: { from: location.pathname } });
+              return;
+            }
+            setChecking(false);
+          }, AUTH_NULL_GRACE_MS);
+
+          return;
+        }
+
+        try {
+          const staffRef = doc(db, "staff", user.uid);
+          const staffSnap = await getDoc(staffRef);
+
+          if (!staffSnap.exists()) {
+            navigate("/dashboard", { replace: true });
+            return;
+          }
+
+          const staff = staffSnap.data() || {};
+
+          if (staff.active !== true) {
+            navigate("/dashboard", { replace: true });
+            return;
+          }
+
+          const isOnboardingRoute = location.pathname.startsWith("/staff/onboarding");
+          if (staff.onboarded !== true && !isOnboardingRoute) {
+            navigate("/staff/onboarding", { replace: true });
+            return;
+          }
+
+          setChecking(false);
+        } catch {
           navigate("/dashboard", { replace: true });
-          return;
         }
+      });
 
-        const staff = staffSnap.data() || {};
+      return unsub;
+    })();
 
-        // must be active
-        if (staff.active !== true) {
-          navigate("/dashboard", { replace: true });
-          return;
-        }
-
-        // ✅ Force onboarding if onboarded is NOT true (false or missing)
-        const isOnboardingRoute = location.pathname.startsWith("/staff/onboarding");
-        if (staff.onboarded !== true && !isOnboardingRoute) {
-          navigate("/staff/onboarding", { replace: true });
-          return;
-        }
-
-        setChecking(false);
-      } catch (e) {
-        // fail closed (but keep it deterministic)
-        navigate("/dashboard", { replace: true });
-      }
-    });
-
-    return () => unsub();
+    return () => {
+      cancelled = true;
+      clearTimer();
+      // unsub when resolved
+      unsubPromise.then((unsub) => unsub && unsub()).catch(() => {});
+    };
   }, [navigate, location.pathname]);
 
   if (checking) {
-    return (
-      <ScreenLoader
-        title="Preparing staff session…"
-        subtitle="Checking access and loading tasks"
-      />
-    );
+    return <ScreenLoader title="Preparing staff session…" subtitle="Checking access and loading tasks" />;
   }
 
   return children;

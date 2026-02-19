@@ -92,15 +92,15 @@ function StatusDots({ status }) {
   if (s === "approved" || s === "delivered") {
     return (
       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-white/80">
-        <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
-        <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+        <span className="h-1.5 w-1.5 rounded-full bg-white/80 dark:bg-zinc-900/60" />
+        <span className="h-1.5 w-1.5 rounded-full bg-white/80 dark:bg-zinc-900/60" />
       </span>
     );
   }
 
   return (
     <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-white/80">
-      <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+      <span className="h-1.5 w-1.5 rounded-full bg-white/80 dark:bg-zinc-900/60" />
     </span>
   );
 }
@@ -333,7 +333,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
   const taRef = useRef(null);
   useAutosizeTextArea(taRef, text, { maxRows: 6 });
 
-  const card = "rounded-2xl border border-zinc-200 bg-white shadow-xl";
+  const card = "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-xl";
   const bubbleBase = "max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap";
 
   useEffect(() => {
@@ -653,7 +653,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
           className={`${bubbleBase} ${
             mine
               ? "bg-emerald-600 text-white"
-              : "bg-white text-zinc-900 border border-zinc-200"
+              : "bg-white dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-800"
           }`}
         >
           <div
@@ -670,7 +670,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
               {safeStr(m.text) ? <div>{m.text}</div> : null}
 
               {m?.pdfMeta?.name ? (
-                <div className={`${mine ? "bg-white/10" : "bg-zinc-50"} rounded-xl p-2`}>
+                <div className={`${mine ? "bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
                   <div className="text-xs font-semibold opacity-90">PDF</div>
                   <div className="text-xs opacity-90">
                     {m?.pdfMeta?.name || "document.pdf"}
@@ -683,7 +683,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
             <div className="mt-1 grid gap-2">
               {safeStr(m.text) ? <div>{m.text}</div> : null}
               {m?.pdfMeta?.name ? (
-                <div className={`${mine ? "bg-white/10" : "bg-zinc-50"} rounded-xl p-2`}>
+                <div className={`${mine ? "bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
                   <div className="text-xs font-semibold opacity-90">PDF</div>
                   <div className="text-xs opacity-90">
                     {m?.pdfMeta?.name || "document.pdf"}
@@ -705,7 +705,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
           )}
 
           {status === "rejected" ? (
-            <div className="mt-2 rounded-xl bg-white/10 px-2 py-1 text-[11px] text-white/90">
+            <div className="mt-2 rounded-xl bg-white/10 dark:bg-zinc-900/60 px-2 py-1 text-[11px] text-white/90">
               Rejected by admin.
             </div>
           ) : null}
@@ -725,16 +725,16 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-3 sm:items-center">
       <div className={`w-full max-w-xl ${card}`}>
         {/* header */}
-        <div className="flex items-center justify-between gap-3 border-b border-zinc-200 p-4">
+        <div className="flex items-center justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 p-4">
           <div>
-            <div className="text-sm font-semibold text-zinc-900">Chat</div>
+            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Chat</div>
             <div className="text-xs text-zinc-500">Messages are reviewed before delivery.</div>
           </div>
 
           <button
             type="button"
             onClick={closeAndGoBack}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50"
             title="Close"
           >
             <IconX className="h-5 w-5" />
@@ -751,12 +751,12 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
 
           <div
             ref={scrollRef}
-            className="h-[50vh] overflow-y-auto rounded-2xl border border-zinc-200 bg-zinc-50/50 p-3"
+            className="h-[50vh] overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/40 p-3"
           >
             {loading ? (
-              <div className="text-sm text-zinc-600">Loading chat…</div>
+              <div className="text-sm text-zinc-600 dark:text-zinc-300">Loading chat…</div>
             ) : timeline.length === 0 ? (
-              <div className="text-sm text-zinc-600">No messages yet.</div>
+              <div className="text-sm text-zinc-600 dark:text-zinc-300">No messages yet.</div>
             ) : (
               <div className="grid gap-2">{timeline.map(renderBubble)}</div>
             )}
@@ -773,13 +773,13 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
             />
 
             {pickedPdf ? (
-              <div className="mb-2 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs">
-                <span className="font-semibold text-zinc-900">{pickedPdf.name}</span>
+              <div className="mb-2 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-xs">
+                <span className="font-semibold text-zinc-900 dark:text-zinc-100">{pickedPdf.name}</span>
                 <span className="text-zinc-500">{pickedPdf.size ? `${pickedPdf.size} bytes` : ""}</span>
                 <button
                   type="button"
                   onClick={() => setPickedPdf(null)}
-                  className="ml-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50"
+                  className="ml-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50"
                 >
                   Remove
                 </button>
@@ -790,7 +790,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
               <button
                 type="button"
                 onClick={openPicker}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 active:scale-[0.99]"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 active:scale-[0.99]"
                 title="Attach PDF (demo)"
               >
                 <IconPlus className="h-5 w-5" />
@@ -804,10 +804,10 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
                 placeholder="Type a message…"
                 rows={1}
                 className="w-full rounded-xl px-3 py-2 text-sm
-                           bg-white text-zinc-900
-                           dark:bg-zinc-900 dark:text-zinc-100
-                           placeholder:text-zinc-400
-                           border border-zinc-200 dark:border-zinc-700
+                           bg-white dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100
+                           dark:bg-zinc-900
+                           placeholder:text-zinc-400 dark:placeholder:text-zinc-500
+                           border border-zinc-200 dark:border-zinc-800 dark:border-zinc-700
                            focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 style={{ overflowY: "hidden" }}
               />
@@ -833,3 +833,4 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     </div>
   );
 }
+

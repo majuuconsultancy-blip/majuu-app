@@ -85,7 +85,7 @@ function RenderMessageBody({ m, mine }) {
         {txt ? <div className="break-words whitespace-pre-wrap">{txt}</div> : null}
 
         {hasPdf ? (
-          <div className={`${mine ? "bg-white/10" : "bg-zinc-50"} rounded-xl p-2`}>
+          <div className={`${mine ? "bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
             <div className="text-xs font-semibold opacity-90">PDF</div>
             <div className="text-xs opacity-90">
               📎 {m?.pdfMeta?.name || "document.pdf"}
@@ -388,7 +388,7 @@ export default function StaffRequestChatPanel({ requestId }) {
   const openBtn =
     "inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]";
   const badge =
-    "rounded-full border border-white/30 bg-white/15 px-2 py-0.5 text-[11px] font-semibold text-white";
+    "rounded-full border border-white/30 bg-white/15 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-white";
 
   const modal = (
     <div className="fixed inset-0 z-[9999]">
@@ -406,7 +406,7 @@ export default function StaffRequestChatPanel({ requestId }) {
       {/* sheet */}
       <div
         className={[
-          "absolute inset-x-0 bottom-0 top-0 bg-white flex flex-col",
+          "absolute inset-x-0 bottom-0 top-0 bg-white dark:bg-zinc-900/60 flex flex-col",
           "sm:inset-y-6 sm:left-1/2 sm:h-auto sm:max-h-[85vh] sm:w-[min(520px,92vw)] sm:-translate-x-1/2 sm:rounded-2xl sm:border sm:border-zinc-200",
           "shadow-[0_20px_60px_rgba(0,0,0,0.20)]",
           "transition-transform transition-opacity duration-200",
@@ -414,16 +414,16 @@ export default function StaffRequestChatPanel({ requestId }) {
         ].join(" ")}
       >
         {/* header */}
-        <div className="flex items-center justify-between gap-3 border-b border-zinc-200 p-4">
+        <div className="flex items-center justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 p-4">
           <div className="min-w-0">
-            <div className="font-semibold text-zinc-900">Request Chat</div>
+            <div className="font-semibold text-zinc-900 dark:text-zinc-100">Request Chat</div>
             <div className="text-xs text-zinc-500">Staff → Admin → User moderation</div>
           </div>
 
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 active:scale-[0.99]"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 active:scale-[0.99]"
             title="Close"
           >
             <IconX className="h-5 w-5" />
@@ -440,9 +440,9 @@ export default function StaffRequestChatPanel({ requestId }) {
         ) : null}
 
         {/* messages */}
-        <div ref={threadRef} className="flex-1 overflow-y-auto px-4 py-4 bg-zinc-50">
+        <div ref={threadRef} className="flex-1 overflow-y-auto px-4 py-4 bg-zinc-50 dark:bg-zinc-950">
           {timeline.length === 0 ? (
-            <div className="text-sm text-zinc-600">No messages yet.</div>
+            <div className="text-sm text-zinc-600 dark:text-zinc-300">No messages yet.</div>
           ) : (
             <div className="grid gap-2">
               {timeline.map((item) => {
@@ -460,7 +460,7 @@ export default function StaffRequestChatPanel({ requestId }) {
 
                 const bubbleBase = "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm";
                 const bubbleMine = "bg-emerald-600 text-white";
-                const bubbleOther = "bg-white text-zinc-900 border border-zinc-200";
+                const bubbleOther = "bg-white dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-800";
                 const bubbleRejected = "bg-rose-50 text-rose-800 border border-rose-200";
 
                 let statusChip = null;
@@ -513,7 +513,7 @@ export default function StaffRequestChatPanel({ requestId }) {
         </div>
 
         {/* composer */}
-        <div className="border-t border-zinc-200 bg-white p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {/* hidden file input */}
           <input
             ref={fileInputRef}
@@ -525,15 +525,15 @@ export default function StaffRequestChatPanel({ requestId }) {
 
           {/* picked file chip */}
           {pickedPdf ? (
-            <div className="mb-2 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs">
-              <span className="font-semibold text-zinc-900">{pickedPdf.name}</span>
+            <div className="mb-2 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-xs">
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{pickedPdf.name}</span>
               <span className="text-zinc-500">
                 {pickedPdf.size ? `${pickedPdf.size} bytes` : ""}
               </span>
               <button
                 type="button"
                 onClick={() => setPickedPdf(null)}
-                className="ml-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50"
+                className="ml-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50"
               >
                 Remove
               </button>
@@ -545,7 +545,7 @@ export default function StaffRequestChatPanel({ requestId }) {
               type="button"
               onClick={openPicker}
               disabled={sending}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
               title="Attach PDF"
             >
               <IconPlus className="h-5 w-5" />
@@ -555,7 +555,7 @@ export default function StaffRequestChatPanel({ requestId }) {
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="Type a message…"
-              className="h-11 w-full rounded-2xl border border-zinc-200 bg-white px-4 text-sm outline-none focus:border-emerald-200"
+              className="h-11 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-4 text-sm outline-none focus:border-emerald-200"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -604,3 +604,4 @@ export default function StaffRequestChatPanel({ requestId }) {
     </>
   );
 }
+

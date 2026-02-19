@@ -7,7 +7,7 @@ export default function CountrySelector({ onSelect }) {
         <button
           key={country}
           onClick={() => onSelect(country)}
-          className="p-3 border rounded-lg bg-white hover:bg-gray-100"
+          className="p-3 border rounded-lg bg-white dark:bg-zinc-900/60 hover:bg-gray-100"
         >
           {country}
         </button>
@@ -15,3 +15,4 @@ export default function CountrySelector({ onSelect }) {
     </div>
   );
 }
+

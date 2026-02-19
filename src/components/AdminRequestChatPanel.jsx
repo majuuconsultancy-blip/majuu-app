@@ -595,9 +595,9 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   };
 
   /* ---------- UI ---------- */
-  const card = "rounded-2xl border border-zinc-200 bg-white shadow-xl";
+  const card = "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-xl";
   const bubbleBase = "max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap";
-  const bubbleLeft = "bg-white text-zinc-900 border border-zinc-200";
+  const bubbleLeft = "bg-white dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-800";
   const bubbleRight = "bg-emerald-600 text-white";
 
   const smallBtn =
@@ -608,13 +608,13 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   return (
     <div className={`w-full ${card} h-[85vh] max-h-[85vh] overflow-hidden`}>
       {/* header */}
-      <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-zinc-200 bg-white p-4">
+      <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4">
         <div className="flex items-center gap-2">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/70">
             <IconChat className="h-5 w-5 text-emerald-800" />
           </span>
           <div className="min-w-0">
-            <div className="font-semibold text-zinc-900">Request chat</div>
+            <div className="font-semibold text-zinc-900 dark:text-zinc-100">Request chat</div>
             <div className="text-xs text-zinc-500">
               Left = User • Right = Staff & Admin • Accept/Hide pending inline.
               {assignedStaffUid ? (
@@ -635,7 +635,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             <button
               type="button"
               onClick={onClose}
-              className="rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
+              className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
             >
               Close
             </button>
@@ -657,10 +657,10 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
         <div className="flex-1 px-4 pb-3 pt-4 overflow-hidden">
           <div
             ref={threadRef}
-            className="h-full overflow-y-auto rounded-2xl border border-zinc-200 bg-zinc-50/50 p-3"
+            className="h-full overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/40 p-3"
           >
             {timeline.length === 0 ? (
-              <div className="text-sm text-zinc-600">No messages yet.</div>
+              <div className="text-sm text-zinc-600 dark:text-zinc-300">No messages yet.</div>
             ) : (
               <div className="grid gap-2">
                 {timeline.map((item) => {
@@ -722,7 +722,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                             {safeStr(m.text) ? <div className="break-words">{m.text}</div> : null}
 
                             {m?.pdfMeta?.name ? (
-                              <div className={`${isLeft ? "bg-zinc-50" : "bg-white/10"} rounded-xl p-2`}>
+                              <div className={`${isLeft ? "bg-zinc-50 dark:bg-zinc-950" : "bg-white/10 dark:bg-zinc-900/60"} rounded-xl p-2`}>
                                 <div className="text-xs font-semibold opacity-90">PDF</div>
                                 <div className="text-xs opacity-90">
                                   {m?.pdfMeta?.name || "document.pdf"}
@@ -756,7 +756,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                                 return hideSingle(m);
                               }}
                               disabled={busy}
-                              className={`${smallBtn} border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50`}
+                              className={`${smallBtn} border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-800 hover:bg-zinc-50`}
                             >
                               {busy ? "…" : "Hide"}
                             </button>
@@ -776,7 +776,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
         {/* composer */}
         <div
           ref={composerRef}
-          className="sticky bottom-0 z-20 border-t border-zinc-200 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+          className="sticky bottom-0 z-20 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
         >
           <input
             ref={fileInputRef}
@@ -791,7 +791,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             <select
               value={sendTo}
               onChange={(e) => setSendTo(e.target.value)}
-              className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-sm"
             >
               <option value="user">To User</option>
               <option value="staff">To Staff</option>
@@ -799,13 +799,13 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
           </div>
 
           {pickedPdf ? (
-            <div className="mt-2 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs">
-              <span className="font-semibold text-zinc-900">{pickedPdf.name}</span>
+            <div className="mt-2 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-xs">
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{pickedPdf.name}</span>
               <span className="text-zinc-500">{pickedPdf.size ? `${pickedPdf.size} bytes` : ""}</span>
               <button
                 type="button"
                 onClick={() => setPickedPdf(null)}
-                className="ml-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50"
+                className="ml-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50"
               >
                 Remove
               </button>
@@ -816,7 +816,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             <button
               type="button"
               onClick={openPicker}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 active:scale-[0.99]"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 active:scale-[0.99]"
               title="Attach PDF meta (demo)"
             >
               <IconPlus className="h-5 w-5" />
@@ -828,7 +828,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
               onChange={(e) => setText(e.target.value)}
               placeholder="Type admin message…"
               rows={1}
-              className="w-full resize-none rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-200"
+              className="w-full resize-none rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-4 py-3 text-sm outline-none focus:border-emerald-200"
               style={{ overflowY: "hidden" }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -857,3 +857,4 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     </div>
   );
 }
+

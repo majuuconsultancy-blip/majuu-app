@@ -202,9 +202,9 @@ export default function TrackScreen({ track }) {
     "bg-gradient-to-b from-emerald-50/50 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
 
   const countryCard =
-    "group w-full text-left rounded-3xl border bg-white/70 backdrop-blur p-4 shadow-sm transition will-change-transform";
+    "group w-full text-left rounded-3xl border bg-white/70 dark:bg-zinc-900/60 backdrop-blur p-4 shadow-sm transition will-change-transform";
   const countryCardHover =
-    "border-zinc-200 hover:border-emerald-200 hover:bg-white hover:shadow-md active:scale-[0.99] hover:-translate-y-[1px]";
+    "border-zinc-200 dark:border-zinc-800 hover:border-emerald-200 hover:bg-white hover:shadow-md active:scale-[0.99] hover:-translate-y-[1px]";
   const countryCardDark =
     "dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:bg-zinc-900";
 
@@ -213,13 +213,13 @@ export default function TrackScreen({ track }) {
       {/* ✅ page padding */}
       <div className="px-5 py-6 pb-10 max-w-xl mx-auto">
         {/* Header */}
-        <div className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white/60 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/50">
+        <div className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white/60 dark:bg-zinc-900/60 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/50">
           {/* ✅ small Tracks button (top-right) */}
           <button
             type="button"
             onClick={goToTracks}
             disabled={saving}
-            className="absolute right-4 bottom-3 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-900 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60
+            className="absolute right-4 bottom-3 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60
                        dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100 dark:hover:bg-zinc-950/45"
             title="Go to Tracks"
           >
@@ -244,7 +244,7 @@ export default function TrackScreen({ track }) {
           <div className="relative flex items-end justify-between gap-3 pr-24">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 border border-emerald-100 dark:bg-zinc-950/40 dark:border-emerald-900/40">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 dark:bg-zinc-900/60 border border-emerald-100 dark:bg-zinc-950/40 dark:border-emerald-900/40">
                   <HeaderIcon className="h-4 w-4 text-emerald-700 dark:text-emerald-200" />
                 </span>
                 {info.title}
@@ -302,7 +302,7 @@ export default function TrackScreen({ track }) {
                     aria-hidden="true"
                     className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl"
                   >
-                    <div className="absolute -left-20 top-0 h-full w-24 rotate-12 bg-white/40 blur-xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 dark:bg-white/10" />
+                    <div className="absolute -left-20 top-0 h-full w-24 rotate-12 bg-white/40 dark:bg-zinc-900/60 blur-xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 dark:bg-white/10" />
                   </div>
 
                   <div className="flex items-center justify-between gap-3">
@@ -315,7 +315,7 @@ export default function TrackScreen({ track }) {
                       </div>
                     </div>
 
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/50 text-zinc-700 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/70 group-hover:text-emerald-800 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200 dark:group-hover:border-emerald-900/40 dark:group-hover:bg-emerald-950/25 dark:group-hover:text-emerald-200">
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/70 group-hover:text-emerald-800 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200 dark:group-hover:border-emerald-900/40 dark:group-hover:bg-emerald-950/25 dark:group-hover:text-emerald-200">
                       <ChevronRight className="h-5 w-5" />
                     </span>
                   </div>
@@ -339,7 +339,7 @@ export default function TrackScreen({ track }) {
           >
             <motion.div
               className={[
-                "w-full max-w-md rounded-3xl border border-zinc-200 bg-white/80 p-5 shadow-xl backdrop-blur",
+                "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 p-5 shadow-xl backdrop-blur",
                 "dark:border-zinc-800 dark:bg-zinc-900/70",
                 "sm:mb-0 mb-4",
               ].join(" ")}
@@ -368,7 +368,7 @@ export default function TrackScreen({ track }) {
                   type="button"
                   onClick={closeModal}
                   disabled={saving}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/60 text-zinc-700 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60
                              dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200 dark:hover:bg-zinc-950/45"
                   aria-label="Close"
                   title="Close"
@@ -383,12 +383,12 @@ export default function TrackScreen({ track }) {
                   type="button"
                   onClick={() => startProcessAndGo("self")}
                   disabled={saving}
-                  className="group w-full rounded-3xl border border-zinc-200 bg-white/60 px-4 py-3 text-left text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-white active:scale-[0.99] disabled:opacity-60
+                  className="group w-full rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-left text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-white active:scale-[0.99] disabled:opacity-60
                              dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100 dark:hover:bg-zinc-950/45"
                 >
                   <div className="flex items-center gap-3">
-                    <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/40">
-                      <User className="h-5 w-5 text-zinc-700 dark:text-zinc-200" />
+                    <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 dark:border-zinc-800 dark:bg-zinc-950/40">
+                      <User className="h-5 w-5 text-zinc-700 dark:text-zinc-300 dark:text-zinc-200" />
                     </span>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -430,7 +430,7 @@ export default function TrackScreen({ track }) {
                   type="button"
                   onClick={closeModal}
                   disabled={saving}
-                  className="w-full rounded-3xl border border-zinc-200 bg-transparent px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60
+                  className="w-full rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-4 py-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60
                              dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-950/35"
                 >
                   Cancel
@@ -447,3 +447,4 @@ export default function TrackScreen({ track }) {
     </div>
   );
 }
+

@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "../utils/motionProxy";
+import { smartBack } from "../utils/navBack";
 import {
   Compass,
   Link2,
@@ -132,7 +133,7 @@ function LinkRow({ item, visitedMap, onRefreshVisited }) {
         "group relative flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 backdrop-blur-xl transition",
         visited
           ? "border-emerald-200/70 bg-emerald-50/55"
-          : "border-zinc-200/70 bg-white/70 hover:border-emerald-200 hover:bg-white/85",
+          : "border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 hover:border-emerald-200 hover:bg-white/85",
         "shadow-[0_10px_30px_rgba(0,0,0,0.06)]",
       ].join(" ")}
       title={item.url}
@@ -145,7 +146,7 @@ function LinkRow({ item, visitedMap, onRefreshVisited }) {
             className={[
               "inline-flex h-9 w-9 items-center justify-center rounded-2xl border",
               visited
-                ? "border-emerald-200 bg-white/60 text-emerald-800"
+                ? "border-emerald-200 bg-white/60 dark:bg-zinc-900/60 text-emerald-800"
                 : "border-emerald-100 bg-emerald-50/60 text-emerald-700",
             ].join(" ")}
           >
@@ -153,19 +154,19 @@ function LinkRow({ item, visitedMap, onRefreshVisited }) {
           </span>
 
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-zinc-900">
+            <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
               {item.title}
             </div>
 
             <div className="mt-0.5 flex flex-wrap items-center gap-2">
               {item.note ? (
-                <div className="truncate text-xs text-zinc-600">{item.note}</div>
+                <div className="truncate text-xs text-zinc-600 dark:text-zinc-300">{item.note}</div>
               ) : (
                 <div className="truncate text-xs text-zinc-500">Open resource</div>
               )}
 
               {domain ? (
-                <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700">
+                <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                   <ExternalLink className="h-3 w-3" />
                   {domain}
                 </span>
@@ -184,7 +185,7 @@ function LinkRow({ item, visitedMap, onRefreshVisited }) {
               "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition active:scale-[0.99]",
               copied
                 ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                : "border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white",
+                : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-white",
             ].join(" ")}
             aria-label="Copy search phrase"
             title="Copy search phrase"
@@ -195,12 +196,12 @@ function LinkRow({ item, visitedMap, onRefreshVisited }) {
         ) : null}
 
         {visited ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
+          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white/70 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
             <CheckCircle2 className="h-3.5 w-3.5" />
             Visited
           </span>
         ) : (
-          <span className="rounded-full border border-zinc-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-700">
+          <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
             Open
           </span>
         )}
@@ -216,12 +217,12 @@ function SectionCard({ title, subtitle, children, index }) {
       initial="hidden"
       animate="show"
       transition={{ delay: Math.min(index * 0.04, 0.18) }}
-      className="rounded-3xl border border-zinc-200/70 bg-white/72 p-5 shadow-[0_14px_40px_rgba(0,0,0,0.08)] backdrop-blur-xl"
+      className="rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/72 dark:bg-zinc-900/60 p-5 shadow-[0_14px_40px_rgba(0,0,0,0.08)] backdrop-blur-xl"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-sm font-extrabold text-zinc-900">{title}</h2>
-          {subtitle ? <p className="mt-1 text-xs text-zinc-600">{subtitle}</p> : null}
+          <h2 className="text-sm font-extrabold text-zinc-900 dark:text-zinc-100">{title}</h2>
+          {subtitle ? <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">{subtitle}</p> : null}
         </div>
 
         <div className="hidden sm:block h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/60" />
@@ -271,7 +272,7 @@ export default function TravelSelfHelp() {
   }, [navigate, backUrl]);
 
   const goBackToChoice = () => {
-    navigate(backUrl, { replace: true });
+    smartBack(navigate, "/app/home");
   };
 
   const qs = encodeURIComponent(country || "destination country");
@@ -349,7 +350,7 @@ export default function TravelSelfHelp() {
   }, [sections]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-emerald-50/60 via-white to-white">
+    <div className="min-h-screen bg-gradient-to-b from-emerald-50/60 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-200/30 blur-3xl" />
         <div className="absolute top-44 -left-24 h-72 w-72 rounded-full bg-sky-200/25 blur-3xl" />
@@ -359,7 +360,7 @@ export default function TravelSelfHelp() {
       <motion.div variants={pageIn} initial="hidden" animate="show" className="px-5 py-6 max-w-xl mx-auto">
         <button
           onClick={goBackToChoice}
-          className="mb-4 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:bg-white active:scale-[0.99]"
+          className="mb-4 inline-flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:bg-white active:scale-[0.99]"
         >
           <ArrowLeft className="h-4 w-4" />
           Back
@@ -368,16 +369,16 @@ export default function TravelSelfHelp() {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-extrabold text-emerald-900">
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/80 border border-emerald-100">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/80 dark:bg-zinc-900/60 border border-emerald-100">
                 <Compass className="h-4 w-4 text-emerald-700" />
               </span>
               Travel · Self-Help
             </div>
 
-            <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-zinc-900">
+            <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100">
               Plan your trip independently
             </h1>
-            <p className="mt-1 text-sm text-zinc-600">
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
               Tap resources below. We’ll mark what you already visited.
             </p>
           </div>
@@ -390,12 +391,12 @@ export default function TravelSelfHelp() {
           initial="rest"
           whileHover="hover"
           whileTap="tap"
-          className="mt-5 rounded-3xl border border-zinc-200/70 bg-white/72 p-4 shadow-[0_14px_40px_rgba(0,0,0,0.08)] backdrop-blur-xl"
+          className="mt-5 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/72 dark:bg-zinc-900/60 p-4 shadow-[0_14px_40px_rgba(0,0,0,0.08)] backdrop-blur-xl"
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs font-extrabold text-zinc-500">Selected country</p>
-              <p className="mt-1 truncate text-sm font-semibold text-zinc-900">
+              <p className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 {country || "Not selected"}
               </p>
             </div>
@@ -421,9 +422,9 @@ export default function TravelSelfHelp() {
             initial="rest"
             whileHover="hover"
             whileTap="tap"
-            className="rounded-3xl border border-dashed border-zinc-300 bg-white/55 p-5 text-sm text-zinc-700 backdrop-blur"
+            className="rounded-3xl border border-dashed border-zinc-300 dark:border-zinc-700 bg-white/55 dark:bg-zinc-900/60 p-5 text-sm text-zinc-700 dark:text-zinc-300 backdrop-blur"
           >
-            <div className="font-extrabold text-zinc-900">Safety tip</div>
+            <div className="font-extrabold text-zinc-900 dark:text-zinc-100">Safety tip</div>
             <p className="mt-1">
               For visa rules, trust the <b>official government</b> site more than random websites.
             </p>
@@ -435,3 +436,5 @@ export default function TravelSelfHelp() {
     </div>
   );
 }
+
+

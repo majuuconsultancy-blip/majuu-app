@@ -1,39 +1,79 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "../firebase";
 import { useLocation, useNavigate } from "react-router-dom";
 
+import { auth, authPersistenceReady } from "../firebase";
+
 const ADMIN_EMAIL = "brioneroo@gmail.com";
+const AUTH_NULL_GRACE_MS = 1100;
 
 export default function AdminGate({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [checking, setChecking] = useState(true);
 
+  const logoutTimerRef = useRef(null);
+
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => {
-      const email = (user?.email || "").toLowerCase();
+    let cancelled = false;
 
-      if (!user) {
-        navigate("/login", { replace: true, state: { from: location.pathname } });
-        return;
+    const clearTimer = () => {
+      if (logoutTimerRef.current) {
+        clearTimeout(logoutTimerRef.current);
+        logoutTimerRef.current = null;
       }
+    };
 
-      if (email !== ADMIN_EMAIL.toLowerCase()) {
-        navigate("/dashboard", { replace: true });
-        return;
-      }
+    const unsubPromise = (async () => {
+      try {
+        await authPersistenceReady;
+      } catch {}
+      if (cancelled) return () => {};
 
-      setChecking(false);
-    });
+      const unsub = onAuthStateChanged(auth, (user) => {
+        if (user) clearTimer();
 
-    return () => unsub();
+        if (!user) {
+          setChecking(true);
+
+          clearTimer();
+          logoutTimerRef.current = setTimeout(() => {
+            const u2 = auth.currentUser;
+            if (!u2) {
+              setChecking(false);
+              navigate("/login", { replace: true, state: { from: location.pathname } });
+              return;
+            }
+            setChecking(false);
+          }, AUTH_NULL_GRACE_MS);
+
+          return;
+        }
+
+        const email = (user?.email || "").toLowerCase();
+
+        if (email !== ADMIN_EMAIL.toLowerCase()) {
+          navigate("/dashboard", { replace: true });
+          return;
+        }
+
+        setChecking(false);
+      });
+
+      return unsub;
+    })();
+
+    return () => {
+      cancelled = true;
+      clearTimer();
+      unsubPromise.then((unsub) => unsub && unsub()).catch(() => {});
+    };
   }, [navigate, location.pathname]);
 
   if (checking) {
     return (
       <div className="p-6">
-        <p className="font-semibold">Checking admin access…</p>
+        <p className="font-semibold">Checking Admin access…</p>
       </div>
     );
   }

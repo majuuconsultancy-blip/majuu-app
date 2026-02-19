@@ -10,6 +10,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { auth } from "../firebase";
+import { smartBack } from "../utils/navBack";
 
 /* -------- Minimal icons (no emojis) -------- */
 function IconBack(props) {
@@ -93,7 +94,7 @@ function IconLogout(props) {
 
 function Tile({ title, subtitle, children }) {
   return (
-    <div className="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
+    <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -172,7 +173,7 @@ export default function SettingsScreen() {
     return true;
   }, [isPasswordUser, anyBusy, newEmail]);
 
-  const goBack = () => navigate("/app/profile");
+  const goBack = () => smartBack(navigate, "/app/home");
 
   const reauth = async (email, password) => {
     const user = auth.currentUser;
@@ -273,7 +274,7 @@ export default function SettingsScreen() {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
         <div className="mx-auto max-w-xl p-5">
-          <div className="animate-pulse rounded-3xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <div className="animate-pulse rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-5 dark:border-zinc-800 dark:bg-zinc-900/60">
             <div className="h-6 w-40 rounded bg-zinc-200 dark:bg-zinc-700" />
             <div className="mt-2 h-4 w-64 rounded bg-zinc-200 dark:bg-zinc-700" />
             <div className="mt-6 h-24 rounded-2xl bg-zinc-200 dark:bg-zinc-700" />
@@ -303,7 +304,7 @@ export default function SettingsScreen() {
           <button
             onClick={goBack}
             disabled={anyBusy}
-            className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-white disabled:opacity-60
+            className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-white disabled:opacity-60
                        dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
           >
             <IconBack className="h-5 w-5" />
@@ -324,7 +325,7 @@ export default function SettingsScreen() {
         ) : null}
 
         {/* Account info */}
-        <div className="mt-6 rounded-3xl border border-zinc-200 bg-white/70 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className="mt-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
           <div className="flex items-center gap-3">
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60 text-emerald-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
               <IconMail className="h-5 w-5" />
@@ -357,7 +358,7 @@ export default function SettingsScreen() {
             }
           >
             <div className="grid gap-3">
-              <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-950/40">
+              <div className="flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-950/40">
                 <IconLock className="h-5 w-5 text-zinc-500" />
                 <input
                   type="password"
@@ -365,7 +366,7 @@ export default function SettingsScreen() {
                   onChange={(e) => setCurrentPassword(e.target.value)}
                   placeholder="Current password"
                   disabled={!isPasswordUser || anyBusy}
-                  className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
+                  className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 dark:text-zinc-100"
                 />
               </div>
 
@@ -375,7 +376,7 @@ export default function SettingsScreen() {
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="New password (min 6 chars)"
                 disabled={!isPasswordUser || anyBusy}
-                className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
+                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
               />
 
               <input
@@ -384,7 +385,7 @@ export default function SettingsScreen() {
                 onChange={(e) => setNewPassword2(e.target.value)}
                 placeholder="Confirm new password"
                 disabled={!isPasswordUser || anyBusy}
-                className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
+                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
               />
 
               <button
@@ -398,7 +399,7 @@ export default function SettingsScreen() {
               <button
                 onClick={doResetPassword}
                 disabled={anyBusy || !userEmail}
-                className="w-full rounded-xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
+                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
               >
                 {busyReset ? "Please wait..." : "Send password reset email"}
               </button>
@@ -426,7 +427,7 @@ export default function SettingsScreen() {
                 onChange={(e) => setNewEmail(e.target.value)}
                 placeholder="New email address"
                 disabled={!isPasswordUser || anyBusy}
-                className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2.5 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
+                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
               />
 
               <button
@@ -450,7 +451,7 @@ export default function SettingsScreen() {
             <button
               onClick={doSignOut}
               disabled={anyBusy}
-              className="w-full rounded-xl border border-zinc-200 bg-white/60 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
+              className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
             >
               <span className="inline-flex items-center justify-center gap-2">
                 <IconLogout className="h-5 w-5" />
@@ -463,3 +464,4 @@ export default function SettingsScreen() {
     </div>
   );
 }
+

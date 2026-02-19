@@ -203,7 +203,7 @@ export default function AssignStaffPanel({ request }) {
   const selectedActive = selected?.__smart?.active !== false;
 
   const card =
-    "mt-4 rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur";
+    "mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur";
   const btn =
     "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99] disabled:opacity-60";
   const btnGreen = "border border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700";
@@ -285,7 +285,7 @@ export default function AssignStaffPanel({ request }) {
 
   return (
     <div className={card}>
-      <div className="text-sm font-semibold text-zinc-900">Assign staff</div>
+      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Assign staff</div>
       <div className="mt-1 text-xs text-zinc-500">
         Smart-sorted: success + speed + speciality match (blocked/inactive disabled).
       </div>
@@ -306,7 +306,7 @@ export default function AssignStaffPanel({ request }) {
         <select
           value={staffUid}
           onChange={(e) => setStaffUid(e.target.value)}
-          className="w-full rounded-2xl border border-zinc-200 bg-white/70 px-4 py-3 text-sm text-zinc-900 shadow-sm outline-none focus:border-emerald-200"
+          className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-4 py-3 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none focus:border-emerald-200"
         >
           <option value="">Select staff…</option>
 
@@ -338,7 +338,7 @@ export default function AssignStaffPanel({ request }) {
 
         {selectionHint ? (
           <div className="text-[11px] text-zinc-500">
-            Selected: <span className="font-semibold text-zinc-700">{selectionHint}</span>
+            Selected: <span className="font-semibold text-zinc-700 dark:text-zinc-300">{selectionHint}</span>
           </div>
         ) : null}
 
@@ -380,3 +380,4 @@ export default function AssignStaffPanel({ request }) {
     </div>
   );
 }
+

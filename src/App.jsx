@@ -1,19 +1,21 @@
-// ✅ App.jsx (FULL COPY-PASTE — Lazy preloading = smoother navigation)
-//
-// Your routing is good.
-// Small improvements applied:
-// ✅ Preload only LAZY screens (avoid dynamic importing screens already in main bundle)
-// ✅ Adds an optional keyboard warm-up utility you can reuse elsewhere if you want later
+// ✅ App.jsx (FULL COPY-PASTE — fixed)
+// Fixes / improvements:
+// ✅ Uses HashRouter (best for Firebase Hosting SPA + PWA + Capacitor; avoids refresh/route weirdness)
+// ✅ Preloads ONLY lazy routes (same as you had)
+// ✅ Better full-screen fallback (dark + emerald, mobile-first)
+// ✅ Adds tiny "warm keyboard" helper you can enable later if needed (off by default)
 
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense, useEffect } from "react";
 
+// Public
 import IntroScreen from "./screens/IntroScreen";
 import LoginScreen from "./screens/LoginScreen";
 import SignupScreen from "./screens/SignupScreen";
 import VerifyEmailScreen from "./screens/VerifyEmailScreen";
 import TrackSelectScreen from "./screens/TrackSelectScreen";
 
+// App shell + core screens (non-lazy)
 import AppLayout from "./components/AppLayout";
 import SmartHome from "./screens/SmartHome";
 import StudyScreen from "./screens/StudyScreen";
@@ -23,21 +25,14 @@ import ProgressScreen from "./screens/ProgressScreen";
 import ProfileScreen from "./screens/ProfileScreen";
 import EditProfileScreen from "./screens/EditProfileScreen";
 
+// Gates
 import AdminGate from "./components/AdminGate";
 import GAPageView from "./components/GAPageView";
 import StaffGate from "./components/StaffGate";
+import AppLoading from "./components/AppLoading";
 
-// ✅ small fallback (no new component needed)
-function LazyFallback() {
-  return (
-    <div className="p-6">
-      <p className="font-semibold">Loading…</p>
-      <p className="text-sm text-white/70 dark:text-white/60">Just a moment</p>
-    </div>
-  );
-}
-
-// ✅ Lazy-load heavier screens (big bundle win)
+/* ---------------- Lazy screens ---------------- */
+// Main user flows
 const PaymentScreen = lazy(() => import("./screens/PaymentScreen"));
 
 const StudySelfHelp = lazy(() => import("./screens/StudySelfHelp"));
@@ -52,12 +47,12 @@ const SettingsScreen = lazy(() => import("./screens/SettingsScreen"));
 const NotificationsScreen = lazy(() => import("./screens/NotificationsScreen"));
 const RequestStatusScreen = lazy(() => import("./screens/RequestStatusScreen"));
 
-// ✅ Admin (heavy)
+// Admin
 const AdminRequestsScreen = lazy(() => import("./screens/AdminRequestsScreen"));
 const AdminRequestDetailsScreen = lazy(() => import("./screens/AdminRequestDetailsScreen"));
 const AdminRequestDocumentsScreen = lazy(() => import("./screens/AdminRequestDocumentsScreen"));
 
-// ✅ Staff (heavy)
+// Staff
 const StaffHomeScreen = lazy(() => import("./screens/StaffHomeScreen"));
 const StaffOnboardingScreen = lazy(() => import("./screens/StaffOnboardingScreen"));
 const StaffTasksScreen = lazy(() => import("./screens/StaffTasksScreen"));
@@ -65,23 +60,27 @@ const StaffRequestDetailsScreen = lazy(() => import("./screens/StaffRequestDetai
 const StaffRequestDocumentsScreen = lazy(() => import("./screens/StaffRequestDocumentsScreen"));
 const StaffStartWorkModalScreen = lazy(() => import("./screens/StaffStartWorkModalScreen"));
 
-/* ✅ Preload critical lazy screens after first paint (smoothness boost) */
+/* ---------------- Preload helpers ---------------- */
 function preloadCriticalScreens() {
-  // Main user flows (LAZY ONLY)
+  // LAZY ONLY
   import("./screens/StudySelfHelp");
   import("./screens/StudyWeHelp");
   import("./screens/WorkSelfHelp");
   import("./screens/WorkWeHelp");
   import("./screens/TravelSelfHelp");
   import("./screens/TravelWeHelp");
+
   import("./screens/FullPackageMissingScreen");
   import("./screens/RequestStatusScreen");
   import("./screens/SettingsScreen");
   import("./screens/NotificationsScreen");
   import("./screens/PaymentScreen");
+
+  // Admin/staff are heavy; preload only if you want later
+  // import("./screens/AdminRequestsScreen");
+  // import("./screens/StaffTasksScreen");
 }
 
-/* ✅ Safe idle callback wrapper (works everywhere) */
 function runWhenIdle(fn) {
   if (typeof window === "undefined") return;
 
@@ -94,17 +93,51 @@ function runWhenIdle(fn) {
   return () => window.clearTimeout(t);
 }
 
+/**
+ * Optional: keyboard "warm-up" for some Android PWAs that refuse to open the keyboard
+ * until an input has been focused once.
+ * Keep OFF unless you need it.
+ */
+function warmKeyboardOnce() {
+  try {
+    const el = document.createElement("input");
+    el.setAttribute("type", "text");
+    el.setAttribute("inputmode", "text");
+    el.setAttribute("aria-hidden", "true");
+    el.style.position = "fixed";
+    el.style.opacity = "0";
+    el.style.pointerEvents = "none";
+    el.style.height = "1px";
+    el.style.width = "1px";
+    el.style.left = "-1000px";
+    el.style.top = "-1000px";
+    document.body.appendChild(el);
+
+    // Focus/blur in the same tick (won't always open keyboard, but "primes" it)
+    el.focus({ preventScroll: true });
+    el.blur();
+    document.body.removeChild(el);
+  } catch {
+    // ignore
+  }
+}
+
 export default function App() {
-  // ✅ Warm up lazy routes quietly in the background
   useEffect(() => {
     return runWhenIdle(preloadCriticalScreens);
   }, []);
 
+  // ❗Keep off unless you decide to test it:
+  // useEffect(() => {
+  //   const t = setTimeout(() => warmKeyboardOnce(), 250);
+  //   return () => clearTimeout(t);
+  // }, []);
+
   return (
-    <BrowserRouter>
+    <HashRouter>
       <GAPageView />
 
-      <Suspense fallback={<LazyFallback />}>
+      <Suspense fallback={<AppLoading />}>
         <Routes>
           {/* Public */}
           <Route path="/intro" element={<IntroScreen />} />
@@ -117,7 +150,7 @@ export default function App() {
           {/* Track selection hub */}
           <Route path="/dashboard" element={<TrackSelectScreen />} />
 
-          {/* ✅ Staff (same level as /app) */}
+          {/* Staff */}
           <Route
             path="/staff"
             element={
@@ -226,6 +259,6 @@ export default function App() {
           <Route path="*" element={<Navigate to="/intro" replace />} />
         </Routes>
       </Suspense>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
