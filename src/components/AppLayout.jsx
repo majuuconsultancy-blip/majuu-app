@@ -17,6 +17,7 @@ import OfflineBanner from "./OfflineBanner";
 import { authPersistenceReady } from "../firebase";
 
 const VALID_TRACKS = new Set(["study", "work", "travel"]);
+const AUTH_NULL_GRACE_MS = 1200;
 
 function IconHome(props) {
   return (
@@ -65,6 +66,11 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const online = useNetworkStatus();
+  const pathRef = useRef(location.pathname);
+
+  useEffect(() => {
+    pathRef.current = location.pathname;
+  }, [location.pathname]);
 
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [uid, setUid] = useState(null);
@@ -150,13 +156,13 @@ export default function AppLayout() {
               setActiveTrack(null);
               setUnreadCount(0);
               setCheckingAuth(false);
-              navigate("/login", { replace: true, state: { from: location.pathname } });
+              navigate("/login", { replace: true, state: { from: pathRef.current } });
               return;
             }
 
             // user came back -> keep session
             setCheckingAuth(false);
-          }, 2500);
+          }, AUTH_NULL_GRACE_MS);
 
           return;
         }
@@ -212,7 +218,7 @@ export default function AppLayout() {
         logoutTimerRef.current = null;
       }
     };
-  }, [navigate, location.pathname]);
+  }, [navigate]);
 
   const goSmartHome = () => {
     if (hasActiveProcess && activeTrack) {

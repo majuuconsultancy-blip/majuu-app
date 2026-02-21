@@ -7,7 +7,7 @@
 // - On close, navigate back to that saved route (replace), instead of relying on history
 // - If missing, fallback to /app/request/:id
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { onSnapshot, collection, doc } from "firebase/firestore";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -111,14 +111,14 @@ export default function RequestChatLauncher({ requestId }) {
     };
   }, [open]);
 
-  const openChat = () => {
+  const openChat = useCallback(() => {
     // ✅ capture the exact current screen (service request status screen)
     // so closing chat returns here, not to ProgressScreen.
     returnToRef.current = `${location.pathname}${location.search || ""}`;
     setOpen(true);
-  };
+  }, [location.pathname, location.search]);
 
-  const closeChat = () => {
+  const closeChat = useCallback(() => {
     setOpen(false);
 
     // ✅ return to where chat was opened from
@@ -130,7 +130,20 @@ export default function RequestChatLauncher({ requestId }) {
 
     // fallback: safe request status route
     if (rid) navigate(`/app/request/${rid}`, { replace: true });
-  };
+  }, [navigate, rid]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onAndroidBack = (event) => {
+      // Native Android back should close the open chat sheet before route navigation.
+      event.preventDefault();
+      closeChat();
+    };
+
+    window.addEventListener("majuu:back", onAndroidBack);
+    return () => window.removeEventListener("majuu:back", onAndroidBack);
+  }, [open, closeChat]);
 
   const btn =
     "w-full inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99]";

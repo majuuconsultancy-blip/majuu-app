@@ -1,12 +1,15 @@
-// ✅ App.jsx (FULL COPY-PASTE — fixed)
-// Fixes / improvements:
-// ✅ Uses HashRouter (best for Firebase Hosting SPA + PWA + Capacitor; avoids refresh/route weirdness)
-// ✅ Preloads ONLY lazy routes (same as you had)
-// ✅ Better full-screen fallback (dark + emerald, mobile-first)
-// ✅ Adds tiny "warm keyboard" helper you can enable later if needed (off by default)
-
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
-import { lazy, Suspense, useEffect } from "react";
+import {
+  BrowserRouter,
+  HashRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
+import { lazy, Suspense, useEffect, useRef } from "react";
+import { Capacitor } from "@capacitor/core";
+import { App as CapacitorApp } from "@capacitor/app";
 
 // Public
 import IntroScreen from "./screens/IntroScreen";
@@ -60,6 +63,10 @@ const StaffRequestDetailsScreen = lazy(() => import("./screens/StaffRequestDetai
 const StaffRequestDocumentsScreen = lazy(() => import("./screens/StaffRequestDocumentsScreen"));
 const StaffStartWorkModalScreen = lazy(() => import("./screens/StaffStartWorkModalScreen"));
 
+const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
+const ROOT_EXIT_PATHS = new Set(["/app/home", "/dashboard", "/staff", "/staff/tasks"]);
+const SAFE_FALLBACK_PATH = "/app/home";
+
 /* ---------------- Preload helpers ---------------- */
 function preloadCriticalScreens() {
   // LAZY ONLY
@@ -75,14 +82,10 @@ function preloadCriticalScreens() {
   import("./screens/SettingsScreen");
   import("./screens/NotificationsScreen");
   import("./screens/PaymentScreen");
-
-  // Admin/staff are heavy; preload only if you want later
-  // import("./screens/AdminRequestsScreen");
-  // import("./screens/StaffTasksScreen");
 }
 
 function runWhenIdle(fn) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") return undefined;
 
   if ("requestIdleCallback" in window) {
     const id = window.requestIdleCallback(() => fn(), { timeout: 1500 });
@@ -93,49 +96,64 @@ function runWhenIdle(fn) {
   return () => window.clearTimeout(t);
 }
 
-/**
- * Optional: keyboard "warm-up" for some Android PWAs that refuse to open the keyboard
- * until an input has been focused once.
- * Keep OFF unless you need it.
- */
-function warmKeyboardOnce() {
-  try {
-    const el = document.createElement("input");
-    el.setAttribute("type", "text");
-    el.setAttribute("inputmode", "text");
-    el.setAttribute("aria-hidden", "true");
-    el.style.position = "fixed";
-    el.style.opacity = "0";
-    el.style.pointerEvents = "none";
-    el.style.height = "1px";
-    el.style.width = "1px";
-    el.style.left = "-1000px";
-    el.style.top = "-1000px";
-    document.body.appendChild(el);
+function AndroidBackHandler() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const pathRef = useRef(location.pathname);
 
-    // Focus/blur in the same tick (won't always open keyboard, but "primes" it)
-    el.focus({ preventScroll: true });
-    el.blur();
-    document.body.removeChild(el);
-  } catch {
-    // ignore
-  }
+  useEffect(() => {
+    pathRef.current = location.pathname;
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!IS_NATIVE_PLATFORM) return undefined;
+
+    let cleanedUp = false;
+    let removeListener = null;
+
+    // Android hardware back needs a single global policy to avoid random exits/logouts.
+    const onBackButton = async () => {
+      const modalBackEvent = new CustomEvent("majuu:back", { cancelable: true });
+      window.dispatchEvent(modalBackEvent);
+      if (modalBackEvent.defaultPrevented) return;
+
+      const idx = typeof window.history.state?.idx === "number" ? window.history.state.idx : 0;
+      const canGoBack = idx > 0 || window.history.length > 1;
+      if (canGoBack) {
+        navigate(-1);
+        return;
+      }
+
+      if (ROOT_EXIT_PATHS.has(pathRef.current)) {
+        await CapacitorApp.exitApp();
+        return;
+      }
+
+      navigate(SAFE_FALLBACK_PATH, { replace: true });
+    };
+
+    CapacitorApp.addListener("backButton", onBackButton).then((listener) => {
+      if (cleanedUp) {
+        listener.remove();
+        return;
+      }
+      removeListener = () => listener.remove();
+    });
+
+    return () => {
+      cleanedUp = true;
+      if (removeListener) removeListener();
+    };
+  }, [navigate]);
+
+  return null;
 }
 
-export default function App() {
-  useEffect(() => {
-    return runWhenIdle(preloadCriticalScreens);
-  }, []);
-
-  // ❗Keep off unless you decide to test it:
-  // useEffect(() => {
-  //   const t = setTimeout(() => warmKeyboardOnce(), 250);
-  //   return () => clearTimeout(t);
-  // }, []);
-
+function AppRoutes() {
   return (
-    <HashRouter>
+    <>
       <GAPageView />
+      <AndroidBackHandler />
 
       <Suspense fallback={<AppLoading />}>
         <Routes>
@@ -259,6 +277,17 @@ export default function App() {
           <Route path="*" element={<Navigate to="/intro" replace />} />
         </Routes>
       </Suspense>
-    </HashRouter>
+    </>
+  );
+}
+
+export default function App() {
+  useEffect(() => runWhenIdle(preloadCriticalScreens), []);
+
+  const Router = IS_NATIVE_PLATFORM ? HashRouter : BrowserRouter;
+  return (
+    <Router>
+      <AppRoutes />
+    </Router>
   );
 }

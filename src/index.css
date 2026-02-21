@@ -2,6 +2,20 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ✅ GLOBAL SCALE FIX (affects Capacitor WebView rendering) */
+html {
+  /* ↓ Change this ONE value if you want smaller/larger */
+  font-size: 14px;
+
+  /* Prevent Android WebView from auto enlarging text */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+
+  /* Improves font rendering consistency inside WebView */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 @layer base {
   html,
   body {
@@ -9,12 +23,7 @@
   }
 }
 
-/* Optional mobile typography fix */
-html {
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
-}
-
+/* Prevent SVGs from inheriting weird inline spacing */
 svg {
   display: block;
 }

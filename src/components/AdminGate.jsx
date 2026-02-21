@@ -5,7 +5,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { auth, authPersistenceReady } from "../firebase";
 
 const ADMIN_EMAIL = "brioneroo@gmail.com";
-const AUTH_NULL_GRACE_MS = 1100;
+const AUTH_NULL_GRACE_MS = 1200;
 
 export default function AdminGate({ children }) {
   const navigate = useNavigate();
@@ -13,6 +13,11 @@ export default function AdminGate({ children }) {
   const [checking, setChecking] = useState(true);
 
   const logoutTimerRef = useRef(null);
+  const pathRef = useRef(location.pathname);
+
+  useEffect(() => {
+    pathRef.current = location.pathname;
+  }, [location.pathname]);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,7 +46,7 @@ export default function AdminGate({ children }) {
             const u2 = auth.currentUser;
             if (!u2) {
               setChecking(false);
-              navigate("/login", { replace: true, state: { from: location.pathname } });
+              navigate("/login", { replace: true, state: { from: pathRef.current } });
               return;
             }
             setChecking(false);
@@ -68,7 +73,7 @@ export default function AdminGate({ children }) {
       clearTimer();
       unsubPromise.then((unsub) => unsub && unsub()).catch(() => {});
     };
-  }, [navigate, location.pathname]);
+  }, [navigate]);
 
   if (checking) {
     return (

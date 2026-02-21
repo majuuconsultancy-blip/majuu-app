@@ -1,7 +1,7 @@
 // ✅ src/components/AdminRequestChatLauncher.jsx
 // Simple launcher that opens AdminRequestChatPanel in a scrollable modal.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AdminRequestChatPanel from "./AdminRequestChatPanel";
 
 function safeStr(x) {
@@ -30,6 +30,19 @@ function IconChat(props) {
 export default function AdminRequestChatLauncher({ requestId }) {
   const rid = useMemo(() => safeStr(requestId), [requestId]);
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onAndroidBack = (event) => {
+      // Let the global Android back handler close this modal first.
+      event.preventDefault();
+      setOpen(false);
+    };
+
+    window.addEventListener("majuu:back", onAndroidBack);
+    return () => window.removeEventListener("majuu:back", onAndroidBack);
+  }, [open]);
 
   const btn =
     "inline-flex items-center justify-center gap-2 rounded-2xl border px-3.5 py-2 text-sm font-semibold shadow-sm transition active:scale-[0.99]";

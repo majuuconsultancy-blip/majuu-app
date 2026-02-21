@@ -1,0 +1,12 @@
+{
+  "appId": "com.majuu.app",
+  "appName": "majuu-app",
+  "webDir": "dist",
+  "plugins": {
+    "SplashScreen": {
+      "layoutName": "launch_screen",
+      "androidScaleType": "FIT_CENTER",
+      "backgroundColor": "#F9F9F9"
+    }
+  }
+}

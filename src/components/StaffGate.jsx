@@ -6,7 +6,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { auth, db, authPersistenceReady } from "../firebase";
 import ScreenLoader from "./ScreenLoader";
 
-const AUTH_NULL_GRACE_MS = 1100;
+const AUTH_NULL_GRACE_MS = 1200;
 
 export default function StaffGate({ children }) {
   const navigate = useNavigate();
@@ -14,6 +14,11 @@ export default function StaffGate({ children }) {
 
   const [checking, setChecking] = useState(true);
   const logoutTimerRef = useRef(null);
+  const pathRef = useRef(location.pathname);
+
+  useEffect(() => {
+    pathRef.current = location.pathname;
+  }, [location.pathname]);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,7 +47,7 @@ export default function StaffGate({ children }) {
             const u2 = auth.currentUser;
             if (!u2) {
               setChecking(false);
-              navigate("/login", { replace: true, state: { from: location.pathname } });
+              navigate("/login", { replace: true, state: { from: pathRef.current } });
               return;
             }
             setChecking(false);
@@ -67,7 +72,7 @@ export default function StaffGate({ children }) {
             return;
           }
 
-          const isOnboardingRoute = location.pathname.startsWith("/staff/onboarding");
+          const isOnboardingRoute = pathRef.current.startsWith("/staff/onboarding");
           if (staff.onboarded !== true && !isOnboardingRoute) {
             navigate("/staff/onboarding", { replace: true });
             return;
@@ -88,7 +93,7 @@ export default function StaffGate({ children }) {
       // unsub when resolved
       unsubPromise.then((unsub) => unsub && unsub()).catch(() => {});
     };
-  }, [navigate, location.pathname]);
+  }, [navigate]);
 
   if (checking) {
     return <ScreenLoader title="Preparing staff session…" subtitle="Checking access and loading tasks" />;

@@ -4,7 +4,7 @@
 // - modal contains StaffRequestChatPanel (the real chat UI)
 // - closes cleanly, no page zoom issues
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import StaffRequestChatPanel from "./StaffRequestChatPanel";
 
 function IconChat(props) {
@@ -41,6 +41,19 @@ function IconX(props) {
 
 export default function StaffRequestChatLauncher({ requestId }) {
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onAndroidBack = (event) => {
+      // Let the global Android back handler close this modal first.
+      event.preventDefault();
+      setOpen(false);
+    };
+
+    window.addEventListener("majuu:back", onAndroidBack);
+    return () => window.removeEventListener("majuu:back", onAndroidBack);
+  }, [open]);
 
   return (
     <>
