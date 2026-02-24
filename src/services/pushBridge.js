@@ -8,6 +8,26 @@ function safeStr(value) {
   return String(value || "").trim();
 }
 
+function safeJsonStringify(value) {
+  const seen = new WeakSet();
+  try {
+    return JSON.stringify(
+      value,
+      (key, val) => {
+        if (typeof val === "object" && val !== null) {
+          if (seen.has(val)) return "[Circular]";
+          seen.add(val);
+        }
+        if (typeof val === "function") return `[Function ${val.name || "anonymous"}]`;
+        return val;
+      },
+      2
+    );
+  } catch (error) {
+    return `<<stringify_failed:${safeStr(error?.message || error)}>>`;
+  }
+}
+
 const ADMIN_EMAIL = "brioneroo@gmail.com";
 const localDedupe = new Set();
 
@@ -40,6 +60,10 @@ function isVisibleForeground() {
   } catch {
     return false;
   }
+}
+
+function isAndroidNative() {
+  return isNative() && platformName() === "android";
 }
 
 function hashToInt(seed) {
@@ -164,6 +188,7 @@ export async function scheduleForegroundLocalNotification({
           id: hashToInt(`${key}:${Date.now()}`),
           title: safeStr(title) || "Notification",
           body: safeStr(body) || "You have an update.",
+          channelId: "default",
           schedule: { at: new Date(Date.now() + 250) },
           extra: {
             route: safeStr(route),
@@ -181,6 +206,32 @@ export async function scheduleForegroundLocalNotification({
 
 export function clearPushBridgeDedupe() {
   localDedupe.clear();
+}
+
+async function ensureLocalNotificationsPermission() {
+  try {
+    const perm = await LocalNotifications.checkPermissions();
+    if (safeStr(perm?.display) === "granted") return true;
+    const req = await LocalNotifications.requestPermissions();
+    return safeStr(req?.display) === "granted";
+  } catch (error) {
+    console.warn("LocalNotifications permission check/request failed:", error?.message || error);
+    return false;
+  }
+}
+
+async function ensureAndroidDefaultNotificationChannel() {
+  if (!isAndroidNative()) return;
+  try {
+    await LocalNotifications.createChannel({
+      id: "default",
+      name: "MAJUU",
+      importance: 5,
+    });
+    console.log("LocalNotifications channel ready: default");
+  } catch (error) {
+    console.warn("LocalNotifications.createChannel failed:", error?.message || error);
+  }
 }
 
 async function upsertPushToken({ uid, role, token }) {
@@ -240,6 +291,7 @@ export function initPushBridge({ navigate, role, uid }) {
   let localActionHandle = null;
   let registrationHandle = null;
   let registrationErrorHandle = null;
+  let pushReceivedHandle = null;
 
   const onTap = (payload) => {
     try {
@@ -250,6 +302,20 @@ export function initPushBridge({ navigate, role, uid }) {
   };
 
   PushNotifications.addListener("pushNotificationActionPerformed", (event) => {
+    console.log("pushNotificationActionPerformed payload", safeJsonStringify(event));
+    const payload = parsePayload(event);
+    const directRoute = safeStr(payload?.route);
+    if (directRoute && typeof activeNavigate === "function") {
+      try {
+        const finalRoute = setOpenChatSessionFlag(directRoute);
+        if (finalRoute) {
+          activeNavigate(finalRoute);
+          return;
+        }
+      } catch (error) {
+        console.warn("pushBridge direct route navigation failed:", error?.message || error);
+      }
+    }
     onTap(event);
   }).then((handle) => {
     if (disposed) {
@@ -257,6 +323,42 @@ export function initPushBridge({ navigate, role, uid }) {
       return;
     }
     pushActionHandle = handle;
+  });
+
+  PushNotifications.addListener("pushNotificationReceived", (event) => {
+    console.log("pushNotificationReceived payload", safeJsonStringify(event));
+    if (!isVisibleForeground()) return;
+
+    const payload = parsePayload(event);
+    const title =
+      safeStr(event?.title) ||
+      safeStr(event?.notification?.title) ||
+      "MAJUU";
+    const body =
+      safeStr(event?.body) ||
+      safeStr(event?.notification?.body) ||
+      "You have an update.";
+    const route = safeStr(payload?.route) || resolveRouteFromPayload(event);
+    const dedupeKey =
+      safeStr(payload?.notificationId) ||
+      safeStr(payload?.requestId) ||
+      `push:${title}:${body}:${route}`;
+
+    scheduleForegroundLocalNotification({
+      dedupeKey,
+      title,
+      body,
+      route,
+      extra: payload,
+    }).catch((error) => {
+      console.warn("pushBridge foreground local notification failed:", error?.message || error);
+    });
+  }).then((handle) => {
+    if (disposed) {
+      handle.remove();
+      return;
+    }
+    pushReceivedHandle = handle;
   });
 
   LocalNotifications.addListener("localNotificationActionPerformed", (event) => {
@@ -286,6 +388,7 @@ export function initPushBridge({ navigate, role, uid }) {
 
   PushNotifications.addListener("registrationError", (error) => {
     console.warn("Push registration error:", error);
+    console.warn("Push registration error (full):", safeJsonStringify(error));
   }).then((handle) => {
     if (disposed) {
       handle.remove();
@@ -296,6 +399,11 @@ export function initPushBridge({ navigate, role, uid }) {
 
   (async () => {
     try {
+      if (isAndroidNative()) {
+        await ensureLocalNotificationsPermission();
+        await ensureAndroidDefaultNotificationChannel();
+      }
+
       const sessionKey = `${safeStr(activeSession.role)}:${safeStr(activeSession.uid)}`;
       if (!safeStr(activeSession.uid)) return;
       if (pushRegisterSessionKey === sessionKey) return;
@@ -326,6 +434,9 @@ export function initPushBridge({ navigate, role, uid }) {
     } catch {}
     try {
       localActionHandle?.remove?.();
+    } catch {}
+    try {
+      pushReceivedHandle?.remove?.();
     } catch {}
     try {
       registrationHandle?.remove?.();
