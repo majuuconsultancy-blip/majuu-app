@@ -347,10 +347,11 @@ async function pollNotificationsOnce() {
 
   try {
     const snap = await firestore
-      .collectionGroup("notifications")
-      .orderBy("createdAt", "desc")
-      .limit(POLL_LIMIT)
-      .get();
+  .collectionGroup("notifications")
+  .orderBy("createdAt", "desc")
+  .orderBy(admin.firestore.FieldPath.documentId(), "desc") // ✅ matches __name__
+  .limit(POLL_LIMIT)
+  .get();
 
     const candidates = snap.docs
       .filter((d) => {
