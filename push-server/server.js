@@ -395,6 +395,18 @@ async function pollNotificationsOnce() {
   pollInFlight = true;
 
   try {
+    console.log(`[${nowIso()}] poll query`, {
+      collectionGroup: "notifications",
+      orderBy: [{ field: "createdAt", direction: "desc" }],
+      limit: POLL_LIMIT,
+      filters: [],
+      indexMatch: {
+        collectionId: "notifications",
+        queryScope: "COLLECTION_GROUP",
+        fields: [{ field: "createdAt", order: "DESCENDING" }],
+      },
+    });
+
     const snap = await firestore
       .collectionGroup("notifications")
       .orderBy("createdAt", "desc")
