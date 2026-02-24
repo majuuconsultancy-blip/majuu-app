@@ -1,28 +1,22 @@
-import { motion, AnimatePresence } from "../utils/motionProxy";
+import { motion } from "../utils/motionProxy";
 
-function isStandalone() {
-  return (
-    window.matchMedia?.("(display-mode: standalone)")?.matches ||
-    window.navigator.standalone === true
-  );
-}
+const pageTransition = {
+  duration: 0.16,
+  ease: [0.2, 0.8, 0.2, 1],
+};
 
 export default function PageTransitions({ children }) {
-  // ✅ In installed app → NO animation at all
-  if (isStandalone()) {
-    return <div style={{ height: "100%" }}>{children}</div>;
-  }
-
-  // ✅ In browser → keep your animation
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8 }}
+      className="route-transition-shell"
+      initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -6 }}
-      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+      exit={{ opacity: 0, y: 2 }}
+      transition={pageTransition}
       style={{ height: "100%" }}
     >
       {children}
     </motion.div>
   );
 }
+

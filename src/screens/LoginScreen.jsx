@@ -218,9 +218,9 @@ function ModalShell({ open, title, subtitle, children, onClose, busy }) {
         if (e.target === e.currentTarget) onClose?.();
       }}
     >
-      <div className="absolute inset-0 bg-black/35 backdrop-blur-[2px]" />
+      <div className="absolute inset-0 bg-black/35 backdrop-blur-[2px] motion-modal-backdrop anim-in-fade" />
       <div className="relative min-h-[100dvh] flex items-end sm:items-center justify-center p-0 sm:p-4">
-        <div className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/85 dark:bg-zinc-900/60 shadow-xl backdrop-blur-xl px-5 py-5">
+        <div className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/85 dark:bg-zinc-900/60 shadow-lg backdrop-blur-xl px-5 py-5 motion-modal-panel anim-in-pop">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">{title}</h2>

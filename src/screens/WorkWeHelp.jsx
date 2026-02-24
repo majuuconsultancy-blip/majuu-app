@@ -31,6 +31,8 @@ import {
   MessageSquareQuote,
   ClipboardCheck,
 } from "lucide-react";
+import AppIcon from "../components/AppIcon";
+import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
 
 import { auth } from "../firebase";
 import RequestModal from "../components/RequestModal";
@@ -88,22 +90,21 @@ function Chip({ active, children, onClick }) {
           : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-white",
       ].join(" ")}
     >
-      <Tags className="h-3.5 w-3.5 opacity-80" />
+      <AppIcon size={ICON_SM} icon={Tags} className="opacity-80" />
       {children}
     </button>
   );
 }
 
 function ServiceIcon({ tag, title }) {
-  const cls = "h-4.5 w-4.5";
-  if (title === "Document Review") return <FileCheck2 className={cls} />;
-  if (title === "Passport Application") return <IdCard className={cls} />;
-  if (tag === "Visa") return <MapPinned className={cls} />;
-  if (tag === "Docs") return <Package className={cls} />;
-  if (tag === "CV") return <FileText className={cls} />;
-  if (tag === "Jobs") return <Target className={cls} />;
-  if (tag === "Interview") return <MessageSquareQuote className={cls} />;
-  return <Package className={cls} />;
+  if (title === "Document Review") return <AppIcon size={ICON_SM} icon={FileCheck2} />;
+  if (title === "Passport Application") return <AppIcon size={ICON_SM} icon={IdCard} />;
+  if (tag === "Visa") return <AppIcon size={ICON_SM} icon={MapPinned} />;
+  if (tag === "Docs") return <AppIcon size={ICON_SM} icon={Package} />;
+  if (tag === "CV") return <AppIcon size={ICON_SM} icon={FileText} />;
+  if (tag === "Jobs") return <AppIcon size={ICON_SM} icon={Target} />;
+  if (tag === "Interview") return <AppIcon size={ICON_SM} icon={MessageSquareQuote} />;
+  return <AppIcon size={ICON_SM} icon={Package} />;
 }
 
 function ServiceTile({ s, disabled, onClick }) {
@@ -134,7 +135,7 @@ function ServiceTile({ s, disabled, onClick }) {
 
             {isDocReview ? (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/70 px-2 py-0.5 text-[11px] font-extrabold text-emerald-900">
-                <FileCheck2 className="h-4 w-4" />
+                <AppIcon size={ICON_SM} icon={FileCheck2} />
                 Attach PDFs
               </span>
             ) : null}
@@ -145,7 +146,7 @@ function ServiceTile({ s, disabled, onClick }) {
         </div>
 
         <span className="inline-flex h-11 w-11 items-center justify-center rounded-3xl border border-emerald-100 bg-emerald-50/70 text-emerald-800 shadow-sm">
-          <ArrowRight className="h-5 w-5" />
+          <AppIcon size={ICON_MD} icon={ArrowRight} />
         </span>
       </div>
     </motion.button>
@@ -401,7 +402,7 @@ export default function WorkWeHelp() {
           onClick={goBackToChoice}
           className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-white/60 px-3 py-2 text-sm font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-50/70 hover:border-emerald-300 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-emerald-200 dark:border-emerald-900/40 dark:bg-zinc-900/60 dark:text-emerald-200 dark:hover:bg-emerald-950/25 dark:focus:ring-emerald-300/30"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <AppIcon size={ICON_SM} icon={ArrowLeft} />
           Back
         </button>
 
@@ -410,7 +411,7 @@ export default function WorkWeHelp() {
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-extrabold text-emerald-900">
               <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/80 dark:bg-zinc-900/60 border border-emerald-100">
-                <Briefcase className="h-4 w-4 text-emerald-700" />
+                <AppIcon size={ICON_SM} className="text-emerald-700" icon={Briefcase} />
               </span>
               Work · We-Help
             </div>
@@ -420,7 +421,7 @@ export default function WorkWeHelp() {
             </h1>
 
             <p className="mt-1 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
-              <MapPinned className="h-4 w-4 text-emerald-700" />
+              <AppIcon size={ICON_SM} icon={MapPinned} className="text-emerald-700" />
               Destination: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{country}</span>
             </p>
           </div>
@@ -468,7 +469,7 @@ export default function WorkWeHelp() {
               </div>
 
               <span className="inline-flex h-11 w-11 items-center justify-center rounded-3xl border border-amber-200 bg-white/70 dark:bg-zinc-900/60 text-amber-900 shadow-sm">
-                <ShieldCheck className="h-5 w-5" />
+                <AppIcon size={ICON_MD} icon={ShieldCheck} />
               </span>
             </div>
 
@@ -497,7 +498,7 @@ export default function WorkWeHelp() {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1.5 text-xs font-extrabold text-emerald-900">
-                <Sparkles className="h-4 w-4" />
+                <AppIcon size={ICON_SM} icon={Sparkles} />
                 Full package · Best value
               </div>
 
@@ -510,7 +511,7 @@ export default function WorkWeHelp() {
             </div>
 
             <span className="shrink-0 inline-flex h-12 w-12 items-center justify-center rounded-3xl border border-emerald-100 bg-emerald-50/80 text-emerald-800 shadow-sm">
-              <ClipboardCheck className="h-6 w-6" />
+              <AppIcon size={ICON_LG} icon={ClipboardCheck} />
             </span>
           </div>
 
@@ -518,7 +519,7 @@ export default function WorkWeHelp() {
             {FULL_PACKAGE.map((item) => (
               <li key={item} className="flex items-start gap-2">
                 <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50/70 text-emerald-800">
-                  <BadgeCheck className="h-3.5 w-3.5" />
+                  <AppIcon size={ICON_SM} icon={BadgeCheck} />
                 </span>
                 <span className="min-w-0">{item}</span>
               </li>
@@ -563,7 +564,7 @@ export default function WorkWeHelp() {
           <div className="mt-4 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/72 dark:bg-zinc-900/60 p-3 shadow-sm backdrop-blur-xl">
             <div className="flex items-center gap-2">
               <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/70 text-emerald-800">
-                <Search className="h-5 w-5" />
+                <AppIcon size={ICON_MD} icon={Search} />
               </span>
 
               <div className="min-w-0 flex-1">
@@ -583,12 +584,12 @@ export default function WorkWeHelp() {
                   aria-label="Clear search"
                   title="Clear"
                 >
-                  <X className="h-5 w-5" />
+                  <AppIcon size={ICON_MD} icon={X} />
                 </button>
               ) : null}
 
               <span className="hidden sm:inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300">
-                <Filter className="h-5 w-5" />
+                <AppIcon size={ICON_MD} icon={Filter} />
               </span>
             </div>
 

@@ -18,6 +18,8 @@ import {
   Copy,
   ExternalLink,
 } from "lucide-react";
+import AppIcon from "../components/AppIcon";
+import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
 
 /* ---------- Visited links memory ---------- */
 const VISITED_KEY = "majuu_visited_links_v1";
@@ -150,7 +152,7 @@ function LinkRow({ item, visitedMap, onRefreshVisited }) {
                 : "border-emerald-100 bg-emerald-50/60 text-emerald-700",
             ].join(" ")}
           >
-            <Link2 className="h-4 w-4" />
+            <AppIcon size={ICON_SM} icon={Link2} />
           </span>
 
           <div className="min-w-0">
@@ -167,7 +169,7 @@ function LinkRow({ item, visitedMap, onRefreshVisited }) {
 
               {domain ? (
                 <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-                  <ExternalLink className="h-3 w-3" />
+                  <AppIcon size={ICON_SM} icon={ExternalLink} />
                   {domain}
                 </span>
               ) : null}
@@ -190,14 +192,14 @@ function LinkRow({ item, visitedMap, onRefreshVisited }) {
             aria-label="Copy search phrase"
             title="Copy search phrase"
           >
-            <Copy className="h-3.5 w-3.5" />
+            <AppIcon size={ICON_SM} icon={Copy} />
             {copied ? "Copied" : "Copy"}
           </button>
         ) : null}
 
         {visited ? (
           <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white/70 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
-            <CheckCircle2 className="h-3.5 w-3.5" />
+            <AppIcon size={ICON_SM} icon={CheckCircle2} />
             Visited
           </span>
         ) : (
@@ -357,7 +359,7 @@ export default function StudySelfHelp() {
           onClick={goBackToChoice}
           className="mb-4 inline-flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:bg-white active:scale-[0.99]"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <AppIcon size={ICON_SM} icon={ArrowLeft} />
           Back
         </button>
 
@@ -365,7 +367,7 @@ export default function StudySelfHelp() {
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-extrabold text-emerald-900">
               <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/80 dark:bg-zinc-900/60 border border-emerald-100">
-                <BookOpen className="h-4 w-4 text-emerald-700" />
+                <AppIcon size={ICON_SM} className="text-emerald-700" icon={BookOpen} />
               </span>
               Study Abroad · Self-Help
             </div>

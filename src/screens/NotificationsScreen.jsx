@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, ChevronLeft, ChevronRight, CheckCheck } from "lucide-react";
+import AppIcon from "../components/AppIcon";
+import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
 import { motion } from "../utils/motionProxy";
 
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
@@ -114,7 +116,7 @@ export default function NotificationsScreen() {
               onClick={() => smartBack(navigate, backTo)}
               className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
             >
-              <ChevronLeft className="h-4 w-4" />
+              <AppIcon size={ICON_SM} icon={ChevronLeft} />
               Back
             </button>
 
@@ -127,7 +129,7 @@ export default function NotificationsScreen() {
           </div>
 
           <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/70 text-emerald-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-emerald-200">
-            <Bell className="h-5 w-5" />
+            <AppIcon size={ICON_MD} icon={Bell} />
           </span>
         </div>
 
@@ -147,7 +149,7 @@ export default function NotificationsScreen() {
               disabled={busy === "all" || unreadCount === 0}
               className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.99] disabled:opacity-60 dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-200"
             >
-              <CheckCheck className="h-4 w-4" />
+              <AppIcon size={ICON_SM} icon={CheckCheck} />
               {busy === "all" ? "Marking..." : "Mark all as read"}
             </button>
           </div>
@@ -156,7 +158,7 @@ export default function NotificationsScreen() {
         {items.length === 0 ? (
           <div className={`mt-4 ${card} p-6 text-center`}>
             <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60">
-              <Bell className="h-6 w-6 text-emerald-700 dark:text-emerald-200" />
+              <AppIcon size={ICON_LG} className="text-emerald-700 dark:text-emerald-200" icon={Bell} />
             </div>
             <div className="mt-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
               No notifications yet
@@ -219,7 +221,7 @@ export default function NotificationsScreen() {
 
                     <span className="shrink-0 inline-flex items-center gap-1 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-200">
                       Open
-                      <ChevronRight className="h-4 w-4" />
+                      <AppIcon size={ICON_SM} icon={ChevronRight} />
                     </span>
                   </div>
                 </button>

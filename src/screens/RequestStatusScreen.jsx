@@ -354,7 +354,7 @@ export default function RequestStatusScreen() {
 
           <button
             className="mt-4 inline-flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-white active:scale-[0.99]"
-            onClick={() => smartBack(navigate, "/app/progress")}
+            onClick={() => navigate("/app/progress")}
           >
             <IconArrowLeft className="h-4 w-4" />
             Back to Progress

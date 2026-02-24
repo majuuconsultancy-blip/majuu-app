@@ -38,6 +38,8 @@ import {
   X,
   Calendar,
 } from "lucide-react";
+import AppIcon from "../components/AppIcon";
+import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
 
 // ✅ 4 tabs: New / Accepted / Rejected / Assigned
 const TABS = [
@@ -233,7 +235,7 @@ function StaffAccessPanel() {
                 open ? "rotate-180" : "rotate-0"
               }`}
             >
-              <ChevronDown className="h-5 w-5" />
+              <AppIcon size={ICON_MD} icon={ChevronDown} />
             </span>
           </div>
         </button>
@@ -291,7 +293,7 @@ function StaffAccessPanel() {
                       disabled={busy === "grant" || busy === "revoke"}
                       className={`${btnBase} ${grantBtn}`}
                     >
-                      <UserPlus className="h-5 w-5" />
+                      <AppIcon size={ICON_MD} icon={UserPlus} />
                       {busy === "grant" ? "Granting…" : "Grant"}
                     </button>
 
@@ -301,7 +303,7 @@ function StaffAccessPanel() {
                       disabled={busy === "grant" || busy === "revoke"}
                       className={`${btnBase} ${revokeBtn}`}
                     >
-                      <UserX className="h-5 w-5" />
+                      <AppIcon size={ICON_MD} icon={UserX} />
                       {busy === "revoke" ? "Revoking…" : "Revoke"}
                     </button>
                   </div>
@@ -688,7 +690,7 @@ export default function AdminRequestsScreen() {
               className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/45 dark:text-zinc-100 dark:hover:bg-zinc-900"
               type="button"
             >
-              <RefreshCw className="h-5 w-5 text-emerald-700 dark:text-emerald-200" />
+              <AppIcon size={ICON_MD} className="text-emerald-700 dark:text-emerald-200" icon={RefreshCw} />
               Refresh
             </button>
           </div>
@@ -725,7 +727,7 @@ export default function AdminRequestsScreen() {
 
           <div className="mt-2 flex items-center gap-2">
             <div className="flex-1 flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 shadow-sm backdrop-blur transition focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100 dark:border-zinc-800 dark:bg-zinc-900/45 dark:focus-within:ring-emerald-500/10">
-              <Search className="h-5 w-5 text-zinc-500 dark:text-zinc-400" />
+              <AppIcon size={ICON_MD} icon={Search} className="text-zinc-500 dark:text-zinc-400" />
               <input
                 className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 dark:text-zinc-100"
                 placeholder="Track, country, name, email, ID, staff…"
@@ -745,7 +747,7 @@ export default function AdminRequestsScreen() {
                 }`}
               title="Filters"
             >
-              <SlidersHorizontal className="h-5 w-5" />
+              <AppIcon size={ICON_MD} icon={SlidersHorizontal} />
               Filter
               {anyFiltersActive ? (
                 <span className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-600 px-1.5 text-[11px] font-bold text-white">
@@ -799,7 +801,7 @@ export default function AdminRequestsScreen() {
                       aria-label="Close filters"
                       title="Close"
                     >
-                      <X className="h-5 w-5" />
+                      <AppIcon size={ICON_MD} icon={X} />
                     </button>
                   </div>
                 </div>
@@ -809,7 +811,7 @@ export default function AdminRequestsScreen() {
                     <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 dark:text-zinc-200">
                       From
                       <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/45">
-                        <Calendar className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+                        <AppIcon size={ICON_SM} icon={Calendar} className="text-zinc-500 dark:text-zinc-400" />
                         <input
                           type="date"
                           value={filters.from}
@@ -822,7 +824,7 @@ export default function AdminRequestsScreen() {
                     <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 dark:text-zinc-200">
                       To
                       <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/45">
-                        <Calendar className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+                        <AppIcon size={ICON_SM} icon={Calendar} className="text-zinc-500 dark:text-zinc-400" />
                         <input
                           type="date"
                           value={filters.to}
@@ -972,7 +974,7 @@ export default function AdminRequestsScreen() {
                       ) : null}
 
                       <span className="inline-flex h-10 w-10 items-center justify-center rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition hover:border-emerald-200 hover:bg-emerald-50/60 hover:text-emerald-800 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-200 dark:hover:bg-zinc-900">
-                        <ChevronRight className="h-5 w-5" />
+                        <AppIcon size={ICON_MD} icon={ChevronRight} />
                       </span>
                     </div>
                   </div>

@@ -22,6 +22,8 @@ import {
   Users,
   Compass,
 } from "lucide-react";
+import AppIcon from "../components/AppIcon";
+import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
 
 import { auth } from "../firebase";
 import { setActiveContext, setSelectedTrack } from "../services/userservice";
@@ -38,33 +40,38 @@ const COUNTRIES = ["Canada", "Australia", "UK", "Germany", "USA"];
 /* ---------- Motion presets ---------- */
 const overlayMotion = {
   hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { duration: 0.16 } },
-  exit: { opacity: 0, transition: { duration: 0.12 } },
+  show: { opacity: 1, transition: { duration: 0.14, ease: [0.2, 0.8, 0.2, 1] } },
+  exit: { opacity: 0, transition: { duration: 0.12, ease: [0.2, 0.8, 0.2, 1] } },
 };
 
 // sheet-style for mobile, centered modal for bigger screens
 const sheetMotion = {
-  hidden: { opacity: 0, y: 24, scale: 0.99 },
+  hidden: { opacity: 0, y: 6, scale: 0.985 },
   show: {
     opacity: 1,
     y: 0,
     scale: 1,
-    transition: { type: "spring", stiffness: 430, damping: 34 },
+    transition: { duration: 0.17, ease: [0.2, 0.8, 0.2, 1] },
   },
-  exit: { opacity: 0, y: 14, scale: 0.99, transition: { duration: 0.14 } },
+  exit: {
+    opacity: 0,
+    y: 4,
+    scale: 0.99,
+    transition: { duration: 0.12, ease: [0.2, 0.8, 0.2, 1] },
+  },
 };
 
 const listWrap = {
   hidden: {},
-  show: { transition: { staggerChildren: 0.06, delayChildren: 0.08 } },
+  show: { transition: { staggerChildren: 0.03, delayChildren: 0.03 } },
 };
 
 const listItem = {
-  hidden: { opacity: 0, y: 10 },
+  hidden: { opacity: 0, y: 4 },
   show: {
     opacity: 1,
     y: 0,
-    transition: { type: "spring", stiffness: 420, damping: 30 },
+    transition: { duration: 0.14, ease: [0.2, 0.8, 0.2, 1] },
   },
 };
 
@@ -223,7 +230,7 @@ export default function TrackScreen({ track }) {
                        dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100 dark:hover:bg-zinc-950/45"
             title="Go to Tracks"
           >
-            <Compass className="h-4 w-4" />
+            <AppIcon size={ICON_SM} icon={Compass} />
             Tracks
           </button>
 
@@ -245,7 +252,11 @@ export default function TrackScreen({ track }) {
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100">
                 <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 dark:bg-zinc-900/60 border border-emerald-100 dark:bg-zinc-950/40 dark:border-emerald-900/40">
-                  <HeaderIcon className="h-4 w-4 text-emerald-700 dark:text-emerald-200" />
+                  <AppIcon
+                    size={ICON_SM}
+                    icon={HeaderIcon}
+                    className="text-emerald-700 dark:text-emerald-200"
+                  />
                 </span>
                 {info.title}
               </div>
@@ -316,7 +327,7 @@ export default function TrackScreen({ track }) {
                     </div>
 
                     <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/70 group-hover:text-emerald-800 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200 dark:group-hover:border-emerald-900/40 dark:group-hover:bg-emerald-950/25 dark:group-hover:text-emerald-200">
-                      <ChevronRight className="h-5 w-5" />
+                      <AppIcon size={ICON_MD} icon={ChevronRight} />
                     </span>
                   </div>
                 </div>
@@ -330,7 +341,7 @@ export default function TrackScreen({ track }) {
       <AnimatePresence>
         {showModal && (
           <motion.div
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 px-4"
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 px-4 motion-modal-backdrop"
             variants={overlayMotion}
             initial="hidden"
             animate="show"
@@ -339,7 +350,7 @@ export default function TrackScreen({ track }) {
           >
             <motion.div
               className={[
-                "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 p-5 shadow-xl backdrop-blur",
+                "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 p-5 shadow-lg backdrop-blur motion-modal-panel",
                 "dark:border-zinc-800 dark:bg-zinc-900/70",
                 "sm:mb-0 mb-4",
               ].join(" ")}
@@ -373,7 +384,7 @@ export default function TrackScreen({ track }) {
                   aria-label="Close"
                   title="Close"
                 >
-                  <X className="h-5 w-5" />
+                  <AppIcon size={ICON_MD} icon={X} />
                 </button>
               </div>
 
@@ -388,7 +399,7 @@ export default function TrackScreen({ track }) {
                 >
                   <div className="flex items-center gap-3">
                     <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 dark:border-zinc-800 dark:bg-zinc-950/40">
-                      <User className="h-5 w-5 text-zinc-700 dark:text-zinc-300 dark:text-zinc-200" />
+                      <AppIcon size={ICON_MD} icon={User} className="text-zinc-700 dark:text-zinc-300 dark:text-zinc-200" />
                     </span>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -415,7 +426,7 @@ export default function TrackScreen({ track }) {
                 >
                   <div className="flex items-center gap-3">
                     <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/75">
-                      <Users className="h-5 w-5 text-emerald-700" />
+                      <AppIcon size={ICON_MD} icon={Users} className="text-emerald-700" />
                     </span>
                     <div className="min-w-0">
                       <div>{saving && startingType === "we" ? "Starting…" : "We-Help"}</div>

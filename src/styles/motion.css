@@ -1,0 +1,241 @@
+:root {
+  --motion-fast: 120ms;
+  --motion-med: 160ms;
+  --motion-slow: 180ms;
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Single-source transition helpers */
+:where(.t-fade, .t-pop, .t-slide, .t-scale) {
+  transition:
+    opacity var(--motion-med) var(--motion-ease),
+    transform var(--motion-med) var(--motion-ease);
+  will-change: opacity, transform;
+}
+
+.t-fade {
+  transition-property: opacity;
+  will-change: opacity;
+}
+
+.t-pop[data-state="closed"] {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.t-slide[data-state="closed"] {
+  opacity: 0;
+  transform: translateX(6px);
+}
+
+.t-scale[data-state="closed"] {
+  opacity: 0;
+  transform: scale(0.98);
+}
+
+/* Lightweight mount animations for non-Framer modals/sheets */
+@keyframes motion-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes motion-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes motion-breathe {
+  0%,
+  100% {
+    opacity: 0.16;
+    transform: scale(0.985);
+  }
+  50% {
+    opacity: 0.28;
+    transform: scale(1);
+  }
+}
+
+@keyframes motion-mark-pulse {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.anim-in-fade {
+  animation: motion-fade-in var(--motion-fast) var(--motion-ease) both;
+}
+
+.anim-in-pop {
+  animation: motion-pop-in var(--motion-slow) var(--motion-ease) both;
+}
+
+.motion-loader-glow {
+  animation: motion-breathe 1.25s var(--motion-ease) infinite;
+}
+
+.motion-loader-mark {
+  animation: motion-mark-pulse 1.1s var(--motion-ease) infinite;
+}
+
+.spinner-soft {
+  animation-duration: 850ms !important;
+  opacity: 0.9;
+}
+
+/* Route and modal shared styling hooks */
+.route-transition-shell {
+  min-height: 100%;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.motion-modal-backdrop {
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+.motion-modal-panel {
+  transition:
+    opacity var(--motion-slow) var(--motion-ease),
+    transform var(--motion-slow) var(--motion-ease);
+  transform: translateZ(0);
+}
+
+/* Global micro-interactions */
+:where(button, [role="button"], a[href]) {
+  transition-property: opacity, transform, background-color, border-color, color, box-shadow;
+  transition-duration: var(--motion-med);
+  transition-timing-function: var(--motion-ease);
+}
+
+:where(button, [role="button"]):active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+:where(input, textarea, select) {
+  transition:
+    color var(--motion-fast) var(--motion-ease),
+    background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease);
+}
+
+:where(input, textarea, select)::placeholder {
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+:where(input, textarea, select):focus::placeholder {
+  opacity: 0.72;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .hover-lift:hover {
+    transform: translateY(-1px);
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .hover\:-translate-y-\[2px\]:hover,
+  .hover\:-translate-y-\[1px\]:hover {
+    transform: none !important;
+  }
+}
+
+/* Clamp common Tailwind durations + smooth easing across the app */
+.transition,
+.transition-all,
+.transition-colors,
+.transition-opacity,
+.transition-shadow,
+.transition-transform {
+  transition-timing-function: var(--motion-ease) !important;
+}
+
+.transition-all {
+  transition-property: opacity, transform, background-color, border-color, color, box-shadow !important;
+}
+
+.duration-300,
+.duration-500 {
+  transition-duration: var(--motion-slow) !important;
+}
+
+.duration-200 {
+  transition-duration: var(--motion-med) !important;
+}
+
+.duration-150 {
+  transition-duration: var(--motion-fast) !important;
+}
+
+/* Tone down heavy utility animations */
+.animate-pulse {
+  animation-duration: 1.1s !important;
+}
+
+.animate-spin {
+  animation-duration: 900ms !important;
+}
+
+/* Reduced motion (OS + runtime flag) */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 1ms;
+    --motion-med: 1ms;
+    --motion-slow: 1ms;
+  }
+}
+
+:root[data-reduce-motion="true"] {
+  --motion-fast: 1ms;
+  --motion-med: 1ms;
+  --motion-slow: 1ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(.t-pop, .t-slide, .t-scale) {
+    transform: none !important;
+  }
+
+  .anim-in-pop,
+  .anim-in-fade,
+  .motion-loader-glow,
+  .motion-loader-mark,
+  .spinner-soft,
+  .animate-pulse,
+  .animate-spin {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+:root[data-reduce-motion="true"] :where(.t-pop, .t-slide, .t-scale) {
+  transform: none !important;
+}
+
+:root[data-reduce-motion="true"] .anim-in-pop,
+:root[data-reduce-motion="true"] .anim-in-fade,
+:root[data-reduce-motion="true"] .motion-loader-glow,
+:root[data-reduce-motion="true"] .motion-loader-mark,
+:root[data-reduce-motion="true"] .spinner-soft,
+:root[data-reduce-motion="true"] .animate-pulse,
+:root[data-reduce-motion="true"] .animate-spin {
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+}
+

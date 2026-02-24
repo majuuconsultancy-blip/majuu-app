@@ -21,6 +21,8 @@ import {
   Flag,
   ChevronRight,
 } from "lucide-react";
+import AppIcon from "../components/AppIcon";
+import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
 
 import { auth } from "../firebase";
 import { getUserState } from "../services/userservice";
@@ -234,7 +236,7 @@ export default function ProfileScreen() {
                 </div>
 
                 <div className="mt-1 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
-                  <Mail className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+                  <AppIcon size={ICON_SM} className="text-zinc-500 dark:text-zinc-400" icon={Mail} />
                   <span className="truncate">{email || "—"}</span>
                 </div>
               </div>
@@ -246,7 +248,7 @@ export default function ProfileScreen() {
               whileTap={{ scale: 0.98 }}
               className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
             >
-              <Pencil className="h-5 w-5" />
+              <AppIcon size={ICON_MD} icon={Pencil} />
               Edit
             </motion.button>
           </div>
@@ -263,7 +265,7 @@ export default function ProfileScreen() {
           >
             <div className="flex items-center gap-3">
               <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100/70 bg-emerald-50/70 text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
-                <Flag className="h-5 w-5" />
+                <AppIcon size={ICON_MD} icon={Flag} />
               </span>
               <div className="min-w-0">
                 <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
@@ -285,7 +287,7 @@ export default function ProfileScreen() {
           >
             <div className="flex items-center gap-3">
               <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100/70 bg-emerald-50/70 text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
-                <Phone className="h-5 w-5" />
+                <AppIcon size={ICON_MD} icon={Phone} />
               </span>
               <div className="min-w-0">
                 <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
@@ -314,7 +316,7 @@ export default function ProfileScreen() {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-200/70 bg-emerald-50/80 text-emerald-800 dark:border-emerald-900/45 dark:bg-emerald-950/28 dark:text-emerald-200">
-                    <ShieldCheck className="h-5 w-5" />
+                    <AppIcon size={ICON_MD} icon={ShieldCheck} />
                   </span>
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-emerald-950 dark:text-emerald-100">
@@ -325,7 +327,7 @@ export default function ProfileScreen() {
                     </div>
                   </div>
                 </div>
-                <ChevronRight className="h-5 w-5 text-emerald-700/70 dark:text-emerald-200/80" />
+                <AppIcon size={ICON_MD} icon={ChevronRight} className="text-emerald-700/70 dark:text-emerald-200/80" />
               </div>
             </motion.button>
           ) : null}
@@ -342,7 +344,7 @@ export default function ProfileScreen() {
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100/70 bg-emerald-50/70 text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
-                  <Settings className="h-5 w-5" />
+                  <AppIcon size={ICON_MD} icon={Settings} />
                 </span>
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -353,7 +355,7 @@ export default function ProfileScreen() {
                   </div>
                 </div>
               </div>
-              <ChevronRight className="h-5 w-5 text-zinc-400 dark:text-zinc-500" />
+              <AppIcon size={ICON_MD} icon={ChevronRight} className="text-zinc-400 dark:text-zinc-500" />
             </div>
           </motion.button>
 
@@ -370,7 +372,7 @@ export default function ProfileScreen() {
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-rose-200/80 bg-rose-50/70 text-rose-700 dark:border-rose-900/45 dark:bg-rose-950/24 dark:text-rose-200">
-                  <LogOut className="h-5 w-5" />
+                  <AppIcon size={ICON_MD} icon={LogOut} />
                 </span>
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-rose-700 dark:text-rose-200">
@@ -381,7 +383,7 @@ export default function ProfileScreen() {
                   </div>
                 </div>
               </div>
-              <ChevronRight className="h-5 w-5 text-rose-400 dark:text-rose-300" />
+              <AppIcon size={ICON_MD} icon={ChevronRight} className="text-rose-400 dark:text-rose-300" />
             </div>
           </motion.button>
         </div>

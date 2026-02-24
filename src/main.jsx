@@ -3,7 +3,9 @@ import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import "./index.css";
 import "./styles/pwa.css";
+import "./styles/motion.css";
 import { initTheme } from "./utils/theme";
+import { applyRuntimeMotionPreference } from "./utils/motionPreferences";
 
 // Detect installed PWA
 const isStandalone =
@@ -14,6 +16,9 @@ const isStandalone =
 if (isStandalone) {
   document.documentElement.classList.add("pwa-compact");
 }
+
+// Optional runtime user flag (localStorage) for reduced motion.
+applyRuntimeMotionPreference();
 
 // Initialize theme
 initTheme();

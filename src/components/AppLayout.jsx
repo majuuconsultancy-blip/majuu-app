@@ -227,7 +227,7 @@ export default function AppLayout() {
   }
 
   const itemBase =
-    "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition active:scale-[0.99]";
+    "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition duration-150 t-fade active:scale-[0.99]";
   const itemOn = "bg-emerald-600 text-white shadow-sm";
   const itemOff =
     "text-zinc-700 dark:text-zinc-300 hover:bg-emerald-50/70 dark:text-zinc-200 dark:hover:bg-zinc-900/60";
@@ -241,7 +241,7 @@ export default function AppLayout() {
                    dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950"
       >
         <div className="max-w-xl mx-auto min-h-screen">
-          <AnimatePresence mode="wait">
+          <AnimatePresence initial={false} mode="sync">
             <PageTransitions key={location.pathname}>
               <Outlet />
             </PageTransitions>
@@ -269,7 +269,7 @@ export default function AppLayout() {
 
       <nav className="fixed bottom-4 left-0 right-0 z-50 px-4 pb-[env(safe-area-inset-bottom)]">
         <div className="max-w-xl mx-auto">
-          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 backdrop-blur px-2 py-2 shadow-sm">
+          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 backdrop-blur px-2 py-2 shadow-sm t-pop">
             <div className="flex items-center justify-between">
               <button onClick={goSmartHome} className={`${itemBase} ${homeActive ? itemOn : itemOff}`}>
                 <IconHome className="h-5 w-5" />

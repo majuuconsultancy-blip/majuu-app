@@ -27,6 +27,8 @@ import {
   Pin,
   PinOff,
 } from "lucide-react";
+import AppIcon from "../components/AppIcon";
+import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
 
 import { auth, db } from "../firebase";
 import { useNotifsV2Store } from "../services/notifsV2Store";
@@ -413,7 +415,7 @@ export default function ProgressScreen() {
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-emerald-200">
                   <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-100 bg-white/70 dark:bg-zinc-900/60 dark:border-zinc-700 dark:bg-zinc-950/40">
-                    <Activity className="h-4 w-4 text-emerald-700 dark:text-emerald-200" />
+                    <AppIcon size={ICON_SM} className="text-emerald-700 dark:text-emerald-200" icon={Activity} />
                   </span>
                   Progress
                 </div>
@@ -448,7 +450,7 @@ export default function ProgressScreen() {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60 text-emerald-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
-                    <Bell className="h-5 w-5" />
+                    <AppIcon size={ICON_MD} icon={Bell} />
                   </span>
 
                   <div className="min-w-0">
@@ -486,7 +488,7 @@ export default function ProgressScreen() {
                     )}
                   </AnimatePresence>
 
-                  <ChevronRight className="h-4 w-4 text-zinc-400 dark:text-zinc-500" />
+                  <AppIcon size={ICON_SM} icon={ChevronRight} className="text-zinc-400 dark:text-zinc-500" />
                 </div>
               </div>
             </motion.button>
@@ -672,7 +674,7 @@ export default function ProgressScreen() {
                                      dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/55"
                         >
                           View
-                          <ChevronRight className="h-4 w-4" />
+                          <AppIcon size={ICON_SM} icon={ChevronRight} />
                         </motion.button>
 
                         {st === "rejected" && (
@@ -720,7 +722,7 @@ export default function ProgressScreen() {
                             className="inline-flex items-center gap-2 rounded-3xl border border-rose-200 bg-rose-50/70 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60
                                        dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/55"
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <AppIcon size={ICON_SM} icon={Trash2} />
                             {isDeleting ? "Deleting…" : "Delete"}
                           </motion.button>
                         )}
@@ -746,7 +748,7 @@ export default function ProgressScreen() {
                               : "border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200 dark:hover:bg-zinc-900"
                           }`}
                       >
-                        {isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+                        {isPinned ? <AppIcon size={ICON_SM} icon={PinOff} /> : <AppIcon size={ICON_SM} icon={Pin} />}
                       </motion.button>
                     </motion.div>
                   );

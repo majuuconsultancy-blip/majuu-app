@@ -434,8 +434,8 @@ export default function RequestModal({
   // ✅ lighter styles in standalone (no blur, no heavy shadows)
   const overlayCls = STANDALONE ? "bg-black/40" : "bg-black/35 backdrop-blur-[2px]";
   const panelCls = STANDALONE
-    ? "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 dark:border-zinc-800 dark:bg-zinc-950 flex flex-col"
-    : "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/75 dark:bg-zinc-900/60 shadow-xl backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/75 flex flex-col";
+    ? "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 dark:border-zinc-800 dark:bg-zinc-950 flex flex-col motion-modal-panel anim-in-pop"
+    : "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/75 dark:bg-zinc-900/60 shadow-lg backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/75 flex flex-col motion-modal-panel anim-in-pop";
 
   const ctaWrapCls = STANDALONE
     ? "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 dark:border-zinc-800 dark:bg-zinc-950 px-3 py-3"
@@ -443,11 +443,11 @@ export default function RequestModal({
 
   const fieldWrap =
     "mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2.5 " +
-    "focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100 " +
+    "transition focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100 " +
     "dark:border-zinc-800 dark:bg-zinc-950";
 
   const inputBase =
-    "w-full bg-transparent text-sm outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 text-zinc-900 dark:text-zinc-100";
+    "w-full bg-transparent text-sm outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 text-zinc-900 dark:text-zinc-100 t-fade";
 
   const focusProps = {
     onFocus: (e) => scrollFieldIntoView(e.currentTarget, scrollRef.current),
@@ -468,7 +468,7 @@ export default function RequestModal({
     >
       {/* ✅ Overlay: close ONLY if pointer started on overlay (not inside modal) */}
       <div
-        className={`absolute inset-0 ${overlayCls}`}
+        className={`absolute inset-0 ${overlayCls} motion-modal-backdrop anim-in-fade`}
         aria-hidden="true"
         onPointerDown={() => {
           if (startedInsidePanelRef.current) return;

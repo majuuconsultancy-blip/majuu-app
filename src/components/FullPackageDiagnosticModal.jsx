@@ -268,7 +268,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
       role="presentation"
     >
       {/* ✅ SUPER FROSTED BACKDROP */}
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-lg" />
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px] motion-modal-backdrop anim-in-fade" />
       <div className="absolute inset-0 bg-white/[0.06] dark:bg-white/[0.03]" />
 
       <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-200/25 blur-3xl" />
@@ -281,9 +281,9 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
           "h-[78vh] max-h-[78vh]",
           "rounded-[22px]",
           "border border-white/40 bg-white/55 dark:bg-zinc-900/60",
-          "shadow-[0_20px_70px_rgba(0,0,0,0.18)] backdrop-blur-2xl",
+          "shadow-[0_12px_30px_rgba(0,0,0,0.14)] backdrop-blur-xl",
           "ring-1 ring-white/20",
-          "flex flex-col overflow-hidden",
+          "flex flex-col overflow-hidden motion-modal-panel anim-in-fade",
           "dark:border-zinc-800/70 dark:bg-zinc-900/55 dark:ring-white/10",
         ].join(" ")}
         role="dialog"
@@ -429,7 +429,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                     }}
                     className={[
                       "w-full text-left rounded-3xl border px-4 py-3 transition active:scale-[0.99]",
-                      "shadow-[0_12px_36px_rgba(0,0,0,0.06)] backdrop-blur-2xl",
+                      "shadow-[0_6px_16px_rgba(0,0,0,0.05)] backdrop-blur-xl",
                       "min-h-[78px]",
                       isOn
                         ? "border-emerald-200 bg-white/55 dark:bg-zinc-900/60 dark:bg-zinc-900/55"

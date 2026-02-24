@@ -85,7 +85,7 @@ function IconSpark(props) {
 
 function Spinner({ className = "h-4 w-4" }) {
   return (
-    <svg className={`${className} animate-spin`} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg className={`${className} animate-spin spinner-soft`} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M21 12a9 9 0 1 1-3-6.7"
         stroke="currentColor"
@@ -99,24 +99,29 @@ function Spinner({ className = "h-4 w-4" }) {
 /* ---------------- Motion ---------------- */
 const overlay = {
   hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { duration: 0.18 } },
-  exit: { opacity: 0, transition: { duration: 0.14 } },
+  show: { opacity: 1, transition: { duration: 0.14, ease: [0.2, 0.8, 0.2, 1] } },
+  exit: { opacity: 0, transition: { duration: 0.12, ease: [0.2, 0.8, 0.2, 1] } },
 };
 
 const sheet = {
-  hidden: { opacity: 0, y: 16, scale: 0.99 },
+  hidden: { opacity: 0, y: 6, scale: 0.985 },
   show: {
     opacity: 1,
-    y: -40,
+    y: 0,
     scale: 1,
-    transition: { type: "spring", stiffness: 520, damping: 40 },
+    transition: { duration: 0.17, ease: [0.2, 0.8, 0.2, 1] },
   },
-  exit: { opacity: 0, y: 10, scale: 0.99, transition: { duration: 0.14 } },
+  exit: {
+    opacity: 0,
+    y: 4,
+    scale: 0.99,
+    transition: { duration: 0.12, ease: [0.2, 0.8, 0.2, 1] },
+  },
 };
 
 const floaty = {
   rest: { y: 0, scale: 1 },
-  hover: { y: -2, scale: 1.01, transition: { duration: 0.16 } },
+  hover: { y: -1, scale: 1, transition: { duration: 0.14, ease: [0.2, 0.8, 0.2, 1] } },
   tap: { scale: 0.985 },
 };
 
@@ -237,7 +242,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
   };
 
   const rootCard =
-    "relative w-[92vw] max-w-sm rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 shadow-[0_18px_55px_rgba(0,0,0,0.20)] backdrop-blur-xl";
+    "relative w-[92vw] max-w-sm rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 shadow-[0_14px_34px_rgba(0,0,0,0.14)] backdrop-blur-xl motion-modal-panel";
   const subText = "text-xs text-zinc-500";
   const titleText = "text-[13px] font-semibold text-zinc-700 dark:text-zinc-300";
   const headline = "text-lg font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100";
@@ -254,7 +259,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-8"
+        className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-8 motion-modal-backdrop"
         variants={overlay}
         initial="hidden"
         animate="show"
@@ -265,7 +270,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
           type="button"
           aria-label="Close"
           onClick={goBackToTrack}
-          className="absolute inset-0 bg-black/45"
+          className="absolute inset-0 bg-black/40"
         />
 
         {/* Modal */}
