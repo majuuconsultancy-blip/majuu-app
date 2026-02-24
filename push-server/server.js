@@ -10,11 +10,32 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function shortErr(error, max = 180) {
-  const msg =
-    safeStr(error && (error.message || error.code)) ||
-    safeStr(error);
-  return msg.slice(0, max);
+function shortErr(error, max = 1200) {
+  if (!error) return "";
+
+  const parts = [];
+  if (error.code != null) parts.push(`code=${safeStr(error.code)}`);
+  if (error.message != null) parts.push(`message=${safeStr(error.message)}`);
+
+  if (error.details != null) {
+    let detailsStr = "";
+    if (typeof error.details === "string") {
+      detailsStr = error.details;
+    } else {
+      try {
+        detailsStr = JSON.stringify(error.details);
+      } catch {
+        detailsStr = safeStr(error.details);
+      }
+    }
+    if (safeStr(detailsStr)) parts.push(`details=${detailsStr}`);
+  }
+
+  if (!parts.length) {
+    parts.push(safeStr(error));
+  }
+
+  return parts.join(" | ").slice(0, max);
 }
 
 function asBool(value, fallback = false) {
@@ -68,7 +89,9 @@ const FIREBASE_PRIVATE_KEY = parsePrivateKey(requireEnv("FIREBASE_PRIVATE_KEY"))
 const PORT = Number(process.env.PORT || 10000);
 const POLL_INTERVAL_MS = Math.max(1000, Number(process.env.POLL_INTERVAL_MS || 5000));
 const POLL_LIMIT = Math.max(1, Math.min(200, Number(process.env.POLL_LIMIT || 100)));
-const CORS_ALLOWED_ORIGINS = parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS || process.env.CORS_ORIGIN || "");
+const CORS_ALLOWED_ORIGINS = parseAllowedOrigins(
+  process.env.CORS_ALLOWED_ORIGINS || process.env.CORS_ORIGIN || ""
+);
 const LOG_VERBOSE = asBool(process.env.LOG_VERBOSE, true);
 
 admin.initializeApp({
@@ -81,7 +104,7 @@ admin.initializeApp({
 
 const firestore = admin.firestore();
 const messaging = admin.messaging();
-const { FieldValue } = admin.firestore;
+const { FieldValue, FieldPath } = admin.firestore;
 
 const app = express();
 app.disable("x-powered-by");
@@ -101,7 +124,9 @@ function tokenCollectionRef({ uid, role }) {
   const safeUid = safeStr(uid);
   const safeRole = safeStr(role).toLowerCase();
   if (!safeUid) return null;
-  if (safeRole === "staff") return firestore.collection("staff").doc(safeUid).collection("pushTokens");
+  if (safeRole === "staff") {
+    return firestore.collection("staff").doc(safeUid).collection("pushTokens");
+  }
   return firestore.collection("users").doc(safeUid).collection("pushTokens"); // user + admin
 }
 
@@ -333,13 +358,17 @@ async function processNotificationDoc(docSnap) {
     try {
       await markNotificationPushResult(docSnap.ref, result);
     } catch (markErr) {
-      console.warn(`[${nowIso()}] failed to mark push result for ${docSnap.ref.path}`, shortErr(markErr));
+      console.warn(
+        `[${nowIso()}] failed to mark push result for ${docSnap.ref.path}`,
+        shortErr(markErr)
+      );
     }
     return { ok: false, ...result, path: docSnap.ref.path };
   }
 }
 
 let pollInFlight = false;
+let pollRawErrorLogged = false;
 
 async function pollNotificationsOnce() {
   if (pollInFlight) return;
@@ -347,11 +376,11 @@ async function pollNotificationsOnce() {
 
   try {
     const snap = await firestore
-  .collectionGroup("notifications")
-  .orderBy("createdAt", "desc")
-  .orderBy(admin.firestore.FieldPath.documentId(), "desc") // ✅ matches __name__
-  .limit(POLL_LIMIT)
-  .get();
+      .collectionGroup("notifications")
+      .orderBy("createdAt", "desc")
+      .orderBy(FieldPath.documentId(), "desc")
+      .limit(POLL_LIMIT)
+      .get();
 
     const candidates = snap.docs
       .filter((d) => {
@@ -381,10 +410,11 @@ async function pollNotificationsOnce() {
       }
     }
   } catch (error) {
-    console.error(
-  `[${nowIso()}] poll loop error`,
-  error?.message || error
-);
+    console.error(`[${nowIso()}] poll loop error`, shortErr(error));
+    if (!pollRawErrorLogged) {
+      pollRawErrorLogged = true;
+      console.error(`[${nowIso()}] poll loop raw error object`, error);
+    }
   } finally {
     pollInFlight = false;
   }
@@ -407,8 +437,12 @@ app.post("/registerToken", async (req, res) => {
     const platform = safeStr(req.body && req.body.platform).toLowerCase();
 
     if (!uid) return res.status(400).json({ ok: false, error: "uid is required" });
-    if (!isValidRole(role)) return res.status(400).json({ ok: false, error: "role must be user|staff|admin" });
-    if (!isValidPlatform(platform)) return res.status(400).json({ ok: false, error: "platform must be android|ios|web" });
+    if (!isValidRole(role)) {
+      return res.status(400).json({ ok: false, error: "role must be user|staff|admin" });
+    }
+    if (!isValidPlatform(platform)) {
+      return res.status(400).json({ ok: false, error: "platform must be android|ios|web" });
+    }
 
     const tokenErr = validateToken(token);
     if (tokenErr) return res.status(400).json({ ok: false, error: tokenErr });
@@ -445,7 +479,9 @@ app.post("/sendTest", async (req, res) => {
     const data = req.body && typeof req.body.data === "object" ? req.body.data : {};
 
     if (!uid) return res.status(400).json({ ok: false, error: "uid is required" });
-    if (!isValidRole(role)) return res.status(400).json({ ok: false, error: "role must be user|staff|admin" });
+    if (!isValidRole(role)) {
+      return res.status(400).json({ ok: false, error: "role must be user|staff|admin" });
+    }
 
     const result = await sendPushToTokens({ uid, role, title, body, data });
     return res.json({ ok: true, result });
