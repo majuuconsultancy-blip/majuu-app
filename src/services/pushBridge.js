@@ -14,6 +14,7 @@ const localDedupe = new Set();
 let activeCleanup = null;
 let activeNavigate = null;
 let activeSession = { role: "", uid: "" };
+let pushRegisterSessionKey = "";
 
 function isNative() {
   try {
@@ -190,17 +191,25 @@ async function upsertPushToken({ uid, role, token }) {
 
   const roleValue =
     safeRole === "admin" || safeRole === "staff" || safeRole === "user" ? safeRole : "user";
+  const tokenDocId = encodeURIComponent(safeToken);
+  const rootCollection = roleValue === "staff" ? "staff" : "users";
+  const pushTokenRef = doc(db, rootCollection, safeUid, "pushTokens", tokenDocId);
+  const detectedPlatform = platformName();
+  const platformValue = detectedPlatform === "android" ? "android" : detectedPlatform;
+
   await setDoc(
-    doc(db, "pushTokens", safeUid),
+    pushTokenRef,
     {
-      uid: safeUid,
-      role: roleValue,
       token: safeToken,
-      platform: platformName(),
+      platform: platformValue,
+      role: roleValue,
+      uid: safeUid,
+      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     },
     { merge: true }
   );
+  console.log("Push token saved to Firestore", pushTokenRef.path);
 }
 
 export function cleanupPushBridge() {
@@ -262,6 +271,8 @@ export function initPushBridge({ navigate, role, uid }) {
 
   PushNotifications.addListener("registration", (token) => {
     const value = safeStr(token?.value || token?.token || "");
+    console.log("Push registered");
+    console.log("FCM TOKEN:", value);
     upsertPushToken({ uid: activeSession.uid, role: activeSession.role, token: value }).catch((e) => {
       console.warn("pushBridge token sync failed:", e?.message || e);
     });
@@ -285,16 +296,25 @@ export function initPushBridge({ navigate, role, uid }) {
 
   (async () => {
     try {
+      const sessionKey = `${safeStr(activeSession.role)}:${safeStr(activeSession.uid)}`;
+      if (!safeStr(activeSession.uid)) return;
+      if (pushRegisterSessionKey === sessionKey) return;
+      pushRegisterSessionKey = sessionKey;
+
       const perm = await PushNotifications.checkPermissions();
       const receive = safeStr(perm?.receive);
+      console.log("Push permission result", perm);
       let granted = receive === "granted";
       if (!granted && receive !== "denied") {
         const req = await PushNotifications.requestPermissions();
+        console.log("Push permission result", req);
         granted = safeStr(req?.receive) === "granted";
       }
       if (!granted) return;
       await PushNotifications.register();
+      console.log("Push registered");
     } catch (error) {
+      pushRegisterSessionKey = "";
       console.warn("pushBridge init/register failed:", error?.message || error);
     }
   })();
