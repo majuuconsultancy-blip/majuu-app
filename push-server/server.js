@@ -381,7 +381,10 @@ async function pollNotificationsOnce() {
       }
     }
   } catch (error) {
-    console.error(`[${nowIso()}] poll loop error`, shortErr(error));
+    console.error(
+  `[${nowIso()}] poll loop error`,
+  error?.message || error
+);
   } finally {
     pollInFlight = false;
   }
