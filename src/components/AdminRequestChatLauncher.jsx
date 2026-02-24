@@ -2,6 +2,7 @@
 // Simple launcher that opens AdminRequestChatPanel in a scrollable modal.
 
 import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import AdminRequestChatPanel from "./AdminRequestChatPanel";
 
 function safeStr(x) {
@@ -29,7 +30,43 @@ function IconChat(props) {
 
 export default function AdminRequestChatLauncher({ requestId }) {
   const rid = useMemo(() => safeStr(requestId), [requestId]);
+  const location = useLocation();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!rid || open) return;
+    try {
+      const params = new URLSearchParams(location.search || "");
+      if (params.get("openChat") === "1") return;
+    } catch {}
+    let shouldOpen = false;
+    try {
+      shouldOpen = sessionStorage.getItem(`maj_open_admin_chat:${rid}`) === "1";
+      if (shouldOpen) sessionStorage.removeItem(`maj_open_admin_chat:${rid}`);
+    } catch {}
+    if (shouldOpen) setOpen(true);
+  }, [rid, open, location.search]);
+
+  useEffect(() => {
+    if (!rid || open) return;
+    let params = null;
+    try {
+      params = new URLSearchParams(location.search || "");
+    } catch {
+      return;
+    }
+    if (params.get("openChat") !== "1") return;
+
+    setOpen(true);
+
+    params.delete("openChat");
+    const qs = params.toString();
+    const nextUrl = `${location.pathname}${qs ? `?${qs}` : ""}`;
+    if (nextUrl !== `${location.pathname}${location.search || ""}`) {
+      navigate(nextUrl, { replace: true });
+    }
+  }, [rid, open, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     if (!open) return;

@@ -460,6 +460,7 @@ export default function SettingsScreen() {
             </button>
           </Tile>
         </div>
+
       </div>
     </div>
   );

@@ -12,6 +12,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
+import { createStaffNotification, createUserNotification } from "./notificationDocs";
 
 /**
  * Performance thresholds (ONLY enforced after doneCount >= 5)
@@ -118,6 +119,10 @@ export async function assignRequestToStaff({
   if (!admin) throw new Error("Not signed in");
 
   const staffRef = doc(db, "staff", staffUid);
+  const reqRef = doc(db, "serviceRequests", requestId);
+  const reqSnap = await getDoc(reqRef);
+  const reqData = reqSnap.exists() ? reqSnap.data() || {} : {};
+  const ownerUid = String(reqData?.uid || "").trim();
 
   // ✅ Hard guard: check staff state + auto-block rule
   const staffSnap = await getDoc(staffRef);
@@ -161,7 +166,6 @@ export async function assignRequestToStaff({
   // ✅ Proceed with normal assignment
   const batch = writeBatch(db);
 
-  const reqRef = doc(db, "serviceRequests", requestId);
   const taskRef = doc(db, "staff", staffUid, "tasks", requestId);
 
   batch.set(
@@ -197,6 +201,23 @@ export async function assignRequestToStaff({
   );
 
   await batch.commit();
+
+  try {
+    if (ownerUid) {
+      await createUserNotification({
+        uid: ownerUid,
+        type: "REQUEST_ASSIGNED",
+        requestId,
+      });
+    }
+    await createStaffNotification({
+      uid: staffUid,
+      type: "STAFF_ASSIGNED_REQUEST",
+      requestId,
+    });
+  } catch (error) {
+    console.warn("Failed to write assignment notifications:", error?.message || error);
+  }
 
   return { ok: true, requestId, staffUid };
 }

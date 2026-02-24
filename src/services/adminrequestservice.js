@@ -9,12 +9,12 @@ import {
   getDoc,
   doc,
   updateDoc,
-  addDoc,
   serverTimestamp,
   increment,
 } from "firebase/firestore";
 
 import { db } from "../firebase";
+import { createUserNotification } from "./notificationDocs";
 
 /* ======================================================
    REQUEST LIST (unchanged)
@@ -42,21 +42,6 @@ export async function getRequests({
   const qy = query(ref, ...clauses, orderBy("createdAt", "desc"), qLimit(take));
   const snap = await getDocs(qy);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-}
-
-/* ======================================================
-   INTERNAL: USER NOTIFICATION (unchanged)
-====================================================== */
-async function createUserNotification(uid, payload) {
-  if (!uid) return;
-
-  const nRef = collection(db, "users", uid, "notifications");
-  await addDoc(nRef, {
-    ...payload,
-    uid,
-    createdAt: serverTimestamp(),
-    readAt: null,
-  });
 }
 
 /* ======================================================
@@ -178,7 +163,7 @@ export async function adminAcceptRequest({ requestId, note = "" }) {
   if (!snap.exists()) throw new Error("Request not found");
 
   const req = snap.data();
-  const uid = req?.uid;
+  const uid = String(req?.uid || "").trim();
 
   await updateDoc(reqRef, {
     status: "closed",
@@ -192,16 +177,17 @@ export async function adminAcceptRequest({ requestId, note = "" }) {
     finalDecision: "accepted",
   });
 
-  await createUserNotification(uid, {
-    type: "request",
-    event: "accepted",
-    title: `${String(req?.track || "Request").toUpperCase()} accepted`,
-    body:
-      String(note || "").trim() ||
-      "Your request was accepted. Open Progress to view details.",
-    link: `/app/request/${requestId}`,
-    requestId,
-  });
+  if (uid) {
+    try {
+      await createUserNotification({
+        uid,
+        type: "REQUEST_ACCEPTED",
+        requestId,
+      });
+    } catch (error) {
+      console.warn("Failed to write REQUEST_ACCEPTED notification:", error?.message || error);
+    }
+  }
 
   return true;
 }
@@ -219,7 +205,7 @@ export async function adminRejectRequest({ requestId, note = "" }) {
   if (!snap.exists()) throw new Error("Request not found");
 
   const req = snap.data();
-  const uid = req?.uid;
+  const uid = String(req?.uid || "").trim();
 
   await updateDoc(reqRef, {
     status: "rejected",
@@ -233,14 +219,17 @@ export async function adminRejectRequest({ requestId, note = "" }) {
     finalDecision: "rejected",
   });
 
-  await createUserNotification(uid, {
-    type: "request",
-    event: "rejected",
-    title: `${String(req?.track || "Request").toUpperCase()} needs changes`,
-    body: String(note || "").trim(),
-    link: `/app/request/${requestId}`,
-    requestId,
-  });
+  if (uid) {
+    try {
+      await createUserNotification({
+        uid,
+        type: "REQUEST_REJECTED",
+        requestId,
+      });
+    } catch (error) {
+      console.warn("Failed to write REQUEST_REJECTED notification:", error?.message || error);
+    }
+  }
 
   return true;
 }

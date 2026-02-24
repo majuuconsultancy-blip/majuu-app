@@ -4,7 +4,7 @@
 // - admin reviews: approve/edit/reject/hide
 // - approved -> messages (published)
 // - admin can also send DIRECT (publish without pending)
-// - unread: readState docs + notifications for user/staff
+// - unread: readState docs + published /messages only
 //
 // ✅ FIX in this version (your issue):
 // ✅ Admin can now APPROVE a message to STAFF even when the request is NOT assigned yet.
@@ -40,6 +40,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
+import { createStaffNotification, createUserNotification } from "./notificationDocs";
 
 /* -------------------- Paths -------------------- */
 const reqRef = (requestId) => doc(db, "serviceRequests", String(requestId));
@@ -90,28 +91,6 @@ function normalizePdfMeta(pdfMeta) {
 
   if (!name) throw new Error("pdfMeta.name required");
   return { name, mime, size, note };
-}
-
-function makeNotificationDoc({ requestId, kind = "chat_message" } = {}) {
-  const rid = safeStr(requestId);
-  if (kind === "chat_pdf") {
-    return {
-      type: "chat_message",
-      requestId: rid,
-      title: "New document",
-      body: "A document was sent to your request chat.",
-      createdAt: serverTimestamp(),
-      readAt: null,
-    };
-  }
-  return {
-    type: "chat_message",
-    requestId: rid,
-    title: "New message",
-    body: "You have a new message on your request.",
-    createdAt: serverTimestamp(),
-    readAt: null,
-  };
 }
 
 /**
@@ -360,18 +339,20 @@ export async function adminApprovePending({
     approvedBy: admin.uid,
   });
 
-  // ✅ notifications only when we actually know who to notify
-  if (receiverUid) {
-    const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
-    const nRef = doc(db, "users", receiverUid, "notifications", notifId);
-
-    const notifKind =
-      (type === "pdf" || (type === "bundle" && finalPdfMeta)) ? "chat_pdf" : "chat_message";
-
-    batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: notifKind }));
-  }
+  // Chat unread is derived from published /messages + readState; no chat notification docs here.
 
   await batch.commit();
+  try {
+    await notifyPublishedRecipient({
+      rid,
+      req,
+      toRole,
+      receiverUid,
+      publishedId: pubRef.id,
+    });
+  } catch (error) {
+    console.warn("Failed to write message notification after approval:", error?.message || error);
+  }
   return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
 }
 
@@ -410,14 +391,95 @@ export async function adminRejectPending({ requestId, pendingId, reason = "" } =
   if (!rid) throw new Error("requestId required");
   if (!pid) throw new Error("pendingId required");
 
-  await updateDoc(doc(db, "serviceRequests", rid, "pendingMessages", pid), {
+  const pendingRef = doc(db, "serviceRequests", rid, "pendingMessages", pid);
+  const pendingSnap = await getDoc(pendingRef);
+  const pending = pendingSnap.exists() ? pendingSnap.data() || {} : {};
+  await updateDoc(pendingRef, {
     status: "rejected",
     rejectedAt: serverTimestamp(),
     rejectedBy: admin.uid,
     rejectReason: safeStr(reason),
   });
 
+  try {
+    await notifyRejectedPendingSender({
+      requestId: rid,
+      pendingId: pid,
+      pending,
+    });
+  } catch (error) {
+    console.warn("Failed to write rejected pending notification:", error?.message || error);
+  }
+
   return { ok: true };
+}
+
+async function notifyPublishedRecipient({ rid, req, toRole, receiverUid, publishedId } = {}) {
+  const requestId = safeStr(rid);
+  const role = normalizeRole(toRole);
+  const requestData = req && typeof req === "object" ? req : {};
+
+  let uid =
+    role === "user"
+      ? safeStr(requestData?.uid)
+      : role === "staff"
+      ? safeStr(requestData?.assignedTo)
+      : "";
+
+  // Fallback to explicit resolver if the caller already computed one.
+  if (!uid) uid = safeStr(receiverUid);
+
+  if (!requestId || !uid) return;
+
+  if (role === "user") {
+    await createUserNotification({
+      uid,
+      type: "NEW_MESSAGE",
+      requestId,
+      extras: {
+        messageId: safeStr(publishedId) || null,
+      },
+    });
+    return;
+  }
+
+  if (role === "staff") {
+    await createStaffNotification({
+      uid,
+      type: "STAFF_NEW_MESSAGE",
+      requestId,
+      extras: {
+        messageId: safeStr(publishedId) || null,
+      },
+    });
+  }
+}
+
+async function notifyRejectedPendingSender({ requestId, pendingId, pending } = {}) {
+  const rid = safeStr(requestId);
+  const pid = safeStr(pendingId);
+  const fromRole = safeStr(pending?.fromRole).toLowerCase();
+  const fromUid = safeStr(pending?.fromUid);
+  if (!rid || !pid || !fromUid) return;
+
+  if (fromRole === "user") {
+    await createUserNotification({
+      uid: fromUid,
+      type: "MESSAGE_REJECTED_USER",
+      requestId: rid,
+      extras: { pendingId: pid },
+    });
+    return;
+  }
+
+  if (fromRole === "staff") {
+    await createStaffNotification({
+      uid: fromUid,
+      type: "STAFF_MESSAGE_REJECTED",
+      requestId: rid,
+      extras: { pendingId: pid },
+    });
+  }
 }
 
 /**
@@ -435,12 +497,26 @@ export async function adminHidePending({ requestId, pendingId, reason = "" } = {
   const r = safeStr(reason);
   const finalReason = r ? `HIDDEN: ${r}` : "HIDDEN";
 
-  await updateDoc(doc(db, "serviceRequests", rid, "pendingMessages", pid), {
+  const pendingRef = doc(db, "serviceRequests", rid, "pendingMessages", pid);
+  const pendingSnap = await getDoc(pendingRef);
+  const pending = pendingSnap.exists() ? pendingSnap.data() || {} : {};
+
+  await updateDoc(pendingRef, {
     status: "rejected",
     rejectedAt: serverTimestamp(),
     rejectedBy: admin.uid,
     rejectReason: finalReason,
   });
+
+  try {
+    await notifyRejectedPendingSender({
+      requestId: rid,
+      pendingId: pid,
+      pending,
+    });
+  } catch (error) {
+    console.warn("Failed to write hidden pending notification:", error?.message || error);
+  }
 
   return { ok: true };
 }
@@ -486,13 +562,20 @@ export async function adminSendTextDirect({ requestId, toRole, text } = {}) {
     needsAssignment: tr === "staff" && !receiverUid ? true : false,
   });
 
-  if (receiverUid) {
-    const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
-    const nRef = doc(db, "users", receiverUid, "notifications", notifId);
-    batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: "chat_message" }));
-  }
+  // Chat unread is derived from published /messages + readState; no chat notification docs here.
 
   await batch.commit();
+  try {
+    await notifyPublishedRecipient({
+      rid,
+      req,
+      toRole: tr,
+      receiverUid,
+      publishedId: pubRef.id,
+    });
+  } catch (error) {
+    console.warn("Failed to write direct text message notification:", error?.message || error);
+  }
   return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
 }
 
@@ -534,13 +617,20 @@ export async function adminSendPdfMetaDirect({ requestId, toRole, pdfMeta } = {}
     needsAssignment: tr === "staff" && !receiverUid ? true : false,
   });
 
-  if (receiverUid) {
-    const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
-    const nRef = doc(db, "users", receiverUid, "notifications", notifId);
-    batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: "chat_pdf" }));
-  }
+  // Chat unread is derived from published /messages + readState; no chat notification docs here.
 
   await batch.commit();
+  try {
+    await notifyPublishedRecipient({
+      rid,
+      req,
+      toRole: tr,
+      receiverUid,
+      publishedId: pubRef.id,
+    });
+  } catch (error) {
+    console.warn("Failed to write direct pdf message notification:", error?.message || error);
+  }
   return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
 }
 
@@ -592,15 +682,20 @@ export async function adminSendBundleDirect({
     needsAssignment: tr === "staff" && !receiverUid ? true : false,
   });
 
-  if (receiverUid) {
-    const notifId = doc(collection(db, "users", receiverUid, "notifications")).id;
-    const nRef = doc(db, "users", receiverUid, "notifications", notifId);
-
-    const notifKind = meta ? "chat_pdf" : "chat_message";
-    batch.set(nRef, makeNotificationDoc({ requestId: rid, kind: notifKind }));
-  }
+  // Chat unread is derived from published /messages + readState; no chat notification docs here.
 
   await batch.commit();
+  try {
+    await notifyPublishedRecipient({
+      rid,
+      req,
+      toRole: tr,
+      receiverUid,
+      publishedId: pubRef.id,
+    });
+  } catch (error) {
+    console.warn("Failed to write direct bundle message notification:", error?.message || error);
+  }
   return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
 }
 

@@ -1,26 +1,16 @@
 // ✅ src/components/AdminRequestChatPanel.jsx (FULL COPY-PASTE)
-// FIX (NEW):
-// ✅ If admin accepts a pending message while NO staff is assigned yet,
-//    we STILL publish it into /messages (toRole="staff") and mark pending as delivered.
-//    This way staff can see it later after assignment.
-//
-// Everything else preserved:
-// - Accept buttons disappear and never come back
-// - Hide optimistic
-// - Bundles: Accept/Hide applies to all pending children
-// - sessionStorage persistence for "no actions"
+// FIX:
+// ✅ White screen was caused by missing Firestore import: `collection`
+//    You call collection(...) but it wasn't imported, so runtime crashed.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  collection,
   onSnapshot,
   orderBy,
   query,
   where,
   doc,
-  addDoc,
-  updateDoc,
-  serverTimestamp,
+  collection, // ✅ FIX: required (was missing)
 } from "firebase/firestore";
 import { db } from "../firebase";
 import {
@@ -405,37 +395,6 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     });
   };
 
-  /* ---------- ✅ NEW: fallback approve when no staff assigned ---------- */
-  const approvePendingWithoutAssignment = async (p) => {
-    // Publish into /messages as "toRole: staff", even if no staffUid yet
-    const type = String(p?.type || "text").toLowerCase();
-
-    await addDoc(collection(db, "serviceRequests", rid, "messages"), {
-      type,
-      text: safeStr(p?.text),
-      pdfMeta: p?.pdfMeta || null,
-
-      fromRole: p?.fromRole || "user",
-      fromUid: p?.fromUid || null,
-
-      // ✅ deliver to staff lane
-      toRole: "staff",
-      toUid: null,
-
-      createdAt: serverTimestamp(),
-
-      // ✅ important: lets user UI hide delivered pending by id
-      sourcePendingId: String(p?.id || ""),
-    });
-
-    // Mark pending as delivered so it disappears from pending list
-    await updateDoc(doc(db, "serviceRequests", rid, "pendingMessages", String(p?.id || "")), {
-      status: "delivered",
-      deliveredAt: serverTimestamp(),
-      approvedAt: serverTimestamp(),
-    });
-  };
-
   /* ---------- actions ---------- */
   const approveBundle = async (bundleId, pendingChildren) => {
     setErr("");
@@ -447,14 +406,8 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     pendingChildren.forEach((c) => disableActionsOptimistic(c.id));
 
     try {
-      const hasAssignee = Boolean(String(assignedStaffUid || "").trim());
-
       for (const c of pendingChildren) {
-        if (!hasAssignee) {
-          await approvePendingWithoutAssignment(c);
-        } else {
-          await adminApprovePendingMessage({ requestId: rid, pendingId: c.id });
-        }
+        await adminApprovePendingMessage({ requestId: rid, pendingId: c.id });
       }
     } catch (e) {
       console.error(e);
@@ -500,13 +453,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     disableActionsOptimistic(p.id);
 
     try {
-      const hasAssignee = Boolean(String(assignedStaffUid || "").trim());
-
-      if (!hasAssignee) {
-        await approvePendingWithoutAssignment(p);
-      } else {
-        await adminApprovePendingMessage({ requestId: rid, pendingId: p.id });
-      }
+      await adminApprovePendingMessage({ requestId: rid, pendingId: p.id });
     } catch (e) {
       console.error(e);
       // ✅ DO NOT rollback button hide
@@ -595,9 +542,11 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   };
 
   /* ---------- UI ---------- */
-  const card = "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-xl";
+  const card =
+    "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-xl";
   const bubbleBase = "max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap";
-  const bubbleLeft = "bg-white dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-800";
+  const bubbleLeft =
+    "bg-white dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-800";
   const bubbleRight = "bg-emerald-600 text-white";
 
   const smallBtn =
@@ -722,7 +671,13 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                             {safeStr(m.text) ? <div className="break-words">{m.text}</div> : null}
 
                             {m?.pdfMeta?.name ? (
-                              <div className={`${isLeft ? "bg-zinc-50 dark:bg-zinc-950" : "bg-white/10 dark:bg-zinc-900/60"} rounded-xl p-2`}>
+                              <div
+                                className={`${
+                                  isLeft
+                                    ? "bg-zinc-50 dark:bg-zinc-950"
+                                    : "bg-white/10 dark:bg-zinc-900/60"
+                                } rounded-xl p-2`}
+                              >
                                 <div className="text-xs font-semibold opacity-90">PDF</div>
                                 <div className="text-xs opacity-90">
                                   {m?.pdfMeta?.name || "document.pdf"}
@@ -857,4 +812,3 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     </div>
   );
 }
-

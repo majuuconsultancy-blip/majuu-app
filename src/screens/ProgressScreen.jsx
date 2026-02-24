@@ -17,10 +17,6 @@ import {
   doc,
   deleteDoc,
   getDocs,
-  orderBy,
-  limit,
-  updateDoc,
-  serverTimestamp,
 } from "firebase/firestore";
 import { motion, AnimatePresence } from "../utils/motionProxy";
 import {
@@ -28,12 +24,12 @@ import {
   ChevronRight,
   Trash2,
   Bell,
-  MessageCircle,
   Pin,
   PinOff,
 } from "lucide-react";
 
 import { auth, db } from "../firebase";
+import { useNotifsV2Store } from "../services/notifsV2Store";
 import { getUserState } from "../services/userservice";
 import { getMyApplications } from "../services/progressservice";
 
@@ -129,26 +125,6 @@ function formatCreatedAt(createdAt) {
   return `${dateStr} • ${timeStr}`;
 }
 
-/* ✅ local-read persistence helpers (sessionStorage) */
-function localReadKey(rid) {
-  return `chat_localRead_user_${String(rid || "")}`;
-}
-function getLocalReadSec(rid) {
-  try {
-    const v = sessionStorage.getItem(localReadKey(rid));
-    const n = Number(v || 0) || 0;
-    return n;
-  } catch {
-    return 0;
-  }
-}
-function setLocalReadSec(rid, sec) {
-  try {
-    const n = Number(sec || 0) || 0;
-    sessionStorage.setItem(localReadKey(rid), String(n));
-  } catch {}
-}
-
 /* ✅ pin persistence helpers (localStorage) */
 function pinKey(uid) {
   return `pinned_requests_${String(uid || "")}`;
@@ -167,35 +143,6 @@ function writePins(uid, arr) {
   try {
     localStorage.setItem(pinKey(uid), JSON.stringify(arr));
   } catch {}
-}
-
-/* ✅ mark notifications read for ONE request (client-only) */
-async function markRequestNotificationsRead({ uid, requestId }) {
-  const u = String(uid || "").trim();
-  const rid = String(requestId || "").trim();
-  if (!u || !rid) return;
-
-  try {
-    const nRef = collection(db, "users", u, "notifications");
-
-    // ✅ expects your notification docs to include { requestId: "<rid>" }
-    // and unread means readAt missing/null.
-    const q1 = query(nRef, where("requestId", "==", rid), where("readAt", "==", null));
-    const snap = await getDocs(q1);
-
-    if (snap.empty) return;
-
-    const jobs = [];
-    snap.forEach((d) => {
-      jobs.push(updateDoc(d.ref, { readAt: serverTimestamp() }));
-    });
-
-    // best-effort
-    await Promise.all(jobs);
-  } catch (e) {
-    // don't break UX if rules/fields differ
-    console.warn("markRequestNotificationsRead failed:", e?.message || e);
-  }
 }
 
 /* ---------- Motion ---------- */
@@ -230,10 +177,7 @@ export default function ProgressScreen() {
   const [err, setErr] = useState("");
   const [deletingId, setDeletingId] = useState("");
 
-  const [unreadCount, setUnreadCount] = useState(0);
-
-  const [chatUnreadByRequest, setChatUnreadByRequest] = useState({});
-  const chatUnsubsRef = useRef({}); // { [requestId]: () => void }
+  const unreadNotifCount = useNotifsV2Store((s) => Number(s.unreadNotifCount || 0) || 0);
 
   /* ✅ pins state (max 2) */
   const [pinnedIds, setPinnedIds] = useState([]);
@@ -285,90 +229,8 @@ export default function ProgressScreen() {
     await deleteDoc(doc(db, "serviceRequests", requestId));
   }
 
-  const setChatUnread = (requestId, isUnread) => {
-    setChatUnreadByRequest((prev) => {
-      const curr = !!prev[requestId];
-      const next = !!isUnread;
-      if (curr === next) return prev;
-      return { ...prev, [requestId]: next };
-    });
-  };
-
-  const attachChatUnreadListeners = (requestIds) => {
-    const existing = chatUnsubsRef.current || {};
-
-    Object.keys(existing).forEach((rid) => {
-      if (!requestIds.includes(rid)) {
-        try {
-          existing[rid]?.();
-        } catch {}
-        delete existing[rid];
-        setChatUnread(rid, false);
-      }
-    });
-
-    requestIds.forEach((rid) => {
-      if (existing[rid]) return;
-
-      let latestMsgSec = 0;
-      let lastReadSec = 0;
-
-      const recompute = () => {
-        const localRead = getLocalReadSec(rid);
-        const effectiveRead = Math.max(lastReadSec || 0, localRead || 0);
-
-        if (!latestMsgSec) {
-          setChatUnread(rid, false);
-          return;
-        }
-        setChatUnread(rid, latestMsgSec > effectiveRead);
-      };
-
-      const msgRef = collection(db, "serviceRequests", rid, "messages");
-      const msgQ = query(msgRef, orderBy("createdAt", "desc"), limit(1));
-      const unsubMsg = onSnapshot(
-        msgQ,
-        (snap) => {
-          const d = snap.docs?.[0]?.data?.() || null;
-          latestMsgSec = d?.createdAt?.seconds || 0;
-          recompute();
-        },
-        () => {
-          latestMsgSec = 0;
-          recompute();
-        }
-      );
-
-      const rsDoc = doc(db, "serviceRequests", rid, "readState", "user");
-      const unsubRead = onSnapshot(
-        rsDoc,
-        (snap) => {
-          const d = snap.exists() ? snap.data() : null;
-          lastReadSec = d?.lastReadAt?.seconds || 0;
-          recompute();
-        },
-        () => {
-          lastReadSec = 0;
-          recompute();
-        }
-      );
-
-      existing[rid] = () => {
-        try {
-          unsubMsg?.();
-        } catch {}
-        try {
-          unsubRead?.();
-        } catch {}
-      };
-    });
-
-    chatUnsubsRef.current = existing;
-  };
-
   useEffect(() => {
     let unsubReq = null;
-    let unsubNotifs = null;
 
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
       if (!user) {
@@ -401,8 +263,6 @@ export default function ProgressScreen() {
             );
             setRequests(data);
 
-            attachChatUnreadListeners(data.map((x) => String(x.id)));
-
             // ✅ keep pins valid (remove pins that no longer exist)
             const ids = new Set(data.map((x) => String(x.id)));
             const currentPins = pinnedIdsRef.current || [];
@@ -420,27 +280,6 @@ export default function ProgressScreen() {
           }
         );
 
-        if (unsubNotifs) unsubNotifs();
-        const nRef = collection(db, "users", user.uid, "notifications");
-        const nQ = query(nRef, orderBy("createdAt", "desc"), limit(50));
-
-        unsubNotifs = onSnapshot(
-          nQ,
-          (snap) => {
-            let count = 0;
-            snap.forEach((d) => {
-              const data = d.data();
-              if (!data?.readAt) count += 1;
-            });
-            setUnreadCount(count);
-          },
-          (error) => {
-            console.error("Realtime notifications error:", error);
-            setUnreadCount(0);
-            setErr((prev) => prev || error?.message || "Failed to load notifications");
-          }
-        );
-
         const appls = await getMyApplications(user.uid, 25);
         setApps(appls);
       } catch (e) {
@@ -454,15 +293,6 @@ export default function ProgressScreen() {
     return () => {
       unsubAuth();
       if (unsubReq) unsubReq();
-      if (unsubNotifs) unsubNotifs();
-
-      const m = chatUnsubsRef.current || {};
-      Object.keys(m).forEach((rid) => {
-        try {
-          m[rid]?.();
-        } catch {}
-      });
-      chatUnsubsRef.current = {};
     };
   }, [navigate]);
 
@@ -471,10 +301,7 @@ export default function ProgressScreen() {
     const requestId = String(state?.activeRequestId || "").trim();
     const track = String(state?.activeTrack || "").toLowerCase();
 
-    // ✅ If continuing into a request, clear its notifications immediately
     if (helpType === "we" && requestId) {
-      const uid = auth.currentUser?.uid || "";
-      await markRequestNotificationsRead({ uid, requestId });
       navigate(`/app/request/${requestId}`, { replace: true });
       return;
     }
@@ -629,14 +456,14 @@ export default function ProgressScreen() {
                       Notifications
                     </div>
                     <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      {unreadCount ? "Tap to view new updates" : "Tap to view history"}
+                      {unreadNotifCount ? "Tap to view new updates" : "Tap to view history"}
                     </div>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
                   <AnimatePresence initial={false}>
-                    {unreadCount ? (
+                    {unreadNotifCount ? (
                       <motion.span
                         key="unread"
                         initial={{ scale: 0.85, opacity: 0 }}
@@ -644,7 +471,7 @@ export default function ProgressScreen() {
                         exit={{ scale: 0.9, opacity: 0 }}
                         className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-rose-600 px-2 text-[11px] font-semibold text-white"
                       >
-                        {unreadCount > 99 ? "99+" : unreadCount}
+                        {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
                       </motion.span>
                     ) : (
                       <motion.span
@@ -764,8 +591,6 @@ export default function ProgressScreen() {
                   const subtitle = isFull ? "Full package" : `Single: ${r.serviceName || "-"}`;
                   const createdLabel = formatCreatedAt(r.createdAt);
 
-                  const hasChatUnread = Boolean(chatUnreadByRequest?.[r.id]);
-
                   const rid = String(r.id || "");
                   const isPinned = (pinnedIds || []).includes(rid);
 
@@ -804,14 +629,6 @@ export default function ProgressScreen() {
                   };
 
                   const openRequestAndClearChatPill = async () => {
-                    const nowSec = Math.floor(Date.now() / 1000);
-
-                    setLocalReadSec(rid, nowSec);
-                    setChatUnread(rid, false);
-
-                    const uid = auth.currentUser?.uid || "";
-                    await markRequestNotificationsRead({ uid, requestId: rid });
-
                     navigate(`/app/request/${rid}`);
                   };
 
@@ -829,19 +646,6 @@ export default function ProgressScreen() {
                               {titleLeft}
                             </div>
 
-                            <AnimatePresence initial={false}>
-                              {hasChatUnread ? (
-                                <motion.span
-                                  initial={{ scale: 0.9, opacity: 0, y: -2 }}
-                                  animate={{ scale: 1, opacity: 1, y: 0 }}
-                                  exit={{ scale: 0.95, opacity: 0, y: -2 }}
-                                  className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50/70 px-2 py-0.5 text-[11px] font-semibold text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200"
-                                >
-                                  <MessageCircle className="h-2 w-3" />
-                                  New message
-                                </motion.span>
-                              ) : null}
-                            </AnimatePresence>
                           </div>
 
                           <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">

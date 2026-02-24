@@ -1,15 +1,5 @@
-// ✅ StaffTasksScreen.jsx (FULL COPY-PASTE)
-//
-// ✅ Unread banner logic:
-// - Reads staff chat notifications from: users/{uid}/notifications
-// - Unread = (readAt == null) OR (readAt field missing)
-// - Primary listener: where(type=="chat_message" && readAt==null)
-// - Fallback listener ONLY if primary query errors (index/rules), then:
-//     where(type=="chat_message") and filter unread in JS
-//
-// ✅ Also:
-// - Prevents setState after unmount during async request details fetch
-// - Keeps UI the same (no backend/routing changes)
+// ✅ StaffTasksScreen.jsx
+// Staff task unread badges are derived only from published chat messages + readState.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -18,16 +8,13 @@ import {
   collection,
   doc,
   getDoc,
-  getDocs,
   onSnapshot,
   orderBy,
   query,
-  serverTimestamp,
-  where,
-  writeBatch,
 } from "firebase/firestore";
 
 import { auth, db } from "../firebase";
+import { useNotifsV2Store } from "../services/notifsV2Store";
 import { smartBack } from "../utils/navBack";
 
 /* ---------- Icons ---------- */
@@ -85,6 +72,20 @@ function IconLogout(props) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function IconBell(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M15 17H5.5a1 1 0 0 1-.8-1.6l1.1-1.5a3 3 0 0 0 .6-1.8V10a5.5 5.5 0 1 1 11 0v2.1a3 3 0 0 0 .6 1.8l1.1 1.5a1 1 0 0 1-.8 1.6H15Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M10.2 19a1.8 1.8 0 0 0 3.6 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
@@ -163,8 +164,9 @@ export default function StaffTasksScreen() {
   const [uid, setUid] = useState("");
   const [busy, setBusy] = useState("");
 
-  // ✅ unread notifications aggregated by requestId
-  const [unreadReqIds, setUnreadReqIds] = useState(() => new Set());
+  // Global unread source-of-truth (driven by notifsV2Engine)
+  const unreadByRequest = useNotifsV2Store((s) => s.unreadByRequest);
+  const unreadNotifCount = useNotifsV2Store((s) => Number(s.unreadNotifCount || 0) || 0);
 
   // ✅ entrance animation
   const [enter, setEnter] = useState(false);
@@ -253,108 +255,6 @@ export default function StaffTasksScreen() {
     };
   }, [navigate]);
 
-  // ✅ live unread-by-request from notifications (users/{uid}/notifications)
-  useEffect(() => {
-    if (!uid) return;
-
-    const nRef = collection(db, "users", uid, "notifications");
-
-    let unsubFallback = null;
-
-    const subscribeFallback = () => {
-      if (unsubFallback) return;
-
-      const fallbackQ = query(nRef, where("type", "==", "chat_message"));
-      unsubFallback = onSnapshot(
-        fallbackQ,
-        (snap) => {
-          const set = new Set();
-          snap.docs.forEach((d) => {
-            const data = d.data() || {};
-            const unread = data.readAt == null || !("readAt" in data);
-            if (!unread) return;
-            const rid = String(data.requestId || "").trim();
-            if (rid) set.add(rid);
-          });
-          setUnreadReqIds(set);
-        },
-        () => {
-          // silent
-        }
-      );
-    };
-
-    const primaryQ = query(
-      nRef,
-      where("type", "==", "chat_message"),
-      where("readAt", "==", null)
-    );
-
-    const unsubPrimary = onSnapshot(
-      primaryQ,
-      (snap) => {
-        const set = new Set();
-        snap.docs.forEach((d) => {
-          const data = d.data() || {};
-          const rid = String(data.requestId || "").trim();
-          if (rid) set.add(rid);
-        });
-
-        // If primary works, use it (even if 0 unread)
-        setUnreadReqIds(set);
-
-        // If fallback was running from a past error, stop it now
-        if (unsubFallback) {
-          unsubFallback();
-          unsubFallback = null;
-        }
-      },
-      () => {
-        // only on error: fallback
-        subscribeFallback();
-      }
-    );
-
-    return () => {
-      unsubPrimary();
-      if (unsubFallback) unsubFallback();
-    };
-  }, [uid]);
-
-  // ✅ mark this request's notifications as read
-  const markRequestNotifsRead = async (requestId) => {
-    const rid = String(requestId || "").trim();
-    if (!uid || !rid) return;
-
-    try {
-      const nRef = collection(db, "users", uid, "notifications");
-      const qy = query(nRef, where("type", "==", "chat_message"));
-
-      const snap = await getDocs(qy);
-      if (snap.empty) return;
-
-      const batch = writeBatch(db);
-      let hasWrites = false;
-
-      snap.docs.forEach((d) => {
-        const data = d.data() || {};
-        const docRid = String(data.requestId || "").trim();
-        const unread = data.readAt == null || !("readAt" in data);
-        if (docRid !== rid || !unread) return;
-
-        hasWrites = true;
-        batch.update(doc(db, "users", uid, "notifications", d.id), {
-          readAt: serverTimestamp(),
-        });
-      });
-
-      if (!hasWrites) return;
-      await batch.commit();
-    } catch {
-      // ignore
-    }
-  };
-
   const enriched = useMemo(() => {
     return tasks
       .map((t) => {
@@ -405,15 +305,15 @@ export default function StaffTasksScreen() {
   // ✅ unread “requests count” per tab (not messages)
   const unreadCountsByTab = useMemo(() => {
     const c = { new: 0, ongoing: 0, done: 0 };
-    if (!unreadReqIds || unreadReqIds.size === 0) return c;
+    if (!unreadByRequest || Object.keys(unreadByRequest).length === 0) return c;
 
     enriched.forEach((x) => {
-      if (!unreadReqIds.has(x.rid)) return;
+      if (!unreadByRequest?.[x.rid]?.unread) return;
       if (c[x.staffTab] != null) c[x.staffTab] += 1;
     });
 
     return c;
-  }, [enriched, unreadReqIds]);
+  }, [enriched, unreadByRequest]);
 
   const unreadInActiveTab = unreadCountsByTab[tab] || 0;
 
@@ -471,6 +371,25 @@ export default function StaffTasksScreen() {
               <h1 className="mt-4 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Your tasks
               </h1>
+
+              <button
+                type="button"
+                onClick={() => navigate("/staff/notifications")}
+                className="relative mt-3 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
+                           dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                title="Notifications"
+              >
+                <span className="relative inline-flex items-center">
+                  <IconBell className="h-4 w-4" />
+                  {unreadNotifCount > 0 ? (
+                    <span
+                      className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-rose-500"
+                      aria-label="Unread notifications"
+                    />
+                  ) : null}
+                </span>
+                Notifications
+              </button>
 
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 New: {counts.new} • Ongoing: {counts.ongoing} • Done: {counts.done}
@@ -535,7 +454,7 @@ export default function StaffTasksScreen() {
               {unreadInActiveTab === 1 ? "request" : "requests"}
             </div>
             <div className="mt-1 text-xs text-amber-900/80">
-              Open a request to clear it from this count.
+              Open chat inside a request to clear it.
             </div>
           </div>
         ) : null}
@@ -611,14 +530,13 @@ export default function StaffTasksScreen() {
                   ? `/staff/request/${rid}`
                   : `/staff/request/${rid}/start`;
 
-              const hasUnread = unreadReqIds?.has(rid);
+              const hasUnread = Boolean(unreadByRequest?.[rid]?.unread);
 
               return (
                 <button
                   key={task.id}
                   type="button"
                   onClick={async () => {
-                    await markRequestNotifsRead(rid);
                     navigate(goTo);
                   }}
                   className={floatCard}
@@ -631,9 +549,11 @@ export default function StaffTasksScreen() {
                         </div>
 
                         {hasUnread ? (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50/70 px-2 py-0.5 text-[11px] font-bold text-amber-900">
-                            New
-                          </span>
+                          <span
+                            className="inline-flex h-2.5 w-2.5 rounded-full bg-rose-500"
+                            aria-label="Unread chat"
+                            title="Unread chat"
+                          />
                         ) : null}
                       </div>
 

@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { onSnapshot, collection, query, orderBy, where } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
-import { sendPendingText, sendPendingPdf, markRequestChatRead } from "../services/chatservice";
+import { sendPendingText, sendPendingPdf } from "../services/chatservice";
 
 /* ---------------- helpers ---------------- */
 function safeStr(x) {
@@ -385,16 +385,6 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
 
     return () => unsub();
   }, [rid, myUid]);
-
-  useEffect(() => {
-    if (!rid) return;
-    if (!myUid) return;
-    if (myRole !== "user" && myRole !== "staff") return;
-
-    markRequestChatRead({ requestId: rid, role: myRole }).catch((e) => {
-      console.warn("markRequestChatRead failed:", e?.message || e);
-    });
-  }, [rid, myUid, myRole, published.length]);
 
   const publishedByPendingId = useMemo(() => {
     const map = new Map();

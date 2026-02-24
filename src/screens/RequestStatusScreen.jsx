@@ -15,8 +15,6 @@ import {
   onSnapshot,
   query,
   orderBy,
-  serverTimestamp,
-  setDoc,
 } from "firebase/firestore";
 import { motion, AnimatePresence } from "../utils/motionProxy";
 import RequestChatLauncher from "../components/RequestChatLauncher";
@@ -223,20 +221,6 @@ export default function RequestStatusScreen() {
     return id.length > 0 ? id : null;
   }, [requestId]);
 
-  // ✅ Mark chat read when viewing this screen so Progress "New message" badge clears
-  const markChatRead = async () => {
-    if (!validRequestId) return;
-    try {
-      await setDoc(
-        doc(db, "serviceRequests", validRequestId, "readState", "user"),
-        { lastReadAt: serverTimestamp() },
-        { merge: true }
-      );
-    } catch (e) {
-      console.warn("markChatRead failed:", e);
-    }
-  };
-
   // ✅ IMPORTANT: ensure any modal/portal chat always sits on top
   const TOP_LAYER_CLS = "relative isolate z-0";
 
@@ -268,8 +252,6 @@ export default function RequestStatusScreen() {
 
       setLoading(true);
       setErr("");
-
-      markChatRead();
 
       const ref = doc(db, "serviceRequests", validRequestId);
       unsubDoc = onSnapshot(
@@ -337,7 +319,6 @@ export default function RequestStatusScreen() {
       if (unsubAdminFiles) unsubAdminFiles();
       unsubAuth();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate, validRequestId]);
 
   // ✅ keep your original base styles, just slightly upgraded

@@ -10,13 +10,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import { useLocation, useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import {
   sendPendingText,
   sendPendingPdf,
   sendPendingBundle,
-  markRequestChatRead,
 } from "../services/chatservice";
+import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 
 /* ---------------- helpers ---------------- */
 function safeStr(x) {
@@ -171,10 +172,13 @@ function IconSend(props) {
 /* ---------------- component ---------------- */
 export default function StaffRequestChatPanel({ requestId }) {
   const rid = useMemo(() => safeStr(requestId), [requestId]);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const [uid, setUid] = useState("");
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const hasUnreadChat = useNotifsV2Store((s) => Boolean(rid && s.unreadByRequest?.[rid]?.unread));
 
   const [published, setPublished] = useState([]); // /messages
   const [pendingMine, setPendingMine] = useState([]); // /pendingMessages (staff only)
@@ -240,9 +244,21 @@ export default function StaffRequestChatPanel({ requestId }) {
 
   /* ---------- mark read when opened ---------- */
   useEffect(() => {
-    if (!rid || !open) return;
-    markRequestChatRead({ requestId: rid, role: "staff" }).catch(() => {});
-  }, [rid, open]);
+    if (!rid || open) return;
+    try {
+      const params = new URLSearchParams(location.search || "");
+      if (params.get("openChat") === "1") return;
+    } catch {}
+    let shouldOpen = false;
+    try {
+      shouldOpen = sessionStorage.getItem(`maj_open_staff_chat:${rid}`) === "1";
+      if (shouldOpen) sessionStorage.removeItem(`maj_open_staff_chat:${rid}`);
+    } catch {}
+    if (!shouldOpen) return;
+
+    if (uid) notifsV2Store.markChatRead(rid).catch(() => {});
+    setOpen(true);
+  }, [rid, open, uid, location.search]);
 
   /* ---------- lock body scroll ---------- */
   useEffect(() => {
@@ -584,20 +600,36 @@ export default function StaffRequestChatPanel({ requestId }) {
     </div>
   );
 
-  // Count to show on button: published visible + pending mine
-  const buttonCount = useMemo(() => {
-    const pendingCount = pendingMine.filter((p) => {
-      const st = String(p?.status || "pending").toLowerCase();
-      return st === "pending" || st === "rejected" || st === "hidden";
-    }).length;
-    return (visiblePublished?.length || 0) + pendingCount;
-  }, [pendingMine, visiblePublished]);
+  const openChat = () => {
+    if (rid) notifsV2Store.markChatRead(rid).catch(() => {});
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    if (!rid || open) return;
+    let params = null;
+    try {
+      params = new URLSearchParams(location.search || "");
+    } catch {
+      return;
+    }
+    if (params.get("openChat") !== "1") return;
+
+    openChat();
+
+    params.delete("openChat");
+    const qs = params.toString();
+    const nextUrl = `${location.pathname}${qs ? `?${qs}` : ""}`;
+    if (nextUrl !== `${location.pathname}${location.search || ""}`) {
+      navigate(nextUrl, { replace: true });
+    }
+  }, [rid, open, location.pathname, location.search, navigate]);
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className={openBtn}>
+      <button type="button" onClick={openChat} className={openBtn}>
         <IconChat className="h-5 w-5" />
-        Chat <span className={badge}>{buttonCount}</span>
+        Chat {hasUnreadChat ? <span className={badge}>New</span> : null}
       </button>
 
       {open ? createPortal(modal, document.body) : null}

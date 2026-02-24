@@ -7,7 +7,9 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { lazy, Suspense, useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 
@@ -33,6 +35,9 @@ import AdminGate from "./components/AdminGate";
 import GAPageView from "./components/GAPageView";
 import StaffGate from "./components/StaffGate";
 import AppLoading from "./components/AppLoading";
+import { auth, db } from "./firebase";
+import { startNotifsV2Engine, stopNotifsV2Engine } from "./services/notifsV2Engine";
+import { cleanupPushBridge, initPushBridge } from "./services/pushBridge";
 
 /* ---------------- Lazy screens ---------------- */
 // Main user flows
@@ -66,6 +71,11 @@ const StaffStartWorkModalScreen = lazy(() => import("./screens/StaffStartWorkMod
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
 const ROOT_EXIT_PATHS = new Set(["/app/home", "/dashboard", "/staff", "/staff/tasks"]);
 const SAFE_FALLBACK_PATH = "/app/home";
+const ADMIN_EMAIL = "brioneroo@gmail.com";
+
+function isAdminEmail(email) {
+  return String(email || "").trim().toLowerCase() === ADMIN_EMAIL;
+}
 
 /* ---------------- Preload helpers ---------------- */
 function preloadCriticalScreens() {
@@ -149,9 +159,76 @@ function AndroidBackHandler() {
   return null;
 }
 
+function RuntimeBridges() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    let disposed = false;
+    let bootSeq = 0;
+    let localEngineCleanup = () => {};
+    let localPushCleanup = () => {};
+
+    const unsub = onAuthStateChanged(auth, (user) => {
+      bootSeq += 1;
+      const seq = bootSeq;
+
+      try {
+        localEngineCleanup?.();
+      } catch {}
+      try {
+        localPushCleanup?.();
+      } catch {}
+      localEngineCleanup = () => {};
+      localPushCleanup = () => {};
+
+      if (!user) {
+        stopNotifsV2Engine();
+        cleanupPushBridge();
+        return;
+      }
+
+      (async () => {
+        let role = isAdminEmail(user.email) ? "admin" : "user";
+
+        if (role !== "admin") {
+          try {
+            const staffSnap = await getDoc(doc(db, "staff", user.uid));
+            if (staffSnap.exists() && staffSnap.data()?.active === true) {
+              role = "staff";
+            }
+          } catch {
+            // default keeps user role
+          }
+        }
+
+        if (disposed || seq !== bootSeq) return;
+        localEngineCleanup = startNotifsV2Engine({ role, uid: user.uid });
+        localPushCleanup = initPushBridge({ navigate, role, uid: user.uid }) || (() => {});
+      })().catch(() => {});
+    });
+
+    return () => {
+      disposed = true;
+      try {
+        localEngineCleanup?.();
+      } catch {}
+      try {
+        localPushCleanup?.();
+      } catch {}
+      unsub();
+      stopNotifsV2Engine();
+      cleanupPushBridge();
+    };
+  }, [navigate]);
+
+  return null;
+}
+
 function AppRoutes() {
+
   return (
     <>
+      <RuntimeBridges />
       <GAPageView />
       <AndroidBackHandler />
 
@@ -190,6 +267,14 @@ function AppRoutes() {
             element={
               <StaffGate>
                 <StaffTasksScreen />
+              </StaffGate>
+            }
+          />
+          <Route
+            path="/staff/notifications"
+            element={
+              <StaffGate>
+                <NotificationsScreen />
               </StaffGate>
             }
           />

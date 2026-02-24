@@ -1,9 +1,10 @@
 import { Outlet, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, onSnapshot, collection, query, orderBy, limit } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 
 import { auth, db } from "../firebase";
+import { useNotifsV2Store } from "../services/notifsV2Store";
 import ScreenLoader from "./ScreenLoader";
 
 import { AnimatePresence } from "../utils/motionProxy";
@@ -76,8 +77,7 @@ export default function AppLayout() {
   const [uid, setUid] = useState(null);
   const [activeTrack, setActiveTrack] = useState(null);
   const [hasActiveProcess, setHasActiveProcess] = useState(false);
-
-  const [unreadCount, setUnreadCount] = useState(0);
+  const unreadNotifCount = useNotifsV2Store((s) => Number(s.unreadNotifCount || 0) || 0);
   const [scrollY, setScrollY] = useState(0);
 
   const rafRef = useRef(null);
@@ -103,7 +103,6 @@ export default function AppLayout() {
 
   useEffect(() => {
     let unsubUserDoc = null;
-    let unsubNotifs = null;
     let unsubAuth = null;
     let cancelled = false;
 
@@ -111,10 +110,6 @@ export default function AppLayout() {
       if (unsubUserDoc) {
         unsubUserDoc();
         unsubUserDoc = null;
-      }
-      if (unsubNotifs) {
-        unsubNotifs();
-        unsubNotifs = null;
       }
     };
 
@@ -154,7 +149,6 @@ export default function AppLayout() {
               setUid(null);
               setHasActiveProcess(false);
               setActiveTrack(null);
-              setUnreadCount(0);
               setCheckingAuth(false);
               navigate("/login", { replace: true, state: { from: pathRef.current } });
               return;
@@ -188,24 +182,6 @@ export default function AppLayout() {
           }
         );
 
-        // notifications listener for badge
-        const nRef = collection(db, "users", user.uid, "notifications");
-        const nQ = query(nRef, orderBy("createdAt", "desc"), limit(50));
-
-        unsubNotifs = onSnapshot(
-          nQ,
-          (snap) => {
-            let count = 0;
-            snap.forEach((d) => {
-              const data = d.data();
-              if (!data?.readAt) count += 1;
-            });
-            setUnreadCount(count);
-          },
-          () => {
-            setUnreadCount(0);
-          }
-        );
       });
     })();
 
@@ -306,31 +282,18 @@ export default function AppLayout() {
               >
                 <span className="relative">
                   <IconProgress className="h-5 w-5" />
-                  {unreadCount > 0 ? (
+                  {unreadNotifCount > 0 ? (
                     <span
                       className={`absolute -top-2 -right-19 h-2.5 w-2.5 rounded-full ${
                         progressActive ? "bg-white dark:bg-zinc-900/60" : "bg-rose-600"
                       }`}
-                      aria-label={`${unreadCount} unread notifications`}
-                      title={`${unreadCount} unread notifications`}
+                      aria-label="Unread notifications"
+                      title="Unread notifications"
                     />
                   ) : null}
                 </span>
 
                 <span>Progress</span>
-
-                {unreadCount >= 10 ? (
-                  <span
-                    className={`ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-2 text-[11px] font-semibold ${
-                      progressActive
-                        ? "bg-white/90 dark:bg-zinc-900/60 text-emerald-900"
-                        : "bg-rose-600 text-white"
-                    }`}
-                    aria-hidden="true"
-                  >
-                    {unreadCount > 99 ? "99+" : unreadCount}
-                  </span>
-                ) : null}
               </NavLink>
 
               <NavLink to="/app/profile" className={({ isActive }) => `${itemBase} ${isActive ? itemOn : itemOff}`}>

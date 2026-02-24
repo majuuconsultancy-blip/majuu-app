@@ -275,6 +275,82 @@ Then restart the dev server after editing `.env`.
 ### 1) Install dependencies
 ```bash
 npm install
+```
+
+## Push Notifications (FCM + Capacitor Android)
+
+This app supports FCM push notifications for:
+- published chat messages (`/serviceRequests/{id}/messages`)
+- request status updates
+- staff task assignment / work start
+
+### Client setup (Android / Capacitor)
+
+1. Install the plugin and sync native project:
+```bash
+npm install @capacitor/push-notifications
+npx cap sync android
+```
+
+2. Add Firebase Android config file:
+- place `google-services.json` at `android/app/google-services.json`
+
+3. Android permissions:
+- `POST_NOTIFICATIONS` is declared in `android/app/src/main/AndroidManifest.xml`
+
+### Functions setup / deploy
+
+1. Install functions deps (if needed):
+```bash
+cd functions
+npm install
+```
+
+2. Deploy Cloud Functions:
+```bash
+firebase deploy --only functions
+```
+
+### What the Functions do
+
+- `onPublishedMessagePush`: sends push only for published messages (never pending messages)
+- `onRequestStatusPush`: sends push for request status changes and started-work transitions
+- `onStaffTaskAssignedPush`: sends push when `staff/{uid}/tasks/{requestId}` is created
+
+### Token storage
+
+- User tokens: `users/{uid}/pushTokens/{deviceKey}`
+- Staff tokens: `staff/{uid}/pushTokens/{deviceKey}` (client also writes fallback under `users/{uid}` when applicable)
+
+Fields include:
+- `token`
+- `platform`
+- `createdAt`
+- `updatedAt`
+- `lastSeenAt`
+- `disabled`
+
+### Deep links / tap behavior
+
+Push taps route inside the app using payload `data`:
+- `type=chat` -> opens request screen and auto-opens chat
+- `type=request_status` / `request_in_progress` -> opens request screen
+- `type=request_assigned` -> opens staff request details (or tasks)
+
+### Debugging
+
+Client push debug logs are written to console and cached in local storage:
+- helper: `src/utils/pushDebug.js`
+- latest entry is also exposed as `window.__MAJUU_PUSH_DEBUG_LAST__`
+
+### Device test checklist
+
+1. Install Android app on a physical device (FCM push will not be reliable on emulator)
+2. Sign in and allow notifications
+3. Check console for `PushDebug` token registration logs
+4. Publish a chat message from admin (not pending) and confirm push arrives
+5. Change request status and confirm owner push arrives
+6. Assign a task to staff and confirm staff push arrives
 
 All rights reserved unless explicitly stated otherwise.
 

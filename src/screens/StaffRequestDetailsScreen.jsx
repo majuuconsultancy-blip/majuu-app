@@ -13,7 +13,7 @@
 // - When the assigned staff opens this screen, we "claim" those orphan staff messages:
 //   - set toUid = current staff uid
 //   - mark needsAssignment = false
-//   - create a notification for each newly claimed message (so badge/notifications work)
+//   - no chat notification docs are created (chat unread comes from readState + messages)
 
 import { useEffect, useMemo, useState, useRef } from "react";
 import { onAuthStateChanged } from "firebase/auth";
@@ -507,23 +507,6 @@ export default function StaffRequestDetailsScreen() {
             assignedAt: serverTimestamp(),
           });
 
-          // Create a notification for staff (so unread badge/notifications work)
-          // We only do this "claim time" because we couldn't notify earlier.
-          const notifRef = doc(collection(db, "users", uid, "notifications"));
-          const type = String(m.data?.type || "text").toLowerCase();
-          const hasPdf = type === "pdf" || (type === "bundle" && m.data?.pdfMeta);
-          batch.set(notifRef, {
-            type: "chat_message",
-            requestId: String(requestId),
-            title: hasPdf ? "New document" : "New message",
-            body: hasPdf
-              ? "A document was sent to your request chat."
-              : "You have a new message on your request.",
-            createdAt: serverTimestamp(),
-            readAt: null,
-            _claimedFromOrphan: true,
-            messageId: m.id,
-          });
         });
 
         await batch.commit();
