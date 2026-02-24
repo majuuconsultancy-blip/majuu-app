@@ -1,5 +1,6 @@
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import { sendPushForNotificationDoc } from "./pushServerClient";
 
 function safeStr(value) {
   return String(value || "").trim();
@@ -102,7 +103,19 @@ async function createNotificationDoc({ scope, uid, type, requestId, extras = {} 
   };
 
   const ref = await addDoc(colRef, payload);
-  return { id: ref.id, ...payload };
+  const row = { id: ref.id, ...payload };
+
+  try {
+    await sendPushForNotificationDoc({
+      scope,
+      uid: targetUid,
+      notification: row,
+    });
+  } catch (error) {
+    console.warn("Failed to trigger push for notification doc:", error?.message || error);
+  }
+
+  return row;
 }
 
 export async function createUserNotification({ uid, type, requestId, extras } = {}) {

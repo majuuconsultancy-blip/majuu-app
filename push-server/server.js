@@ -1,3 +1,26 @@
+/*
+ * MAJUU Render Push Server (client-triggered only; no Firestore polling/scanning)
+ *
+ * Required env vars:
+ * - FIREBASE_PROJECT_ID
+ * - FIREBASE_CLIENT_EMAIL
+ * - FIREBASE_PRIVATE_KEY
+ * - PUSH_SERVER_API_KEY (required in production; shared secret for POST endpoints)
+ *
+ * Optional env vars:
+ * - PORT
+ * - CORS_ALLOWED_ORIGINS (comma-separated)
+ * - CORS_ORIGIN (legacy single-origin fallback)
+ * - LOG_VERBOSE (true|false, default true)
+ * - FALLBACK_POLL_MS / POLL_INTERVAL_MS (legacy; only used to keep /health response shape)
+ *
+ * Testing notes:
+ * curl -X POST https://<render>/sendPush \
+ *   -H "content-type: application/json" \
+ *   -H "x-api-key: <key>" \
+ *   -d '{"toRole":"user","toUid":"UID","title":"Test","body":"Hello","data":{"type":"NEW_MESSAGE"}}'
+ */
+
 const express = require("express");
 const cors = require("cors");
 const admin = require("firebase-admin");
@@ -36,27 +59,6 @@ function shortErr(error, max = 1200) {
   }
 
   return parts.join(" | ").slice(0, max);
-}
-
-function safeJsonStringify(value) {
-  const seen = new WeakSet();
-  try {
-    return JSON.stringify(
-      value,
-      (key, val) => {
-        if (typeof val === "object" && val !== null) {
-          if (seen.has(val)) return "[Circular]";
-          seen.add(val);
-        }
-        if (typeof val === "bigint") return String(val);
-        if (typeof val === "function") return `[Function ${val.name || "anonymous"}]`;
-        return val;
-      },
-      2
-    );
-  } catch (error) {
-    return `<<stringify_failed: ${safeStr(error && error.message)}>>`;
-  }
 }
 
 function asBool(value, fallback = false) {
@@ -103,13 +105,25 @@ function validateToken(token) {
   return "";
 }
 
+function asPlainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
 const FIREBASE_PROJECT_ID = requireEnv("FIREBASE_PROJECT_ID");
 const FIREBASE_CLIENT_EMAIL = requireEnv("FIREBASE_CLIENT_EMAIL");
 const FIREBASE_PRIVATE_KEY = parsePrivateKey(requireEnv("FIREBASE_PRIVATE_KEY"));
 
+const NODE_ENV = safeStr(process.env.NODE_ENV).toLowerCase() || "development";
+const PUSH_SERVER_API_KEY = safeStr(process.env.PUSH_SERVER_API_KEY);
+if (NODE_ENV === "production" && !PUSH_SERVER_API_KEY) {
+  throw new Error("Missing required env var in production: PUSH_SERVER_API_KEY");
+}
+
 const PORT = Number(process.env.PORT || 10000);
-const POLL_INTERVAL_MS = Math.max(1000, Number(process.env.POLL_INTERVAL_MS || 5000));
-const POLL_LIMIT = Math.max(1, Math.min(200, Number(process.env.POLL_LIMIT || 100)));
+const LEGACY_POLL_INTERVAL_MS = Math.max(
+  60000,
+  Number(process.env.FALLBACK_POLL_MS || process.env.POLL_INTERVAL_MS || 180000)
+);
 const CORS_ALLOWED_ORIGINS = parseAllowedOrigins(
   process.env.CORS_ALLOWED_ORIGINS || process.env.CORS_ORIGIN || ""
 );
@@ -125,7 +139,7 @@ admin.initializeApp({
 
 const firestore = admin.firestore();
 const messaging = admin.messaging();
-const { FieldValue, FieldPath } = admin.firestore;
+const { FieldValue } = admin.firestore;
 
 const app = express();
 app.disable("x-powered-by");
@@ -141,6 +155,21 @@ app.use(
   })
 );
 
+function requireApiKey(req, res, next) {
+  if (req.method === "OPTIONS") return next();
+  if (req.path === "/health") return next();
+  if (!PUSH_SERVER_API_KEY) return next(); // local/dev fallback when key is intentionally unset
+
+  const provided = safeStr(req.get("x-api-key"));
+  if (!provided || provided !== PUSH_SERVER_API_KEY) {
+    return res.status(401).json({ ok: false, error: "unauthorized" });
+  }
+
+  return next();
+}
+
+app.use(requireApiKey);
+
 function tokenCollectionRef({ uid, role }) {
   const safeUid = safeStr(uid);
   const safeRole = safeStr(role).toLowerCase();
@@ -155,28 +184,6 @@ function makeTokenDocId(token) {
   const t = safeStr(token);
   if (!t || t.includes("/")) return "";
   return t;
-}
-
-function notificationDocMetaFromPath(docSnap) {
-  const segments = docSnap.ref.path.split("/");
-  // users/{uid}/notifications/{nid} OR staff/{uid}/notifications/{nid}
-  if (segments.length !== 4) return null;
-  const root = safeStr(segments[0]).toLowerCase();
-  const uid = safeStr(segments[1]);
-  const nid = safeStr(segments[3]);
-  if (!uid || !nid) return null;
-  if (root !== "users" && root !== "staff") return null;
-  return {
-    root,
-    uid,
-    notificationId: nid,
-  };
-}
-
-function isPushWorthyNotification(data) {
-  const type = safeStr(data?.type).toUpperCase();
-  if (["NEW_MESSAGE", "NEW_REQUEST", "STATUS_UPDATE"].includes(type)) return true;
-  return Boolean(safeStr(data?.title) && safeStr(data?.body));
 }
 
 function toFcmDataMap(input = {}) {
@@ -195,7 +202,7 @@ function toFcmDataMap(input = {}) {
     try {
       out[key] = JSON.stringify(value);
     } catch {
-      // skip
+      // skip non-serializable values
     }
   });
   return out;
@@ -303,231 +310,33 @@ async function sendPushToTokens({ uid, role, title, body, data }) {
     }
   }
 
-  if (sentCount > 0) {
-    return {
-      ok: true,
-      pushStatus: "sent",
-      sentCount,
-      failedCount,
-      pushError: failedCount > 0 ? shortErr(firstError) : "",
-    };
-  }
-
-  return {
-    ok: false,
-    pushStatus: "failed",
+  const summary = {
+    ok: sentCount > 0,
+    pushStatus: sentCount > 0 ? "sent" : "failed",
     sentCount,
     failedCount,
-    pushError: shortErr(firstError || "FCM send failed"),
+    pushError: sentCount > 0 ? (failedCount > 0 ? shortErr(firstError) : "") : shortErr(firstError || "FCM send failed"),
   };
-}
-
-async function markNotificationPushResult(docRef, result) {
-  const patch = {
-    pushedAt: FieldValue.serverTimestamp(),
-    pushStatus: safeStr(result?.pushStatus || "failed"),
-  };
-
-  if (patch.pushStatus === "failed" && safeStr(result?.pushError)) {
-    patch.pushError = shortErr(result.pushError);
-  } else {
-    patch.pushError = FieldValue.delete();
-  }
-
-  patch.pushMeta = {
-    sentCount: Number(result?.sentCount || 0) || 0,
-    failedCount: Number(result?.failedCount || 0) || 0,
-    processedBy: "render-push-server",
-  };
-
-  await docRef.set(patch, { merge: true });
-}
-
-async function processNotificationDoc(docSnap) {
-  const meta = notificationDocMetaFromPath(docSnap);
-  if (!meta) return { skipped: true, reason: "unsupported_path" };
-
-  const data = docSnap.data() || {};
-  if (data?.pushedAt) return { skipped: true, reason: "already_pushed" };
-  if (!isPushWorthyNotification(data)) {
-    await markNotificationPushResult(docSnap.ref, {
-      pushStatus: "skipped_no_tokens", // still mark processed to avoid repeat for non-push docs
-      sentCount: 0,
-      failedCount: 0,
-      pushError: "",
-    });
-    return { skipped: true, reason: "not_push_worthy" };
-  }
-
-  const title = safeStr(data?.title) || "MAJUU";
-  const body = safeStr(data?.body) || "You have an update.";
-  const roleField = safeStr(data?.role).toLowerCase();
-  const tokenRole = meta.root === "staff" ? "staff" : roleField === "admin" ? "admin" : "user";
-  const route = safeStr(data?.route);
 
   if (LOG_VERBOSE) {
-    console.log(`[${nowIso()}] processNotificationDoc`, {
-      path: docSnap.ref.path,
-      root: meta.root,
-      uid: meta.uid,
-      type: safeStr(data?.type),
-      role: roleField,
-      title,
-      body,
-      tokenRole,
+    console.log(`[${nowIso()}] sendPushToTokens result`, {
+      uid: safeStr(uid),
+      role: safeStr(role),
+      pushStatus: summary.pushStatus,
+      sentCount: summary.sentCount,
+      failedCount: summary.failedCount,
+      pushError: summary.pushError || "",
     });
   }
 
-  try {
-    if (LOG_VERBOSE) {
-      console.log(`[${nowIso()}] sending push...`, {
-        path: docSnap.ref.path,
-        uid: meta.uid,
-        role: tokenRole,
-      });
-    }
-    const sendResult = await sendPushToTokens({
-      uid: meta.uid,
-      role: tokenRole,
-      title,
-      body,
-      data: {
-        route,
-        type: safeStr(data?.type),
-        requestId: safeStr(data?.requestId),
-        notificationId: meta.notificationId,
-        role: tokenRole,
-      },
-    });
-
-    if (LOG_VERBOSE) {
-      console.log(`[${nowIso()}] sendResult`, {
-        path: docSnap.ref.path,
-        pushStatus: sendResult?.pushStatus,
-        sentCount: sendResult?.sentCount,
-        failedCount: sendResult?.failedCount,
-        pushError: sendResult?.pushError || "",
-      });
-    }
-
-    await markNotificationPushResult(docSnap.ref, sendResult);
-    return { ok: true, ...sendResult, path: docSnap.ref.path };
-  } catch (error) {
-    const result = {
-      pushStatus: "failed",
-      sentCount: 0,
-      failedCount: 0,
-      pushError: shortErr(error),
-    };
-    try {
-      await markNotificationPushResult(docSnap.ref, result);
-    } catch (markErr) {
-      console.warn(
-        `[${nowIso()}] failed to mark push result for ${docSnap.ref.path}`,
-        shortErr(markErr)
-      );
-    }
-    return { ok: false, ...result, path: docSnap.ref.path };
-  }
-}
-
-let pollInFlight = false;
-
-async function pollNotificationsOnce() {
-  if (pollInFlight) return;
-  pollInFlight = true;
-
-  try {
-    console.log(
-      `[${nowIso()}] poll query`,
-      JSON.stringify(
-        {
-          collectionGroup: "notifications",
-          orderBy: [
-            { field: "createdAt", direction: "desc" },
-            { field: "__name__", direction: "asc" },
-          ],
-          limit: POLL_LIMIT,
-          filters: [],
-          indexMatch: {
-            collectionId: "notifications",
-            queryScope: "COLLECTION_GROUP",
-            fields: [
-              { field: "createdAt", order: "DESCENDING" },
-              { field: "__name__", order: "ASCENDING" },
-            ],
-          },
-        },
-        null,
-        2
-      )
-    );
-
-    const snap = await firestore
-      .collectionGroup("notifications")
-      .orderBy("createdAt", "desc")
-      .orderBy(FieldPath.documentId(), "asc")
-      .limit(POLL_LIMIT)
-      .get();
-
-    const candidates = snap.docs
-      .filter((d) => {
-        const meta = notificationDocMetaFromPath(d);
-        if (!meta) return false;
-        const data = d.data() || {};
-        return !data?.pushedAt;
-      })
-      .sort((a, b) => {
-        const aTs = a.data()?.createdAt?.toMillis ? a.data().createdAt.toMillis() : 0;
-        const bTs = b.data()?.createdAt?.toMillis ? b.data().createdAt.toMillis() : 0;
-        return aTs - bTs;
-      });
-
-    if (!candidates.length) return;
-
-    if (LOG_VERBOSE) {
-      console.log(`[${nowIso()}] polling ${candidates.length} notification(s)`);
-    }
-
-    for (const docSnap of candidates) {
-      const result = await processNotificationDoc(docSnap);
-      if (LOG_VERBOSE && !result?.skipped) {
-        console.log(
-          `[${nowIso()}] push ${result?.pushStatus || "unknown"} ${docSnap.ref.path} sent=${result?.sentCount || 0} failed=${result?.failedCount || 0}`
-        );
-      }
-    }
-  } catch (error) {
-    const metaDump =
-      error && error.metadata && typeof error.metadata.getMap === "function"
-        ? error.metadata.getMap()
-        : error && error.metadata;
-
-    console.error(`[${nowIso()}] poll loop error code`, error && error.code);
-    console.error(`[${nowIso()}] poll loop error message`, error && error.message);
-    console.error(`[${nowIso()}] poll loop error details`, error && error.details);
-    console.error(`[${nowIso()}] poll loop error metadata`, metaDump);
-    console.error(
-      `[${nowIso()}] poll loop error full json`,
-      safeJsonStringify({
-        code: error && error.code,
-        message: error && error.message,
-        details: error && error.details,
-        metadata: metaDump,
-        rawError: error,
-      })
-    );
-    console.error(`[${nowIso()}] poll loop raw error object`, error);
-  } finally {
-    pollInFlight = false;
-  }
+  return summary;
 }
 
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     service: "majuu-push-server",
-    pollIntervalMs: POLL_INTERVAL_MS,
+    pollIntervalMs: LEGACY_POLL_INTERVAL_MS,
     time: nowIso(),
   });
 });
@@ -573,17 +382,74 @@ app.post("/registerToken", async (req, res) => {
   }
 });
 
+app.post("/sendPush", async (req, res) => {
+  try {
+    const toUid = safeStr(req.body && req.body.toUid);
+    const toRole = safeStr(req.body && req.body.toRole).toLowerCase();
+    const title = safeStr(req.body && req.body.title) || "MAJUU";
+    const body = safeStr(req.body && req.body.body) || "You have an update.";
+    const data = asPlainObject(req.body && req.body.data);
+
+    if (!toUid) return res.status(400).json({ ok: false, error: "toUid is required" });
+    if (!isValidRole(toRole)) {
+      return res.status(400).json({ ok: false, error: "toRole must be user|staff|admin" });
+    }
+
+    if (LOG_VERBOSE) {
+      console.log(`[${nowIso()}] /sendPush request`, {
+        toRole,
+        toUid,
+        type: safeStr(data?.type),
+        requestId: safeStr(data?.requestId),
+      });
+    }
+
+    const result = await sendPushToTokens({
+      uid: toUid,
+      role: toRole,
+      title,
+      body,
+      data,
+    });
+
+    if (LOG_VERBOSE) {
+      console.log(`[${nowIso()}] /sendPush result`, {
+        toRole,
+        toUid,
+        pushStatus: result?.pushStatus,
+        sentCount: result?.sentCount,
+        failedCount: result?.failedCount,
+        pushError: result?.pushError || "",
+      });
+    }
+
+    return res.json({ ok: true, result });
+  } catch (error) {
+    console.error(`[${nowIso()}] /sendPush error`, shortErr(error));
+    return res.status(500).json({ ok: false, error: shortErr(error) || "internal_error" });
+  }
+});
+
 app.post("/sendTest", async (req, res) => {
   try {
     const uid = safeStr(req.body && req.body.uid);
     const role = safeStr(req.body && req.body.role).toLowerCase();
     const title = safeStr(req.body && req.body.title) || "MAJUU Test";
     const body = safeStr(req.body && req.body.body) || "Test push from Render server";
-    const data = req.body && typeof req.body.data === "object" ? req.body.data : {};
+    const data = asPlainObject(req.body && req.body.data);
 
     if (!uid) return res.status(400).json({ ok: false, error: "uid is required" });
     if (!isValidRole(role)) {
       return res.status(400).json({ ok: false, error: "role must be user|staff|admin" });
+    }
+
+    if (LOG_VERBOSE) {
+      console.log(`[${nowIso()}] /sendTest request`, {
+        role,
+        uid,
+        type: safeStr(data?.type),
+        requestId: safeStr(data?.requestId),
+      });
     }
 
     const result = await sendPushToTokens({ uid, role, title, body, data });
@@ -594,19 +460,28 @@ app.post("/sendTest", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`[${nowIso()}] MAJUU push server listening on port ${PORT}`);
   console.log(
     `[${nowIso()}] firebase admin project=${FIREBASE_PROJECT_ID} clientEmail=${FIREBASE_CLIENT_EMAIL}`
   );
-  console.log(`[${nowIso()}] poll interval ${POLL_INTERVAL_MS}ms, poll limit ${POLL_LIMIT}`);
-  setInterval(() => {
-    pollNotificationsOnce().catch((error) => {
-      console.error(`[${nowIso()}] unhandled poll error`, shortErr(error));
-    });
-  }, POLL_INTERVAL_MS);
-  // Run once on boot so first sends aren't delayed by the interval.
-  pollNotificationsOnce().catch((error) => {
-    console.error(`[${nowIso()}] boot poll error`, shortErr(error));
-  });
+  console.log(
+    `[${nowIso()}] client-triggered push mode enabled (no polling/scanning). auth=${
+      PUSH_SERVER_API_KEY ? "api-key" : "disabled-dev"
+    }`
+  );
 });
+
+function shutdown(signal) {
+  try {
+    console.log(`[${nowIso()}] ${safeStr(signal) || "signal"} received, shutting down`);
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 5000).unref?.();
+  } catch {
+    process.exit(0);
+  }
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+

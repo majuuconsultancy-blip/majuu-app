@@ -1,6 +1,7 @@
 // requestservice.js (REPLACE with this)
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import { sendPushToAdmin } from "./pushServerClient";
 
 function cleanStr(x, max = 500) {
   return String(x || "").trim().slice(0, max);
@@ -150,5 +151,18 @@ export async function createServiceRequest(payload) {
   };
 
   const docRef = await addDoc(ref, clean);
+  try {
+    await sendPushToAdmin({
+      title: "New request",
+      body: "A new service request was submitted.",
+      data: {
+        type: "NEW_REQUEST",
+        requestId: docRef.id,
+        route: `/app/admin/request/${encodeURIComponent(docRef.id)}`,
+      },
+    });
+  } catch (error) {
+    console.warn("Failed to trigger NEW_REQUEST push:", error?.message || error);
+  }
   return docRef.id;
 }

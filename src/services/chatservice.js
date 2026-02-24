@@ -41,6 +41,7 @@ import {
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { createStaffNotification, createUserNotification } from "./notificationDocs";
+import { sendPushToAdmin } from "./pushServerClient";
 
 /* -------------------- Paths -------------------- */
 const reqRef = (requestId) => doc(db, "serviceRequests", String(requestId));
@@ -109,6 +110,23 @@ function resolveReceiverUid({ req, toRole }) {
   return "";
 }
 
+async function notifyAdminPendingModeration({ requestId, pendingId } = {}) {
+  const rid = safeStr(requestId);
+  const pid = safeStr(pendingId);
+  if (!rid || !pid) return;
+
+  await sendPushToAdmin({
+    title: "New message for moderation",
+    body: "A user or staff message is waiting for admin review.",
+    data: {
+      type: "ADMIN_NEW_MESSAGE",
+      requestId: rid,
+      pendingId: pid,
+      route: `/app/admin/request/${encodeURIComponent(rid)}?openChat=1`,
+    },
+  });
+}
+
 /* -------------------- Sender: User/Staff -> Pending -------------------- */
 
 export async function sendPendingText({ requestId, fromRole, toRole, text } = {}) {
@@ -135,6 +153,11 @@ export async function sendPendingText({ requestId, fromRole, toRole, text } = {}
   };
 
   const ref = await addDoc(pendingCol(rid), payload);
+  try {
+    await notifyAdminPendingModeration({ requestId: rid, pendingId: ref.id });
+  } catch (error) {
+    console.warn("Failed to trigger admin pending-text push:", error?.message || error);
+  }
   return { ok: true, id: ref.id };
 }
 
@@ -162,6 +185,11 @@ export async function sendPendingPdf({ requestId, fromRole, toRole, pdfMeta } = 
   };
 
   const ref = await addDoc(pendingCol(rid), payload);
+  try {
+    await notifyAdminPendingModeration({ requestId: rid, pendingId: ref.id });
+  } catch (error) {
+    console.warn("Failed to trigger admin pending-pdf push:", error?.message || error);
+  }
   return { ok: true, id: ref.id };
 }
 
@@ -201,6 +229,11 @@ export async function sendPendingBundle({
   };
 
   const ref = await addDoc(pendingCol(rid), payload);
+  try {
+    await notifyAdminPendingModeration({ requestId: rid, pendingId: ref.id });
+  } catch (error) {
+    console.warn("Failed to trigger admin pending-bundle push:", error?.message || error);
+  }
   return { ok: true, id: ref.id };
 }
 
