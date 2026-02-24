@@ -38,6 +38,27 @@ function shortErr(error, max = 1200) {
   return parts.join(" | ").slice(0, max);
 }
 
+function safeJsonStringify(value) {
+  const seen = new WeakSet();
+  try {
+    return JSON.stringify(
+      value,
+      (key, val) => {
+        if (typeof val === "object" && val !== null) {
+          if (seen.has(val)) return "[Circular]";
+          seen.add(val);
+        }
+        if (typeof val === "bigint") return String(val);
+        if (typeof val === "function") return `[Function ${val.name || "anonymous"}]`;
+        return val;
+      },
+      2
+    );
+  } catch (error) {
+    return `<<stringify_failed: ${safeStr(error && error.message)}>>`;
+  }
+}
+
 function asBool(value, fallback = false) {
   const v = safeStr(value).toLowerCase();
   if (!v) return fallback;
@@ -104,7 +125,7 @@ admin.initializeApp({
 
 const firestore = admin.firestore();
 const messaging = admin.messaging();
-const { FieldValue, FieldPath } = admin.firestore;
+const { FieldValue } = admin.firestore;
 
 const app = express();
 app.disable("x-powered-by");
@@ -368,7 +389,6 @@ async function processNotificationDoc(docSnap) {
 }
 
 let pollInFlight = false;
-let pollRawErrorLogged = false;
 
 async function pollNotificationsOnce() {
   if (pollInFlight) return;
@@ -378,7 +398,6 @@ async function pollNotificationsOnce() {
     const snap = await firestore
       .collectionGroup("notifications")
       .orderBy("createdAt", "desc")
-      .orderBy(FieldPath.documentId(), "desc")
       .limit(POLL_LIMIT)
       .get();
 
@@ -410,11 +429,26 @@ async function pollNotificationsOnce() {
       }
     }
   } catch (error) {
-    console.error(`[${nowIso()}] poll loop error`, shortErr(error));
-    if (!pollRawErrorLogged) {
-      pollRawErrorLogged = true;
-      console.error(`[${nowIso()}] poll loop raw error object`, error);
-    }
+    const metaDump =
+      error && error.metadata && typeof error.metadata.getMap === "function"
+        ? error.metadata.getMap()
+        : error && error.metadata;
+
+    console.error(`[${nowIso()}] poll loop error code`, error && error.code);
+    console.error(`[${nowIso()}] poll loop error message`, error && error.message);
+    console.error(`[${nowIso()}] poll loop error details`, error && error.details);
+    console.error(`[${nowIso()}] poll loop error metadata`, metaDump);
+    console.error(
+      `[${nowIso()}] poll loop error full json`,
+      safeJsonStringify({
+        code: error && error.code,
+        message: error && error.message,
+        details: error && error.details,
+        metadata: metaDump,
+        rawError: error,
+      })
+    );
+    console.error(`[${nowIso()}] poll loop raw error object`, error);
   } finally {
     pollInFlight = false;
   }
@@ -493,6 +527,9 @@ app.post("/sendTest", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`[${nowIso()}] MAJUU push server listening on port ${PORT}`);
+  console.log(
+    `[${nowIso()}] firebase admin project=${FIREBASE_PROJECT_ID} clientEmail=${FIREBASE_CLIENT_EMAIL}`
+  );
   console.log(`[${nowIso()}] poll interval ${POLL_INTERVAL_MS}ms, poll limit ${POLL_LIMIT}`);
   setInterval(() => {
     pollNotificationsOnce().catch((error) => {
