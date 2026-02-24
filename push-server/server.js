@@ -237,7 +237,20 @@ async function removeInvalidTokenDocs({ uid, role, tokenIds = [] }) {
 
 async function sendPushToTokens({ uid, role, title, body, data }) {
   const tokens = await listPushTokens({ uid, role });
+  if (LOG_VERBOSE) {
+    console.log(`[${nowIso()}] sendPushToTokens tokens`, {
+      uid: safeStr(uid),
+      role: safeStr(role),
+      tokenCount: tokens.length,
+    });
+  }
   if (!tokens.length) {
+    if (LOG_VERBOSE) {
+      console.log(`[${nowIso()}] sendPushToTokens skipped_no_tokens`, {
+        uid: safeStr(uid),
+        role: safeStr(role),
+      });
+    }
     return { ok: true, pushStatus: "skipped_no_tokens", sentCount: 0, failedCount: 0 };
   }
 
@@ -352,7 +365,27 @@ async function processNotificationDoc(docSnap) {
   const tokenRole = meta.root === "staff" ? "staff" : roleField === "admin" ? "admin" : "user";
   const route = safeStr(data?.route);
 
+  if (LOG_VERBOSE) {
+    console.log(`[${nowIso()}] processNotificationDoc`, {
+      path: docSnap.ref.path,
+      root: meta.root,
+      uid: meta.uid,
+      type: safeStr(data?.type),
+      role: roleField,
+      title,
+      body,
+      tokenRole,
+    });
+  }
+
   try {
+    if (LOG_VERBOSE) {
+      console.log(`[${nowIso()}] sending push...`, {
+        path: docSnap.ref.path,
+        uid: meta.uid,
+        role: tokenRole,
+      });
+    }
     const sendResult = await sendPushToTokens({
       uid: meta.uid,
       role: tokenRole,
@@ -366,6 +399,16 @@ async function processNotificationDoc(docSnap) {
         role: tokenRole,
       },
     });
+
+    if (LOG_VERBOSE) {
+      console.log(`[${nowIso()}] sendResult`, {
+        path: docSnap.ref.path,
+        pushStatus: sendResult?.pushStatus,
+        sentCount: sendResult?.sentCount,
+        failedCount: sendResult?.failedCount,
+        pushError: sendResult?.pushError || "",
+      });
+    }
 
     await markNotificationPushResult(docSnap.ref, sendResult);
     return { ok: true, ...sendResult, path: docSnap.ref.path };
