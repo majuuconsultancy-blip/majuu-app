@@ -125,7 +125,7 @@ admin.initializeApp({
 
 const firestore = admin.firestore();
 const messaging = admin.messaging();
-const { FieldValue } = admin.firestore;
+const { FieldValue, FieldPath } = admin.firestore;
 
 const app = express();
 app.disable("x-powered-by");
@@ -395,26 +395,37 @@ async function pollNotificationsOnce() {
   pollInFlight = true;
 
   try {
-    console.log(`[${nowIso()}] poll query`, {
-      collectionGroup: "notifications",
-      orderBy: [{ field: "createdAt", direction: "desc" }],
-      limit: POLL_LIMIT,
-      filters: [],
-      indexMatch: {
-        collectionId: "notifications",
-        queryScope: "COLLECTION_GROUP",
-        fields: [{ field: "createdAt", order: "DESCENDING" }],
-      },
-    });
+    console.log(
+      `[${nowIso()}] poll query`,
+      JSON.stringify(
+        {
+          collectionGroup: "notifications",
+          orderBy: [
+            { field: "createdAt", direction: "desc" },
+            { field: "__name__", direction: "asc" },
+          ],
+          limit: POLL_LIMIT,
+          filters: [],
+          indexMatch: {
+            collectionId: "notifications",
+            queryScope: "COLLECTION_GROUP",
+            fields: [
+              { field: "createdAt", order: "DESCENDING" },
+              { field: "__name__", order: "ASCENDING" },
+            ],
+          },
+        },
+        null,
+        2
+      )
+    );
 
-    const { FieldPath } = admin.firestore;
-
-const snap = await firestore
-  .collectionGroup("notifications")
-  .orderBy("createdAt", "desc")
-  .orderBy(FieldPath.documentId(), "asc") // must match your index (__name__ asc)
-  .limit(POLL_LIMIT)
-  .get();
+    const snap = await firestore
+      .collectionGroup("notifications")
+      .orderBy("createdAt", "desc")
+      .orderBy(FieldPath.documentId(), "asc")
+      .limit(POLL_LIMIT)
+      .get();
 
     const candidates = snap.docs
       .filter((d) => {
