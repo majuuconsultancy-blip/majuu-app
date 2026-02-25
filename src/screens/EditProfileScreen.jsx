@@ -189,7 +189,7 @@ export default function EditProfileScreen() {
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
         <div className="mx-auto max-w-xl p-5">
           <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
-            <div className="text-base font-extrabold text-zinc-900 dark:text-zinc-100">
+            <div className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
               Loading…
             </div>
             <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300 dark:text-zinc-400">
@@ -214,8 +214,7 @@ export default function EditProfileScreen() {
         <div className="flex items-center justify-between gap-3">
           <button
             onClick={() => smartBack(navigate, "/app/home")}
-            className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm active:scale-[0.99]
-                       dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100"
+            className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100"
             type="button"
           >
             ← Back
@@ -230,7 +229,7 @@ export default function EditProfileScreen() {
         </div>
 
         <div className={`mt-5 rounded-3xl ${glass} p-5`}>
-          <h1 className="text-xl font-extrabold text-zinc-900 dark:text-zinc-100">
+          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
             Edit profile
           </h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
@@ -246,7 +245,7 @@ export default function EditProfileScreen() {
           {/* Form */}
           <div className="mt-5 grid gap-4">
             <div className="rounded-2xl border border-white/40 bg-white/55 dark:bg-zinc-900/60 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              <div className="text-[11px] font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
                 Full name
               </div>
               <input
@@ -258,20 +257,18 @@ export default function EditProfileScreen() {
                 autoCorrect="on"
                 spellCheck={false}
                 enterKeyHint="next"
-                className="mt-2 w-full rounded-xl border border-white/50 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4
-                           dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                className="mt-2 w-full rounded-xl border border-white/50 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
               />
             </div>
 
             <div className="rounded-2xl border border-white/40 bg-white/55 dark:bg-zinc-900/60 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              <div className="text-[11px] font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
                 Country of residence
               </div>
               <select
                 value={residence}
                 onChange={(e) => setResidence(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-white/50 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4
-                           dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
+                className="mt-2 w-full rounded-xl border border-white/50 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
               >
                 <option value="">Select…</option>
                 {RESIDENCE_COUNTRIES.map((c) => (
@@ -292,7 +289,7 @@ export default function EditProfileScreen() {
             </div>
 
             <div className="rounded-2xl border border-white/40 bg-white/55 dark:bg-zinc-900/60 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              <div className="text-[11px] font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
                 Phone / WhatsApp
               </div>
 
@@ -312,8 +309,7 @@ export default function EditProfileScreen() {
                       inputMode="tel"
                       autoComplete="tel"
                       enterKeyHint="done"
-                      className="w-full rounded-xl border border-white/50 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4
-                                 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                      className="w-full rounded-xl border border-white/50 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
                     />
                   </div>
                   <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
@@ -332,8 +328,7 @@ export default function EditProfileScreen() {
                     inputMode="tel"
                     autoComplete="tel"
                     enterKeyHint="done"
-                    className="mt-2 w-full rounded-xl border border-white/50 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4
-                               dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                    className="mt-2 w-full rounded-xl border border-white/50 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
                   />
                   <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
                     Tip: include your country code (start with{" "}
@@ -348,7 +343,7 @@ export default function EditProfileScreen() {
               <button
                 onClick={save}
                 disabled={saving || !isDirty}
-                className="w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                className="w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                 type="button"
               >
                 {saving ? "Saving…" : isDirty ? "Save changes" : "No changes"}
@@ -358,8 +353,7 @@ export default function EditProfileScreen() {
                 <button
                   onClick={reset}
                   disabled={saving || !isDirty}
-                  className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm active:scale-[0.99] disabled:opacity-60
-                             dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100"
+                  className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100"
                   type="button"
                 >
                   Reset
@@ -368,8 +362,7 @@ export default function EditProfileScreen() {
                 <button
                   onClick={() => navigate("/app/profile", { replace: true })}
                   disabled={saving}
-                  className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm active:scale-[0.99] disabled:opacity-60
-                             dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100"
+                  className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100"
                   type="button"
                 >
                   Cancel

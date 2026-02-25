@@ -82,7 +82,7 @@ function Chip({ active, children, onClick }) {
       type="button"
       onClick={onClick}
       className={[
-        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-extrabold transition active:scale-[0.99]",
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition active:scale-[0.99]",
         active
           ? "border-emerald-200 bg-emerald-50/80 text-emerald-900"
           : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-white",
@@ -126,20 +126,20 @@ function ServiceTile({ s, disabled, onClick }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-extrabold text-zinc-700 dark:text-zinc-300">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
               <ServiceIcon tag={s.tag} title={s.title} />
               {s.tag}
             </span>
 
             {isDocReview ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/70 px-2 py-0.5 text-[11px] font-extrabold text-emerald-900">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/70 px-2 py-0.5 text-[11px] font-semibold text-emerald-900">
                 <AppIcon size={ICON_SM} icon={FileCheck2} />
                 Attach PDFs
               </span>
             ) : null}
           </div>
 
-          <div className="mt-2 font-extrabold text-zinc-900 dark:text-zinc-100">{s.title}</div>
+          <div className="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{s.title}</div>
           <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{s.note}</div>
         </div>
 
@@ -408,14 +408,14 @@ export default function StudyWeHelp() {
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-extrabold text-emerald-900">
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-900">
               <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/80 dark:bg-zinc-900/60 border border-emerald-100">
                 <AppIcon size={ICON_SM} className="text-emerald-700" icon={BookOpen} />
               </span>
               Study · We-Help
             </div>
 
-            <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Get help with your study process
             </h1>
 
@@ -459,7 +459,7 @@ export default function StudyWeHelp() {
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-sm font-extrabold text-zinc-900 dark:text-zinc-100">
+                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                   Complete your profile to continue
                 </div>
                 <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
@@ -474,7 +474,7 @@ export default function StudyWeHelp() {
 
             <button
               onClick={goToProfile}
-              className="mt-4 w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
+              className="mt-4 w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
             >
               Go to Profile
             </button>
@@ -496,12 +496,12 @@ export default function StudyWeHelp() {
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1.5 text-xs font-extrabold text-emerald-900">
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1.5 text-xs font-semibold text-emerald-900">
                 <AppIcon size={ICON_SM} icon={Sparkles} />
                 Full package · Best value
               </div>
 
-              <h2 className="mt-3 text-lg font-extrabold text-zinc-900 dark:text-zinc-100">
+              <h2 className="mt-3 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
                 End-to-end support, from start to finish
               </h2>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
@@ -529,7 +529,7 @@ export default function StudyWeHelp() {
             onClick={openFull}
             disabled={!canUseWeHelp}
             className={[
-              "mt-5 w-full rounded-2xl border px-4 py-3 text-sm font-extrabold shadow-sm transition active:scale-[0.99]",
+              "mt-5 w-full rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99]",
               canUseWeHelp
                 ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
                 : "border-zinc-200 dark:border-zinc-800 bg-zinc-100 text-zinc-400 cursor-not-allowed",
@@ -549,7 +549,7 @@ export default function StudyWeHelp() {
         <div className="mt-6">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h2 className="text-base font-extrabold text-zinc-900 dark:text-zinc-100">Single packages</h2>
+              <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Single packages</h2>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 Choose one service you want help with.
               </p>

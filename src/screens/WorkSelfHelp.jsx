@@ -222,7 +222,7 @@ function SectionCard({ title, subtitle, children, index }) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-sm font-extrabold text-zinc-900 dark:text-zinc-100">{title}</h2>
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
           {subtitle ? <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">{subtitle}</p> : null}
         </div>
 
@@ -353,14 +353,14 @@ export default function WorkSelfHelp() {
 
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-extrabold text-emerald-900">
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-900">
               <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/80 dark:bg-zinc-900/60 border border-emerald-100">
                 <AppIcon size={ICON_SM} className="text-emerald-700" icon={Briefcase} />
               </span>
               Work · Self-Help
             </div>
 
-            <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Work abroad, step by step
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
@@ -380,15 +380,15 @@ export default function WorkSelfHelp() {
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs font-extrabold text-zinc-500">Selected country</p>
+              <p className="text-xs font-semibold text-zinc-500">Selected country</p>
               <p className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 {country || "Not selected"}
               </p>
             </div>
 
             <div className="shrink-0 text-right">
-              <p className="text-xs font-extrabold text-zinc-500">Websites</p>
-              <p className="mt-1 text-sm font-extrabold text-emerald-800">{totalSites}</p>
+              <p className="text-xs font-semibold text-zinc-500">Websites</p>
+              <p className="mt-1 text-sm font-semibold text-emerald-800">{totalSites}</p>
             </div>
           </div>
         </motion.div>
@@ -409,7 +409,7 @@ export default function WorkSelfHelp() {
             whileTap="tap"
             className="rounded-3xl border border-dashed border-zinc-300 dark:border-zinc-700 bg-white/55 dark:bg-zinc-900/60 p-5 text-sm text-zinc-700 dark:text-zinc-300 backdrop-blur"
           >
-            <div className="font-extrabold text-zinc-900 dark:text-zinc-100">Safety tip</div>
+            <div className="font-semibold text-zinc-900 dark:text-zinc-100">Safety tip</div>
             <p className="mt-1">
               If a website asks for money upfront, always cross-check with the{" "}
               <b>official embassy / government</b> source.

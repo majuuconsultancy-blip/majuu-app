@@ -656,14 +656,14 @@ export default function FullPackageMissingScreen() {
   const cardBase = "rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur";
 
   const btnPrimary =
-    "inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]";
+    "inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]";
 
   // ✅ Simple auth UI (no forced redirect)
   if (!authChecked) {
     return (
       <div className="min-h-screen px-5 py-10">
         <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 p-5 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="text-base font-extrabold">Reconnecting…</div>
+          <div className="text-base font-semibold">Reconnecting…</div>
           <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300 dark:text-zinc-400">
             Restoring your session.
           </div>
@@ -676,13 +676,13 @@ export default function FullPackageMissingScreen() {
     return (
       <div className="min-h-screen px-5 py-10">
         <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 p-5 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="text-base font-extrabold">You’re signed out</div>
+          <div className="text-base font-semibold">You’re signed out</div>
           <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300 dark:text-zinc-400">
             Please sign in again to continue.
           </div>
           <button
             onClick={() => navigate("/login", { replace: true })}
-            className="mt-4 w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white active:scale-[0.99]"
+            className="mt-4 w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white active:scale-[0.99]"
           >
             Go to Login
           </button>
@@ -706,7 +706,7 @@ export default function FullPackageMissingScreen() {
           <div>
             <div
               className={[
-                "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-extrabold",
+                "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold",
                 chipTrack,
               ].join(" ")}
             >
@@ -716,7 +716,7 @@ export default function FullPackageMissingScreen() {
               Full package • {titleText}
             </div>
 
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Continue your full package
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">Tap any tile to continue that step.</p>
@@ -735,7 +735,7 @@ export default function FullPackageMissingScreen() {
           <div className="mt-5 rounded-3xl border border-amber-200 bg-amber-50/60 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-extrabold text-zinc-900 dark:text-zinc-100">
+                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                   Complete your profile to continue
                 </div>
                 <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
@@ -758,7 +758,7 @@ export default function FullPackageMissingScreen() {
           <div className={`${cardBase} p-4`}>
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-extrabold text-zinc-900 dark:text-zinc-100">Remaining steps</div>
+                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Remaining steps</div>
                 <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                   Country: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{country}</span>
                 </div>
@@ -777,10 +777,10 @@ export default function FullPackageMissingScreen() {
 
               <div className="text-right">
                 <div className="inline-flex items-center gap-2">
-                  <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2 py-1 text-[11px] font-extrabold text-zinc-700 dark:text-zinc-300">
+                  <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                     Done {doneCount}/{totalCount}
                   </span>
-                  <span className="rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-1 text-[11px] font-extrabold text-emerald-900">
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-1 text-[11px] font-semibold text-emerald-900">
                     {remainingCount} left
                   </span>
                 </div>
@@ -840,7 +840,7 @@ export default function FullPackageMissingScreen() {
                     </span>
 
                     <div className="min-w-0">
-                      <div className="truncate text-[15px] font-extrabold text-zinc-900 dark:text-zinc-100">
+                      <div className="truncate text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">
                         {need}
                       </div>
                       <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
@@ -849,10 +849,10 @@ export default function FullPackageMissingScreen() {
 
                       {!done ? (
                         <div className="mt-2 inline-flex items-center gap-2">
-                          <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2 py-1 text-[11px] font-extrabold text-zinc-700 dark:text-zinc-300">
+                          <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                             PDFs allowed
                           </span>
-                          <span className="rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-1 text-[11px] font-extrabold text-emerald-900">
+                          <span className="rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-1 text-[11px] font-semibold text-emerald-900">
                             Continue
                           </span>
                         </div>
@@ -862,7 +862,7 @@ export default function FullPackageMissingScreen() {
 
                   <span
                     className={[
-                      "shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-extrabold",
+                      "shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
                       done
                         ? "border-emerald-200 bg-emerald-50/70 text-emerald-900"
                         : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300",

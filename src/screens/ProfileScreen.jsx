@@ -189,7 +189,7 @@ export default function ProfileScreen() {
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <h1 className="text-lg font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
               Profile
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
@@ -268,7 +268,7 @@ export default function ProfileScreen() {
                 <AppIcon size={ICON_MD} icon={Flag} />
               </span>
               <div className="min-w-0">
-                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                <div className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
                   Residence
                 </div>
                 <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -290,7 +290,7 @@ export default function ProfileScreen() {
                 <AppIcon size={ICON_MD} icon={Phone} />
               </span>
               <div className="min-w-0">
-                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                <div className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
                   Phone / WhatsApp
                 </div>
                 <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">

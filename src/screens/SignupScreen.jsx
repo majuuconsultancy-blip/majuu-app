@@ -276,7 +276,7 @@ export default function SignupScreen() {
           {/* Header */}
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+              <h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Create your account
               </h1>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">Sign up to start your journey.</p>
@@ -292,14 +292,7 @@ export default function SignupScreen() {
                 type="button"
                 onClick={handleGoogle}
                 disabled={loading}
-                className="
-                  w-full rounded-xl border border-zinc-200 dark:border-zinc-800
-                  bg-white dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100
-                  shadow-sm transition
-                  hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60
-                  flex items-center justify-center gap-2
-                  focus:outline-none focus:ring-2 focus:ring-blue-200/70
-                "
+                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60 flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-blue-200/70"
               >
                 <GoogleGIcon className="h-5 w-5" />
                 Continue with Google

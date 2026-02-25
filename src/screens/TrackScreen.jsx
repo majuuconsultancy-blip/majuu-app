@@ -226,8 +226,7 @@ export default function TrackScreen({ track }) {
             type="button"
             onClick={goToTracks}
             disabled={saving}
-            className="absolute right-4 bottom-3 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60
-                       dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100 dark:hover:bg-zinc-950/45"
+            className="absolute right-4 bottom-3 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100 dark:hover:bg-zinc-950/45"
             title="Go to Tracks"
           >
             <AppIcon size={ICON_SM} icon={Compass} />
@@ -261,7 +260,7 @@ export default function TrackScreen({ track }) {
                 {info.title}
               </div>
 
-              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+              <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Choose a country
               </h1>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
@@ -379,8 +378,7 @@ export default function TrackScreen({ track }) {
                   type="button"
                   onClick={closeModal}
                   disabled={saving}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60
-                             dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200 dark:hover:bg-zinc-950/45"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200 dark:hover:bg-zinc-950/45"
                   aria-label="Close"
                   title="Close"
                 >
@@ -394,8 +392,7 @@ export default function TrackScreen({ track }) {
                   type="button"
                   onClick={() => startProcessAndGo("self")}
                   disabled={saving}
-                  className="group w-full rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-left text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-white active:scale-[0.99] disabled:opacity-60
-                             dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100 dark:hover:bg-zinc-950/45"
+                  className="group w-full rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-left text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-white active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100 dark:hover:bg-zinc-950/45"
                 >
                   <div className="flex items-center gap-3">
                     <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 dark:border-zinc-800 dark:bg-zinc-950/40">
@@ -441,8 +438,7 @@ export default function TrackScreen({ track }) {
                   type="button"
                   onClick={closeModal}
                   disabled={saving}
-                  className="w-full rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-4 py-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60
-                             dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-950/35"
+                  className="w-full rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-4 py-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-950/35"
                 >
                   Cancel
                 </button>

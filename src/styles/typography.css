@@ -1,0 +1,178 @@
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto,
+    sans-serif;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.45;
+  --leading-relaxed: 1.6;
+
+  --tracking-tight: -0.01em;
+  --tracking-normal: 0;
+}
+
+@layer base {
+  html,
+  body {
+    font-family: var(--font-sans);
+  }
+
+  body {
+    font-size: var(--text-md);
+    line-height: var(--leading-normal);
+    letter-spacing: var(--tracking-normal);
+    font-weight: 400;
+  }
+
+  h1 {
+    font-size: var(--text-xl);
+    line-height: var(--leading-tight);
+    font-weight: 600;
+    letter-spacing: var(--tracking-tight);
+  }
+
+  h2 {
+    font-size: var(--text-lg);
+    line-height: var(--leading-tight);
+    font-weight: 600;
+    letter-spacing: var(--tracking-tight);
+  }
+
+  h3 {
+    font-size: var(--text-md);
+    line-height: var(--leading-normal);
+    font-weight: 500;
+    letter-spacing: var(--tracking-normal);
+  }
+
+  p,
+  li,
+  dt,
+  dd {
+    line-height: var(--leading-normal);
+  }
+
+  small,
+  caption {
+    font-size: var(--text-xs);
+    line-height: var(--leading-relaxed);
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    line-height: var(--leading-normal);
+    letter-spacing: var(--tracking-normal);
+  }
+
+  button {
+    font-size: var(--text-md);
+    font-weight: 500;
+  }
+
+  input,
+  select,
+  textarea {
+    font-size: var(--text-md);
+    font-weight: 400;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+    opacity: 1;
+  }
+
+  b,
+  strong {
+    font-weight: 600;
+  }
+}
+
+@layer utilities {
+  /* Typography scale remap for calmer mobile-first hierarchy */
+  .text-xs {
+    font-size: var(--text-xs);
+    line-height: var(--leading-relaxed);
+  }
+
+  .text-sm {
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+  }
+
+  .text-base {
+    font-size: var(--text-md);
+    line-height: var(--leading-normal);
+  }
+
+  .text-lg {
+    font-size: var(--text-lg);
+    line-height: var(--leading-normal);
+  }
+
+  .text-xl {
+    font-size: var(--text-xl);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  /* Cap app headings to keep screens calm and compact */
+  .text-2xl {
+    font-size: var(--text-xl);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  .text-3xl,
+  .text-4xl,
+  .text-5xl,
+  .text-6xl {
+    font-size: 20px;
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  .leading-tight {
+    line-height: var(--leading-tight);
+  }
+
+  .leading-normal {
+    line-height: var(--leading-normal);
+  }
+
+  .leading-relaxed {
+    line-height: var(--leading-relaxed);
+  }
+
+  .tracking-tight {
+    letter-spacing: var(--tracking-tight);
+  }
+
+  .tracking-normal {
+    letter-spacing: var(--tracking-normal);
+  }
+
+  /* Reduce visual loudness without touching layout or colors */
+  .font-bold,
+  .font-extrabold,
+  .font-black {
+    font-weight: 600;
+  }
+
+  .font-semibold {
+    font-weight: 600;
+  }
+
+  .font-medium {
+    font-weight: 500;
+  }
+}

@@ -56,12 +56,10 @@ export default function ThemeToggle() {
     <button
       type="button"
       onClick={toggle}
-      className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
-                 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
+      className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
       title={isDark ? "Switch to light" : "Switch to dark"}
     >
-      <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200 bg-white/60 text-zinc-700
-                       dark:border-zinc-700 dark:bg-zinc-950/50 dark:text-zinc-100"
+      <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200 bg-white/60 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/50 dark:text-zinc-100"
       >
         {isDark ? <IconMoon className="h-4 w-4" /> : <IconSun className="h-4 w-4" />}
       </span>

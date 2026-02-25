@@ -420,7 +420,7 @@ export default function ProgressScreen() {
                   Progress
                 </div>
 
-                <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                   Your activity
                 </h1>
                 <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
@@ -670,8 +670,7 @@ export default function ProgressScreen() {
                         <motion.button
                           whileTap={{ scale: 0.99 }}
                           onClick={openRequestAndClearChatPill}
-                          className="inline-flex items-center gap-2 rounded-3xl border border-emerald-200 bg-emerald-50/60 px-3.5 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.99]
-                                     dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/55"
+                          className="inline-flex items-center gap-2 rounded-3xl border border-emerald-200 bg-emerald-50/60 px-3.5 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.99] dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/55"
                         >
                           View
                           <AppIcon size={ICON_SM} icon={ChevronRight} />
@@ -681,8 +680,7 @@ export default function ProgressScreen() {
                           <motion.button
                             whileTap={{ scale: 0.99 }}
                             onClick={handleTryAgain}
-                            className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
-                                       dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                            className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
                           >
                             Try again
                           </motion.button>
@@ -719,8 +717,7 @@ export default function ProgressScreen() {
                                 setDeletingId("");
                               }
                             }}
-                            className="inline-flex items-center gap-2 rounded-3xl border border-rose-200 bg-rose-50/70 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60
-                                       dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/55"
+                            className="inline-flex items-center gap-2 rounded-3xl border border-rose-200 bg-rose-50/70 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/55"
                           >
                             <AppIcon size={ICON_SM} icon={Trash2} />
                             {isDeleting ? "Deleting…" : "Delete"}

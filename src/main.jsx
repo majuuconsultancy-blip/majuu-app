@@ -4,6 +4,7 @@ import App from "./App.jsx";
 import "./index.css";
 import "./styles/pwa.css";
 import "./styles/motion.css";
+import "./styles/typography.css";
 import { initTheme } from "./utils/theme";
 import { applyRuntimeMotionPreference } from "./utils/motionPreferences";
 

@@ -602,7 +602,7 @@ export default function StaffRequestDetailsScreen() {
             <div className={`mt-4 ${floatCard} p-5`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                  <div className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                     {title}
                   </div>
                   <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{typeLabel}</div>
@@ -647,8 +647,7 @@ export default function StaffRequestDetailsScreen() {
                 <button
                   type="button"
                   onClick={() => navigate(`/staff/request/${req?.id}/documents`)}
-                  className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
-                             dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                  className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 dark:hover:bg-zinc-900"
                 >
                   Applicant docs
                   <IconChevronRight className="h-5 w-5 text-emerald-700 dark:text-emerald-200" />
@@ -657,7 +656,7 @@ export default function StaffRequestDetailsScreen() {
 
               <div className="mt-4 grid gap-3 text-sm">
                 <div className="grid gap-1">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  <div className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
                     Full name
                   </div>
                   <div className="font-semibold text-zinc-900 dark:text-zinc-100">
@@ -667,7 +666,7 @@ export default function StaffRequestDetailsScreen() {
 
                 {req?.note ? (
                   <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    <div className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
                       Applicant note
                     </div>
                     <div className="mt-1 text-sm text-zinc-800 whitespace-pre-wrap dark:text-zinc-100">
@@ -822,8 +821,7 @@ export default function StaffRequestDetailsScreen() {
                 rows={5}
                 placeholder="What did you find? What’s missing? Next steps?"
                 disabled={!canWork || isDone}
-                className="mt-4 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-3 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 min-h-[120px] disabled:opacity-70
-                           dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-emerald-300/20"
+                className="mt-4 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-3 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 min-h-[120px] disabled:opacity-70 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-emerald-300/20"
               />
             </div>
 
@@ -836,7 +834,7 @@ export default function StaffRequestDetailsScreen() {
 
               <div className="mt-4 grid gap-3">
                 <div className="grid gap-2 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  <div className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
                     Recommendation
                   </div>
 

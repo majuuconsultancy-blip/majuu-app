@@ -211,7 +211,7 @@ export default function StaffRequestDocumentsScreen() {
               Applicant uploads
             </div>
 
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Uploaded documents
             </h1>
 

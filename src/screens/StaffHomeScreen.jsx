@@ -131,7 +131,7 @@ export default function StaffHomeScreen() {
                 Staff portal
               </div>
 
-              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+              <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Welcome, {name}
               </h1>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
@@ -179,8 +179,7 @@ export default function StaffHomeScreen() {
 
               <button
                 onClick={() => navigate("/staff/onboarding")}
-                className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
-                           dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
               >
                 Edit onboarding
                 <IconChevronRight className="ml-2 inline h-4 w-4" />

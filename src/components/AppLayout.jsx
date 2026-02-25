@@ -237,8 +237,7 @@ export default function AppLayout() {
       <OfflineBanner online={online} />
 
       <div
-        className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-28
-                   dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950"
+        className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-28 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950"
       >
         <div className="max-w-xl mx-auto min-h-screen">
           <AnimatePresence initial={false} mode="sync">

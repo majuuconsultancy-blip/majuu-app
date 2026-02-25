@@ -40,7 +40,7 @@ export default function PaymentScreen() {
           Back
         </button>
 
-        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+        <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
           Complete payment
         </h1>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">

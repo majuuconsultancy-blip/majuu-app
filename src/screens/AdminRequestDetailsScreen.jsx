@@ -567,7 +567,7 @@ export default function AdminRequestDetailsScreen() {
               Review request
             </div>
 
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               {headerLeft}
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{headerRight}</p>
@@ -583,7 +583,7 @@ export default function AdminRequestDetailsScreen() {
                     "absolute -top-1 -right-1 z-10",
                     "min-w-[18px] h-[18px] px-1",
                     "rounded-full bg-rose-600 text-white",
-                    "text-[10px] font-extrabold leading-none",
+                    "text-[10px] font-semibold leading-none",
                     "flex items-center justify-center",
                     "shadow-[0_0_0_3px_rgba(244,63,94,0.18),0_0_14px_rgba(244,63,94,0.45)]",
                   ].join(" ")}

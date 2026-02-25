@@ -677,7 +677,7 @@ export default function AdminRequestsScreen() {
         <div className="sticky top-0 z-20 -mx-5 px-5 pb-3 pt-2 backdrop-blur supports-[backdrop-filter]:bg-white/50 dark:supports-[backdrop-filter]:bg-zinc-950/40">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+              <h1 className="text-lg font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Admin Page
               </h1>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">

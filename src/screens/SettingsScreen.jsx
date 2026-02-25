@@ -293,7 +293,7 @@ export default function SettingsScreen() {
         {/* Top bar */}
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Settings
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
@@ -304,8 +304,7 @@ export default function SettingsScreen() {
           <button
             onClick={goBack}
             disabled={anyBusy}
-            className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-white disabled:opacity-60
-                       dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
+            className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-white disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
           >
             <IconBack className="h-5 w-5" />
             Back

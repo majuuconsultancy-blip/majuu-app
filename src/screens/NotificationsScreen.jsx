@@ -120,7 +120,7 @@ export default function NotificationsScreen() {
               Back
             </button>
 
-            <h1 className="mt-4 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <h1 className="mt-4 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               {headingLabel}
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">

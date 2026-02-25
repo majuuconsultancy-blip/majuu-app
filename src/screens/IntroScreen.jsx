@@ -98,14 +98,14 @@ export default function IntroScreen() {
         {/* Header */}
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <div className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               MAJUU APP
             </div>
             <div className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">
               Get started
             </div>
 
-            <div className="mt-1 text-[10px] font-extrabold text-rose-600">
+            <div className="mt-1 text-[10px] font-semibold text-rose-600">
               {BUILD_TAG}
             </div>
           </div>
@@ -124,7 +124,7 @@ export default function IntroScreen() {
         <div className={cx("mt-8", glass, "p-5")}>
           <AnimatePresence mode="wait">
             <motion.div key={i} {...slideMotion}>
-              <div className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100">
+              <div className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 {slide.title}
               </div>
 

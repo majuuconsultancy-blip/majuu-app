@@ -361,22 +361,20 @@ export default function StaffTasksScreen() {
               <button
                 type="button"
                 onClick={() => smartBack(navigate, "/staff/tasks")}
-                className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
-                           dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
               >
                 <IconChevronLeft className="h-4 w-4" />
                 Back
               </button>
 
-              <h1 className="mt-4 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+              <h1 className="mt-4 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Your tasks
               </h1>
 
               <button
                 type="button"
                 onClick={() => navigate("/staff/notifications")}
-                className="relative mt-3 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]
-                           dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+                className="relative mt-3 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
                 title="Notifications"
               >
                 <span className="relative inline-flex items-center">
@@ -400,8 +398,7 @@ export default function StaffTasksScreen() {
               type="button"
               onClick={doLogout}
               disabled={busy === "logout" || !uid}
-              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-rose-200 hover:bg-rose-50/60 active:scale-[0.99] disabled:opacity-60
-                         dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
+              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-rose-200 hover:bg-rose-50/60 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
               title="Logout"
             >
               <IconLogout className="h-5 w-5" />
@@ -464,8 +461,7 @@ export default function StaffTasksScreen() {
           <label className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
             Search
           </label>
-          <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 shadow-sm backdrop-blur transition focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100/80
-                          dark:border-zinc-800 dark:bg-zinc-900/60 dark:focus-within:ring-emerald-300/20">
+          <div className="mt-2 flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 shadow-sm backdrop-blur transition focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100/80 dark:border-zinc-800 dark:bg-zinc-900/60 dark:focus-within:ring-emerald-300/20">
             <IconSearch className="h-5 w-5 text-zinc-500" />
             <input
               className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"

@@ -296,10 +296,10 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
         <div className="shrink-0 border-b border-white/25 bg-white/45 dark:bg-zinc-900/60 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/45">
           <div className="flex items-start justify-between gap-3 px-5 py-2">
             <div className="min-w-0">
-              <div className="text-[12px] font-extrabold text-emerald-900/85 dark:text-emerald-200/90">
+              <div className="text-[12px] font-semibold text-emerald-900/85 dark:text-emerald-200/90">
                 Full package diagnostic
               </div>
-              <h2 className="mt-0.5 text-[16px] font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100">
+              <h2 className="mt-0.5 text-[16px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Let’s understand where you are
               </h2>
               <p className="mt-0.5 text-[12px] text-zinc-600 dark:text-zinc-300">
@@ -309,8 +309,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
             <button
               onClick={onClose}
-              className="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-white/35 bg-white/55 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition hover:bg-white/70 active:scale-[0.99] backdrop-blur-xl
-                         dark:border-zinc-700/60 dark:bg-zinc-900/55 dark:text-zinc-200"
+              className="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-white/35 bg-white/55 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition hover:bg-white/70 active:scale-[0.99] backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/55 dark:text-zinc-200"
               aria-label="Close"
               type="button"
             >
@@ -325,13 +324,13 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
             <div className="rounded-3xl border border-white/35 bg-white/45 dark:bg-zinc-900/60 px-4 py-2.5 backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/45">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[10.5px] font-extrabold text-zinc-600 dark:text-zinc-300">
+                  <div className="text-[10.5px] font-semibold text-zinc-600 dark:text-zinc-300">
                     Price
                   </div>
 
                   <div
                     className={[
-                      "mt-0.5 text-[18px] font-extrabold text-zinc-900 dark:text-zinc-100 tabular-nums leading-none dark:text-zinc-100",
+                      "mt-0.5 text-[18px] font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums leading-none dark:text-zinc-100",
                       pricePulse ? "scale-[1.02]" : "scale-100",
                       "transition-transform duration-150 ease-out",
                     ].join(" ")}
@@ -339,12 +338,12 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                     {formatKES(livePrice)}
                   </div>
 
-                  <div className="mt-0.5 text-[10.5px] font-extrabold text-emerald-900/70 dark:text-emerald-200/80">
+                  <div className="mt-0.5 text-[10.5px] font-semibold text-emerald-900/70 dark:text-emerald-200/80">
                     {saveText}
                   </div>
                 </div>
 
-                <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-0.5 text-[10.5px] font-extrabold text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+                <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
                   <IconShieldCheck className="h-4 w-4" />
                   Best
                 </span>
@@ -352,7 +351,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
               <div className="mt-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-[12px] font-extrabold text-zinc-900 dark:text-zinc-100">
+                  <div className="text-[12px] font-semibold text-zinc-900 dark:text-zinc-100">
                     Readiness {readiness}%
                   </div>
 
@@ -362,7 +361,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                     </span>
                     <span
                       className={[
-                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-extrabold",
+                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold",
                         readinessLabel.cls,
                       ].join(" ")}
                     >
@@ -460,7 +459,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                         </span>
 
                         <div className="min-w-0">
-                          <div className="font-extrabold text-zinc-900 dark:text-zinc-100">
+                          <div className="font-semibold text-zinc-900 dark:text-zinc-100">
                             {item}
                           </div>
                           <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-300">
@@ -469,7 +468,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                         </div>
                       </div>
 
-                      <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50/60 px-2.5 py-1 text-[11px] font-extrabold text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+                      <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
                         -{formatKES(credit)}
                       </span>
                     </div>
@@ -484,7 +483,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                 onClick={handleProceed}
                 disabled={!canProceed}
                 className={[
-                  "w-full rounded-2xl border px-4 py-2.5 text-sm font-extrabold shadow-sm transition active:scale-[0.99]",
+                  "w-full rounded-2xl border px-4 py-2.5 text-sm font-semibold shadow-sm transition active:scale-[0.99]",
                   canProceed
                     ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
                     : "border-white/30 bg-white/30 dark:bg-zinc-900/60 text-zinc-400 cursor-not-allowed dark:border-zinc-800/60 dark:bg-zinc-950/20",
@@ -496,8 +495,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
               <button
                 onClick={onClose}
-                className="mt-2.5 w-full rounded-2xl border border-white/35 bg-white/45 dark:bg-zinc-900/60 px-4 py-2.5 text-sm font-extrabold text-zinc-800 transition hover:bg-white/60 active:scale-[0.99] backdrop-blur-2xl
-                           dark:border-zinc-800/60 dark:bg-zinc-900/45 dark:text-zinc-100"
+                className="mt-2.5 w-full rounded-2xl border border-white/35 bg-white/45 dark:bg-zinc-900/60 px-4 py-2.5 text-sm font-semibold text-zinc-800 transition hover:bg-white/60 active:scale-[0.99] backdrop-blur-2xl dark:border-zinc-800/60 dark:bg-zinc-900/45 dark:text-zinc-100"
                 type="button"
               >
                 Cancel

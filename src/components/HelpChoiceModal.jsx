@@ -245,7 +245,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
     "relative w-[92vw] max-w-sm rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 shadow-[0_14px_34px_rgba(0,0,0,0.14)] backdrop-blur-xl motion-modal-panel";
   const subText = "text-xs text-zinc-500";
   const titleText = "text-[13px] font-semibold text-zinc-700 dark:text-zinc-300";
-  const headline = "text-lg font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100";
+  const headline = "text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100";
 
   const btnBase =
     "w-full rounded-2xl px-4 py-3 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed";

@@ -291,7 +291,7 @@ export default function TrackSelectScreen() {
           {/* Header */}
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+              <h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Choose your path
               </h1>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
@@ -308,8 +308,7 @@ export default function TrackSelectScreen() {
               <button
                 type="button"
                 onClick={() => navigate("/staff/tasks")}
-                className="w-full rounded-3xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm font-semibold text-emerald-900 shadow-sm transition hover:bg-emerald-100 active:scale-[0.99]
-                           dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100 dark:hover:bg-emerald-950/45"
+                className="w-full rounded-3xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm font-semibold text-emerald-900 shadow-sm transition hover:bg-emerald-100 active:scale-[0.99] dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100 dark:hover:bg-emerald-950/45"
               >
                 <span className="inline-flex items-center justify-center gap-2">
                   <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-emerald-200 bg-white/70 dark:bg-zinc-900/60 text-emerald-800 dark:border-emerald-900/40 dark:bg-zinc-950/40 dark:text-emerald-200">
@@ -382,8 +381,7 @@ export default function TrackSelectScreen() {
 
                 <button
                   onClick={() => navigate("/app/progress")}
-                  className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-zinc-50 active:scale-[0.99]
-                             dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                  className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-zinc-50 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-100 dark:hover:bg-zinc-900"
                 >
                   View progress
                 </button>

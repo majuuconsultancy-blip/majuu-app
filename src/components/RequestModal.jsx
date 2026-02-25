@@ -442,8 +442,8 @@ export default function RequestModal({
     : "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 shadow-lg backdrop-blur px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950/70";
 
   const fieldWrap =
-    "mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2.5 " +
-    "transition focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100 " +
+    "mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2.5" +
+    "transition focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100" +
     "dark:border-zinc-800 dark:bg-zinc-950";
 
   const inputBase =

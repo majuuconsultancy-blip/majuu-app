@@ -21,7 +21,7 @@ export default function ScreenLoader({
           <div className="relative mx-auto h-24 w-24">
             <div className="absolute inset-0 rounded-full bg-emerald-500/16 dark:bg-emerald-400/16 blur-xl motion-loader-glow" />
             <div className="relative flex h-full w-full items-center justify-center">
-              <span className="text-6xl font-black tracking-tight text-emerald-500 dark:text-emerald-400 motion-loader-mark">
+              <span className="text-lg font-semibold tracking-tight text-emerald-500 dark:text-emerald-400 motion-loader-mark">
                 M
               </span>
             </div>
