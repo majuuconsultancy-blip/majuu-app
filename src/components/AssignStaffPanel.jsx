@@ -1,49 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, Link2, Unlink } from "lucide-react";
 import {
   assignRequestToStaff,
   listStaff,
   unassignRequest,
 } from "../services/taskassignservice";
+import AppIcon from "./AppIcon";
+import { ICON_SM } from "../constants/iconSizes";
 
-function IconLink(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M10 13a4 4 0 0 1 0-6l1.2-1.2a4 4 0 0 1 5.6 5.6L16 12"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M14 11a4 4 0 0 1 0 6l-1.2 1.2a4 4 0 1 1-5.6-5.6L8 12"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconUnlink(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path d="M4 4l16 16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path
-        d="M10 13a4 4 0 0 1 0-6l1.2-1.2a4 4 0 0 1 5.6 5.6L16 12"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-/** Normalize request -> staff speciality key (must match staff.onboarding values) */
 function normalizeSpeciality(request) {
-  const raw =
-    String(request?.serviceName || request?.service || request?.requestType || "")
-      .trim()
-      .toLowerCase();
+  const raw = String(
+    request?.serviceName || request?.service || request?.requestType || ""
+  )
+    .trim()
+    .toLowerCase();
 
   if (raw === "full" || raw.includes("full package")) return "full";
   if (raw.includes("passport")) return "passport";
@@ -52,7 +22,9 @@ function normalizeSpeciality(request) {
   if (raw.includes("cv") || raw.includes("resume")) return "cv";
   if (raw.includes("fund")) return "funds";
   if (raw.includes("admission") || raw.includes("offer")) return "admission";
-  if (raw.includes("travel") || raw.includes("flight") || raw.includes("planning")) return "travel";
+  if (raw.includes("travel") || raw.includes("flight") || raw.includes("planning")) {
+    return "travel";
+  }
 
   return raw || "unknown";
 }
@@ -61,58 +33,27 @@ function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
 
-function fmtPct(x) {
-  if (!Number.isFinite(x)) return "-";
-  return `${Math.round(x * 100)}%`;
-}
-
-function fmtMinsToHuman(mins) {
-  const m = Number(mins);
-  if (!Number.isFinite(m) || m <= 0) return "-";
-  if (m < 60) return `${Math.round(m)}m`;
-  const h = m / 60;
-  if (h < 24) return `${Math.round(h * 10) / 10}h`;
-  const d = h / 24;
-  return `${Math.round(d * 10) / 10}d`;
-}
-
-/**
- * ✅ Backwards compatible perf extractor:
- * supports staff.performance.* OR staff.stats.*
- */
 function readPerf(staffDoc) {
   const perf = staffDoc?.performance || {};
   const stats = staffDoc?.stats || staffDoc?.stats?.stats || {};
 
   const doneCount = Number(perf?.doneCount ?? stats?.totalDone ?? 0) || 0;
   const successCount = Number(perf?.successCount ?? stats?.successCount ?? 0) || 0;
-
   const avgMinutesRaw = perf?.avgMinutes ?? stats?.avgMinutes ?? null;
   const avgMinutes = Number.isFinite(Number(avgMinutesRaw)) ? Number(avgMinutesRaw) : 0;
-
-  const successRate =
-    doneCount > 0 ? clamp(successCount / doneCount, 0, 1) : 0.5; // neutral for new staff
-
+  const successRate = doneCount > 0 ? clamp(successCount / doneCount, 0, 1) : 0.5;
   const blocked = Boolean(perf?.blocked);
   const active = staffDoc?.active !== false;
 
-  return { doneCount, successCount, avgMinutes, successRate, blocked, active };
+  return { doneCount, avgMinutes, successRate, blocked, active };
 }
 
-/**
- * Smart staff sorting:
- * - blocked bottom
- * - inactive near bottom
- * - speciality match boost
- * - higher success + faster avg => higher score
- */
 function computeSmartScore(staffDoc, { specialityKey = "", trackKey = "" } = {}) {
-  const { doneCount, successCount, avgMinutes, successRate, blocked, active } = readPerf(staffDoc);
+  const { doneCount, avgMinutes, successRate, blocked, active } = readPerf(staffDoc);
 
-  // speed score 0..1
   let speedScore = 0.5;
   if (avgMinutes > 0) {
-    const x = clamp(avgMinutes, 30, 10080); // 30m..7d
+    const x = clamp(avgMinutes, 30, 10080);
     speedScore = clamp(1 - x / 10500, 0.05, 1);
   }
 
@@ -129,29 +70,15 @@ function computeSmartScore(staffDoc, { specialityKey = "", trackKey = "" } = {})
   const hasTrackMatch = trackKey ? staffTracks.includes(String(trackKey).toLowerCase()) : false;
 
   let score = 0;
-
   if (blocked) score -= 9999;
   if (!active) score -= 2000;
-
   if (hasSpecMatch) score += 50;
   if (hasTrackMatch) score += 10;
-
   score += successRate * 100;
   score += speedScore * 40;
-
   score += clamp(doneCount, 0, 30) * 0.8;
 
-  return {
-    score,
-    blocked,
-    active,
-    doneCount,
-    successCount,
-    successRate,
-    avgMinutes,
-    hasSpecMatch,
-    hasTrackMatch,
-  };
+  return { score, blocked, active };
 }
 
 export default function AssignStaffPanel({ request }) {
@@ -163,9 +90,11 @@ export default function AssignStaffPanel({ request }) {
 
   const requestId = String(request?.id || "").trim();
   const assignedTo = String(request?.assignedTo || "").trim();
-
   const specialityKey = useMemo(() => normalizeSpeciality(request), [request]);
-  const trackKey = useMemo(() => String(request?.track || "").trim().toLowerCase(), [request]);
+  const trackKey = useMemo(
+    () => String(request?.track || "").trim().toLowerCase(),
+    [request]
+  );
 
   useEffect(() => {
     if (assignedTo) setStaffUid(assignedTo);
@@ -185,11 +114,10 @@ export default function AssignStaffPanel({ request }) {
 
   const scoredStaff = useMemo(() => {
     const list = Array.isArray(staff) ? staff : [];
-    const scored = list.map((s) => {
-      const meta = computeSmartScore(s, { specialityKey, trackKey });
-      return { ...s, __smart: meta };
-    });
-
+    const scored = list.map((s) => ({
+      ...s,
+      __smart: computeSmartScore(s, { specialityKey, trackKey }),
+    }));
     scored.sort((a, b) => (b?.__smart?.score ?? 0) - (a?.__smart?.score ?? 0));
     return scored;
   }, [staff, specialityKey, trackKey]);
@@ -198,7 +126,13 @@ export default function AssignStaffPanel({ request }) {
     () => scoredStaff.find((s) => s.uid === staffUid),
     [scoredStaff, staffUid]
   );
+  const assignedStaff = useMemo(
+    () => scoredStaff.find((s) => s.uid === assignedTo),
+    [scoredStaff, assignedTo]
+  );
 
+  const isAssigned = Boolean(assignedTo);
+  const assignedLabel = assignedStaff?.email || assignedTo || "-";
   const selectedBlocked = Boolean(selected?.__smart?.blocked);
   const selectedActive = selected?.__smart?.active !== false;
 
@@ -215,26 +149,22 @@ export default function AssignStaffPanel({ request }) {
 
     if (!requestId) return setErr("Missing request id.");
     if (!staffUid) return setErr("Pick a staff member.");
-
     if (selectedBlocked) return setErr("This staff member is blocked due to low performance.");
     if (!selectedActive) return setErr("This staff member is inactive.");
 
     try {
       setBusy("assign");
-
       await assignRequestToStaff({
         requestId,
         staffUid,
         track: trackKey,
         speciality: specialityKey,
-
         country: request?.country || "",
         requestType: request?.requestType || "",
         serviceName: request?.serviceName || "",
         applicantName: request?.name || "",
       });
-
-      setMsg(`✅ Assigned to ${selected?.email || staffUid} (${specialityKey})`);
+      setMsg(`Assigned to ${selected?.email || staffUid}.`);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Assign failed.");
@@ -248,14 +178,18 @@ export default function AssignStaffPanel({ request }) {
     setMsg("");
 
     if (!requestId) return setErr("Missing request id.");
-
     const uid = assignedTo || staffUid;
     if (!uid) return setErr("No assignee found.");
+
+    const ok = window.confirm(
+      "Are you sure you want to unassign this request from this staff?"
+    );
+    if (!ok) return;
 
     try {
       setBusy("unassign");
       await unassignRequest({ requestId, staffUid: uid });
-      setMsg("✅ Unassigned");
+      setMsg("Unassigned.");
       setStaffUid("");
     } catch (e) {
       console.error(e);
@@ -265,30 +199,10 @@ export default function AssignStaffPanel({ request }) {
     }
   };
 
-  const selectionHint = useMemo(() => {
-    if (!selected) return null;
-    const m = selected.__smart;
-    if (!m) return null;
-
-    const bits = [];
-    if (m.hasSpecMatch) bits.push("Speciality match");
-    if (m.hasTrackMatch) bits.push("Track match");
-    if (m.doneCount > 0) {
-      bits.push(`Success ${fmtPct(m.successRate)}`);
-      bits.push(`Avg ${fmtMinsToHuman(m.avgMinutes)}`);
-      bits.push(`Done ${m.doneCount}`);
-    } else {
-      bits.push("No history yet");
-    }
-    return bits.join(" • ");
-  }, [selected]);
-
   return (
     <div className={card}>
       <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Assign staff</div>
-      <div className="mt-1 text-xs text-zinc-500">
-        Smart-sorted: success + speed + speciality match (blocked/inactive disabled).
-      </div>
+      <div className="mt-1 text-xs text-zinc-500">Sorted by a ranking system.</div>
 
       {err ? (
         <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
@@ -303,81 +217,60 @@ export default function AssignStaffPanel({ request }) {
       ) : null}
 
       <div className="mt-4 grid gap-3">
-        <select
-          value={staffUid}
-          onChange={(e) => setStaffUid(e.target.value)}
-          className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-4 py-3 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none focus:border-emerald-200"
-        >
-          <option value="">Select staff…</option>
+        {!isAssigned ? (
+          <div className="relative">
+            <select
+              value={staffUid}
+              onChange={(e) => setStaffUid(e.target.value)}
+              className="w-full appearance-none rounded-2xl border border-white/45 dark:border-zinc-700/60 bg-white/55 dark:bg-zinc-900/55 backdrop-blur-xl px-4 pr-11 py-3 text-sm font-medium text-zinc-900 dark:text-zinc-100 shadow-[0_10px_30px_rgba(0,0,0,0.08)] outline-none transition hover:border-emerald-200 focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100/80 dark:focus:ring-emerald-400/15"
+            >
+              <option value="">Select staff...</option>
+              {scoredStaff.map((s) => {
+                const m = s.__smart || {};
+                const blocked = Boolean(m.blocked);
+                const active = Boolean(m.active);
+                const rankTxt = Number.isFinite(m.score) ? `rank ${Math.round(m.score)}` : "rank -";
+                return (
+                  <option key={s.uid} value={s.uid} disabled={blocked || !active}>
+                    {s.email || s.uid} - {rankTxt}
+                  </option>
+                );
+              })}
+            </select>
 
-          {scoredStaff.map((s) => {
-            const m = s.__smart || {};
-            const blocked = Boolean(m.blocked);
-            const active = Boolean(m.active);
-
-            const scoreTxt = Number.isFinite(m.score) ? `score ${Math.round(m.score)}` : "score -";
-            const perfTxt =
-              m.doneCount > 0 ? `${fmtPct(m.successRate)} • ${fmtMinsToHuman(m.avgMinutes)}` : "new";
-
-            const flags = [
-              blocked ? "BLOCKED" : "",
-              !active ? "inactive" : "",
-              m.hasSpecMatch ? "match" : "",
-            ]
-              .filter(Boolean)
-              .join(", ");
-
-            return (
-              <option key={s.uid} value={s.uid} disabled={blocked || !active}>
-                {s.email || s.uid} — {scoreTxt} — {perfTxt}
-                {flags ? ` (${flags})` : ""}
-              </option>
-            );
-          })}
-        </select>
-
-        {selectionHint ? (
-          <div className="text-[11px] text-zinc-500">
-            Selected: <span className="font-semibold text-zinc-700 dark:text-zinc-300">{selectionHint}</span>
-          </div>
-        ) : null}
-
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={doAssign}
-            disabled={
-              busy === "assign" ||
-              busy === "unassign" ||
-              (selected && (selectedBlocked || !selectedActive))
-            }
-            className={`${btn} ${btnGreen} flex-1`}
-          >
-            <IconLink className="h-5 w-5" />
-            {busy === "assign" ? "Assigning…" : assignedTo ? "Re-assign" : "Assign"}
-          </button>
-
-          <button
-            type="button"
-            onClick={doUnassign}
-            disabled={busy === "assign" || busy === "unassign" || (!assignedTo && !staffUid)}
-            className={`${btn} ${btnRed}`}
-            title="Unassign"
-          >
-            <IconUnlink className="h-5 w-5" />
-            {busy === "unassign" ? "Removing…" : "Unassign"}
-          </button>
-        </div>
-
-        {assignedTo ? (
-          <div className="text-[11px] text-zinc-500">
-            Currently assigned to: <span className="font-mono">{assignedTo}</span>
+            <span className="pointer-events-none absolute inset-y-0 right-3 inline-flex items-center text-zinc-500 dark:text-zinc-400">
+              <AppIcon icon={ChevronDown} size={ICON_SM} />
+            </span>
           </div>
         ) : (
-          <div className="text-[11px] text-zinc-500">Not assigned yet.</div>
+          <div className="rounded-2xl border border-white/45 dark:border-zinc-700/60 bg-white/55 dark:bg-zinc-900/55 backdrop-blur-xl px-4 py-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            Assigned to staff - {assignedLabel}
+          </div>
         )}
+
+        <button
+          type="button"
+          onClick={isAssigned ? doUnassign : doAssign}
+          disabled={
+            busy === "assign" ||
+            busy === "unassign" ||
+            (!isAssigned && (!staffUid || (selected && (selectedBlocked || !selectedActive))))
+          }
+          className={`${btn} ${isAssigned ? btnRed : btnGreen} w-full`}
+          title={isAssigned ? "Unassign" : "Assign"}
+        >
+          <AppIcon icon={isAssigned ? Unlink : Link2} size={ICON_SM} />
+          {isAssigned
+            ? busy === "unassign"
+              ? "Unassigning..."
+              : "Unassign"
+            : busy === "assign"
+            ? "Assigning..."
+            : "Assign"}
+        </button>
       </div>
     </div>
   );
 }
+
 

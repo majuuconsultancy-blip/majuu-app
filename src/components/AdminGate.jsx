@@ -33,6 +33,11 @@ export default function AdminGate({ children }) {
       try {
         await authPersistenceReady;
       } catch {}
+      if (typeof auth?.authStateReady === "function") {
+        try {
+          await auth.authStateReady();
+        } catch {}
+      }
       if (cancelled) return () => {};
 
       const unsub = onAuthStateChanged(auth, (user) => {

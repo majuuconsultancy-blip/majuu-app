@@ -18,18 +18,6 @@ const RESIDENCE_COUNTRIES = [
   "Other",
 ];
 
-const DIAL_BY_COUNTRY = {
-  Kenya: "+254",
-  Uganda: "+256",
-  Tanzania: "+255",
-  Rwanda: "+250",
-  Burundi: "+257",
-  "South Sudan": "+211",
-  Ethiopia: "+251",
-  Somalia: "+252",
-  DRC: "+243",
-};
-
 function onlyDigits(s) {
   return String(s || "").replace(/\D+/g, "");
 }
@@ -81,7 +69,6 @@ export default function EditProfileScreen() {
   // originals (for "changed" detection + reset)
   const originalRef = useRef({ name: "", residence: "", phone: "" });
 
-  const dial = useMemo(() => DIAL_BY_COUNTRY[residence] || "", [residence]);
   const isKenya = residence === "Kenya";
 
   const isDirty = useMemo(() => {
@@ -233,7 +220,7 @@ export default function EditProfileScreen() {
             Edit profile
           </h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-            Keep your details correct so requests don’t delay.
+            Keep your details correct for faster application filling.
           </p>
 
           {err ? (
@@ -257,7 +244,7 @@ export default function EditProfileScreen() {
                 autoCorrect="on"
                 spellCheck={false}
                 enterKeyHint="next"
-                className="mt-2 w-full rounded-xl border border-white/50 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                className="mt-2 w-full rounded-xl border border-zinc-200/80 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
               />
             </div>
 
@@ -268,7 +255,7 @@ export default function EditProfileScreen() {
               <select
                 value={residence}
                 onChange={(e) => setResidence(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-white/50 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
+                className="mt-2 w-full rounded-xl border border-zinc-200/80 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
               >
                 <option value="">Select…</option>
                 {RESIDENCE_COUNTRIES.map((c) => (
@@ -277,15 +264,6 @@ export default function EditProfileScreen() {
                   </option>
                 ))}
               </select>
-
-              {residence ? (
-                <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                  Dial code:{" "}
-                  <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                    {dial || "—"}
-                  </span>
-                </div>
-              ) : null}
             </div>
 
             <div className="rounded-2xl border border-white/40 bg-white/55 dark:bg-zinc-900/60 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
@@ -296,7 +274,7 @@ export default function EditProfileScreen() {
               {isKenya ? (
                 <>
                   <div className="mt-2 flex gap-2">
-                    <div className="shrink-0 rounded-xl border border-white/50 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm font-semibold text-zinc-900 dark:text-zinc-100 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100">
+                    <div className="shrink-0 rounded-xl border border-zinc-200/80 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm font-semibold text-zinc-900 dark:text-zinc-100 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100">
                       +254
                     </div>
                     <input
@@ -309,14 +287,8 @@ export default function EditProfileScreen() {
                       inputMode="tel"
                       autoComplete="tel"
                       enterKeyHint="done"
-                      className="w-full rounded-xl border border-white/50 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                      className="w-full rounded-xl border border-zinc-200/80 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
                     />
-                  </div>
-                  <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                    Kenya: we accept{" "}
-                    <span className="font-semibold">0712…</span>,{" "}
-                    <span className="font-semibold">712…</span>,{" "}
-                    <span className="font-semibold">+254712…</span>.
                   </div>
                 </>
               ) : (
@@ -328,14 +300,14 @@ export default function EditProfileScreen() {
                     inputMode="tel"
                     autoComplete="tel"
                     enterKeyHint="done"
-                    className="mt-2 w-full rounded-xl border border-white/50 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                    className="mt-2 w-full rounded-xl border border-zinc-200/80 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
                   />
-                  <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                    Tip: include your country code (start with{" "}
-                    <span className="font-semibold">+</span>).
-                  </div>
                 </>
               )}
+
+              {residence ? (
+                <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">({residence})</div>
+              ) : null}
             </div>
 
             {/* Actions */}
@@ -376,9 +348,6 @@ export default function EditProfileScreen() {
           </div>
         </div>
 
-        <div className="mt-4 text-center text-[11px] text-zinc-500 dark:text-zinc-400">
-          EDIT PROFILE BUILD 2026-02-17
-        </div>
       </div>
     </div>
   );

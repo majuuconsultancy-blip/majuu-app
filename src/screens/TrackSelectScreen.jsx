@@ -11,101 +11,18 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
+import {
+  BookOpen,
+  Briefcase,
+  ChevronRight,
+  Plane,
+  ShieldCheck,
+} from "lucide-react";
 
 import { auth, db } from "../firebase";
+import AppIcon from "../components/AppIcon";
+import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { getUserState, setSelectedTrack } from "../services/userservice";
-
-/* Minimal icons (no libs) */
-function IconCap(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M3 8.5 12 4l9 4.5-9 4.5L3 8.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M6 10.5V16c0 .6.3 1.1.8 1.4 1.7 1 3.7 1.6 5.2 1.6 1.5 0 3.5-.6 5.2-1.6.5-.3.8-.8.8-1.4v-5.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconBriefcase(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M9 7V6.2A2.2 2.2 0 0 1 11.2 4h1.6A2.2 2.2 0 0 1 15 6.2V7"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M6 7h12a2 2 0 0 1 2 2v8.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5V9a2 2 0 0 1 2-2Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M4 12h16"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconPlane(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      {/* clean airplane silhouette */}
-      <path
-        d="M21 12l-8.6-2.4V4.8c0-.5-.4-.8-.8-.8h-.8c-.4 0-.8.3-.8.8v4.8L3 12v1.2l7.9 1.2v4.1l-2.3 1.4v1l3.5-.9 3.5.9v-1l-2.3-1.4v-4.1L21 13.2V12Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
-function IconArrowRight(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M9 18l6-6-6-6"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-/* ✅ small badge icon for Staff button */
-function IconShield(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M12 3l7 4v6c0 5-3.5 8.7-7 9-3.5-.3-7-4-7-9V7l7-4Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M9.5 12l1.8 1.8L14.8 10"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 export default function TrackSelectScreen() {
   const navigate = useNavigate();
@@ -171,11 +88,10 @@ export default function TrackSelectScreen() {
   const showSkip = Boolean(userState?.hasActiveProcess);
 
   const skipLabel = useMemo(() => {
-    const helpType = String(userState?.activeHelpType || "").toLowerCase();
-    const track = String(userState?.activeTrack || "").toUpperCase();
+    const trackRaw = String(userState?.activeTrack || "").toLowerCase();
+    const track = trackRaw ? `${trackRaw.slice(0, 1).toUpperCase()}${trackRaw.slice(1)}` : "";
     if (!showSkip) return "";
-    if (helpType === "we") return `Continue your request${track ? ` (${track})` : ""}`;
-    return `Continue your process${track ? ` (${track})` : ""}`;
+    return track ? `Continue your ${track} application` : "Continue your application";
   }, [showSkip, userState]);
 
   const go = async (track) => {
@@ -260,7 +176,7 @@ export default function TrackSelectScreen() {
               "shadow-[0_10px_25px_rgba(16,185,129,0.10)]",
             ].join(" ")}
           >
-            {icon}
+            <AppIcon size={ICON_MD} icon={icon} aria-hidden="true" />
           </div>
 
           <div className="min-w-0">
@@ -278,7 +194,7 @@ export default function TrackSelectScreen() {
         </div>
 
         <div className="text-zinc-400 mt-1 dark:text-zinc-500">
-          <IconArrowRight className="h-5 w-5" />
+          <AppIcon size={ICON_MD} icon={ChevronRight} aria-hidden="true" />
         </div>
       </div>
     </button>
@@ -291,7 +207,7 @@ export default function TrackSelectScreen() {
           {/* Header */}
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+              <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Choose your path
               </h1>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
@@ -302,92 +218,96 @@ export default function TrackSelectScreen() {
             <div className="h-11 w-11 rounded-2xl border border-emerald-100 bg-emerald-50/60 dark:border-zinc-800 dark:bg-zinc-950/40" />
           </div>
 
-          {/* ✅ Staff Portal button (ONLY for staff) */}
-          {isStaff ? (
-            <div className={`mt-5 transition ${mounted ? "opacity-100" : "opacity-0"}`}>
-              <button
-                type="button"
-                onClick={() => navigate("/staff/tasks")}
-                className="w-full rounded-3xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm font-semibold text-emerald-900 shadow-sm transition hover:bg-emerald-100 active:scale-[0.99] dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100 dark:hover:bg-emerald-950/45"
+          {/* Lower content wrapper (stronger offset for Android/Capacitor visual spacing) */}
+          <div className="pt-20 sm:pt-24">
+            <div aria-hidden="true" className="mb-4 h-8" />
+            {/* ✅ Staff Portal button (ONLY for staff) */}
+            {isStaff ? (
+              <div className={`transition ${mounted ? "opacity-100" : "opacity-0"}`}>
+                <button
+                  type="button"
+                  onClick={() => navigate("/staff/tasks")}
+                  className="w-full rounded-3xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm font-semibold text-emerald-900 shadow-sm transition hover:bg-emerald-100 active:scale-[0.99] dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100 dark:hover:bg-emerald-950/45"
+                >
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-emerald-200 bg-white/70 dark:bg-zinc-900/60 text-emerald-800 dark:border-emerald-900/40 dark:bg-zinc-950/40 dark:text-emerald-200">
+                      <AppIcon size={ICON_SM} icon={ShieldCheck} aria-hidden="true" />
+                    </span>
+                    Staff Portal
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-emerald-200 bg-white/60 dark:bg-zinc-900/60 text-emerald-800 dark:border-emerald-900/40 dark:bg-zinc-950/40 dark:text-emerald-200">
+                      <AppIcon size={ICON_MD} icon={ChevronRight} aria-hidden="true" />
+                    </span>
+                  </span>
+                </button>
+
+                <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+                  Visible to staff accounts only.
+                </div>
+              </div>
+            ) : null}
+
+            {/* Tiles */}
+            <div className={[isStaff ? "mt-4" : "", "grid gap-3"].join(" ").trim()}>
+              <Tile
+                icon={BookOpen}
+                title="Study abroad"
+                desc="Admissions, visas, scholarships."
+                onClick={() => go("study")}
+                active={going === "study"}
+                delay={0}
+              />
+
+              <Tile
+                icon={Briefcase}
+                title="Work abroad"
+                desc="Jobs, CV support, work permits."
+                onClick={() => go("work")}
+                active={going === "work"}
+                delay={60}
+              />
+
+              <Tile
+                icon={Plane}
+                title="Travel abroad"
+                desc="Trips, tours, travel planning."
+                onClick={() => go("travel")}
+                active={going === "travel"}
+                delay={120}
+              />
+            </div>
+
+            {/* Skip block */}
+            {showSkip ? (
+              <div
+                className={[
+                  "mt-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur transition",
+                  "dark:border-zinc-800 dark:bg-zinc-900/60",
+                  mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
+                ].join(" ")}
               >
-                <span className="inline-flex items-center justify-center gap-2">
-                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-emerald-200 bg-white/70 dark:bg-zinc-900/60 text-emerald-800 dark:border-emerald-900/40 dark:bg-zinc-950/40 dark:text-emerald-200">
-                    <IconShield className="h-4 w-4" />
-                  </span>
-                  Staff Portal
-                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-emerald-200 bg-white/60 dark:bg-zinc-900/60 text-emerald-800 dark:border-emerald-900/40 dark:bg-zinc-950/40 dark:text-emerald-200">
-                    <IconArrowRight className="h-5 w-5" />
-                  </span>
-                </span>
-              </button>
+                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  You have something in progress
+                </div>
+                <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{skipLabel}</div>
 
-              <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-                Visible to staff accounts only.
+                <div className="mt-4 flex gap-3">
+                  <button
+                    onClick={() => navigate("/app/progress")}
+                    className="flex-1 min-w-0 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/60 px-3 py-2.5 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-zinc-50 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                  >
+                    View progress
+                  </button>
+
+                  <button
+                    onClick={skipToOngoing}
+                    className="flex-1 min-w-0 rounded-2xl border border-emerald-200 bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99]"
+                  >
+                    Continue
+                  </button>
+                </div>
               </div>
-            </div>
-          ) : null}
-
-          {/* Tiles */}
-          <div className="mt-6 grid gap-3">
-            <Tile
-              icon={<IconCap className="h-5 w-5" />}
-              title="Study abroad"
-              desc="Admissions, visas, scholarships."
-              onClick={() => go("study")}
-              active={going === "study"}
-              delay={0}
-            />
-
-            <Tile
-              icon={<IconBriefcase className="h-5 w-5" />}
-              title="Work abroad"
-              desc="Jobs, CV support, work permits."
-              onClick={() => go("work")}
-              active={going === "work"}
-              delay={60}
-            />
-
-            <Tile
-              icon={<IconPlane className="h-5 w-5" />}
-              title="Travel abroad"
-              desc="Trips, tours, travel planning."
-              onClick={() => go("travel")}
-              active={going === "travel"}
-              delay={120}
-            />
+            ) : null}
           </div>
-
-          {/* Skip block */}
-          {showSkip ? (
-            <div
-              className={[
-                "mt-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur transition",
-                "dark:border-zinc-800 dark:bg-zinc-900/60",
-                mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
-              ].join(" ")}
-            >
-              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                You have something in progress
-              </div>
-              <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{skipLabel}</div>
-
-              <div className="mt-4 grid gap-2">
-                <button
-                  onClick={skipToOngoing}
-                  className="w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99]"
-                >
-                  Continue
-                </button>
-
-                <button
-                  onClick={() => navigate("/app/progress")}
-                  className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-zinc-50 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-100 dark:hover:bg-zinc-900"
-                >
-                  View progress
-                </button>
-              </div>
-            </div>
-          ) : null}
 
           <div className="h-6" />
         </div>

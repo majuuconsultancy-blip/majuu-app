@@ -30,6 +30,7 @@ import {
   Target,
   MessageSquareQuote,
   ClipboardCheck,
+  ChevronDown,
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
@@ -74,8 +75,8 @@ const pageIn = {
 
 const floatCard = {
   rest: { y: 0, scale: 1 },
-  hover: { y: -2, scale: 1.01, transition: { duration: 0.16 } },
-  tap: { scale: 0.985 },
+  hover: { y: -1, scale: 1.003, transition: { duration: 0.12 } },
+  tap: { scale: 0.996 },
 };
 
 function Chip({ active, children, onClick }) {
@@ -84,7 +85,7 @@ function Chip({ active, children, onClick }) {
       type="button"
       onClick={onClick}
       className={[
-        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition active:scale-[0.99]",
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition active:scale-[0.995]",
         active
           ? "border-emerald-200 bg-emerald-50/80 text-emerald-900"
           : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-white",
@@ -187,6 +188,8 @@ export default function WorkWeHelp() {
   // UI extras
   const [q, setQ] = useState("");
   const [chip, setChip] = useState("All");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [fullPackageDetailsOpen, setFullPackageDetailsOpen] = useState(false);
   const [toast, setToast] = useState("");
 
   const canUseWeHelp = missing.length === 0 && profileChecked;
@@ -298,6 +301,7 @@ export default function WorkWeHelp() {
       return chipOk && qOk;
     });
   }, [q, chip]);
+  const hasActiveFilters = chip !== "All" || q.trim().length > 0;
 
   const submitRequest = async ({
     name,
@@ -503,7 +507,7 @@ export default function WorkWeHelp() {
               </div>
 
               <h2 className="mt-3 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-                End-to-end work support, organized in one place
+                Complete work support in one request
               </h2>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 We help you with documents, submissions, and next steps — inside MAJUU.
@@ -515,16 +519,34 @@ export default function WorkWeHelp() {
             </span>
           </div>
 
-          <ul className="mt-4 grid gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-            {FULL_PACKAGE.map((item) => (
-              <li key={item} className="flex items-start gap-2">
-                <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50/70 text-emerald-800">
-                  <AppIcon size={ICON_SM} icon={BadgeCheck} />
-                </span>
-                <span className="min-w-0">{item}</span>
-              </li>
-            ))}
-          </ul>
+          <button
+            type="button"
+            onClick={() => setFullPackageDetailsOpen((v) => !v)}
+            className="mt-4 flex w-full items-center justify-between rounded-2xl border border-zinc-200/70 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3 py-2.5 text-left text-xs font-semibold text-zinc-700 dark:text-zinc-300"
+          >
+            <span className="inline-flex items-center gap-2">
+              <AppIcon size={ICON_SM} icon={BadgeCheck} className="text-emerald-700" />
+              Includes {FULL_PACKAGE.length} verified support steps
+            </span>
+            <AppIcon
+              size={ICON_SM}
+              icon={ChevronDown}
+              className={`transition-transform ${fullPackageDetailsOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+
+          {fullPackageDetailsOpen ? (
+            <ul className="mt-3 grid gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+              {FULL_PACKAGE.map((item) => (
+                <li key={item} className="flex items-start gap-2">
+                  <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50/70 text-emerald-800">
+                    <AppIcon size={ICON_SM} icon={BadgeCheck} />
+                  </span>
+                  <span className="min-w-0">{item}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
 
           <button
             onClick={openFull}
@@ -552,7 +574,7 @@ export default function WorkWeHelp() {
             <div>
               <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Single packages</h2>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                Choose one service you want help with.
+                Pick one service to request.
               </p>
             </div>
             <span className="text-xs font-semibold text-zinc-500">
@@ -562,7 +584,42 @@ export default function WorkWeHelp() {
 
           {/* Search */}
           <div className="mt-4 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/72 dark:bg-zinc-900/60 p-3 shadow-sm backdrop-blur-xl">
-            <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setFiltersOpen((v) => !v)}
+              className="flex w-full items-center gap-2 rounded-2xl border border-zinc-200/70 dark:border-zinc-800 bg-white/65 dark:bg-zinc-900/60 px-2.5 py-2 text-left"
+            >
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/70 text-emerald-800">
+                <AppIcon size={ICON_MD} icon={Filter} />
+              </span>
+
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Filters</div>
+                <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+                  {q
+                    ? `Search: ${q}`
+                    : chip === "All"
+                      ? "All services"
+                      : `Category: ${chip}`}
+                </div>
+              </div>
+
+              {hasActiveFilters ? (
+                <span className="rounded-full border border-emerald-200 bg-emerald-50/70 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">
+                  Active
+                </span>
+              ) : null}
+
+              <AppIcon
+                size={ICON_SM}
+                icon={ChevronDown}
+                className={`text-zinc-500 transition-transform ${filtersOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+
+            {filtersOpen ? (
+              <>
+                <div className="mt-3 flex items-center gap-2">
               <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/70 text-emerald-800">
                 <AppIcon size={ICON_MD} icon={Search} />
               </span>
@@ -580,7 +637,7 @@ export default function WorkWeHelp() {
                 <button
                   type="button"
                   onClick={() => setQ("")}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition hover:bg-white active:scale-[0.99]"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition hover:bg-white active:scale-[0.995]"
                   aria-label="Clear search"
                   title="Clear"
                 >
@@ -594,13 +651,15 @@ export default function WorkWeHelp() {
             </div>
 
             {/* Chips */}
-            <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-3 flex flex-wrap gap-2">
               {["All", "Visa", "Docs", "CV", "Jobs", "Interview"].map((c) => (
                 <Chip key={c} active={chip === c} onClick={() => setChip(c)}>
                   {c}
                 </Chip>
               ))}
             </div>
+              </>
+            ) : null}
           </div>
 
           {/* Tiles */}

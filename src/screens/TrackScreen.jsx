@@ -16,14 +16,14 @@ import {
   GraduationCap,
   Briefcase,
   Plane,
+  ArrowLeft,
   ChevronRight,
   X,
   User,
   Users,
-  Compass,
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
-import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
+import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 
 import { auth } from "../firebase";
 import { setActiveContext, setSelectedTrack } from "../services/userservice";
@@ -153,10 +153,10 @@ export default function TrackScreen({ track }) {
     setShowModal(false);
   };
 
-  // ✅ Go back to Track selection hub
-  const goToTracks = () => {
+  // ✅ Go back to TrackSelectScreen via explicit route
+  const goToTrackSelect = () => {
     if (saving) return;
-    navigate("/dashboard");
+    navigate("/dashboard", { replace: true });
   };
 
   const startProcessAndGo = async (helpType) => {
@@ -221,16 +221,16 @@ export default function TrackScreen({ track }) {
       <div className="px-5 py-6 pb-10 max-w-xl mx-auto">
         {/* Header */}
         <div className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white/60 dark:bg-zinc-900/60 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/50">
-          {/* ✅ small Tracks button (top-right) */}
+          {/* ✅ Back button (top-right) */}
           <button
             type="button"
-            onClick={goToTracks}
+            onClick={goToTrackSelect}
             disabled={saving}
-            className="absolute right-4 bottom-3 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100 dark:hover:bg-zinc-950/45"
-            title="Go to Tracks"
+            className="absolute right-4 top-4 z-20 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 dark:bg-zinc-950/30 dark:hover:bg-zinc-950/45"
+            title="Back to track selection"
           >
-            <AppIcon size={ICON_SM} icon={Compass} />
-            Tracks
+            <AppIcon size={ICON_SM} icon={ArrowLeft} aria-hidden="true" />
+            Back
           </button>
 
           {/* animated glow blob */}

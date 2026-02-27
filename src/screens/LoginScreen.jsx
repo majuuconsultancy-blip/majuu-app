@@ -8,12 +8,13 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  onAuthStateChanged,
   signInWithEmailAndPassword,
   signInWithPopup,
   signInWithRedirect,
   sendPasswordResetEmail,
 } from "firebase/auth";
-import { auth, googleProvider } from "../firebase";
+import { auth, authPersistenceReady, googleProvider } from "../firebase";
 import { ensureUserDoc } from "../services/userservice";
 
 /* ---------------- Icons ---------------- */
@@ -63,22 +64,22 @@ function IconLock(props) {
 
 function IconGoogle(props) {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+    <svg viewBox="0 0 18 18" aria-hidden="true" {...props}>
       <path
-        fill="currentColor"
-        d="M21.6 12.27c0-.68-.06-1.18-.17-1.7H12v3.21h5.54c-.11.8-.71 2.01-2.04 2.82l-.02.11 2.98 2.31.2.02c1.83-1.69 2.9-4.17 2.9-6.77Z"
+        fill="#4285F4"
+        d="M17.64 9.2045c0-.638-.0573-1.2518-.1636-1.8409H9v3.4818h4.8436c-.2086 1.125-.8432 2.0782-1.7968 2.715v2.2582h2.9086c1.7018-1.5668 2.6846-3.8741 2.6846-6.6141Z"
       />
       <path
-        fill="currentColor"
-        d="M12 22c2.7 0 4.97-.89 6.63-2.43l-3.16-2.45c-.85.59-1.99 1-3.47 1-2.65 0-4.9-1.69-5.71-4.03l-.1.01-3.08 2.4-.03.1C4.74 19.95 8.09 22 12 22Z"
+        fill="#34A853"
+        d="M9 18c2.43 0 4.4673-.8068 5.9564-2.1818l-2.9086-2.2582c-.8068.54-1.8409.8591-3.0477.8591-2.3441 0-4.3282-1.5832-5.0364-3.7105H.9573v2.3318C2.4382 15.9832 5.4818 18 9 18Z"
       />
       <path
-        fill="currentColor"
-        d="M6.29 14.09A6.02 6.02 0 0 1 6 12c0-.73.13-1.44.29-2.09l-.01-.14-3.11-2.43-.1.05A9.98 9.98 0 0 0 2 12c0 1.61.39 3.13 1.07 4.46l3.22-2.37Z"
+        fill="#FBBC05"
+        d="M3.9636 10.7086C3.7832 10.1686 3.6818 9.5918 3.6818 9s.1014-1.1686.2818-1.7086V4.9595H.9573C.3477 6.1745 0 7.5491 0 9s.3477 2.8255.9573 4.0405l3.0063-2.3319Z"
       />
       <path
-        fill="currentColor"
-        d="M12 5.88c1.7 0 2.85.73 3.5 1.34l2.55-2.48C16.96 3.13 14.7 2 12 2 8.09 2 4.74 4.05 3.07 7.54l3.21 2.37C7.1 7.57 9.35 5.88 12 5.88Z"
+        fill="#EA4335"
+        d="M9 3.5809c1.3214 0 2.5077.4541 3.4405 1.3459l2.5813-2.5814C13.4636.8918 11.4264 0 9 0 5.4818 0 2.4382 2.0168.9573 4.9595l3.0063 2.3319C4.6718 5.1641 6.6559 3.5809 9 3.5809Z"
       />
     </svg>
   );
@@ -264,6 +265,29 @@ export default function LoginScreen() {
   const [resetBusy, setResetBusy] = useState(false);
 
   const lastAttemptRef = useRef(null); // { type: "email"|"google", payload: {...} }
+
+  useEffect(() => {
+    let cancelled = false;
+    let unsub = null;
+
+    (async () => {
+      try {
+        await authPersistenceReady;
+      } catch {}
+      if (cancelled) return;
+
+      unsub = onAuthStateChanged(auth, (user) => {
+        if (user) {
+          navigate("/dashboard", { replace: true });
+        }
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
+  }, [navigate]);
 
   // ✅ watch online/offline
   useEffect(() => {
@@ -522,7 +546,7 @@ export default function LoginScreen() {
           {/* Header */}
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+              <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Welcome back
               </h1>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">Sign in to continue.</p>
@@ -531,152 +555,156 @@ export default function LoginScreen() {
             <div className="h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70" />
           </div>
 
-          {/* Card */}
-          <div className={["mt-7", glassCard].join(" ")}>
-            <div className="grid gap-3">
-              {/* ✅ Network banner */}
-              {netMsg ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm text-amber-900">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="font-semibold">Connection issue</div>
-                      <div className="mt-0.5 text-xs text-amber-900/80">{netMsg}</div>
-                      {retryInfo ? (
-                        <div className="mt-1 text-xs font-semibold">{retryInfo}</div>
-                      ) : null}
+          {/* Lower content wrapper (stronger offset for Android/Capacitor visual spacing) */}
+          <div className="pt-16 sm:pt-20 md:pt-24">
+            <div aria-hidden="true" className="mb-4 h-6" />
+            {/* Card */}
+            <div className={glassCard}>
+              <div className="grid gap-3">
+                {/* ✅ Network banner */}
+                {netMsg ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm text-amber-900">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-semibold">Connection issue</div>
+                        <div className="mt-0.5 text-xs text-amber-900/80">{netMsg}</div>
+                        {retryInfo ? (
+                          <div className="mt-1 text-xs font-semibold">{retryInfo}</div>
+                        ) : null}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={retryNow}
+                        disabled={loading}
+                        className="shrink-0 rounded-xl border border-amber-200 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs font-semibold text-amber-900 transition hover:bg-white active:scale-[0.98] disabled:opacity-60"
+                      >
+                        Retry
+                      </button>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={retryNow}
-                      disabled={loading}
-                      className="shrink-0 rounded-xl border border-amber-200 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs font-semibold text-amber-900 transition hover:bg-white active:scale-[0.98] disabled:opacity-60"
-                    >
-                      Retry
-                    </button>
                   </div>
-                </div>
-              ) : retryInfo ? (
-                <div className="rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300">
-                  {retryInfo}
-                </div>
-              ) : null}
-
-              {/* Google */}
-              <button
-                type="button"
-                onClick={handleGoogle}
-                disabled={loading}
-                className={googleBtn}
-              >
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
-                  <IconGoogle className="h-5 w-5 text-[#4285F4]" />
-                </span>
-                Continue with Google
-              </button>
-
-              <div className="flex items-center gap-3">
-                <div className="h-px flex-1 bg-zinc-200/80" />
-                <span className="text-xs font-semibold text-zinc-500">or</span>
-                <div className="h-px flex-1 bg-zinc-200/80" />
-              </div>
-
-              <form onSubmit={handleLogin} className="grid gap-4">
-                {/* Email */}
-                <div>
-                  <label className="text-sm font-medium text-zinc-800">Email</label>
-                  <div className={fieldShell}>
-                    <IconMail className="h-5 w-5 text-zinc-500" />
-                    <input
-                      type="email"
-                      placeholder="name@email.com"
-                      className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      autoComplete="email"
-                      required
-                      disabled={loading}
-                    />
-                  </div>
-                </div>
-
-                {/* Password */}
-                <div>
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-zinc-800">Password</label>
-                    <button
-                      type="button"
-                      onClick={openReset}
-                      disabled={loading}
-                      className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 disabled:opacity-60"
-                    >
-                      Forgot password?
-                    </button>
-                  </div>
-
-                  <div className={fieldShell}>
-                    <IconLock className="h-5 w-5 text-zinc-500" />
-                    <input
-                      type={showPw ? "text" : "password"}
-                      placeholder="Your password"
-                      className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      autoComplete="current-password"
-                      required
-                      disabled={loading}
-                    />
-
-                    {/* Eye toggle */}
-                    <button
-                      type="button"
-                      onClick={() => setShowPw((v) => !v)}
-                      disabled={loading}
-                      className="shrink-0 inline-flex items-center justify-center rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-2 text-zinc-700 dark:text-zinc-300 transition hover:bg-white active:scale-[0.98] disabled:opacity-60"
-                      aria-label={showPw ? "Hide password" : "Show password"}
-                      title={showPw ? "Hide password" : "Show password"}
-                    >
-                      {showPw ? (
-                        <IconEyeOff className="h-5 w-5" />
-                      ) : (
-                        <IconEye className="h-5 w-5" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Error */}
-                {error ? (
-                  <div className="rounded-2xl border border-rose-100 bg-rose-50/70 px-3 py-2 text-sm text-rose-700">
-                    {error}
+                ) : retryInfo ? (
+                  <div className="rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300">
+                    {retryInfo}
                   </div>
                 ) : null}
 
-                {/* Submit */}
-                <button type="submit" disabled={!canSubmit} className={primaryBtn}>
-                  {loading ? "Signing in..." : "Sign in"}
-                </button>
-
-                {/* Secondary */}
+                {/* Google */}
                 <button
                   type="button"
-                  onClick={() => navigate("/signup")}
+                  onClick={handleGoogle}
                   disabled={loading}
-                  className={secondaryBtn}
+                  className={googleBtn}
                 >
-                  Create an account
+                  <span className="mr-2 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
+                    <IconGoogle className="h-[18px] w-[18px]" />
+                  </span>
+                  Continue with Google
                 </button>
 
-                <p className="text-center text-xs text-zinc-500">
-                  By continuing, you agree to our terms and privacy policy.
-                </p>
-              </form>
-            </div>
-          </div>
+                <div className="flex items-center gap-3">
+                  <div className="h-px flex-1 bg-zinc-200/80" />
+                  <span className="text-xs font-semibold text-zinc-500">or</span>
+                  <div className="h-px flex-1 bg-zinc-200/80" />
+                </div>
 
-          {/* Footer hint */}
-          <div className="mt-6 text-center text-xs text-zinc-500">
-            Tip: Use the same email you signed up with.
+                <form onSubmit={handleLogin} className="grid gap-4">
+                  {/* Email */}
+                  <div>
+                    <label className="text-sm font-medium text-zinc-800">Email</label>
+                    <div className={fieldShell}>
+                      <IconMail className="h-5 w-5 text-zinc-500" />
+                      <input
+                        type="email"
+                        placeholder="name@email.com"
+                        className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        autoComplete="email"
+                        required
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Password */}
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium text-zinc-800">Password</label>
+                      <button
+                        type="button"
+                        onClick={openReset}
+                        disabled={loading}
+                        className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 disabled:opacity-60"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+
+                    <div className={fieldShell}>
+                      <IconLock className="h-5 w-5 text-zinc-500" />
+                      <input
+                        type={showPw ? "text" : "password"}
+                        placeholder="Your password"
+                        className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        autoComplete="current-password"
+                        required
+                        disabled={loading}
+                      />
+
+                      {/* Eye toggle */}
+                      <button
+                        type="button"
+                        onClick={() => setShowPw((v) => !v)}
+                        disabled={loading}
+                        className="shrink-0 inline-flex items-center justify-center rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-2 text-zinc-700 dark:text-zinc-300 transition hover:bg-white active:scale-[0.98] disabled:opacity-60"
+                        aria-label={showPw ? "Hide password" : "Show password"}
+                        title={showPw ? "Hide password" : "Show password"}
+                      >
+                        {showPw ? (
+                          <IconEyeOff className="h-5 w-5" />
+                        ) : (
+                          <IconEye className="h-5 w-5" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Error */}
+                  {error ? (
+                    <div className="rounded-2xl border border-rose-100 bg-rose-50/70 px-3 py-2 text-sm text-rose-700">
+                      {error}
+                    </div>
+                  ) : null}
+
+                  {/* Submit */}
+                  <button type="submit" disabled={!canSubmit} className={primaryBtn}>
+                    {loading ? "Signing in..." : "Sign in"}
+                  </button>
+
+                  {/* Secondary */}
+                  <button
+                    type="button"
+                    onClick={() => navigate("/signup")}
+                    disabled={loading}
+                    className={secondaryBtn}
+                  >
+                    Create an account
+                  </button>
+
+                  <p className="text-center text-xs text-zinc-500">
+                    By continuing, you agree to our terms and privacy policy.
+                  </p>
+                </form>
+              </div>
+            </div>
+
+            {/* Footer hint */}
+            <div className="mt-6 text-center text-xs text-zinc-500">
+              Tip: Use the same email you signed up with.
+            </div>
           </div>
         </div>
       </div>

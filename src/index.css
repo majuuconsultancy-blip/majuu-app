@@ -21,9 +21,60 @@ html {
   body {
     @apply bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 transition-colors duration-200;
   }
+
+  html,
+  body,
+  #root {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  input,
+  textarea,
+  select,
+  option,
+  [contenteditable="true"],
+  .selectable {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* Avoid transparent option rows in Android WebView dropdown rendering */
+  option,
+  optgroup {
+    background-color: #ffffff;
+    color: #18181b;
+  }
+
+  .dark option,
+  .dark optgroup {
+    background-color: #09090b;
+    color: #f4f4f5;
+  }
 }
 
 /* Prevent SVGs from inheriting weird inline spacing */
 svg {
   display: block;
+}
+
+.app-bottom-nav {
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+/* Global safe-area padding for notches/cutouts (iOS + Android). */
+.app-safe-area {
+  min-height: 100%;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+body.request-modal-open .app-bottom-nav,
+body.app-keyboard-open .app-bottom-nav {
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
 }

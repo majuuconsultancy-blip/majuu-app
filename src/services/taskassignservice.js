@@ -172,7 +172,8 @@ export async function assignRequestToStaff({
     taskRef,
     {
       requestId,
-      status: "active",
+      // Keep task in "assigned" until staff explicitly taps Start work.
+      status: "assigned",
       assignedAt: serverTimestamp(),
 
       track: String(track || "").trim().toLowerCase(),
@@ -196,6 +197,21 @@ export async function assignRequestToStaff({
       assignedTo: staffUid,
       assignedAt: serverTimestamp(),
       assignedBy: admin.uid,
+
+      // Reset staff workflow state on every assignment/reassignment so Start Work
+      // modal is shown and timing/scoring starts from the current assignee.
+      staffStatus: "assigned",
+      staffDecision: "none",
+      staffUpdatedAt: serverTimestamp(),
+
+      staffStartedAt: null,
+      staffStartedAtMs: null,
+      staffStartedBy: null,
+
+      staffCompletedAt: null,
+      staffCompletedAtMs: null,
+      staffCompletedBy: null,
+      staffWorkMinutes: null,
     },
     { merge: true }
   );

@@ -127,6 +127,11 @@ export default function AppLayout() {
       } catch {
         // ignore if not available / failed
       }
+      if (typeof auth?.authStateReady === "function") {
+        try {
+          await auth.authStateReady();
+        } catch {}
+      }
       if (cancelled) return;
 
       unsubAuth = onAuthStateChanged(auth, (user) => {
@@ -266,9 +271,15 @@ export default function AppLayout() {
         </div>
       )}
 
-      <nav className="fixed bottom-4 left-0 right-0 z-50 px-4 pb-[env(safe-area-inset-bottom)]">
+      <nav className="app-bottom-nav fixed bottom-4 left-0 right-0 z-50 px-4 pb-[env(safe-area-inset-bottom)]">
         <div className="max-w-xl mx-auto">
-          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 backdrop-blur px-2 py-2 shadow-sm t-pop">
+          <div
+            className="rounded-2xl border border-white/50 dark:border-zinc-700/45 bg-white/15 dark:bg-zinc-900/18 px-2 py-2 shadow-[0_10px_28px_rgba(15,23,42,0.10)] t-pop"
+            style={{
+              WebkitBackdropFilter: "blur(10px)",
+              backdropFilter: "blur(10px)",
+            }}
+          >
             <div className="flex items-center justify-between">
               <button onClick={goSmartHome} className={`${itemBase} ${homeActive ? itemOn : itemOff}`}>
                 <IconHome className="h-5 w-5" />

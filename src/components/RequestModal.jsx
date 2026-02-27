@@ -338,6 +338,15 @@ export default function RequestModal({
     return () => unlock();
   }, [open]);
 
+  // Hide the app bottom nav while the request modal is open.
+  useEffect(() => {
+    if (!open) return;
+    document.body.classList.add("request-modal-open");
+    return () => {
+      document.body.classList.remove("request-modal-open");
+    };
+  }, [open]);
+
   // ESC close
   useEffect(() => {
     if (!open) return;
@@ -442,7 +451,7 @@ export default function RequestModal({
     : "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 shadow-lg backdrop-blur px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950/70";
 
   const fieldWrap =
-    "mt-2 flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2.5" +
+    "mt-2 mx-0.5 flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-3.5" +
     "transition focus-within:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-100" +
     "dark:border-zinc-800 dark:bg-zinc-950";
 
@@ -482,7 +491,7 @@ export default function RequestModal({
         <div
           ref={panelRef}
           className={panelCls}
-          style={{ height: "75vh", maxHeight: "75vh", overflow: "hidden" }}
+          style={{ height: "79vh", maxHeight: "79vh", overflow: "hidden" }}
           onPointerDown={(e) => {
             startedInsidePanelRef.current = true;
             e.stopPropagation();
@@ -527,7 +536,7 @@ export default function RequestModal({
           <div className="px-5 pt-4 flex-1 min-h-0">
             <div
               ref={scrollRef}
-              className="h-full pb-[152px] md:pb-[140px] overflow-y-auto"
+              className="h-full pb-4 overflow-y-auto"
               style={{
                 WebkitOverflowScrolling: "touch",
                 overscrollBehavior: "contain",
@@ -672,7 +681,7 @@ export default function RequestModal({
                   <div className={fieldWrap + " items-start"}>
                     <IconNote className="h-5 w-5 text-zinc-500 mt-0.5" />
                     <textarea
-                      className={inputBase + " min-h-[96px] resize-none"}
+                      className={inputBase + " min-h-[112px] resize-none"}
                       value={note}
                       onChange={(e) => setNote(e.target.value)}
                       placeholder="Any extra details to help us assist you..."
@@ -689,58 +698,52 @@ export default function RequestModal({
                   </div>
                 ) : null}
               </div>
-            </div>
-          </div>
+                <div className="pt-2">
+                  <div className={ctaWrapCls}>
+                    <div className="grid gap-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={doPay}
+                          disabled={!canPay || loading || paid}
+                          className={`w-full rounded-xl border px-4 py-3 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60 ${
+                            paid
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                              : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                          }`}
+                        >
+                          {paid ? "Paid ✓" : "Pay"}
+                        </button>
 
-          {/* Sticky CTA */}
-          <div className="sticky bottom-0 px-5 pb-5 pt-3 shrink-0">
-            {!STANDALONE ? (
-              <div className="pointer-events-none -mt-6 h-6 w-full bg-gradient-to-b from-transparent to-white/80 backdrop-blur-[2px]" />
-            ) : (
-              <div className="pointer-events-none -mt-6 h-6 w-full bg-gradient-to-b from-transparent to-white" />
-            )}
+                        <button
+                          type="button"
+                          onClick={submit}
+                          disabled={!canSubmit}
+                          className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                        >
+                          {loading ? "Sending..." : "Send request"}
+                        </button>
+                      </div>
 
-            <div className={ctaWrapCls}>
-              <div className="grid gap-2">
-                <button
-                  type="button"
-                  onClick={doPay}
-                  disabled={!canPay || loading || paid}
-                  className={`w-full rounded-xl border px-4 py-3 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60 ${
-                    paid
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                      : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
-                  }`}
-                >
-                  {paid ? "Payment confirmed ✓" : "Pay to unlock request"}
-                </button>
+                      <button
+                        type="button"
+                        onClick={handleClose}
+                        disabled={loading}
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                      >
+                        Cancel
+                      </button>
 
-                <button
-                  type="button"
-                  onClick={submit}
-                  disabled={!canSubmit}
-                  className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
-                >
-                  {loading ? "Sending..." : "Send request"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleClose}
-                  disabled={loading}
-                  className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
-                >
-                  Cancel
-                </button>
-
-                <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
-                  You must <span className="font-semibold">Pay</span> before sending an application.
-                </p>
+                      <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
+                        You must <span className="font-semibold">Pay</span> before sending an application.
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
     </div>
   );
 }

@@ -20,140 +20,12 @@ import {
   publishStagedAdminFiles,
   markStaffDraftStaged,
 } from "../services/adminfileservice";
+import { ArrowLeft, FileText, Check, X, ChevronRight, Link2, Trash2 } from "lucide-react";
 import AssignStaffPanel from "../components/AssignStaffPanel";
 import AdminRequestChatLauncher from "../components/AdminRequestChatLauncher";
+import AppIcon from "../components/AppIcon";
+import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { smartBack } from "../utils/navBack";
-
-/* ---------- Minimal icons ---------- */
-function IconBack(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M15.5 5.5 9 12l6.5 6.5"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconDoc(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M8 3.8h6.2L19.2 8.8V20a2.2 2.2 0 0 1-2.2 2.2H8A2.2 2.2 0 0 1 5.8 20V6A2.2 2.2 0 0 1 8 3.8Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M14.2 3.8V8a.9.9 0 0 0 .9.9h4.1"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M8.6 12h7"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M8.6 15.6h7"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconCheck(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M20 6.8 9.7 17.1 4 11.4"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconX(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconChevronRight(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M9 5.5 15.5 12 9 18.5"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconLink(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M10.6 13.4 9.2 14.8a3.6 3.6 0 0 1-5.1 0 3.6 3.6 0 0 1 0-5.1l1.8-1.8a3.6 3.6 0 0 1 5.1 0"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-      />
-      <path
-        d="M13.4 10.6 14.8 9.2a3.6 3.6 0 0 1 5.1 0 3.6 3.6 0 0 1 0 5.1l-1.8 1.8a3.6 3.6 0 0 1-5.1 0"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-      />
-      <path
-        d="M9.8 14.2 14.2 9.8"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconTrash(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M6.8 7.5h10.4M10 7.5V6.2A1.5 1.5 0 0 1 11.5 4.7h1A1.5 1.5 0 0 1 14 6.2v1.3"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-      />
-      <path
-        d="M8.2 7.5 9 19a1.8 1.8 0 0 0 1.8 1.6h2.4A1.8 1.8 0 0 0 15 19l.8-11.5"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
 /* ---------- UI helpers ---------- */
 function pill(status) {
@@ -524,7 +396,7 @@ export default function AdminRequestDetailsScreen() {
               className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
               type="button"
             >
-              <IconBack className="h-5 w-5 text-emerald-700" />
+              <AppIcon icon={ArrowLeft} size={ICON_MD} className="text-emerald-700" />
               Back
             </button>
           </div>
@@ -562,7 +434,7 @@ export default function AdminRequestDetailsScreen() {
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800">
               <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/70 dark:bg-zinc-900/60 border border-emerald-100">
-                <IconDoc className="h-4 w-4 text-emerald-700" />
+                <AppIcon icon={FileText} size={ICON_SM} className="text-emerald-700" />
               </span>
               Review request
             </div>
@@ -599,7 +471,7 @@ export default function AdminRequestDetailsScreen() {
               className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
               type="button"
             >
-              <IconBack className="h-5 w-5 text-emerald-700" />
+              <AppIcon icon={ArrowLeft} size={ICON_MD} className="text-emerald-700" />
               Back
             </button>
           </div>
@@ -677,7 +549,7 @@ export default function AdminRequestDetailsScreen() {
               className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
             >
               Applicant docs
-              <IconChevronRight className="h-5 w-5 text-emerald-700" />
+              <AppIcon icon={ChevronRight} size={ICON_MD} className="text-emerald-700" />
             </button>
           </div>
 
@@ -731,9 +603,6 @@ export default function AdminRequestDetailsScreen() {
               </p>
             </div>
 
-            <span className="rounded-full border border-rose-100 bg-rose-50/70 px-2.5 py-1 text-[11px] font-semibold text-rose-700">
-              Required for reject
-            </span>
           </div>
 
           <textarea
@@ -787,10 +656,7 @@ export default function AdminRequestDetailsScreen() {
                 const staged = Boolean(d?.stagedAt);
 
                 return (
-                  <div
-                    key={d.id}
-                    className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4"
-                  >
+                  <div key={d.id} className="py-2">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 break-words">
@@ -853,7 +719,7 @@ export default function AdminRequestDetailsScreen() {
               </p>
             </div>
 
-            <span className="rounded-full border border-emerald-100 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
+            <span className="text-[11px] font-semibold text-emerald-800">
               Sends on Accept
             </span>
           </div>
@@ -877,7 +743,7 @@ export default function AdminRequestDetailsScreen() {
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400">
-                    <IconLink className="h-5 w-5" />
+                    <AppIcon icon={Link2} size={ICON_MD} />
                   </span>
                   <input
                     value={draftUrl}
@@ -948,7 +814,7 @@ export default function AdminRequestDetailsScreen() {
                         disabled={saving}
                         className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60"
                       >
-                        <IconTrash className="h-5 w-5" />
+                        <AppIcon icon={Trash2} size={ICON_MD} />
                         Remove
                       </button>
                     ) : null}
@@ -983,7 +849,7 @@ export default function AdminRequestDetailsScreen() {
                 type="button"
                 title={!note.trim() ? "Note is required for rejection." : ""}
               >
-                <IconX className="h-5 w-5" />
+                <AppIcon icon={X} size={ICON_MD} />
                 {saving ? "Saving…" : "Reject"}
               </button>
 
@@ -993,7 +859,7 @@ export default function AdminRequestDetailsScreen() {
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                 type="button"
               >
-                <IconCheck className="h-5 w-5 text-white" />
+                <AppIcon icon={Check} size={ICON_MD} className="text-white" />
                 {saving ? "Saving…" : "Accept"}
               </button>
             </div>

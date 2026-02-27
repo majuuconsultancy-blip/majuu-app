@@ -51,6 +51,17 @@ function safeStr(x) {
   return String(x || "").trim();
 }
 
+function tsMs(v) {
+  if (v == null) return 0;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  try {
+    if (typeof v?.toMillis === "function") return Number(v.toMillis()) || 0;
+  } catch {
+    // ignore timestamp conversion issues
+  }
+  return 0;
+}
+
 export default function StaffStartWorkModalScreen() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -107,7 +118,13 @@ export default function StaffStartWorkModalScreen() {
         const statusLower = String(r.status || "new").toLowerCase();
 
         const finalized = statusLower === "closed" || statusLower === "rejected";
-        if (finalized || staffStatus === "in_progress" || staffStatus === "done") {
+        const hasStartedEvidence = tsMs(r.staffStartedAtMs) > 0 || tsMs(r.staffStartedAt) > 0;
+        const hasCompletedEvidence = tsMs(r.staffCompletedAtMs) > 0 || tsMs(r.staffCompletedAt) > 0;
+        const alreadyStarted = staffStatus === "in_progress" && hasStartedEvidence;
+        const alreadyFinished = staffStatus === "done" && (hasCompletedEvidence || hasStartedEvidence);
+
+        // Defensive guard: only skip this modal if the request truly has start/completion timing.
+        if (finalized || alreadyStarted || alreadyFinished) {
           navigate(`/staff/request/${rid}`, { replace: true });
           return;
         }

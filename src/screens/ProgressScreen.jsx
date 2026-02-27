@@ -18,9 +18,8 @@ import {
   deleteDoc,
   getDocs,
 } from "firebase/firestore";
-import { motion, AnimatePresence } from "../utils/motionProxy";
+import { motion } from "../utils/motionProxy";
 import {
-  Activity,
   ChevronRight,
   Trash2,
   Bell,
@@ -28,7 +27,7 @@ import {
   PinOff,
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
-import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
+import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 
 import { auth, db } from "../firebase";
 import { useNotifsV2Store } from "../services/notifsV2Store";
@@ -149,23 +148,10 @@ function writePins(uid, arr) {
 
 /* ---------- Motion ---------- */
 const pageIn = {
-  hidden: { opacity: 0, y: 10 },
+  hidden: { opacity: 0 },
   show: {
     opacity: 1,
-    y: 0,
-    transition: { type: "spring", stiffness: 420, damping: 34 },
-  },
-};
-const listWrap = {
-  hidden: {},
-  show: { transition: { staggerChildren: 0.06, delayChildren: 0.06 } },
-};
-const listItem = {
-  hidden: { opacity: 0, y: 10 },
-  show: {
-    opacity: 1,
-    y: 0,
-    transition: { type: "spring", stiffness: 420, damping: 30 },
+    transition: { duration: 0.14, ease: [0.2, 0.8, 0.2, 1] },
   },
 };
 
@@ -330,6 +316,8 @@ export default function ProgressScreen() {
     "w-full rounded-3xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60";
   const ghostBtn =
     "rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900";
+  const notifBannerBtn =
+    "w-full text-left rounded-3xl border border-zinc-200/60 dark:border-zinc-800/60 bg-white/45 dark:bg-zinc-900/35 backdrop-blur-md p-4 shadow-sm transition hover:bg-white/55 hover:border-emerald-200/70 active:scale-[0.99] dark:hover:bg-zinc-900/45 dark:hover:border-emerald-900/30";
 
   const requestsCountLabel = useMemo(() => {
     const n = requests.length;
@@ -396,108 +384,20 @@ export default function ProgressScreen() {
           initial="hidden"
           animate="show"
         >
-          {/* Header (premium) */}
-          <div className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white/60 dark:bg-zinc-900/60 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/50">
-            <motion.div
-              aria-hidden="true"
-              className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-emerald-300/25 blur-3xl dark:bg-emerald-400/10"
-              animate={{ x: [0, -8, 0], y: [0, 10, 0] }}
-              transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
-            />
-            <motion.div
-              aria-hidden="true"
-              className="pointer-events-none absolute -left-16 -bottom-16 h-44 w-44 rounded-full bg-emerald-200/25 blur-3xl dark:bg-emerald-500/10"
-              animate={{ x: [0, 10, 0], y: [0, -8, 0] }}
-              transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-            />
-
-            <div className="relative flex items-end justify-between gap-3">
-              <div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-emerald-200">
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-100 bg-white/70 dark:bg-zinc-900/60 dark:border-zinc-700 dark:bg-zinc-950/40">
-                    <AppIcon size={ICON_SM} className="text-emerald-700 dark:text-emerald-200" icon={Activity} />
-                  </span>
-                  Progress
-                </div>
-
-                <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-                  Your activity
-                </h1>
-                <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                  Continue your process and track We-Help requests.
-                </p>
-              </div>
-
-              <div className="h-11 w-11 rounded-2xl border border-emerald-100 bg-emerald-50/70 dark:border-zinc-800 dark:bg-zinc-950/40" />
-            </div>
+          {/* Thin header */}
+          <div className="mb-3">
+            <h1 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+              Progress
+            </h1>
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              Track your progress here.
+            </p>
           </div>
 
-          {/* Error */}
-          {err ? (
-            <div className="mt-4 rounded-3xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
-              {err}
-            </div>
-          ) : null}
-
-          {/* ✅ Notifications (single banner) */}
-          <div className="mt-6">
-            <motion.button
-              type="button"
-              onClick={() => navigate("/app/notifications")}
-              whileTap={{ scale: 0.99 }}
-              className={`${cardBase} ${cardHover} w-full text-left`}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60 text-emerald-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
-                    <AppIcon size={ICON_MD} icon={Bell} />
-                  </span>
-
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                      Notifications
-                    </div>
-                    <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      {unreadNotifCount ? "Tap to view new updates" : "Tap to view history"}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <AnimatePresence initial={false}>
-                    {unreadNotifCount ? (
-                      <motion.span
-                        key="unread"
-                        initial={{ scale: 0.85, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0.9, opacity: 0 }}
-                        className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-rose-600 px-2 text-[11px] font-semibold text-white"
-                      >
-                        {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
-                      </motion.span>
-                    ) : (
-                      <motion.span
-                        key="caughtup"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="text-xs text-zinc-500 dark:text-zinc-400"
-                      >
-                        All caught up
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-
-                  <AppIcon size={ICON_SM} icon={ChevronRight} className="text-zinc-400 dark:text-zinc-500" />
-                </div>
-              </div>
-            </motion.button>
-          </div>
-
-          {/* Current process */}
-          <div className={`mt-8 ${cardBase} ${cardHover}`}>
+          {/* Current process (moved up + compact) */}
+          <div className={`mt-3 ${cardBase} ${cardHover} p-3`}>
             <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 Current process
               </h2>
               <span className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -506,8 +406,8 @@ export default function ProgressScreen() {
             </div>
 
             {Boolean(state?.hasActiveProcess) ? (
-              <div className="mt-4 grid gap-3">
-                <div className="grid gap-2 text-sm">
+              <div className="mt-3 grid gap-2">
+                <div className="grid gap-1.5 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-zinc-500 dark:text-zinc-400">Track</span>
                     <span className="font-medium text-zinc-900 dark:text-zinc-100">
@@ -530,15 +430,18 @@ export default function ProgressScreen() {
                   </div>
                 </div>
 
-                <button onClick={goContinue} className={primaryBtn}>
+                <button onClick={goContinue} className={`${primaryBtn} py-2.5 rounded-2xl`}>
                   Continue
                 </button>
               </div>
             ) : (
-              <div className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
+              <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
                 No active process yet. Choose a track to begin.
-                <div className="mt-4">
-                  <button onClick={() => navigate("/dashboard")} className={ghostBtn}>
+                <div className="mt-3">
+                  <button
+                    onClick={() => navigate("/dashboard")}
+                    className={`${ghostBtn} px-3 py-2.5 rounded-2xl`}
+                  >
                     Choose track
                   </button>
                 </div>
@@ -546,39 +449,81 @@ export default function ProgressScreen() {
             )}
           </div>
 
-          {/* Requests */}
-          <div className="mt-8">
-            <div className="flex items-end justify-between">
-              <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
-                We-Help requests
-              </h2>
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                {requests.length === 1 ? "1 request" : `${requests.length} requests`}
-              </span>
-            </div>
+          {/* ✅ Notifications (single banner, lighter glass) */}
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => navigate("/app/notifications")}
+              className={notifBannerBtn}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200/60 bg-white/45 text-emerald-700 dark:border-zinc-800/60 dark:bg-zinc-900/35 dark:text-emerald-200">
+                    <AppIcon size={ICON_MD} icon={Bell} />
+                  </span>
 
-            {requests.length === 0 ? (
-              <div className={`mt-3 ${cardBase}`}>
-                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                  No requests yet
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      Notifications
+                    </div>
+                    <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      {unreadNotifCount ? "Tap to view new updates" : "Tap to view history"}
+                    </div>
+                  </div>
                 </div>
-                <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                  When you submit a We-Help request, it will show up here.
-                </div>
-                <div className="mt-4">
-                  <button onClick={() => navigate("/dashboard")} className={ghostBtn}>
-                    Start a request
-                  </button>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {unreadNotifCount ? (
+                    <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-rose-600 px-2 text-[11px] font-semibold text-white">
+                      {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      All caught up
+                    </span>
+                  )}
+
+                  <AppIcon size={ICON_SM} icon={ChevronRight} className="text-zinc-400 dark:text-zinc-500" />
                 </div>
               </div>
-            ) : (
-              <motion.div
-                className="mt-3 grid gap-3"
-                variants={listWrap}
-                initial="hidden"
-                animate="show"
-              >
-                {requestsSorted.map((r) => {
+            </button>
+          </div>
+
+          {/* Error */}
+          {err ? (
+            <div className="mt-4 rounded-3xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
+              {err}
+            </div>
+          ) : null}
+
+          {/* Requests */}
+          <div className="mt-6">
+              <div className="flex items-end justify-between">
+                <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
+                  We-Help requests
+                </h2>
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {requests.length === 1 ? "1 request" : `${requests.length} requests`}
+                </span>
+              </div>
+
+              {requests.length === 0 ? (
+                <div className={`mt-3 ${cardBase}`}>
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    No requests yet
+                  </div>
+                  <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    When you submit a We-Help request, it will show up here.
+                  </div>
+                  <div className="mt-4">
+                    <button onClick={() => navigate("/dashboard")} className={ghostBtn}>
+                      Start a request
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 grid gap-3">
+                  {requestsSorted.map((r) => {
                   const ui = statusUI(r.status);
                   const track = String(r.track || "").toLowerCase();
                   const safeTrack = track === "work" || track === "travel" ? track : "study";
@@ -634,10 +579,9 @@ export default function ProgressScreen() {
                     navigate(`/app/request/${rid}`);
                   };
 
-                  return (
-                    <motion.div
+                    return (
+                    <div
                       key={r.id}
-                      variants={listItem}
                       className={`${cardBase} ${cardHover} relative`}
                     >
                       <div className="flex items-start justify-between gap-3">
@@ -667,28 +611,25 @@ export default function ProgressScreen() {
                       </div>
 
                       <div className="mt-4 flex flex-wrap gap-2">
-                        <motion.button
-                          whileTap={{ scale: 0.99 }}
+                        <button
                           onClick={openRequestAndClearChatPill}
                           className="inline-flex items-center gap-2 rounded-3xl border border-emerald-200 bg-emerald-50/60 px-3.5 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.99] dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/55"
                         >
                           View
                           <AppIcon size={ICON_SM} icon={ChevronRight} />
-                        </motion.button>
+                        </button>
 
                         {st === "rejected" && (
-                          <motion.button
-                            whileTap={{ scale: 0.99 }}
+                          <button
                             onClick={handleTryAgain}
                             className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
                           >
                             Try again
-                          </motion.button>
+                          </button>
                         )}
 
                         {canDelete && (
-                          <motion.button
-                            whileTap={{ scale: 0.99 }}
+                          <button
                             disabled={isDeleting}
                             onClick={async () => {
                               const ok = window.confirm("Delete this request? This cannot be undone.");
@@ -721,7 +662,7 @@ export default function ProgressScreen() {
                           >
                             <AppIcon size={ICON_SM} icon={Trash2} />
                             {isDeleting ? "Deleting…" : "Delete"}
-                          </motion.button>
+                          </button>
                         )}
                       </div>
 
@@ -731,8 +672,7 @@ export default function ProgressScreen() {
                         </div>
                       ) : null}
 
-                      <motion.button
-                        whileTap={{ scale: 0.98 }}
+                      <button
                         onClick={() => togglePin(rid)}
                         type="button"
                         title={isPinned ? "Unpin" : pinnedIds.length >= 2 ? "Pin limit reached" : "Pin"}
@@ -746,12 +686,12 @@ export default function ProgressScreen() {
                           }`}
                       >
                         {isPinned ? <AppIcon size={ICON_SM} icon={PinOff} /> : <AppIcon size={ICON_SM} icon={Pin} />}
-                      </motion.button>
-                    </motion.div>
+                      </button>
+                    </div>
                   );
                 })}
-              </motion.div>
-            )}
+                </div>
+              )}
           </div>
 
           {/* apps kept but not rendered */}

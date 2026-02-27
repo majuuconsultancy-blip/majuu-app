@@ -34,6 +34,11 @@ export default function StaffGate({ children }) {
       try {
         await authPersistenceReady;
       } catch {}
+      if (typeof auth?.authStateReady === "function") {
+        try {
+          await auth.authStateReady();
+        } catch {}
+      }
       if (cancelled) return () => {};
 
       const unsub = onAuthStateChanged(auth, async (user) => {

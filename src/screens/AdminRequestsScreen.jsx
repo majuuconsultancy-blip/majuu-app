@@ -12,13 +12,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { getRequests } from "../services/adminrequestservice";
+import { adminSoftDeleteRequest, getRequests } from "../services/adminrequestservice";
 import { setStaffAccessByEmail } from "../services/staffservice";
 
 import {
-  collection,
   collectionGroup,
   doc,
+  getDoc,
   onSnapshot,
   query,
   where,
@@ -37,6 +37,9 @@ import {
   SlidersHorizontal,
   X,
   Calendar,
+  Trash2,
+  Pin,
+  PinOff,
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
@@ -50,6 +53,26 @@ const TABS = [
 ];
 
 const LIMIT_PENDING = 1000;
+const ADMIN_TAB_PINS_KEY = "majuu_admin_requests_pins_by_tab_v1";
+const LONG_PRESS_MS = 420;
+
+function readAdminTabPins() {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(ADMIN_TAB_PINS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const next = {};
+    TABS.forEach((t) => {
+      const arr = Array.isArray(parsed?.[t.key]) ? parsed[t.key] : [];
+      next[t.key] = arr.map((v) => String(v || "").trim()).filter(Boolean);
+    });
+    return next;
+  } catch {
+    return {};
+  }
+}
 
 /* ---------- UI helpers ---------- */
 function pill(status) {
@@ -112,10 +135,14 @@ function isValidTabKey(key) {
 
 function formatShortTS(ts) {
   const sec = ts?.seconds;
-  if (!sec) return "";
-  const d = new Date(sec * 1000);
+  const ms = ts?.toMillis?.();
+  const d = ms ? new Date(ms) : sec ? new Date(sec * 1000) : null;
+  if (!d) return "";
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${dd}/${mm}/${yy}`;
 }
 
 function getCreatedAtMs(r) {
@@ -140,6 +167,8 @@ function dayEndMs(yyyy_mm_dd) {
 
 /* ---------- ✅ stable tab classifier ---------- */
 function classifyTabFromRequestDoc(data) {
+  if (data?.deletedByAdmin === true || data?.adminDeletedAt) return null;
+
   const st = String(data?.status || "new").toLowerCase();
   const assignedTo = String(data?.assignedTo || "").trim();
 
@@ -151,6 +180,10 @@ function classifyTabFromRequestDoc(data) {
 
   // active but unassigned -> New tab
   return "new";
+}
+
+function isAdminSoftDeletedRequest(r) {
+  return r?.deletedByAdmin === true || !!r?.adminDeletedAt;
 }
 
 /* ---------- ✅ Staff panel (smaller + collapsible) ---------- */
@@ -340,6 +373,7 @@ const listItem = {
 };
 
 export default function AdminRequestsScreen() {
+  void motion;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -361,12 +395,83 @@ export default function AdminRequestsScreen() {
     staffDecision: "any", // any | recommend_accept | recommend_reject | none
     staffStatus: "any", // any | assigned | in_progress | done
   });
+  const [deletingId, setDeletingId] = useState("");
+  const [staffEmailByUid, setStaffEmailByUid] = useState({});
+  const [pinsByTab, setPinsByTab] = useState(() => readAdminTabPins());
+  const [requestActions, setRequestActions] = useState(null);
+  const screenRef = useRef(null);
+  const keyboardFocusTimeoutRef = useRef(null);
+  const longPressTimerRef = useRef(null);
+  const longPressStateRef = useRef({ id: "", fired: false, x: 0, y: 0 });
 
   // ✅ subtle entrance
   const [enter, setEnter] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setEnter(true), 10);
     return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearLongPressTimer();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(ADMIN_TAB_PINS_KEY, JSON.stringify(pinsByTab || {}));
+    } catch {
+      // ignore storage failures
+    }
+  }, [pinsByTab]);
+
+  useEffect(() => {
+    const root = screenRef.current;
+    if (!root) return;
+
+    const isField = (el) => {
+      if (!el || !(el instanceof HTMLElement)) return false;
+      const tag = el.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    };
+
+    const setOpen = (open) => {
+      document.body.classList.toggle("app-keyboard-open", !!open);
+    };
+
+    const onFocusIn = (e) => {
+      if (keyboardFocusTimeoutRef.current) {
+        clearTimeout(keyboardFocusTimeoutRef.current);
+        keyboardFocusTimeoutRef.current = null;
+      }
+      if (!root.contains(e.target)) return;
+      if (!isField(e.target)) return;
+      setOpen(true);
+    };
+
+    const onFocusOut = () => {
+      if (keyboardFocusTimeoutRef.current) clearTimeout(keyboardFocusTimeoutRef.current);
+      keyboardFocusTimeoutRef.current = setTimeout(() => {
+        keyboardFocusTimeoutRef.current = null;
+        const active = document.activeElement;
+        if (active && root.contains(active) && isField(active)) return;
+        setOpen(false);
+      }, 0);
+    };
+
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+      if (keyboardFocusTimeoutRef.current) {
+        clearTimeout(keyboardFocusTimeoutRef.current);
+        keyboardFocusTimeoutRef.current = null;
+      }
+      document.body.classList.remove("app-keyboard-open");
+    };
   }, []);
 
   // ✅ Keep URL synced (tab + q only)
@@ -399,6 +504,7 @@ export default function AdminRequestsScreen() {
         ];
 
         const assigned = merged.filter((r) => {
+          if (isAdminSoftDeletedRequest(r)) return false;
           const assignedTo = String(r?.assignedTo || "").trim();
           const st = String(r?.status || "").toLowerCase();
           return assignedTo && st !== "closed" && st !== "rejected";
@@ -411,7 +517,7 @@ export default function AdminRequestsScreen() {
       }
 
       const data = await getRequests({ status, max: 120 });
-      setItems(Array.isArray(data) ? data : []);
+      setItems((Array.isArray(data) ? data : []).filter((r) => !isAdminSoftDeletedRequest(r)));
     } catch (e) {
       console.error(e);
       setMsg(e?.message || "Failed to load requests");
@@ -424,6 +530,47 @@ export default function AdminRequestsScreen() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
+
+  useEffect(() => {
+    const uids = Array.from(
+      new Set(
+        (items || [])
+          .map((r) => String(r?.assignedTo || "").trim())
+          .filter(Boolean)
+      )
+    ).filter((uid) => !(uid in staffEmailByUid));
+
+    if (uids.length === 0) return;
+
+    let cancelled = false;
+
+    (async () => {
+      const entries = await Promise.all(
+        uids.map(async (uid) => {
+          try {
+            const snap = await getDoc(doc(db, "staff", uid));
+            const email = snap.exists() ? String(snap.data()?.email || "").trim() : "";
+            return [uid, email];
+          } catch {
+            return [uid, ""];
+          }
+        })
+      );
+
+      if (cancelled) return;
+      setStaffEmailByUid((prev) => {
+        const next = { ...prev };
+        entries.forEach(([uid, email]) => {
+          next[uid] = email;
+        });
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [items, staffEmailByUid]);
 
   /* ---------- ✅ GLOBAL new-message dots (fixed) ---------- */
   const [pendingSet, setPendingSet] = useState(() => new Set()); // Set<requestId>
@@ -467,7 +614,11 @@ export default function AdminRequestsScreen() {
     // remove listeners no longer needed
     Object.keys(existing).forEach((rid) => {
       if (!need.includes(rid)) {
-        try { existing[rid]?.(); } catch {}
+        try {
+          existing[rid]?.();
+        } catch {
+          // noop
+        }
         delete existing[rid];
         setReqMetaById((prev) => {
           if (!prev[rid]) return prev;
@@ -534,7 +685,11 @@ export default function AdminRequestsScreen() {
     return () => {
       const m = reqDocUnsubsRef.current || {};
       Object.keys(m).forEach((rid) => {
-        try { m[rid]?.(); } catch {}
+        try {
+          m[rid]?.();
+        } catch {
+          // noop
+        }
       });
       reqDocUnsubsRef.current = {};
     };
@@ -580,8 +735,9 @@ export default function AdminRequestsScreen() {
   const filtered = useMemo(() => {
     const fromMs = dayStartMs(filters.from);
     const toMs = dayEndMs(filters.to);
+    const base = (searched || []).filter((r) => {
+      if (isAdminSoftDeletedRequest(r)) return false;
 
-    return (searched || []).filter((r) => {
       const createdMs = getCreatedAtMs(r);
 
       if (fromMs && createdMs && createdMs < fromMs) return false;
@@ -612,7 +768,25 @@ export default function AdminRequestsScreen() {
 
       return true;
     });
-  }, [searched, filters]);
+
+    const pinList = Array.isArray(pinsByTab?.[status]) ? pinsByTab[status] : [];
+    if (pinList.length === 0) return base;
+
+    const pinIndexById = new Map(pinList.map((rid, idx) => [String(rid), idx]));
+    return base
+      .map((r, idx) => ({ r, idx }))
+      .sort((a, b) => {
+        const aPin = pinIndexById.get(String(a.r?.id || ""));
+        const bPin = pinIndexById.get(String(b.r?.id || ""));
+        const aPinned = Number.isInteger(aPin);
+        const bPinned = Number.isInteger(bPin);
+        if (aPinned && bPinned) return aPin - bPin;
+        if (aPinned) return -1;
+        if (bPinned) return 1;
+        return a.idx - b.idx;
+      })
+      .map((x) => x.r);
+  }, [searched, filters, pinsByTab, status]);
 
   const activeLabel = useMemo(() => {
     return TABS.find((t) => t.key === status)?.label || String(status).toUpperCase();
@@ -624,6 +798,142 @@ export default function AdminRequestsScreen() {
     qs.set("tab", status);
     if (q) qs.set("q", q);
     navigate(`/app/admin/request/${id}?${qs.toString()}`);
+  };
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const closeRequestActions = () => {
+    clearLongPressTimer();
+    longPressStateRef.current = { id: "", fired: false, x: 0, y: 0 };
+    setRequestActions(null);
+  };
+
+  const beginLongPress = (e, r) => {
+    const rid = String(r?.id || "").trim();
+    if (!rid) return;
+    if (e?.button != null && e.button !== 0) return;
+
+    clearLongPressTimer();
+    longPressStateRef.current = {
+      id: rid,
+      fired: false,
+      x: Number(e?.clientX ?? 0),
+      y: Number(e?.clientY ?? 0),
+    };
+
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      longPressStateRef.current = { ...longPressStateRef.current, fired: true };
+      setRequestActions({
+        request: r,
+        tabKey: status,
+        x: Number(longPressStateRef.current?.x ?? 0),
+        y: Number(longPressStateRef.current?.y ?? 0),
+      });
+      if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+        navigator.vibrate(10);
+      }
+    }, LONG_PRESS_MS);
+  };
+
+  const cancelLongPressPending = () => {
+    if (!longPressStateRef.current.fired) clearLongPressTimer();
+  };
+
+  const maybeCancelLongPressOnMove = (e) => {
+    if (!longPressTimerRef.current) return;
+    const { x, y } = longPressStateRef.current;
+    const dx = Math.abs(Number(e?.clientX ?? 0) - x);
+    const dy = Math.abs(Number(e?.clientY ?? 0) - y);
+    if (dx > 10 || dy > 10) clearLongPressTimer();
+  };
+
+  const handleRequestTileActivate = (r) => {
+    const rid = String(r?.id || "").trim();
+    if (longPressStateRef.current.fired && longPressStateRef.current.id === rid) {
+      longPressStateRef.current = { id: "", fired: false, x: 0, y: 0 };
+      return;
+    }
+    longPressStateRef.current = { id: "", fired: false, x: 0, y: 0 };
+    openRequest(r.id);
+  };
+
+  const openRequestActionsFromContext = (e, r) => {
+    e.preventDefault();
+    e.stopPropagation();
+    clearLongPressTimer();
+    longPressStateRef.current = {
+      id: String(r?.id || "").trim(),
+      fired: true,
+      x: Number(e?.clientX ?? 0),
+      y: Number(e?.clientY ?? 0),
+    };
+    setRequestActions({
+      request: r,
+      tabKey: status,
+      x: Number(e?.clientX ?? 0),
+      y: Number(e?.clientY ?? 0),
+    });
+  };
+
+  const togglePinnedForTab = ({ requestId, tabKey }) => {
+    const rid = String(requestId || "").trim();
+    const tk = isValidTabKey(tabKey) ? String(tabKey) : status;
+    if (!rid) return;
+
+    setPinsByTab((prev) => {
+      const current = Array.isArray(prev?.[tk]) ? prev[tk] : [];
+      const exists = current.includes(rid);
+      const nextList = exists ? current.filter((x) => x !== rid) : [rid, ...current.filter((x) => x !== rid)];
+      return { ...(prev || {}), [tk]: nextList };
+    });
+  };
+
+  const handleDeleteRequest = async (r) => {
+    const rid = String(r?.id || "").trim();
+    if (!rid || deletingId) return;
+
+    const label = r?.requestType === "full" ? "Full Package" : (r?.serviceName || "request");
+    const ok = window.confirm(`Delete this request?\n\n${label}\nID: ${rid}\n\nScreenshot for easier retrieval later.`);
+    if (!ok) return;
+
+    try {
+      setDeletingId(rid);
+      setMsg("");
+      await adminSoftDeleteRequest({ requestId: rid });
+
+      setItems((prev) => (prev || []).filter((x) => String(x?.id || "") !== rid));
+      setPendingSet((prev) => {
+        const next = new Set(prev || []);
+        next.delete(rid);
+        return next;
+      });
+      setReqMetaById((prev) => {
+        if (!prev?.[rid]) return prev;
+        const next = { ...prev };
+        delete next[rid];
+        return next;
+      });
+      setPinsByTab((prev) => {
+        const next = { ...(prev || {}) };
+        TABS.forEach((t) => {
+          const cur = Array.isArray(next?.[t.key]) ? next[t.key] : [];
+          next[t.key] = cur.filter((x) => x !== rid);
+        });
+        return next;
+      });
+    } catch (e) {
+      console.error(e);
+      setMsg(e?.message || "Failed to delete request.");
+    } finally {
+      setDeletingId("");
+      closeRequestActions();
+    }
   };
 
   const softBg =
@@ -671,14 +981,14 @@ export default function AdminRequestsScreen() {
   );
 
   return (
-    <div className={`min-h-screen ${softBg}`}>
+    <div ref={screenRef} className={`min-h-screen ${softBg}`}>
       <motion.div variants={pageIn} initial="hidden" animate="show" className={`px-5 py-6 ${enterWrap} ${enterCls}`}>
         {/* Sticky header */}
         <div className="sticky top-0 z-20 -mx-5 px-5 pb-3 pt-2 backdrop-blur supports-[backdrop-filter]:bg-white/50 dark:supports-[backdrop-filter]:bg-zinc-950/40">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h1 className="text-lg font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
-                Admin Page
+              <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 sm:text-3xl">
+                Admin
               </h1>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 Manage incoming requests, assignments and decisions.
@@ -687,11 +997,12 @@ export default function AdminRequestsScreen() {
 
             <button
               onClick={load}
-              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/45 dark:text-zinc-100 dark:hover:bg-zinc-900"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-800 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/45 dark:text-zinc-100 dark:hover:bg-zinc-900"
               type="button"
+              aria-label="Refresh"
+              title="Refresh"
             >
               <AppIcon size={ICON_MD} className="text-emerald-700 dark:text-emerald-200" icon={RefreshCw} />
-              Refresh
             </button>
           </div>
 
@@ -910,6 +1221,7 @@ export default function AdminRequestsScreen() {
 
               const rid = String(r.id || "");
               const assignedTo = String(r?.assignedTo || "").trim();
+              const assignedEmail = assignedTo ? String(staffEmailByUid?.[assignedTo] || "").trim() : "";
               const staffStatus = String(r?.staffStatus || "").trim();
               const staffDecision = String(r?.staffDecision || "").trim();
               const staffUpdatedAt = formatShortTS(r?.staffUpdatedAt);
@@ -920,11 +1232,24 @@ export default function AdminRequestsScreen() {
               const hasNew = pendingSet?.has(rid);
 
               return (
-                <motion.button
+                <motion.div
                   key={r.id}
                   variants={listItem}
-                  type="button"
-                  onClick={() => openRequest(r.id)}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleRequestTileActivate(r)}
+                  onPointerDown={(e) => beginLongPress(e, r)}
+                  onPointerUp={cancelLongPressPending}
+                  onPointerCancel={cancelLongPressPending}
+                  onPointerLeave={cancelLongPressPending}
+                  onPointerMove={maybeCancelLongPressOnMove}
+                  onContextMenu={(e) => openRequestActionsFromContext(e, r)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleRequestTileActivate(r);
+                    }
+                  }}
                   className={`${tile} relative overflow-hidden`}
                 >
                   {hasNew ? (
@@ -936,6 +1261,15 @@ export default function AdminRequestsScreen() {
                       <div className="flex items-center gap-2">
                         <div className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">{left}</div>
                         {hasNew ? <RedDot /> : null}
+                        {(pinsByTab?.[status] || []).includes(rid) ? (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50/80 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200"
+                            title="Pinned to top in this tab"
+                          >
+                            <AppIcon icon={Pin} size={12} />
+                            Pinned
+                          </span>
+                        ) : null}
                       </div>
 
                       <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{right}</div>
@@ -943,7 +1277,7 @@ export default function AdminRequestsScreen() {
                       {assignedTo ? (
                         <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
                           Assigned to:{" "}
-                          <span className="font-mono text-zinc-800 dark:text-zinc-100">{assignedTo}</span>
+                          <span className="text-zinc-800 dark:text-zinc-100">{assignedEmail || assignedTo}</span>
                           {staffUpdatedAt ? (
                             <span className="ml-2 text-zinc-500 dark:text-zinc-400">• Updated: {staffUpdatedAt}</span>
                           ) : null}
@@ -978,7 +1312,7 @@ export default function AdminRequestsScreen() {
                       </span>
                     </div>
                   </div>
-                </motion.button>
+                </motion.div>
               );
             })}
           </motion.div>
@@ -986,6 +1320,103 @@ export default function AdminRequestsScreen() {
 
         <div className="h-10" />
       </motion.div>
+
+      <AnimatePresence>
+        {requestActions?.request ? (
+          <motion.div
+            className="fixed inset-0 z-50"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={closeRequestActions}
+          >
+            <div className="absolute inset-0 bg-black/18" />
+            {(() => {
+              const actionReq = requestActions.request;
+              const actionTabKey = isValidTabKey(requestActions.tabKey) ? requestActions.tabKey : status;
+              const actionRid = String(actionReq?.id || "").trim();
+              const isPinned = (pinsByTab?.[actionTabKey] || []).includes(actionRid);
+              const shortLabel =
+                actionReq?.requestType === "full"
+                  ? "Full Package"
+                  : String(actionReq?.serviceName || "Request");
+
+              const vw = typeof window !== "undefined" ? window.innerWidth : 360;
+              const vh = typeof window !== "undefined" ? window.innerHeight : 640;
+              const menuW = Math.max(216, Math.min(272, vw - 20));
+              const menuH = 168;
+              const rawX = Number(requestActions?.x || 0);
+              const rawY = Number(requestActions?.y || 0);
+              const anchorX = rawX > 0 ? rawX : Math.round(vw / 2);
+              const anchorY = rawY > 0 ? rawY : Math.round(vh / 2);
+              const left = Math.max(10, Math.min(anchorX - 10, vw - menuW - 10));
+              const top = Math.max(10, Math.min(anchorY - 10, vh - menuH - 10));
+              const originX = Math.max(10, Math.min(anchorX - left, menuW - 10));
+              const originY = Math.max(10, Math.min(anchorY - top, menuH - 10));
+
+              return (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.97 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                  transition={{ duration: 0.12, ease: "easeOut" }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute rounded-2xl border border-zinc-200/90 bg-white/94 p-2.5 shadow-lg backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900/92"
+                  style={{
+                    left,
+                    top,
+                    width: menuW,
+                    maxWidth: "calc(100vw - 20px)",
+                    transformOrigin: `${originX}px ${originY}px`,
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-2 px-2 pb-1.5">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">{shortLabel}</div>
+                      <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {TABS.find((t) => t.key === actionTabKey)?.label || actionTabKey} tab actions
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closeRequestActions}
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white/80 text-zinc-600 transition hover:bg-white active:scale-[0.98] dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                      aria-label="Close actions"
+                    >
+                      <AppIcon icon={X} size={ICON_SM} />
+                    </button>
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        togglePinnedForTab({ requestId: actionRid, tabKey: actionTabKey });
+                        closeRequestActions();
+                      }}
+                      className="inline-flex w-full items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2.5 text-sm font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100 active:scale-[0.99] dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200 dark:hover:bg-emerald-950/30"
+                    >
+                      <span>{isPinned ? "Unpin from top" : "Pin to top"}</span>
+                      <AppIcon icon={isPinned ? PinOff : Pin} size={ICON_SM} className="text-emerald-700 dark:text-emerald-200" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteRequest(actionReq)}
+                      disabled={deletingId === actionRid}
+                      className="inline-flex w-full items-center justify-between rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2.5 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200 dark:hover:bg-rose-950/30"
+                    >
+                      <span>{deletingId === actionRid ? "Deleting..." : "Delete request"}</span>
+                      <AppIcon icon={Trash2} size={ICON_SM} />
+                    </button>
+
+                  </div>
+                </motion.div>
+              );
+            })()}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }

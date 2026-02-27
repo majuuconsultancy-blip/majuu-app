@@ -35,9 +35,10 @@ import AdminGate from "./components/AdminGate";
 import GAPageView from "./components/GAPageView";
 import StaffGate from "./components/StaffGate";
 import AppLoading from "./components/AppLoading";
-import { auth, db } from "./firebase";
+import { auth, db, authPersistenceReady } from "./firebase";
 import { startNotifsV2Engine, stopNotifsV2Engine } from "./services/notifsV2Engine";
 import { cleanupPushBridge, initPushBridge } from "./services/pushBridge";
+import { hasSeenIntro } from "./utils/introFlag";
 
 /* ---------------- Lazy screens ---------------- */
 // Main user flows
@@ -104,6 +105,63 @@ function runWhenIdle(fn) {
 
   const t = window.setTimeout(() => fn(), 900);
   return () => window.clearTimeout(t);
+}
+
+function StartupRoute() {
+  const [target, setTarget] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const waitWithTimeout = async (promise, timeoutMs = 2000) => {
+      await Promise.race([
+        promise,
+        new Promise((resolve) => {
+          window.setTimeout(resolve, timeoutMs);
+        }),
+      ]);
+    };
+
+    (async () => {
+      try {
+        await waitWithTimeout(authPersistenceReady, 2000);
+      } catch {}
+
+      if (typeof auth?.authStateReady === "function") {
+        try {
+          await waitWithTimeout(auth.authStateReady(), 2000);
+        } catch {}
+      } else {
+        await waitWithTimeout(
+          new Promise((resolve) => {
+            const unsub = onAuthStateChanged(auth, () => {
+              try {
+                unsub();
+              } catch {}
+              resolve();
+            });
+          }),
+          2000
+        );
+      }
+
+      if (cancelled) return;
+
+      if (!hasSeenIntro()) {
+        setTarget("/intro");
+        return;
+      }
+
+      setTarget(auth.currentUser ? "/dashboard" : "/login");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!target) return <AppLoading />;
+  return <Navigate to={target} replace />;
 }
 
 function AndroidBackHandler() {
@@ -236,7 +294,7 @@ function AppRoutes() {
         <Routes>
           {/* Public */}
           <Route path="/intro" element={<IntroScreen />} />
-          <Route path="/" element={<Navigate to="/intro" replace />} />
+          <Route path="/" element={<StartupRoute />} />
 
           <Route path="/login" element={<LoginScreen />} />
           <Route path="/signup" element={<SignupScreen />} />
@@ -359,7 +417,7 @@ function AppRoutes() {
           </Route>
 
           {/* Fallback */}
-          <Route path="*" element={<Navigate to="/intro" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
     </>
@@ -372,7 +430,9 @@ export default function App() {
   const Router = IS_NATIVE_PLATFORM ? HashRouter : BrowserRouter;
   return (
     <Router>
-      <AppRoutes />
+      <div className="app-safe-area">
+        <AppRoutes />
+      </div>
     </Router>
   );
 }

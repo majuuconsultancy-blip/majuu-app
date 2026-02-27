@@ -13,7 +13,7 @@ import {
   increment,
 } from "firebase/firestore";
 
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
 import { createUserNotification } from "./notificationDocs";
 
 /* ======================================================
@@ -230,6 +230,28 @@ export async function adminRejectRequest({ requestId, note = "" }) {
       console.warn("Failed to write REQUEST_REJECTED notification:", error?.message || error);
     }
   }
+
+  return true;
+}
+
+/* ======================================================
+   ✅ ADMIN: SOFT DELETE REQUEST (safe for nested subcollections)
+====================================================== */
+export async function adminSoftDeleteRequest({ requestId } = {}) {
+  if (!requestId) throw new Error("Missing requestId");
+
+  const reqRef = doc(db, "serviceRequests", requestId);
+  const snap = await getDoc(reqRef);
+  if (!snap.exists()) throw new Error("Request not found");
+
+  const adminUid = String(auth.currentUser?.uid || "").trim();
+
+  await updateDoc(reqRef, {
+    deletedByAdmin: true,
+    adminDeletedAt: serverTimestamp(),
+    adminDeletedBy: adminUid || null,
+    updatedAt: serverTimestamp(),
+  });
 
   return true;
 }
