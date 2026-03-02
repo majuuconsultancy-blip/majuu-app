@@ -6,7 +6,7 @@
 //
 // Build indicator unchanged
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { motion } from "../utils/motionProxy";
@@ -28,21 +28,75 @@ import { auth } from "../firebase";
 import { getUserState } from "../services/userservice";
 import ThemeToggle from "../components/ThemeToggle";
 
+const PERF_TAG = "[perf][ProfileScreen]";
+const PROFILE_CACHE_PREFIX = "majuu_profile_cache_";
+
+function startPerf(label) {
+  try {
+    console.time(label);
+  } catch {}
+}
+
+function endPerf(label) {
+  try {
+    console.timeEnd(label);
+  } catch {}
+}
+
+function profileCacheKey(uid) {
+  return `${PROFILE_CACHE_PREFIX}${String(uid || "")}`;
+}
+
+function readProfileCache(uid) {
+  if (!uid || typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(profileCacheKey(uid));
+    const parsed = JSON.parse(raw || "null");
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      name: String(parsed?.name || ""),
+      phone: String(parsed?.phone || ""),
+      countryOfResidence: String(parsed?.countryOfResidence || ""),
+      activeTrack: String(parsed?.activeTrack || "").toLowerCase(),
+      updatedAt: Number(parsed?.updatedAt || 0) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeProfileCache(uid, payload) {
+  if (!uid || typeof window === "undefined") return;
+  try {
+    const safe = {
+      name: String(payload?.name || ""),
+      phone: String(payload?.phone || ""),
+      countryOfResidence: String(payload?.countryOfResidence || ""),
+      activeTrack: String(payload?.activeTrack || "").toLowerCase(),
+      updatedAt: Date.now(),
+    };
+    window.localStorage.setItem(profileCacheKey(uid), JSON.stringify(safe));
+  } catch {}
+}
+
 /* ---------- Motion ---------- */
 const pageIn = {
-  hidden: { opacity: 0, y: 10 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.32, ease: "easeOut" } },
+  hidden: { opacity: 0, y: 4 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.14, ease: "easeOut" } },
 };
 
 const floatCard = {
   rest: { y: 0, scale: 1 },
-  hover: { y: -2, scale: 1.01, transition: { duration: 0.18 } },
-  tap: { scale: 0.99 },
+  hover: { y: -1, scale: 1.005, transition: { duration: 0.1 } },
+  tap: { scale: 0.995 },
 };
 
 export default function ProfileScreen() {
   const navigate = useNavigate();
   const ADMIN_EMAIL = "brioneroo@gmail.com";
+  const mountAtRef = useRef(typeof performance !== "undefined" ? performance.now() : 0);
+  const firstPaintLoggedRef = useRef(false);
+  const lastHydratedUidRef = useRef("");
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -73,38 +127,95 @@ export default function ProfileScreen() {
   }, [name, email]);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        navigate("/login", { replace: true });
-        return;
+    if (firstPaintLoggedRef.current) return;
+    firstPaintLoggedRef.current = true;
+    const raf = window.requestAnimationFrame(() => {
+      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      const delta = Math.max(0, now - (mountAtRef.current || 0));
+      console.log(`${PERF_TAG} mount->first-paint: ${delta.toFixed(1)}ms`);
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrate = async (user) => {
+      if (!user) return;
+      const uidNow = String(user.uid || "");
+      if (!uidNow) return;
+      if (lastHydratedUidRef.current === uidNow) return;
+
+      lastHydratedUidRef.current = uidNow;
+      setUid(uidNow);
+      setEmail(user.email || "");
+      setErr("");
+
+      const cached = readProfileCache(uidNow);
+      if (cached) {
+        setName(cached.name || "");
+        setPhone(cached.phone || "");
+        setCountryOfResidence(cached.countryOfResidence || "");
+        if (cached.activeTrack === "study" || cached.activeTrack === "work" || cached.activeTrack === "travel") {
+          setActiveTrack(cached.activeTrack);
+        }
+        setLoading(false);
+      } else {
+        setLoading(true);
       }
 
-      setUid(user.uid);
-      setEmail(user.email || "");
-
+      const timer = `${PERF_TAG} firestore:getUserState`;
       try {
-        const s = await getUserState(user.uid);
+        startPerf(timer);
+        const s = await getUserState(uidNow, user.email || "");
+        endPerf(timer);
+        if (cancelled) return;
+
         const n = s?.name || "";
         const p = s?.phone || "";
         const c = s?.countryOfResidence || "";
-
         setName(n);
         setPhone(p);
         setCountryOfResidence(c);
 
-        // ✅ read activeTrack for back nav (fallback to selectedTrack if you store it)
         const t = String(s?.activeTrack || s?.selectedTrack || "").toLowerCase();
         if (t === "study" || t === "work" || t === "travel") setActiveTrack(t);
         else setActiveTrack("");
+
+        writeProfileCache(uidNow, {
+          name: n,
+          phone: p,
+          countryOfResidence: c,
+          activeTrack: t,
+        });
       } catch (e) {
+        endPerf(timer);
+        if (cancelled) return;
         console.error(e);
         setErr(e?.message || "Failed to load profile.");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
+    };
+
+    const current = auth.currentUser;
+    if (current) {
+      hydrate(current);
+    }
+
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (cancelled) return;
+      if (!user) {
+        navigate("/login", { replace: true });
+        return;
+      }
+      hydrate(user);
     });
 
-    return () => unsub();
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, [navigate]);
 
   // ✅ NEW: Android/browser back button should go to TrackScreen
@@ -210,11 +321,11 @@ export default function ProfileScreen() {
         {/* Hero */}
         <motion.div
           className={`mt-6 rounded-3xl ${glass} p-5`}
-          initial={{ opacity: 0, y: 8 }}
+          initial={{ opacity: 0, y: 4 }}
           animate={{
             opacity: 1,
             y: 0,
-            transition: { duration: 0.28, ease: "easeOut" },
+            transition: { duration: 0.14, ease: "easeOut" },
           }}
         >
           <div className="flex items-start justify-between gap-4">
@@ -245,7 +356,7 @@ export default function ProfileScreen() {
             <motion.button
               type="button"
               onClick={openEdit}
-              whileTap={{ scale: 0.98 }}
+              whileTap={{ scale: 0.995 }}
               className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
             >
               <AppIcon size={ICON_MD} icon={Pencil} />

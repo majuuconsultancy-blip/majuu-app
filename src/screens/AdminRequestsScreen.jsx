@@ -1,4 +1,4 @@
-// ✅ AdminRequestsScreen.jsx (FULL COPY-PASTE)
+﻿// ✅ AdminRequestsScreen.jsx (FULL COPY-PASTE)
 // Stable fix:
 // ✅ Filters kept (date range, assigned, staff status, staff recommendation)
 // ✅ RED DOTS are now GLOBAL + CONSISTENT:
@@ -16,9 +16,12 @@ import { adminSoftDeleteRequest, getRequests } from "../services/adminrequestser
 import { setStaffAccessByEmail } from "../services/staffservice";
 
 import {
+  collection,
   collectionGroup,
+  documentId,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   query,
   where,
@@ -55,6 +58,29 @@ const TABS = [
 const LIMIT_PENDING = 1000;
 const ADMIN_TAB_PINS_KEY = "majuu_admin_requests_pins_by_tab_v1";
 const LONG_PRESS_MS = 420;
+const SEARCH_DEBOUNCE_MS = 180;
+const INITIAL_RENDER_COUNT = 7;
+const PERF_TAG = "[perf][AdminRequests]";
+
+function startPerf(label) {
+  try {
+    console.time(label);
+  } catch {}
+}
+
+function endPerf(label) {
+  try {
+    console.timeEnd(label);
+  } catch {}
+}
+
+function logIndexHint(scope, error) {
+  const raw = String(error?.message || "");
+  const match = raw.match(/https:\/\/console\.firebase\.google\.com\/[^\s)]+/i);
+  if (match?.[0]) {
+    console.warn(`${PERF_TAG} index hint (${scope}): ${match[0]}`);
+  }
+}
 
 function readAdminTabPins() {
   if (typeof window === "undefined") return {};
@@ -376,6 +402,8 @@ export default function AdminRequestsScreen() {
   void motion;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const mountAtRef = useRef(typeof performance !== "undefined" ? performance.now() : 0);
+  const firstPaintLoggedRef = useRef(false);
 
   const tabFromUrl = searchParams.get("tab");
   const qFromUrl = searchParams.get("q") || "";
@@ -385,6 +413,8 @@ export default function AdminRequestsScreen() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [search, setSearch] = useState(String(qFromUrl));
+  const [debouncedSearch, setDebouncedSearch] = useState(String(qFromUrl));
+  const [visibleCount, setVisibleCount] = useState(INITIAL_RENDER_COUNT);
 
   // ✅ Filter UI (minimal popover beside search)
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -410,6 +440,26 @@ export default function AdminRequestsScreen() {
     const t = setTimeout(() => setEnter(true), 10);
     return () => clearTimeout(t);
   }, []);
+
+  useEffect(() => {
+    if (firstPaintLoggedRef.current) return;
+    firstPaintLoggedRef.current = true;
+    const raf = window.requestAnimationFrame(() => {
+      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      const delta = Math.max(0, now - (mountAtRef.current || 0));
+      console.log(`${PERF_TAG} mount->first-paint: ${delta.toFixed(1)}ms`);
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, []);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(String(search || "")), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    setVisibleCount(INITIAL_RENDER_COUNT);
+  }, [status, debouncedSearch, filters]);
 
   useEffect(() => {
     return () => {
@@ -488,11 +538,15 @@ export default function AdminRequestsScreen() {
   }, [status, search]);
 
   const load = async () => {
+    const loadTimer = `${PERF_TAG} firestore:load tab=${status}`;
+    startPerf(loadTimer);
     setLoading(true);
     setMsg("");
 
     try {
       if (status === "assigned") {
+        const assignedTimer = `${PERF_TAG} transform:assigned merge/filter`;
+        startPerf(assignedTimer);
         const [newOnes, contactedOnes] = await Promise.all([
           getRequests({ status: "new", max: 200 }).catch(() => []),
           getRequests({ status: "contacted", max: 200 }).catch(() => []),
@@ -513,6 +567,7 @@ export default function AdminRequestsScreen() {
         const map = new Map();
         assigned.forEach((r) => map.set(r.id, r));
         setItems(Array.from(map.values()));
+        endPerf(assignedTimer);
         return;
       }
 
@@ -520,8 +575,10 @@ export default function AdminRequestsScreen() {
       setItems((Array.isArray(data) ? data : []).filter((r) => !isAdminSoftDeletedRequest(r)));
     } catch (e) {
       console.error(e);
+      logIndexHint(`getRequests(${status})`, e);
       setMsg(e?.message || "Failed to load requests");
     } finally {
+      endPerf(loadTimer);
       setLoading(false);
     }
   };
@@ -574,7 +631,6 @@ export default function AdminRequestsScreen() {
 
   /* ---------- ✅ GLOBAL new-message dots (fixed) ---------- */
   const [pendingSet, setPendingSet] = useState(() => new Set()); // Set<requestId>
-  const reqDocUnsubsRef = useRef({}); // { [rid]: () => void }
   const [reqMetaById, setReqMetaById] = useState({}); // { [rid]: { status, assignedTo, tabKey } }
 
   // 1) One global listener: collectionGroup pendingMessages (status == pending)
@@ -599,6 +655,7 @@ export default function AdminRequestsScreen() {
       },
       (err) => {
         console.error("pendingMessages collectionGroup listener error:", err);
+        logIndexHint("collectionGroup(pendingMessages)", err);
         // keep old set rather than wiping (prevents flicker)
       }
     );
@@ -606,94 +663,54 @@ export default function AdminRequestsScreen() {
     return () => unsub();
   }, []);
 
-  // 2) For each rid in pendingSet, listen to its serviceRequests doc to classify which tab it belongs to
+  // 2) Batch-lookup request docs for pending IDs to classify which tab gets a red dot.
   useEffect(() => {
-    const need = Array.from(pendingSet || []);
-    const existing = reqDocUnsubsRef.current || {};
+    const ids = Array.from(pendingSet || [])
+      .map((x) => String(x || "").trim())
+      .filter(Boolean);
+    let cancelled = false;
 
-    // remove listeners no longer needed
-    Object.keys(existing).forEach((rid) => {
-      if (!need.includes(rid)) {
-        try {
-          existing[rid]?.();
-        } catch {
-          // noop
-        }
-        delete existing[rid];
-        setReqMetaById((prev) => {
-          if (!prev[rid]) return prev;
-          const n = { ...prev };
-          delete n[rid];
-          return n;
-        });
-      }
-    });
+    if (ids.length === 0) {
+      setReqMetaById({});
+      return () => {
+        cancelled = true;
+      };
+    }
 
-    // add listeners for new rids
-    need.forEach((rid) => {
-      if (existing[rid]) return;
+    (async () => {
+      const timer = `${PERF_TAG} firestore:classify pending request tabs (${ids.length})`;
+      startPerf(timer);
+      try {
+        const nextMeta = {};
+        const chunkSize = 30;
 
-      const rRef = doc(db, "serviceRequests", rid);
-      const unsub = onSnapshot(
-        rRef,
-        (snap) => {
-          const data = snap.exists() ? snap.data() : null;
-          if (!data) {
-            setReqMetaById((prev) => {
-              if (!prev[rid]) return prev;
-              const n = { ...prev };
-              delete n[rid];
-              return n;
-            });
-            return;
-          }
-
-          const tabKey = classifyTabFromRequestDoc(data);
-          const st = String(data?.status || "new").toLowerCase();
-          const assignedTo = String(data?.assignedTo || "").trim();
-
-          setReqMetaById((prev) => {
-            const prevOne = prev[rid];
-            if (
-              prevOne &&
-              prevOne.tabKey === tabKey &&
-              prevOne.status === st &&
-              prevOne.assignedTo === assignedTo
-            ) {
-              return prev;
-            }
-            return { ...prev, [rid]: { tabKey, status: st, assignedTo } };
+        for (let i = 0; i < ids.length; i += chunkSize) {
+          const chunk = ids.slice(i, i + chunkSize);
+          const qy = query(collection(db, "serviceRequests"), where(documentId(), "in", chunk));
+          const snap = await getDocs(qy);
+          snap.docs.forEach((d) => {
+            const data = d.data() || {};
+            const tabKey = classifyTabFromRequestDoc(data);
+            if (!tabKey) return;
+            const st = String(data?.status || "new").toLowerCase();
+            const assignedTo = String(data?.assignedTo || "").trim();
+            nextMeta[String(d.id)] = { tabKey, status: st, assignedTo };
           });
-        },
-        (err) => {
-          console.error("serviceRequests doc listen error:", rid, err);
         }
-      );
 
-      existing[rid] = unsub;
-    });
-
-    reqDocUnsubsRef.current = existing;
+        if (!cancelled) setReqMetaById(nextMeta);
+      } catch (err) {
+        console.error("pending request tab classification error:", err);
+        logIndexHint("serviceRequests(documentId in ...)", err);
+      } finally {
+        endPerf(timer);
+      }
+    })();
 
     return () => {
-      // don't tear down here — we manage add/remove above
+      cancelled = true;
     };
   }, [pendingSet]);
-
-  // cleanup doc listeners on unmount
-  useEffect(() => {
-    return () => {
-      const m = reqDocUnsubsRef.current || {};
-      Object.keys(m).forEach((rid) => {
-        try {
-          m[rid]?.();
-        } catch {
-          // noop
-        }
-      });
-      reqDocUnsubsRef.current = {};
-    };
-  }, []);
 
   const tabHasDot = useMemo(() => {
     const out = { new: false, closed: false, rejected: false, assigned: false };
@@ -706,10 +723,15 @@ export default function AdminRequestsScreen() {
 
   /* ---------- Search + Filters ---------- */
   const searched = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return items;
+    const timer = `${PERF_TAG} transform:search`;
+    startPerf(timer);
+    const q = debouncedSearch.trim().toLowerCase();
+    if (!q) {
+      endPerf(timer);
+      return items;
+    }
 
-    return (items || []).filter((r) =>
+    const out = (items || []).filter((r) =>
       [
         r.track,
         r.country,
@@ -730,9 +752,13 @@ export default function AdminRequestsScreen() {
         .toLowerCase()
         .includes(q)
     );
-  }, [items, search]);
+    endPerf(timer);
+    return out;
+  }, [items, debouncedSearch]);
 
   const filtered = useMemo(() => {
+    const timer = `${PERF_TAG} transform:filters+pin-sort`;
+    startPerf(timer);
     const fromMs = dayStartMs(filters.from);
     const toMs = dayEndMs(filters.to);
     const base = (searched || []).filter((r) => {
@@ -770,10 +796,13 @@ export default function AdminRequestsScreen() {
     });
 
     const pinList = Array.isArray(pinsByTab?.[status]) ? pinsByTab[status] : [];
-    if (pinList.length === 0) return base;
+    if (pinList.length === 0) {
+      endPerf(timer);
+      return base;
+    }
 
     const pinIndexById = new Map(pinList.map((rid, idx) => [String(rid), idx]));
-    return base
+    const out = base
       .map((r, idx) => ({ r, idx }))
       .sort((a, b) => {
         const aPin = pinIndexById.get(String(a.r?.id || ""));
@@ -786,7 +815,25 @@ export default function AdminRequestsScreen() {
         return a.idx - b.idx;
       })
       .map((x) => x.r);
+    endPerf(timer);
+    return out;
   }, [searched, filters, pinsByTab, status]);
+
+  const visibleFiltered = useMemo(() => {
+    const timer = `${PERF_TAG} render:list-window`;
+    startPerf(timer);
+    const out = filtered.slice(0, visibleCount);
+    endPerf(timer);
+    return out;
+  }, [filtered, visibleCount]);
+
+  const visibleRenderRows = useMemo(() => {
+    const timer = `${PERF_TAG} render:list-items map`;
+    startPerf(timer);
+    const out = visibleFiltered.map((r) => r);
+    endPerf(timer);
+    return out;
+  }, [visibleFiltered]);
 
   const activeLabel = useMemo(() => {
     return TABS.find((t) => t.key === status)?.label || String(status).toUpperCase();
@@ -1214,7 +1261,7 @@ export default function AdminRequestsScreen() {
           <div className={`mt-6 ${card} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>No requests found.</div>
         ) : (
           <motion.div variants={listWrap} initial="hidden" animate="show" className="mt-6 grid gap-3">
-            {filtered.map((r) => {
+            {visibleRenderRows.map((r) => {
               const p = pill(r.status);
               const left = `${String(r.track || "").toUpperCase()} • ${r.country || "-"}`;
               const right = r.requestType === "full" ? "Full Package" : `Single: ${r.serviceName || "-"}`;
@@ -1315,6 +1362,15 @@ export default function AdminRequestsScreen() {
                 </motion.div>
               );
             })}
+            {visibleCount < filtered.length ? (
+              <button
+                type="button"
+                onClick={() => setVisibleCount((prev) => prev + INITIAL_RENDER_COUNT)}
+                className="mx-auto text-sm font-semibold text-emerald-700 dark:text-emerald-300 transition hover:opacity-80 active:scale-[0.99]"
+              >
+                See more...
+              </button>
+            ) : null}
           </motion.div>
         )}
 

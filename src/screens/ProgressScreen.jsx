@@ -33,6 +33,65 @@ import { auth, db } from "../firebase";
 import { useNotifsV2Store } from "../services/notifsV2Store";
 import { getUserState } from "../services/userservice";
 import { getMyApplications } from "../services/progressservice";
+import { getResumeTarget } from "../resume/resumeEngine";
+
+const PERF_TAG = "[perf][ProgressScreen]";
+const REQUESTS_INITIAL_RENDER = 5;
+const PROGRESS_CACHE_PREFIX = "majuu_progress_cache_";
+
+function startPerf(label) {
+  try {
+    console.time(label);
+  } catch {}
+}
+
+function endPerf(label) {
+  try {
+    console.timeEnd(label);
+  } catch {}
+}
+
+function logIndexHint(scope, error) {
+  const raw = String(error?.message || "");
+  const match = raw.match(/https:\/\/console\.firebase\.google\.com\/[^\s)]+/i);
+  if (match?.[0]) {
+    console.warn(`${PERF_TAG} index hint (${scope}): ${match[0]}`);
+  }
+}
+
+function progressCacheKey(uid) {
+  return `${PROGRESS_CACHE_PREFIX}${String(uid || "")}`;
+}
+
+function readProgressCache(uid) {
+  if (!uid || typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(progressCacheKey(uid));
+    const parsed = JSON.parse(raw || "null");
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      state: parsed?.state || null,
+      requests: Array.isArray(parsed?.requests) ? parsed.requests : [],
+      apps: Array.isArray(parsed?.apps) ? parsed.apps : [],
+      updatedAt: Number(parsed?.updatedAt || 0) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeProgressCache(uid, payload) {
+  if (!uid || typeof window === "undefined") return;
+  try {
+    const safe = {
+      state: payload?.state || null,
+      requests: Array.isArray(payload?.requests) ? payload.requests : [],
+      apps: Array.isArray(payload?.apps) ? payload.apps : [],
+      updatedAt: Date.now(),
+    };
+    window.localStorage.setItem(progressCacheKey(uid), JSON.stringify(safe));
+  } catch {}
+}
 
 /* ---------- Status UI ---------- */
 function statusUI(status) {
@@ -157,6 +216,9 @@ const pageIn = {
 
 export default function ProgressScreen() {
   const navigate = useNavigate();
+  const mountAtRef = useRef(typeof performance !== "undefined" ? performance.now() : 0);
+  const firstReqSnapSeenRef = useRef(false);
+  const firstPaintLoggedRef = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [state, setState] = useState(null);
@@ -169,10 +231,34 @@ export default function ProgressScreen() {
 
   /* ✅ pins state (max 2) */
   const [pinnedIds, setPinnedIds] = useState([]);
+  const [visibleCount, setVisibleCount] = useState(REQUESTS_INITIAL_RENDER);
   const pinnedIdsRef = useRef([]);
+  const stateRef = useRef(null);
+  const appsRef = useRef([]);
+  const requestsRef = useRef([]);
   useEffect(() => {
     pinnedIdsRef.current = pinnedIds;
   }, [pinnedIds]);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+  useEffect(() => {
+    appsRef.current = apps;
+  }, [apps]);
+  useEffect(() => {
+    requestsRef.current = requests;
+  }, [requests]);
+
+  useEffect(() => {
+    if (firstPaintLoggedRef.current) return;
+    firstPaintLoggedRef.current = true;
+    const raf = window.requestAnimationFrame(() => {
+      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      const delta = Math.max(0, now - (mountAtRef.current || 0));
+      console.log(`${PERF_TAG} mount->first-paint: ${delta.toFixed(1)}ms`);
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, []);
 
   // ✅ NEW: active track used as the "back target" for this screen
   const activeTrackForBack = useMemo(() => {
@@ -226,30 +312,63 @@ export default function ProgressScreen() {
         return;
       }
 
-      setLoading(true);
+      firstReqSnapSeenRef.current = false;
       setErr("");
+      const cached = readProgressCache(user.uid);
+      if (cached) {
+        setState(cached.state || null);
+        setRequests(Array.isArray(cached.requests) ? cached.requests : []);
+        setApps(Array.isArray(cached.apps) ? cached.apps : []);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
 
       /* ✅ load pins for this user (max 2) */
       const pins = readPins(user.uid).slice(0, 2);
       setPinnedIds(pins);
 
       try {
+        const userStateTimer = `${PERF_TAG} firestore:getUserState`;
+        startPerf(userStateTimer);
         const s = await getUserState(user.uid);
+        endPerf(userStateTimer);
         setState(s);
+        writeProgressCache(user.uid, {
+          state: s,
+          requests: cached?.requests || [],
+          apps: cached?.apps || [],
+        });
 
         const reqRef = collection(db, "serviceRequests");
         const reqQ = query(reqRef, where("uid", "==", user.uid));
 
         if (unsubReq) unsubReq();
+        const listenerSetupTimer = `${PERF_TAG} firestore:onSnapshot setup`;
+        const firstSnapTimer = `${PERF_TAG} firestore:wait first requests snapshot`;
+        startPerf(listenerSetupTimer);
+        startPerf(firstSnapTimer);
 
         unsubReq = onSnapshot(
           reqQ,
           (snap) => {
+            if (!firstReqSnapSeenRef.current) {
+              firstReqSnapSeenRef.current = true;
+              endPerf(firstSnapTimer);
+            }
+            const mapSortTimer = `${PERF_TAG} transform:map+sort requests`;
+            startPerf(mapSortTimer);
             const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
             data.sort(
               (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
             );
+            endPerf(mapSortTimer);
             setRequests(data);
+            writeProgressCache(user.uid, {
+              state: stateRef.current,
+              requests: data,
+              apps: appsRef.current,
+            });
 
             // ✅ keep pins valid (remove pins that no longer exist)
             const ids = new Set(data.map((x) => String(x.id)));
@@ -263,15 +382,27 @@ export default function ProgressScreen() {
             }
           },
           (error) => {
+            endPerf(firstSnapTimer);
             console.error("Realtime requests error:", error);
+            logIndexHint("serviceRequests(uid)", error);
             setErr(error?.message || "Failed to listen for requests");
           }
         );
+        endPerf(listenerSetupTimer);
 
+        const appsTimer = `${PERF_TAG} firestore:getMyApplications`;
+        startPerf(appsTimer);
         const appls = await getMyApplications(user.uid, 25);
+        endPerf(appsTimer);
         setApps(appls);
+        writeProgressCache(user.uid, {
+          state: stateRef.current,
+          requests: requestsRef.current,
+          apps: appls,
+        });
       } catch (e) {
         console.error(e);
+        logIndexHint("progress-load", e);
         setErr(e?.message || "Failed to load progress");
       } finally {
         setLoading(false);
@@ -285,6 +416,15 @@ export default function ProgressScreen() {
   }, [navigate]);
 
   const goContinue = async () => {
+    const resumeTarget = await getResumeTarget();
+    if (resumeTarget?.path) {
+      navigate(`${resumeTarget.path}${resumeTarget.search || ""}`, {
+        replace: true,
+        state: resumeTarget.state,
+      });
+      return;
+    }
+
     const helpType = String(state?.activeHelpType || "").toLowerCase();
     const requestId = String(state?.activeRequestId || "").trim();
     const track = String(state?.activeTrack || "").toLowerCase();
@@ -326,14 +466,42 @@ export default function ProgressScreen() {
 
   /* ✅ reorder: pinned first (in pin order), then rest as-is */
   const requestsSorted = useMemo(() => {
+    const label = `${PERF_TAG} transform:requestsSorted`;
+    startPerf(label);
     const pins = (pinnedIds || []).map((x) => String(x));
-    if (!pins.length) return requests;
+    if (!pins.length) {
+      endPerf(label);
+      return requests;
+    }
 
+    const pinSet = new Set(pins);
     const byId = new Map(requests.map((r) => [String(r.id), r]));
     const pinned = pins.map((id) => byId.get(id)).filter(Boolean);
-    const rest = requests.filter((r) => !pins.includes(String(r.id)));
-    return [...pinned, ...rest];
+    const rest = requests.filter((r) => !pinSet.has(String(r.id)));
+    const out = [...pinned, ...rest];
+    endPerf(label);
+    return out;
   }, [requests, pinnedIds]);
+
+  useEffect(() => {
+    setVisibleCount(REQUESTS_INITIAL_RENDER);
+  }, [requestsSorted.length]);
+
+  const visibleRequests = useMemo(() => {
+    const label = `${PERF_TAG} render:list-window`;
+    startPerf(label);
+    const out = requestsSorted.slice(0, visibleCount);
+    endPerf(label);
+    return out;
+  }, [requestsSorted, visibleCount]);
+
+  const visibleRenderRows = useMemo(() => {
+    const label = `${PERF_TAG} render:list-items map`;
+    startPerf(label);
+    const out = visibleRequests.map((r) => r);
+    endPerf(label);
+    return out;
+  }, [visibleRequests]);
 
   /* ✅ toggle pin (max 2) */
   const togglePin = (rid) => {
@@ -503,7 +671,7 @@ export default function ProgressScreen() {
                   We-Help requests
                 </h2>
                 <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                  {requests.length === 1 ? "1 request" : `${requests.length} requests`}
+                  {requestsCountLabel}
                 </span>
               </div>
 
@@ -523,7 +691,7 @@ export default function ProgressScreen() {
                 </div>
               ) : (
                 <div className="mt-3 grid gap-3">
-                  {requestsSorted.map((r) => {
+                  {visibleRenderRows.map((r) => {
                   const ui = statusUI(r.status);
                   const track = String(r.track || "").toLowerCase();
                   const safeTrack = track === "work" || track === "travel" ? track : "study";
@@ -690,6 +858,16 @@ export default function ProgressScreen() {
                     </div>
                   );
                 })}
+
+                  {visibleCount < requestsSorted.length ? (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleCount((prev) => prev + REQUESTS_INITIAL_RENDER)}
+                      className="mx-auto text-sm font-semibold text-emerald-700 dark:text-emerald-300 transition hover:opacity-80 active:scale-[0.99]"
+                    >
+                      See more...
+                    </button>
+                  ) : null}
                 </div>
               )}
           </div>

@@ -267,25 +267,23 @@ export default function LoginScreen() {
   const lastAttemptRef = useRef(null); // { type: "email"|"google", payload: {...} }
 
   useEffect(() => {
-    let cancelled = false;
-    let unsub = null;
+    // Do not block redirect listener behind persistence resolution.
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        navigate("/dashboard", { replace: true });
+      }
+    });
 
-    (async () => {
-      try {
-        await authPersistenceReady;
-      } catch {}
-      if (cancelled) return;
+    // Fast path when user is already restored.
+    if (auth.currentUser) {
+      navigate("/dashboard", { replace: true });
+    }
 
-      unsub = onAuthStateChanged(auth, (user) => {
-        if (user) {
-          navigate("/dashboard", { replace: true });
-        }
-      });
-    })();
+    // Keep background init for other flows, but don't await it.
+    authPersistenceReady.catch(() => {});
 
     return () => {
-      cancelled = true;
-      if (unsub) unsub();
+      unsub();
     };
   }, [navigate]);
 

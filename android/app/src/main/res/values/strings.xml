@@ -1,7 +1,8 @@
-<?xml version='1.0' encoding='utf-8'?>
+﻿<?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">majuu-app</string>
-    <string name="title_activity_main">majuu-app</string>
+    <string name="app_name">Majuu App</string>
+    <string name="title_activity_main">Majuu App</string>
     <string name="package_name">com.majuu.app</string>
     <string name="custom_url_scheme">com.majuu.app</string>
 </resources>
+

@@ -9,8 +9,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { isStandalone } from "../utils/isStandalone";
+import {
+  clearDummyPaymentDraft,
+  clearDummyPaymentState,
+  createRequestDraftId,
+  getDummyPaymentDraft,
+  getDummyPaymentState,
+  setDummyPaymentDraft,
+} from "../utils/dummyPayment";
 
 const STANDALONE = isStandalone();
+const DEFAULT_PAYMENT_AMOUNT = "KES 10,000";
 
 /* ---------------- Icons ---------------- */
 function IconX(props) {
@@ -148,6 +157,18 @@ function fileToMeta(f) {
   };
 }
 
+function normalizeFileMeta(input) {
+  if (!input || typeof input !== "object") return null;
+  const name = String(input?.name || "").trim();
+  if (!name) return null;
+  return {
+    name,
+    size: Number(input?.size || 0),
+    type: String(input?.type || ""),
+    lastModified: Number(input?.lastModified || 0),
+  };
+}
+
 // ✅ Best-practice body lock for Android PWA keyboard stability
 function lockBodyScrollFixed() {
   const y = window.scrollY || 0;
@@ -261,6 +282,8 @@ export default function RequestModal({
   defaultPhone = "",
   defaultEmail = "",
   onPay,
+  paymentContext = null,
+  paymentAmount = "",
   maxPdfMb = 10,
   enableAttachments = true,
 
@@ -268,12 +291,17 @@ export default function RequestModal({
   // Example:
   //   returnTo={`/app/work/we-help?country=${encodeURIComponent(country)}`}
   returnTo,
+
+  // Optional resume state hooks
+  initialState = null,
+  onStateChange,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
 
   const panelRef = useRef(null);
   const scrollRef = useRef(null);
+  const wasOpenRef = useRef(false);
 
   // ✅ prevents "tap causes close + blur" on Android
   const startedInsidePanelRef = useRef(false);
@@ -300,36 +328,131 @@ export default function RequestModal({
     };
   }, [onClose, navigate, effectiveReturnTo]);
 
+  const queryDraftId = useMemo(() => {
+    try {
+      const qs = new URLSearchParams(location.search || "");
+      return String(qs.get("draft") || "").trim();
+    } catch {
+      return "";
+    }
+  }, [location.search]);
+
   const [name, setName] = useState(defaultName);
   const [phone, setPhone] = useState(defaultPhone);
   const [email, setEmail] = useState(defaultEmail);
   const [city, setCity] = useState("");
   const [note, setNote] = useState("");
+  const [requestDraftId, setRequestDraftId] = useState("");
 
   const [pickedFiles, setPickedFiles] = useState([]);
+  const [pickedFileMetas, setPickedFileMetas] = useState([]);
   const [paid, setPaid] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
+  const resolvedPaymentAmount = useMemo(() => {
+    const clean = String(paymentAmount || "").trim();
+    return clean || DEFAULT_PAYMENT_AMOUNT;
+  }, [paymentAmount]);
+
   // reset when opened
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      wasOpenRef.current = false;
+      return;
+    }
 
-    setName(defaultName || "");
-    setPhone(defaultPhone || "");
-    setEmail(defaultEmail || "");
-    setCity("");
-    setNote("");
+    // Only seed once per open-cycle to avoid field flicker while typing.
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
+
+    const seeded = initialState && typeof initialState === "object" ? initialState : null;
+    const draftId = String(seeded?.requestDraftId || queryDraftId || createRequestDraftId()).trim();
+    const storedDraft = getDummyPaymentDraft(draftId);
+    const storedForm = storedDraft?.formState && typeof storedDraft.formState === "object"
+      ? storedDraft.formState
+      : storedDraft && typeof storedDraft === "object"
+        ? storedDraft
+        : null;
+    const seededMetasRaw = Array.isArray(seeded?.fileMetas) ? seeded.fileMetas : [];
+    const storedMetasRaw = Array.isArray(storedForm?.fileMetas) ? storedForm.fileMetas : [];
+    const restoredMetas = (seededMetasRaw.length ? seededMetasRaw : storedMetasRaw)
+      .map(normalizeFileMeta)
+      .filter(Boolean);
+    const storedPayment = getDummyPaymentState(draftId);
+    const paidFromStorage = String(storedPayment?.status || "").toLowerCase() === "paid";
+
+    setRequestDraftId(draftId);
+    setName(seeded?.name ?? storedForm?.name ?? defaultName ?? "");
+    setPhone(seeded?.phone ?? storedForm?.phone ?? defaultPhone ?? "");
+    setEmail(seeded?.email ?? storedForm?.email ?? defaultEmail ?? "");
+    setCity(seeded?.city ?? storedForm?.city ?? "");
+    setNote(seeded?.note ?? storedForm?.note ?? "");
     setPickedFiles([]);
-    setPaid(false);
+    setPickedFileMetas(restoredMetas);
+    setPaid(Boolean(seeded?.paid || storedForm?.paid || paidFromStorage));
     setErr("");
     setLoading(false);
 
     requestAnimationFrame(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = 0;
     });
-  }, [open, defaultName, defaultPhone, defaultEmail]);
+  }, [open, defaultName, defaultPhone, defaultEmail, initialState, queryDraftId]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (typeof onStateChange !== "function") return;
+
+    onStateChange({
+      open: Boolean(open),
+      step: paid ? "submit" : "form",
+      formState: {
+        name: String(name || ""),
+        phone: String(phone || ""),
+        email: String(email || ""),
+        city: String(city || ""),
+        note: String(note || ""),
+        fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        paid: Boolean(paid),
+        requestDraftId: String(requestDraftId || ""),
+      },
+    });
+  }, [onStateChange, open, paid, name, phone, email, city, note, pickedFileMetas, requestDraftId]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (!requestDraftId) return;
+
+    setDummyPaymentDraft(requestDraftId, {
+      requestDraftId: String(requestDraftId || ""),
+      formState: {
+        name: String(name || ""),
+        phone: String(phone || ""),
+        email: String(email || ""),
+        city: String(city || ""),
+        note: String(note || ""),
+        fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        paid: Boolean(paid),
+        requestDraftId: String(requestDraftId || ""),
+      },
+      paymentContext: paymentContext && typeof paymentContext === "object" ? paymentContext : null,
+      amount: resolvedPaymentAmount,
+      updatedAt: Date.now(),
+    });
+  }, [
+    open,
+    requestDraftId,
+    name,
+    phone,
+    email,
+    city,
+    note,
+    pickedFileMetas,
+    paid,
+    paymentContext,
+    resolvedPaymentAmount,
+  ]);
 
   // ✅ lock body scroll (ANDROID SAFE)
   useEffect(() => {
@@ -376,9 +499,71 @@ export default function RequestModal({
       setErr("Please enter a valid email address.");
       return;
     }
+
+    const draftId = String(requestDraftId || createRequestDraftId()).trim();
+    const qs = new URLSearchParams(location.search || "");
+    qs.set("autoOpen", "1");
+    qs.set("draft", draftId);
+
+    const flow = String(paymentContext?.flow || "").trim().toLowerCase();
+    if (flow === "wehelp") {
+      const serviceName = String(paymentContext?.serviceName || "").trim();
+      if (serviceName) qs.set("open", serviceName);
+    }
+    if (flow === "fullpackage") {
+      const selectedItem = String(paymentContext?.selectedItem || "").trim();
+      if (selectedItem) qs.set("item", selectedItem);
+    }
+
+    const returnTo = qs.toString() ? `${location.pathname}?${qs.toString()}` : location.pathname;
+    const amountText = resolvedPaymentAmount;
+
+    setRequestDraftId(draftId);
+    setDummyPaymentDraft(draftId, {
+      requestDraftId: draftId,
+      formState: {
+        name: String(name || ""),
+        phone: String(phone || ""),
+        email: String(email || ""),
+        city: String(city || ""),
+        note: String(note || ""),
+        fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        paid: Boolean(paid),
+        requestDraftId: draftId,
+      },
+      paymentContext: paymentContext && typeof paymentContext === "object" ? paymentContext : null,
+      amount: amountText,
+      updatedAt: Date.now(),
+    });
+
     setErr("");
-    setPaid(true);
-    onPay?.();
+    onPay?.({
+      requestDraftId: draftId,
+      returnTo,
+      amount: amountText,
+    });
+
+    const paymentQs = new URLSearchParams();
+    paymentQs.set("draft", draftId);
+    paymentQs.set("returnTo", returnTo);
+    if (amountText) paymentQs.set("amount", amountText);
+
+    navigate(`/app/dummy-payment?${paymentQs.toString()}`, {
+      state: {
+        requestDraftId: draftId,
+        returnTo,
+        amount: amountText,
+        paymentContext: paymentContext && typeof paymentContext === "object" ? paymentContext : null,
+        draftForm: {
+          name: String(name || ""),
+          phone: String(phone || ""),
+          email: String(email || ""),
+          city: String(city || ""),
+          note: String(note || ""),
+          fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        },
+      },
+    });
   };
 
   const submit = async () => {
@@ -405,9 +590,11 @@ export default function RequestModal({
       const tooBig = pickedFiles.find((f) => (f?.size || 0) > maxBytes);
       if (tooBig) return setErr(`One file is too large. Max size is ${maxPdfMb}MB.`);
 
-      fileMetas = Array.isArray(pickedFiles) ? pickedFiles.map(fileToMeta) : [];
+      const liveMetas = Array.isArray(pickedFiles) ? pickedFiles.map(fileToMeta) : [];
+      fileMetas = liveMetas.length ? liveMetas : (Array.isArray(pickedFileMetas) ? pickedFileMetas : []);
     } else {
       if (pickedFiles.length) setPickedFiles([]);
+      if (pickedFileMetas.length) setPickedFileMetas([]);
     }
 
     setLoading(true);
@@ -433,6 +620,11 @@ export default function RequestModal({
         paid: true,
         paymentMeta: { status: "paid_gate_passed", method: "dummy", paidAt: Date.now() },
       });
+
+      if (requestDraftId) {
+        clearDummyPaymentState(requestDraftId);
+        clearDummyPaymentDraft(requestDraftId);
+      }
     } catch (e) {
       setErr(e?.message || "Failed to submit. Try again.");
     } finally {
@@ -649,6 +841,7 @@ export default function RequestModal({
                         onChange={(e) => {
                           const arr = Array.from(e.target.files || []);
                           setPickedFiles(arr);
+                          setPickedFileMetas(arr.map(fileToMeta));
                         }}
                         className="w-full text-sm text-zinc-900 dark:text-zinc-100"
                       />
@@ -657,9 +850,9 @@ export default function RequestModal({
                         PDFs only. Max {maxPdfMb}MB each.
                       </div>
 
-                      {pickedFiles.length ? (
+                      {pickedFileMetas.length ? (
                         <div className="mt-3 grid gap-2">
-                          {pickedFiles.map((f, idx) => (
+                          {pickedFileMetas.map((f, idx) => (
                             <div
                               key={`${f.name}-${idx}`}
                               className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"

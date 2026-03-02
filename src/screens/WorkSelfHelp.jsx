@@ -1,11 +1,11 @@
-// ✅ WorkSelfHelp.jsx (FULL COPY-PASTE)
+﻿// âœ… WorkSelfHelp.jsx (FULL COPY-PASTE)
 // CHANGE: Android hardware back now ALWAYS goes to TrackScreen (/app/work)
 // - Uses history.pushState + popstate trap (PWA-safe)
 // - On-screen Back also goes to /app/work
 // Everything else (layout/logic/keys) unchanged.
 // Keeps visited memory key: majuu_visited_links_v1
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "../utils/motionProxy";
 import { smartBack } from "../utils/navBack";
@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
+import OpenExternalLinkDialog from "../components/OpenExternalLinkDialog";
+import { clearPendingExternalLink, setSnapshot } from "../resume/resumeEngine";
 
 /* ---------- Visited links memory ---------- */
 const VISITED_KEY = "majuu_visited_links_v1";
@@ -99,7 +101,7 @@ const cardFloat = {
   tap: { scale: 0.985 },
 };
 
-function LinkRow({ item, visitedMap, onRefreshVisited }) {
+function LinkRow({ item, visitedMap, onRefreshVisited, onOpenLink }) {
   const visited = Boolean(visitedMap[item.url]);
   const domain = getDomain(item.url);
   const googleQ = getGoogleQueryFromUrl(item.url);
@@ -116,6 +118,7 @@ function LinkRow({ item, visitedMap, onRefreshVisited }) {
   };
 
   const handleOpen = () => {
+    onOpenLink?.(item);
     markVisited(item.url);
     onRefreshVisited?.();
   };
@@ -238,8 +241,10 @@ export default function WorkSelfHelp() {
   const navigate = useNavigate();
   const location = useLocation();
   const country = new URLSearchParams(location.search).get("country") || "";
+  const resumePromptHandledRef = useRef(false);
 
   const [visitedMap, setVisitedMap] = useState({});
+  const [pendingExternalLinkPrompt, setPendingExternalLinkPrompt] = useState(null);
   const refreshVisited = () => setVisitedMap(loadVisited());
 
   useEffect(() => {
@@ -251,10 +256,40 @@ export default function WorkSelfHelp() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  // ✅ Desired back destination (TrackScreen)
+  useEffect(() => {
+    setSnapshot({
+      route: {
+        path: location.pathname,
+        search: location.search || "",
+      },
+      selfHelp: {
+        track: "work",
+        country,
+        screenKey: `work:${country || "not-selected"}`,
+      },
+    });
+  }, [country, location.pathname, location.search]);
+
+  useEffect(() => {
+    if (resumePromptHandledRef.current) return;
+    const pending = location.state?.resumePendingExternalLink;
+    if (!pending?.url) return;
+
+    resumePromptHandledRef.current = true;
+    setPendingExternalLinkPrompt(pending);
+
+    const nextState = { ...(location.state || {}) };
+    delete nextState.resumePendingExternalLink;
+    navigate(`${location.pathname}${location.search}`, {
+      replace: true,
+      state: nextState,
+    });
+  }, [location.pathname, location.search, location.state, navigate]);
+
+  // âœ… Desired back destination (TrackScreen)
   const backUrl = `/app/work?country=${encodeURIComponent(country || "")}&from=choice`;
 
-  // ✅ HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/work)
+  // âœ… HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/work)
   useEffect(() => {
     try {
       window.history.pushState(
@@ -272,12 +307,42 @@ export default function WorkSelfHelp() {
     return () => window.removeEventListener("popstate", onPopState);
   }, [navigate, backUrl]);
 
-  // ✅ On-screen Back
+  // âœ… On-screen Back
   const goBackToChoice = () => {
     smartBack(navigate, "/app/home");
   };
 
   const qs = encodeURIComponent(country || "destination country");
+
+  const captureExternalLink = (item) => {
+    setSnapshot({
+      selfHelp: {
+        track: "work",
+        country,
+        screenKey: `work:${country || "not-selected"}`,
+        pendingExternalLink: {
+          url: item?.url || "",
+          title: item?.title || "",
+          tappedAt: Date.now(),
+        },
+      },
+    });
+  };
+
+  const cancelPendingExternalLink = () => {
+    setPendingExternalLinkPrompt(null);
+    clearPendingExternalLink();
+  };
+
+  const openPendingExternalLink = () => {
+    const url = String(pendingExternalLinkPrompt?.url || "").trim();
+    if (url) {
+      try {
+        window.open(url, "_blank", "noopener,noreferrer");
+      } catch {}
+    }
+    cancelPendingExternalLink();
+  };
 
   const sections = useMemo(() => {
     return [
@@ -289,7 +354,7 @@ export default function WorkSelfHelp() {
           { title: "Indeed", url: "https://www.indeed.com/", note: "Big job board (varies by country)" },
           { title: "Glassdoor", url: "https://www.glassdoor.com/Job/index.htm", note: "Jobs + company reviews" },
           {
-            title: `Search: “government job portal ${country || "your destination"}”`,
+            title: `Search: â€œgovernment job portal ${country || "your destination"}â€`,
             url: `https://www.google.com/search?q=government+job+portal+${qs}`,
             note: "Try to use the official government portal if available",
           },
@@ -300,11 +365,11 @@ export default function WorkSelfHelp() {
         subtitle: "Always confirm requirements on official sites.",
         links: [
           {
-            title: `Search: “${country || "destination"} work visa official government site”`,
+            title: `Search: â€œ${country || "destination"} work visa official government siteâ€`,
             url: `https://www.google.com/search?q=${qs}+work+visa+official+government+site`,
             note: "Use the top government result",
           },
-          { title: "EmbassyPages — embassies & consulates directory", url: "https://www.embassypages.com/", note: "Find your destination embassy in Kenya" },
+          { title: "EmbassyPages â€” embassies & consulates directory", url: "https://www.embassypages.com/", note: "Find your destination embassy in Kenya" },
           { title: "VFS Global (if destination uses it)", url: "https://www.vfsglobal.com/", note: "Visa application center (varies)" },
         ],
       },
@@ -321,7 +386,7 @@ export default function WorkSelfHelp() {
         title: "Relocation basics",
         subtitle: "Budgeting, housing, and cost of living.",
         links: [
-          { title: "Numbeo — cost of living", url: "https://www.numbeo.com/cost-of-living/", note: "Compare cities and costs" },
+          { title: "Numbeo â€” cost of living", url: "https://www.numbeo.com/cost-of-living/", note: "Compare cities and costs" },
           { title: "Booking.com", url: "https://www.booking.com/", note: "Short stays for arrival week" },
           { title: "Airbnb", url: "https://www.airbnb.com/", note: "Short/medium stays" },
         ],
@@ -357,14 +422,14 @@ export default function WorkSelfHelp() {
               <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/80 dark:bg-zinc-900/60 border border-emerald-100">
                 <AppIcon size={ICON_SM} className="text-emerald-700" icon={Briefcase} />
               </span>
-              Work · Self-Help
+              Work Â· Self-Help
             </div>
 
             <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Work abroad, step by step
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              Tap resources below. We’ll mark what you already visited.
+              All the links below are curated for your selected destination.
             </p>
           </div>
 
@@ -397,7 +462,13 @@ export default function WorkSelfHelp() {
           {sections.map((sec, i) => (
             <SectionCard key={sec.title} title={sec.title} subtitle={sec.subtitle} index={i}>
               {sec.links.map((l) => (
-                <LinkRow key={l.url} item={l} visitedMap={visitedMap} onRefreshVisited={refreshVisited} />
+                <LinkRow
+                  key={l.url}
+                  item={l}
+                  visitedMap={visitedMap}
+                  onRefreshVisited={refreshVisited}
+                  onOpenLink={captureExternalLink}
+                />
               ))}
             </SectionCard>
           ))}
@@ -419,8 +490,18 @@ export default function WorkSelfHelp() {
 
         <div className="h-10" />
       </motion.div>
+
+      <OpenExternalLinkDialog
+        open={Boolean(pendingExternalLinkPrompt)}
+        title="Open external link?"
+        description="Open this external link now?"
+        linkLabel={pendingExternalLinkPrompt?.title || pendingExternalLinkPrompt?.url || ""}
+        onOpen={openPendingExternalLink}
+        onCancel={cancelPendingExternalLink}
+      />
     </div>
   );
 }
+
 
 

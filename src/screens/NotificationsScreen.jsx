@@ -124,7 +124,7 @@ export default function NotificationsScreen() {
               {headingLabel}
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              Real notifications stored in Firestore. Tap one to open it and mark it as read.
+              Tap open to mark read.
             </p>
           </div>
 
@@ -164,7 +164,7 @@ export default function NotificationsScreen() {
               No notifications yet
             </div>
             <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-              Updates will appear here when admin actions or moderated messages reach you.
+              Updates will appear here as soon as there is an activity.
             </div>
           </div>
         ) : (

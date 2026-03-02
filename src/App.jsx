@@ -7,7 +7,7 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { Capacitor } from "@capacitor/core";
@@ -39,10 +39,12 @@ import { auth, db, authPersistenceReady } from "./firebase";
 import { startNotifsV2Engine, stopNotifsV2Engine } from "./services/notifsV2Engine";
 import { cleanupPushBridge, initPushBridge } from "./services/pushBridge";
 import { hasSeenIntro } from "./utils/introFlag";
+import { isResumableRoute, setSnapshot } from "./resume/resumeEngine";
 
 /* ---------------- Lazy screens ---------------- */
 // Main user flows
 const PaymentScreen = lazy(() => import("./screens/PaymentScreen"));
+const DummyPaymentScreen = lazy(() => import("./screens/DummyPaymentScreen"));
 
 const StudySelfHelp = lazy(() => import("./screens/StudySelfHelp"));
 const StudyWeHelp = lazy(() => import("./screens/StudyWeHelp"));
@@ -73,9 +75,16 @@ const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
 const ROOT_EXIT_PATHS = new Set(["/app/home", "/dashboard", "/staff", "/staff/tasks"]);
 const SAFE_FALLBACK_PATH = "/app/home";
 const ADMIN_EMAIL = "brioneroo@gmail.com";
+const SCROLL_RESET_EXCLUDED_ROUTES = [/^\/staff\/request\/[^/]+\/start$/];
 
 function isAdminEmail(email) {
   return String(email || "").trim().toLowerCase() === ADMIN_EMAIL;
+}
+
+function shouldResetRouteScroll(pathname) {
+  const path = String(pathname || "").trim();
+  if (!path) return false;
+  return !SCROLL_RESET_EXCLUDED_ROUTES.some((pattern) => pattern.test(path));
 }
 
 /* ---------------- Preload helpers ---------------- */
@@ -93,6 +102,7 @@ function preloadCriticalScreens() {
   import("./screens/SettingsScreen");
   import("./screens/NotificationsScreen");
   import("./screens/PaymentScreen");
+  import("./screens/DummyPaymentScreen");
 }
 
 function runWhenIdle(fn) {
@@ -112,51 +122,67 @@ function StartupRoute() {
 
   useEffect(() => {
     let cancelled = false;
+    let settled = false;
+    let unsubAuth = () => {};
+    let timeoutId = null;
 
-    const waitWithTimeout = async (promise, timeoutMs = 2000) => {
-      await Promise.race([
-        promise,
-        new Promise((resolve) => {
-          window.setTimeout(resolve, timeoutMs);
-        }),
-      ]);
+    const finalize = (next) => {
+      if (cancelled || settled) return;
+      settled = true;
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      try {
+        unsubAuth?.();
+      } catch {}
+      setTarget(next);
     };
 
-    (async () => {
-      try {
-        await waitWithTimeout(authPersistenceReady, 2000);
-      } catch {}
+    if (!hasSeenIntro()) {
+      finalize("/intro");
+      return () => {
+        cancelled = true;
+      };
+    }
 
-      if (typeof auth?.authStateReady === "function") {
-        try {
-          await waitWithTimeout(auth.authStateReady(), 2000);
-        } catch {}
-      } else {
-        await waitWithTimeout(
-          new Promise((resolve) => {
-            const unsub = onAuthStateChanged(auth, () => {
-              try {
-                unsub();
-              } catch {}
-              resolve();
-            });
-          }),
-          2000
-        );
-      }
+    // Fast path: if user is already hydrated, skip directly.
+    if (auth.currentUser) {
+      finalize("/dashboard");
+      return () => {
+        cancelled = true;
+      };
+    }
 
-      if (cancelled) return;
+    try {
+      unsubAuth = onAuthStateChanged(auth, (user) => {
+        finalize(user ? "/dashboard" : "/login");
+      });
+    } catch {}
 
-      if (!hasSeenIntro()) {
-        setTarget("/intro");
-        return;
-      }
+    // Kick persistence in background (do not block listener wiring).
+    authPersistenceReady.catch(() => {});
 
-      setTarget(auth.currentUser ? "/dashboard" : "/login");
-    })();
+    if (typeof auth?.authStateReady === "function") {
+      auth
+        .authStateReady()
+        .then(() => {
+          finalize(auth.currentUser ? "/dashboard" : "/login");
+        })
+        .catch(() => {});
+    }
+
+    // Last fallback to avoid hanging loader forever.
+    timeoutId = window.setTimeout(() => {
+      finalize(auth.currentUser ? "/dashboard" : "/login");
+    }, 8000);
 
     return () => {
       cancelled = true;
+      if (timeoutId) window.clearTimeout(timeoutId);
+      try {
+        unsubAuth?.();
+      } catch {}
     };
   }, []);
 
@@ -213,6 +239,41 @@ function AndroidBackHandler() {
       if (removeListener) removeListener();
     };
   }, [navigate]);
+
+  return null;
+}
+
+function RouteScrollReset() {
+  const location = useLocation();
+  const firstRunRef = useRef(true);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("scrollRestoration" in window.history)) return undefined;
+    const previous = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
+    return () => {
+      window.history.scrollRestoration = previous;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    if (!shouldResetRouteScroll(location.pathname)) return undefined;
+
+    const scrollToTop = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    };
+
+    scrollToTop();
+    const raf = window.requestAnimationFrame(scrollToTop);
+    const timeoutId = window.setTimeout(scrollToTop, firstRunRef.current ? 120 : 40);
+    firstRunRef.current = false;
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timeoutId);
+    };
+  }, [location.pathname]);
 
   return null;
 }
@@ -282,13 +343,53 @@ function RuntimeBridges() {
   return null;
 }
 
+function ResumeRouteWatcher() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const path = String(location.pathname || "").trim();
+    if (!isResumableRoute(path)) return;
+
+    if (path === "/dashboard") {
+      setSnapshot({ trackSelect: { subStep: "dashboard" } });
+      return;
+    }
+
+    if (path === "/app/progress") {
+      return;
+    }
+
+    const patch = {
+      route: {
+        path,
+        search: location.search || "",
+      },
+    };
+
+    const requestMatch = path.match(/^\/app\/request\/([^/]+)$/);
+    if (requestMatch?.[1]) {
+      let requestId = requestMatch[1];
+      try {
+        requestId = decodeURIComponent(requestId);
+      } catch {}
+      patch.weHelp = { activeRequestId: requestId };
+    }
+
+    setSnapshot(patch);
+  }, [location.pathname, location.search]);
+
+  return null;
+}
+
 function AppRoutes() {
 
   return (
     <>
       <RuntimeBridges />
+      <ResumeRouteWatcher />
       <GAPageView />
       <AndroidBackHandler />
+      <RouteScrollReset />
 
       <Suspense fallback={<AppLoading />}>
         <Routes>
@@ -375,6 +476,7 @@ function AppRoutes() {
             <Route path="profile/edit" element={<EditProfileScreen />} />
 
             <Route path="payment" element={<PaymentScreen />} />
+            <Route path="dummy-payment" element={<DummyPaymentScreen />} />
             <Route path="request/:requestId" element={<RequestStatusScreen />} />
 
             <Route path="full-package/:track" element={<FullPackageMissingScreen />} />

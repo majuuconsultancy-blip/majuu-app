@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, orderBy, query } from "firebase/firestore";
 import { db } from "../firebase";
 import { smartBack } from "../utils/navBack";
+import DocumentExtractPanel from "../components/DocumentExtractPanel";
 
 /* ---------- Minimal icons ---------- */
 function IconBack(props) {
@@ -99,6 +100,30 @@ export default function AdminRequestDocumentsScreen() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [attachments, setAttachments] = useState([]);
+  const [requestData, setRequestData] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+
+    (async () => {
+      if (!validId) {
+        if (active) setRequestData(null);
+        return;
+      }
+      try {
+        const snap = await getDoc(doc(db, "serviceRequests", validId));
+        if (!active) return;
+        setRequestData(snap.exists() ? snap.data() || null : null);
+      } catch (error) {
+        console.error("request fetch error:", error);
+        if (active) setRequestData(null);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [validId]);
 
   useEffect(() => {
     if (!validId) {
@@ -259,6 +284,13 @@ export default function AdminRequestDocumentsScreen() {
                             Download link not available yet
                           </div>
                         )}
+
+                        <DocumentExtractPanel
+                          requestId={validId}
+                          request={requestData}
+                          attachment={a}
+                          role="admin"
+                        />
                       </div>
 
                       <span className="shrink-0 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 text-xs font-semibold text-emerald-800">

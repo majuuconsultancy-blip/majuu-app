@@ -1,4 +1,4 @@
-// ✅ StaffTasksScreen.jsx
+﻿// ✅ StaffTasksScreen.jsx
 // Staff task unread badges are derived only from published chat messages + readState.
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -16,6 +16,30 @@ import {
 import { auth, db } from "../firebase";
 import { useNotifsV2Store } from "../services/notifsV2Store";
 import { smartBack } from "../utils/navBack";
+
+const PERF_TAG = "[perf][StaffTasks]";
+const SEARCH_DEBOUNCE_MS = 180;
+const INITIAL_RENDER_COUNT = 5;
+
+function startPerf(label) {
+  try {
+    console.time(label);
+  } catch {}
+}
+
+function endPerf(label) {
+  try {
+    console.timeEnd(label);
+  } catch {}
+}
+
+function logIndexHint(scope, error) {
+  const raw = String(error?.message || "");
+  const match = raw.match(/https:\/\/console\.firebase\.google\.com\/[^\s)]+/i);
+  if (match?.[0]) {
+    console.warn(`${PERF_TAG} index hint (${scope}): ${match[0]}`);
+  }
+}
 
 /* ---------- Icons ---------- */
 function IconChevronLeft(props) {
@@ -149,12 +173,19 @@ function normalizeStaffTab(staffStatus) {
 export default function StaffTasksScreen() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const mountAtRef = useRef(typeof performance !== "undefined" ? performance.now() : 0);
+  const firstPaintLoggedRef = useRef(false);
+  const firstTasksSnapSeenRef = useRef(false);
+  const requestsMapRef = useRef({});
+  const requestsInFlightRef = useRef(new Set());
 
   const tabFromUrl = searchParams.get("tab");
   const qFromUrl = searchParams.get("q") || "";
 
   const [tab, setTab] = useState(isValidTabKey(tabFromUrl) ? tabFromUrl : "new");
   const [search, setSearch] = useState(String(qFromUrl));
+  const [debouncedSearch, setDebouncedSearch] = useState(String(qFromUrl));
+  const [visibleCount, setVisibleCount] = useState(INITIAL_RENDER_COUNT);
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -184,6 +215,30 @@ export default function StaffTasksScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    requestsMapRef.current = requestsMap || {};
+  }, [requestsMap]);
+
+  useEffect(() => {
+    if (firstPaintLoggedRef.current) return;
+    firstPaintLoggedRef.current = true;
+    const raf = window.requestAnimationFrame(() => {
+      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      const delta = Math.max(0, now - (mountAtRef.current || 0));
+      console.log(`${PERF_TAG} mount->first-paint: ${delta.toFixed(1)}ms`);
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, []);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(String(search || "")), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    setVisibleCount(INITIAL_RENDER_COUNT);
+  }, [tab, debouncedSearch]);
+
   // keep URL state in sync
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
@@ -202,6 +257,8 @@ export default function StaffTasksScreen() {
 
     const unsubAuth = onAuthStateChanged(auth, (user) => {
       if (unsubTasks) unsubTasks();
+      requestsInFlightRef.current = new Set();
+      firstTasksSnapSeenRef.current = false;
 
       if (!user) {
         navigate("/login", { replace: true });
@@ -214,49 +271,106 @@ export default function StaffTasksScreen() {
 
       const tRef = collection(db, "staff", user.uid, "tasks");
       const tQ = query(tRef, orderBy("assignedAt", "desc"));
+      const setupTimer = `${PERF_TAG} firestore:onSnapshot setup staff tasks`;
+      const firstSnapTimer = `${PERF_TAG} firestore:wait first tasks snapshot`;
+      startPerf(setupTimer);
+      startPerf(firstSnapTimer);
 
       unsubTasks = onSnapshot(
         tQ,
-        async (snap) => {
+        (snap) => {
+          if (!firstTasksSnapSeenRef.current) {
+            firstTasksSnapSeenRef.current = true;
+            endPerf(firstSnapTimer);
+          }
+          const mapTimer = `${PERF_TAG} transform:tasks snapshot map`;
+          startPerf(mapTimer);
           const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          endPerf(mapTimer);
           if (!aliveRef.current) return;
           setTasks(list);
+          setLoading(false);
 
-          const nextMap = {};
-          await Promise.all(
-            list.map(async (t) => {
-              const rid = String(t.requestId || t.id);
-              if (!rid) return;
-              try {
-                const rSnap = await getDoc(doc(db, "serviceRequests", rid));
-                if (rSnap.exists()) nextMap[rid] = { id: rSnap.id, ...rSnap.data() };
-              } catch {
-                // ignore per-item
-              }
-            })
+          const requestIds = Array.from(
+            new Set(
+              list
+                .map((t) => String(t.requestId || t.id || "").trim())
+                .filter(Boolean)
+            )
           );
+          const activeIdSet = new Set(requestIds);
 
           if (!aliveRef.current) return;
-          setRequestsMap(nextMap);
-          setLoading(false);
+          setRequestsMap((prev) => {
+            const next = {};
+            Object.keys(prev || {}).forEach((rid) => {
+              if (activeIdSet.has(rid)) next[rid] = prev[rid];
+            });
+            return next;
+          });
+
+          const inflight = requestsInFlightRef.current;
+          const missing = requestIds.filter((rid) => !requestsMapRef.current?.[rid] && !inflight.has(rid));
+          if (missing.length === 0) return;
+
+          const fetchTimer = `${PERF_TAG} firestore:getDoc request details (${missing.length})`;
+          startPerf(fetchTimer);
+          missing.forEach((rid) => inflight.add(rid));
+
+          Promise.all(
+            missing.map(async (rid) => {
+              try {
+                const rSnap = await getDoc(doc(db, "serviceRequests", rid));
+                if (!rSnap.exists()) return [rid, null];
+                return [rid, { id: rSnap.id, ...rSnap.data() }];
+              } catch {
+                return [rid, null];
+              }
+            })
+          )
+            .then((entries) => {
+              if (!aliveRef.current) return;
+              setRequestsMap((prev) => {
+                const next = { ...(prev || {}) };
+                entries.forEach(([rid, payload]) => {
+                  if (!rid) return;
+                  if (!payload) {
+                    delete next[rid];
+                    return;
+                  }
+                  next[rid] = payload;
+                });
+                return next;
+              });
+            })
+            .finally(() => {
+              missing.forEach((rid) => inflight.delete(rid));
+              endPerf(fetchTimer);
+            });
         },
         (e) => {
+          endPerf(firstSnapTimer);
           console.error(e);
+          logIndexHint("staff/{uid}/tasks orderBy(assignedAt)", e);
           if (!aliveRef.current) return;
           setErr(e?.message || "Failed to load tasks.");
           setLoading(false);
         }
       );
+      endPerf(setupTimer);
     });
 
     return () => {
       unsubAuth();
       if (unsubTasks) unsubTasks();
+      requestsInFlightRef.current = new Set();
     };
   }, [navigate]);
 
   const enriched = useMemo(() => {
-    return tasks
+    const label = `${PERF_TAG} transform:enriched`;
+    startPerf(label);
+    const out = tasks
       .map((t) => {
         const rid = String(t.requestId || t.id);
         const req = requestsMap[rid];
@@ -266,20 +380,27 @@ export default function StaffTasksScreen() {
         return { task: t, rid, req, staffStatus, staffTab };
       })
       .filter((x) => x.rid);
+    endPerf(label);
+    return out;
   }, [tasks, requestsMap]);
 
   const counts = useMemo(() => {
+    const label = `${PERF_TAG} transform:counts`;
+    startPerf(label);
     const c = { new: 0, ongoing: 0, done: 0 };
     enriched.forEach((x) => {
       if (c[x.staffTab] != null) c[x.staffTab] += 1;
     });
+    endPerf(label);
     return c;
   }, [enriched]);
 
   const filtered = useMemo(() => {
-    const q = String(search || "").trim().toLowerCase();
+    const label = `${PERF_TAG} transform:filter`;
+    startPerf(label);
+    const q = String(debouncedSearch || "").trim().toLowerCase();
 
-    return enriched
+    const out = enriched
       .filter((x) => x.staffTab === tab)
       .filter((x) => {
         if (!q) return true;
@@ -300,7 +421,17 @@ export default function StaffTasksScreen() {
           .toLowerCase()
           .includes(q);
       });
-  }, [enriched, tab, search]);
+    endPerf(label);
+    return out;
+  }, [enriched, tab, debouncedSearch]);
+
+  const visibleFiltered = useMemo(() => {
+    const label = `${PERF_TAG} render:list-window`;
+    startPerf(label);
+    const out = filtered.slice(0, visibleCount);
+    endPerf(label);
+    return out;
+  }, [filtered, visibleCount]);
 
   // ✅ unread “requests count” per tab (not messages)
   const unreadCountsByTab = useMemo(() => {
@@ -506,7 +637,7 @@ export default function StaffTasksScreen() {
           </div>
         ) : (
           <div className="mt-6 grid gap-3">
-            {filtered.map(({ task, rid, req, staffStatus }) => {
+            {visibleFiltered.map(({ task, rid, req, staffStatus }) => {
               const tp = taskPillByStaffStatus(staffStatus);
               const rp = recPill(req?.staffDecision);
 
@@ -532,7 +663,7 @@ export default function StaffTasksScreen() {
                 <button
                   key={task.id}
                   type="button"
-                  onClick={async () => {
+                  onClick={() => {
                     navigate(goTo);
                   }}
                   className={floatCard}
@@ -579,6 +710,16 @@ export default function StaffTasksScreen() {
                 </button>
               );
             })}
+
+            {visibleCount < filtered.length ? (
+              <button
+                type="button"
+                onClick={() => setVisibleCount((prev) => prev + INITIAL_RENDER_COUNT)}
+                className="mx-auto text-sm font-semibold text-emerald-700 dark:text-emerald-300 transition hover:opacity-80 active:scale-[0.99]"
+              >
+                See more...
+              </button>
+            ) : null}
           </div>
         )}
 

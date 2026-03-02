@@ -1,12 +1,12 @@
-// ✅ StudySelfHelp.jsx (FULL COPY-PASTE)
+﻿// âœ… StudySelfHelp.jsx (FULL COPY-PASTE)
 // CHANGE: Redo ALL icons using lucide-react (no custom SVG icon components)
-// ✅ ADD: Android hardware back ALWAYS goes to TrackScreen (/app/study)
+// âœ… ADD: Android hardware back ALWAYS goes to TrackScreen (/app/study)
 // - Uses history.pushState + popstate trap (PWA-safe)
 // - On-screen Back also goes to /app/study
 // Everything else (layout/logic/keys) unchanged.
 // Keeps visited memory key: majuu_visited_links_v1
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "../utils/motionProxy";
 import { smartBack } from "../utils/navBack";
@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
+import OpenExternalLinkDialog from "../components/OpenExternalLinkDialog";
+import { clearPendingExternalLink, setSnapshot } from "../resume/resumeEngine";
 
 /* ---------- Visited links memory ---------- */
 const VISITED_KEY = "majuu_visited_links_v1";
@@ -100,7 +102,7 @@ const cardFloat = {
   tap: { scale: 0.985 },
 };
 
-function LinkRow({ item, visitedMap, onRefreshVisited }) {
+function LinkRow({ item, visitedMap, onRefreshVisited, onOpenLink }) {
   const visited = Boolean(visitedMap[item.url]);
   const domain = getDomain(item.url);
   const googleQ = getGoogleQueryFromUrl(item.url);
@@ -117,6 +119,7 @@ function LinkRow({ item, visitedMap, onRefreshVisited }) {
   };
 
   const handleOpen = () => {
+    onOpenLink?.(item);
     markVisited(item.url);
     onRefreshVisited?.();
   };
@@ -239,8 +242,10 @@ export default function StudySelfHelp() {
   const navigate = useNavigate();
   const location = useLocation();
   const country = new URLSearchParams(location.search).get("country") || "";
+  const resumePromptHandledRef = useRef(false);
 
   const [visitedMap, setVisitedMap] = useState({});
+  const [pendingExternalLinkPrompt, setPendingExternalLinkPrompt] = useState(null);
   const refreshVisited = () => setVisitedMap(loadVisited());
 
   useEffect(() => {
@@ -252,10 +257,40 @@ export default function StudySelfHelp() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  // ✅ Desired back destination (TrackScreen)
+  useEffect(() => {
+    setSnapshot({
+      route: {
+        path: location.pathname,
+        search: location.search || "",
+      },
+      selfHelp: {
+        track: "study",
+        country,
+        screenKey: `study:${country || "not-selected"}`,
+      },
+    });
+  }, [country, location.pathname, location.search]);
+
+  useEffect(() => {
+    if (resumePromptHandledRef.current) return;
+    const pending = location.state?.resumePendingExternalLink;
+    if (!pending?.url) return;
+
+    resumePromptHandledRef.current = true;
+    setPendingExternalLinkPrompt(pending);
+
+    const nextState = { ...(location.state || {}) };
+    delete nextState.resumePendingExternalLink;
+    navigate(`${location.pathname}${location.search}`, {
+      replace: true,
+      state: nextState,
+    });
+  }, [location.pathname, location.search, location.state, navigate]);
+
+  // âœ… Desired back destination (TrackScreen)
   const backUrl = `/app/study?country=${encodeURIComponent(country || "")}&from=choice`;
 
-  // ✅ HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/study)
+  // âœ… HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/study)
   useEffect(() => {
     try {
       window.history.pushState(
@@ -273,12 +308,42 @@ export default function StudySelfHelp() {
     return () => window.removeEventListener("popstate", onPopState);
   }, [navigate, backUrl]);
 
-  // ✅ On-screen Back
+  // âœ… On-screen Back
   const goBackToChoice = () => {
     smartBack(navigate, "/app/home");
   };
 
   const qs = encodeURIComponent(country || "selected country");
+
+  const captureExternalLink = (item) => {
+    setSnapshot({
+      selfHelp: {
+        track: "study",
+        country,
+        screenKey: `study:${country || "not-selected"}`,
+        pendingExternalLink: {
+          url: item?.url || "",
+          title: item?.title || "",
+          tappedAt: Date.now(),
+        },
+      },
+    });
+  };
+
+  const cancelPendingExternalLink = () => {
+    setPendingExternalLinkPrompt(null);
+    clearPendingExternalLink();
+  };
+
+  const openPendingExternalLink = () => {
+    const url = String(pendingExternalLinkPrompt?.url || "").trim();
+    if (url) {
+      try {
+        window.open(url, "_blank", "noopener,noreferrer");
+      } catch {}
+    }
+    cancelPendingExternalLink();
+  };
 
   const sections = useMemo(() => {
     return [
@@ -286,11 +351,11 @@ export default function StudySelfHelp() {
         title: "Universities & programs",
         subtitle: "Find schools, compare programs, and shortlist options.",
         links: [
-          { title: "Studyportals — Bachelor & Master programs", url: "https://www.studyportals.com/", note: "Search programs by country & subject" },
+          { title: "Studyportals â€” Bachelor & Master programs", url: "https://www.studyportals.com/", note: "Search programs by country & subject" },
           { title: "QS Top Universities", url: "https://www.topuniversities.com/", note: "Rankings + university profiles" },
           { title: "Times Higher Education (THE) Rankings", url: "https://www.timeshighereducation.com/world-university-rankings", note: "Rankings and insights" },
           {
-            title: `Search: “universities in ${country || "your country"} admissions”`,
+            title: `Search: â€œuniversities in ${country || "your country"} admissionsâ€`,
             url: `https://www.google.com/search?q=universities+in+${qs}+admissions`,
             note: "Quick way to find official university admissions pages",
           },
@@ -310,9 +375,9 @@ export default function StudySelfHelp() {
         title: "Visa, embassy & official guidance",
         subtitle: "Always prioritize official government/embassy pages for requirements.",
         links: [
-          { title: "EmbassyPages — embassies & consulates directory", url: "https://www.embassypages.com/", note: "Find the correct embassy/consulate" },
+          { title: "EmbassyPages â€” embassies & consulates directory", url: "https://www.embassypages.com/", note: "Find the correct embassy/consulate" },
           {
-            title: `Search: “${country || "your destination"} student visa official site”`,
+            title: `Search: â€œ${country || "your destination"} student visa official siteâ€`,
             url: `https://www.google.com/search?q=${qs}+student+visa+official+government+site`,
             note: "Use the top government result",
           },
@@ -369,14 +434,14 @@ export default function StudySelfHelp() {
               <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/80 dark:bg-zinc-900/60 border border-emerald-100">
                 <AppIcon size={ICON_SM} className="text-emerald-700" icon={BookOpen} />
               </span>
-              Study Abroad · Self-Help
+              Study Abroad Â· Self-Help
             </div>
 
             <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Do it yourself, step by step
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              Tap resources below. We’ll mark what you already visited.
+              All the links below are curated for your selected destination.
             </p>
           </div>
 
@@ -409,7 +474,13 @@ export default function StudySelfHelp() {
           {sections.map((sec, i) => (
             <SectionCard key={sec.title} title={sec.title} subtitle={sec.subtitle} index={i}>
               {sec.links.map((l) => (
-                <LinkRow key={l.url} item={l} visitedMap={visitedMap} onRefreshVisited={refreshVisited} />
+                <LinkRow
+                  key={l.url}
+                  item={l}
+                  visitedMap={visitedMap}
+                  onRefreshVisited={refreshVisited}
+                  onOpenLink={captureExternalLink}
+                />
               ))}
             </SectionCard>
           ))}
@@ -426,15 +497,25 @@ export default function StudySelfHelp() {
               The safest info is always the <b>official government/embassy</b> page for your destination.
             </p>
             <p className="mt-2 text-xs text-zinc-500">
-              Only open links you trust. MAJUU can’t guarantee external sites.
+              Only open links you trust. MAJUU canâ€™t guarantee external sites.
             </p>
           </motion.div>
         </div>
 
         <div className="h-10" />
       </motion.div>
+
+      <OpenExternalLinkDialog
+        open={Boolean(pendingExternalLinkPrompt)}
+        title="Open external link?"
+        description="Open this external link now?"
+        linkLabel={pendingExternalLinkPrompt?.title || pendingExternalLinkPrompt?.url || ""}
+        onOpen={openPendingExternalLink}
+        onCancel={cancelPendingExternalLink}
+      />
     </div>
   );
 }
+
 
 

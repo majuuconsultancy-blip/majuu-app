@@ -5,7 +5,7 @@
 // - On-screen Back also goes to /app/study
 // Backend/logic untouched.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { motion, AnimatePresence } from "../utils/motionProxy";
@@ -46,6 +46,7 @@ import {
 } from "../services/userservice";
 import { getMissingProfileFields } from "../utils/profileGuard";
 import { createPendingAttachment } from "../services/attachmentservice";
+import { setSnapshot } from "../resume/resumeEngine";
 
 /* ---------------- Data ---------------- */
 const SINGLE_SERVICES = [
@@ -179,8 +180,10 @@ export default function StudyWeHelp() {
   // Request modal (single services only)
   const [modalOpen, setModalOpen] = useState(false);
   const [requestMeta, setRequestMeta] = useState(null); // { requestType, serviceName }
+  const [modalResumeState, setModalResumeState] = useState(null);
   const [autoOpened, setAutoOpened] = useState(false);
   const [profileChecked, setProfileChecked] = useState(false);
+  const resumeRestoreAppliedRef = useRef(false);
 
   // Full Package diagnostic state
   const [diagnosticOpen, setDiagnosticOpen] = useState(false);
@@ -248,6 +251,69 @@ export default function StudyWeHelp() {
     return () => unsub();
   }, [navigate]);
 
+  useEffect(() => {
+    if (resumeRestoreAppliedRef.current) return;
+    if (!profileChecked) return;
+
+    const resumeState = location.state?.resumeWeHelp;
+    if (!resumeState || String(resumeState.track || "").toLowerCase() !== "study") return;
+
+    resumeRestoreAppliedRef.current = true;
+
+    if (resumeState?.fullPackage?.detailsOpen) setFullPackageDetailsOpen(true);
+    if (resumeState?.fullPackage?.diagnosticOpen) setDiagnosticOpen(true);
+
+    const modalState = resumeState?.requestModal;
+    if (modalState?.open && modalState?.serviceName) {
+      if (missing.length > 0) {
+        setToast("Complete your profile first - then you can submit this request.");
+        setTimeout(() => setToast(""), 2600);
+      } else {
+        setRequestMeta({
+          requestType: modalState.requestType || "single",
+          serviceName: modalState.serviceName,
+        });
+        setModalResumeState(modalState);
+        setModalOpen(true);
+        setAutoOpened(true);
+      }
+    }
+  }, [location.state, profileChecked, missing.length]);
+
+  useEffect(() => {
+    setSnapshot({
+      route: {
+        path: location.pathname,
+        search: location.search || "",
+      },
+      weHelp: {
+        track: "study",
+        country,
+        requestModal: {
+          open: modalOpen,
+          serviceName: requestMeta?.serviceName || "",
+          requestType: requestMeta?.requestType || "",
+          step: modalResumeState?.step || (modalOpen ? "form" : "closed"),
+          formState: modalResumeState?.formState || null,
+        },
+        fullPackage: {
+          screen: "main",
+          detailsOpen: fullPackageDetailsOpen,
+          diagnosticOpen,
+        },
+      },
+    });
+  }, [
+    country,
+    location.pathname,
+    location.search,
+    modalOpen,
+    requestMeta,
+    modalResumeState,
+    fullPackageDetailsOpen,
+    diagnosticOpen,
+  ]);
+
   // ✅ Auto-open the modal when coming from "Try again"
   useEffect(() => {
     if (autoOpened) return;
@@ -275,6 +341,7 @@ export default function StudyWeHelp() {
 
   const openSingle = (serviceName) => {
     if (!canUseWeHelp) return;
+    setModalResumeState(null);
     setRequestMeta({ requestType: "single", serviceName });
     setModalOpen(true);
   };
@@ -287,10 +354,8 @@ export default function StudyWeHelp() {
 
   const goToProfile = () => navigate("/app/profile");
 
-  // ✅ Attachments ONLY on Document Review
-  const enableAttachments =
-    requestMeta?.requestType === "single" &&
-    requestMeta?.serviceName === "Document Review";
+  // ✅ Attachments on all single-package requests
+  const enableAttachments = requestMeta?.requestType === "single";
 
   const filteredSingles = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -375,6 +440,11 @@ export default function StudyWeHelp() {
         activeCountry: country,
         activeHelpType: "we",
         activeRequestId: requestId,
+      });
+
+      setSnapshot({
+        route: { path: `/app/request/${requestId}`, search: "" },
+        weHelp: { activeRequestId: requestId },
       });
 
       setModalOpen(false);
@@ -703,11 +773,17 @@ export default function StudyWeHelp() {
         defaultName={defaultName}
         defaultPhone={defaultPhone}
         defaultEmail={auth.currentUser?.email || email || ""}
+        paymentContext={{
+          flow: "weHelp",
+          track: "study",
+          requestType: requestMeta?.requestType || "single",
+          serviceName: requestMeta?.serviceName || "",
+        }}
+        initialState={modalResumeState?.formState || null}
+        onStateChange={setModalResumeState}
         enableAttachments={enableAttachments}
         maxPdfMb={10}
       />
     </div>
   );
 }
-
-

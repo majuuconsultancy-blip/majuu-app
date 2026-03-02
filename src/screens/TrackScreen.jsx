@@ -27,6 +27,7 @@ import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 
 import { auth } from "../firebase";
 import { setActiveContext, setSelectedTrack } from "../services/userservice";
+import { setSnapshot } from "../resume/resumeEngine";
 
 /* ---------- Track config ---------- */
 const TRACKS = {
@@ -130,6 +131,26 @@ export default function TrackScreen({ track }) {
     }
   }, [location.search]);
 
+  useEffect(() => {
+    setSnapshot({
+      route: {
+        path: location.pathname,
+        search: location.search || "",
+      },
+      trackSelect: {
+        selectedTrack: safeTrack,
+        destination: selectedCountry || "",
+        country: selectedCountry || "",
+        category: safeTrack,
+        subStep: showModal
+          ? "country-selected-modal-open"
+          : selectedCountry
+            ? "country-selected"
+            : "country-list",
+      },
+    });
+  }, [location.pathname, location.search, safeTrack, selectedCountry, showModal]);
+
   // Close modal on ESC
   useEffect(() => {
     if (!showModal) return;
@@ -183,10 +204,47 @@ export default function TrackScreen({ track }) {
       const qs = encodeURIComponent(selectedCountry);
 
       if (helpType === "self") {
+        setSnapshot({
+          route: {
+            path: `/app/${safeTrack}/self-help`,
+            search: `?country=${qs}&from=choice`,
+          },
+          trackSelect: {
+            selectedTrack: safeTrack,
+            destination: selectedCountry,
+            country: selectedCountry,
+            category: safeTrack,
+            subStep: "help-type-selected",
+            helpType: "self",
+          },
+          selfHelp: {
+            track: safeTrack,
+            country: selectedCountry,
+            screenKey: `${safeTrack}:${selectedCountry}`,
+          },
+        });
         navigate(`/app/${safeTrack}/self-help?country=${qs}&from=choice`, {
           replace: true,
         });
       } else {
+        setSnapshot({
+          route: {
+            path: `/app/${safeTrack}/we-help`,
+            search: `?country=${qs}&from=choice`,
+          },
+          trackSelect: {
+            selectedTrack: safeTrack,
+            destination: selectedCountry,
+            country: selectedCountry,
+            category: safeTrack,
+            subStep: "help-type-selected",
+            helpType: "we",
+          },
+          weHelp: {
+            track: safeTrack,
+            country: selectedCountry,
+          },
+        });
         navigate(`/app/${safeTrack}/we-help?country=${qs}&from=choice`, {
           replace: true,
         });

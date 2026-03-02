@@ -23,6 +23,7 @@ import { auth, db } from "../firebase";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { getUserState, setSelectedTrack } from "../services/userservice";
+import { getResumeTarget, setSnapshot } from "../resume/resumeEngine";
 
 export default function TrackSelectScreen() {
   const navigate = useNavigate();
@@ -94,11 +95,37 @@ export default function TrackSelectScreen() {
     return track ? `Continue your ${track} application` : "Continue your application";
   }, [showSkip, userState]);
 
+  useEffect(() => {
+    if (!userState) return;
+    const activeTrack = String(userState?.activeTrack || "").toLowerCase();
+    const activeCountry = String(userState?.activeCountry || "");
+    const activeHelpType = String(userState?.activeHelpType || "").toLowerCase();
+
+    setSnapshot({
+      trackSelect: {
+        selectedTrack: activeTrack,
+        destination: activeCountry,
+        country: activeCountry,
+        category: activeTrack,
+        helpType: activeHelpType,
+        subStep: showSkip ? "dashboard-active-process" : "dashboard-idle",
+      },
+    });
+  }, [userState, showSkip]);
+
   const go = async (track) => {
     if (!uid) return;
 
     setGoing(track);
     localStorage.setItem("majuu_track", track);
+    setSnapshot({
+      trackSelect: {
+        selectedTrack: track,
+        category: track,
+        subStep: "track-selected",
+      },
+      route: { path: `/app/${track}`, search: "" },
+    });
 
     try {
       await setSelectedTrack(uid, track);
@@ -110,7 +137,16 @@ export default function TrackSelectScreen() {
     }
   };
 
-  const skipToOngoing = () => {
+  const skipToOngoing = async () => {
+    const resumeTarget = await getResumeTarget();
+    if (resumeTarget?.path) {
+      navigate(`${resumeTarget.path}${resumeTarget.search || ""}`, {
+        replace: true,
+        state: resumeTarget.state,
+      });
+      return;
+    }
+
     if (!userState?.hasActiveProcess) return;
 
     const helpType = String(userState?.activeHelpType || "").toLowerCase();

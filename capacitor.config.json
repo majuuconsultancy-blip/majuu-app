@@ -1,6 +1,6 @@
-{
+﻿{
   "appId": "com.majuu.app",
-  "appName": "majuu-app",
+  "appName": "Majuu App",
   "webDir": "dist",
   "plugins": {
     "SplashScreen": {
@@ -10,3 +10,4 @@
     }
   }
 }
+

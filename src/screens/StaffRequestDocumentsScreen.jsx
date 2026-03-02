@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { smartBack } from "../utils/navBack";
+import DocumentExtractPanel from "../components/DocumentExtractPanel";
 
 /* ---------- Minimal icons ---------- */
 function IconBack(props) {
@@ -105,6 +106,7 @@ export default function StaffRequestDocumentsScreen() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [attachments, setAttachments] = useState([]);
+  const [requestData, setRequestData] = useState(null);
 
   const [allowed, setAllowed] = useState(false);
 
@@ -124,16 +126,21 @@ export default function StaffRequestDocumentsScreen() {
   // ✅ Permission check: staff must be assigned to this request
   useEffect(() => {
     (async () => {
-      if (!validId || !uid) return;
+      if (!validId || !uid) {
+        setRequestData(null);
+        return;
+      }
 
       try {
         setErr("");
         setAllowed(false);
+        setRequestData(null);
 
         const reqSnap = await getDoc(doc(db, "serviceRequests", validId));
         if (!reqSnap.exists()) throw new Error("Request not found");
 
         const req = reqSnap.data();
+        setRequestData(req || null);
         const assignedTo = safeStr(req?.assignedTo);
 
         // allow if request is assigned to this staff
@@ -154,6 +161,7 @@ export default function StaffRequestDocumentsScreen() {
       } catch (e) {
         console.error(e);
         setAllowed(false);
+        setRequestData(null);
         setErr(e?.message || "Access check failed.");
       }
     })();
@@ -323,6 +331,13 @@ export default function StaffRequestDocumentsScreen() {
                               Download link not available yet
                             </div>
                           )}
+
+                          <DocumentExtractPanel
+                            requestId={validId}
+                            request={requestData}
+                            attachment={a}
+                            role="staff"
+                          />
                         </div>
 
                         <span className="shrink-0 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 text-xs font-semibold text-emerald-800">

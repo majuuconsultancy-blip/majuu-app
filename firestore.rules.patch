@@ -1,0 +1,53 @@
+// PATCH SNIPPET
+// Insert these helpers and match block inside your existing Firestore rules file.
+// The repo currently does not include a baseline firestore.rules to patch directly.
+
+// --- helper functions (add once in match /databases/{database}/documents) ---
+function signedIn() {
+  return request.auth != null;
+}
+
+function isAdmin() {
+  return signedIn() && request.auth.token.email == "brioneroo@gmail.com";
+}
+
+function hasActiveStaffDoc() {
+  return signedIn()
+    && exists(/databases/$(database)/documents/staff/$(request.auth.uid))
+    && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.active == true;
+}
+
+function requestDoc(requestId) {
+  return get(/databases/$(database)/documents/serviceRequests/$(requestId));
+}
+
+function requestExists(requestId) {
+  return exists(/databases/$(database)/documents/serviceRequests/$(requestId));
+}
+
+function staffCanWorkOnRequest(requestId) {
+  return signedIn()
+    && hasActiveStaffDoc()
+    && requestExists(requestId)
+    && (
+      requestDoc(requestId).data.assignedTo == request.auth.uid
+      || exists(/databases/$(database)/documents/staff/$(request.auth.uid)/tasks/$(requestId))
+    );
+}
+
+function resourceParentOwnerOrStaff(requestId) {
+  return signedIn()
+    && requestExists(requestId)
+    && (
+      requestDoc(requestId).data.uid == request.auth.uid
+      || staffCanWorkOnRequest(requestId)
+    );
+}
+
+// --- add inside your existing match /serviceRequests/{id} { ... } ---
+match /documentExtracts/{attachmentId} {
+  allow read: if isAdmin() || resourceParentOwnerOrStaff(id);
+  allow create, update: if isAdmin() || staffCanWorkOnRequest(id);
+  allow delete: if isAdmin();
+}
+

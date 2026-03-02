@@ -718,7 +718,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
         <div className="flex items-center justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 p-4">
           <div>
             <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Chat</div>
-            <div className="text-xs text-zinc-500">Messages are reviewed before delivery.</div>
+            <div className="text-xs text-zinc-500">Talk to us!.</div>
           </div>
 
           <button
@@ -809,8 +809,8 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
             </div>
 
             <div className="mt-2 text-[11px] text-zinc-500">
-              Demo: attaching a PDF sends META only.
-              <span className="ml-2">Enter = send, Shift+Enter = new line.</span>
+              Majuu Chat.
+              <span className="ml-2"></span>
             </div>
           </div>
         </div>

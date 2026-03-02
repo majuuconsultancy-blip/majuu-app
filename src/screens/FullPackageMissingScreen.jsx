@@ -6,7 +6,7 @@
 // ✅ createServiceRequest now sends the correct "missingItems" list (not the fallback list)
 // ✅ Keeps your auth soft-reconnect behavior (no instant redirect on transient null)
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { motion } from "../utils/motionProxy";
@@ -22,6 +22,7 @@ import {
 } from "../services/userservice";
 import { getMissingProfileFields } from "../utils/profileGuard";
 import { createPendingAttachment } from "../services/attachmentservice";
+import { setSnapshot } from "../resume/resumeEngine";
 
 /* ---------------- Icons (minimal, consistent stroke) ---------------- */
 function IconBack(props) {
@@ -365,6 +366,8 @@ export default function FullPackageMissingScreen() {
   const [modalOpen, setModalOpen] = useState(false);
   const [pickedNeed, setPickedNeed] = useState(null);
   const [autoOpened, setAutoOpened] = useState(false);
+  const [requestModalResumeState, setRequestModalResumeState] = useState(null);
+  const fullPackageRestoreAppliedRef = useRef(false);
 
   const [defaultName, setDefaultName] = useState("");
   const [defaultPhone, setDefaultPhone] = useState("");
@@ -524,9 +527,35 @@ export default function FullPackageMissingScreen() {
     setAutoOpened(true);
   }, [autoOpened, shouldAutoOpen, canContinueHere, autoItem, finalMissingItems]);
 
+  useEffect(() => {
+    if (fullPackageRestoreAppliedRef.current) return;
+
+    const resumeState = location.state?.resumeFullPackage;
+    if (!resumeState) return;
+
+    fullPackageRestoreAppliedRef.current = true;
+
+    const selectedItem = String(
+      resumeState?.selectedItem || resumeState?.requestModal?.selectedItem || ""
+    ).trim();
+
+    if (selectedItem) setPickedNeed(selectedItem);
+
+    const modalState = resumeState?.requestModal;
+    if (modalState?.open && canContinueHere) {
+      setRequestModalResumeState(modalState);
+      setPickedNeed(
+        selectedItem || String(finalMissingItems?.[0] || "").trim() || "Document checklist"
+      );
+      setModalOpen(true);
+      setAutoOpened(true);
+    }
+  }, [location.state, canContinueHere, finalMissingItems]);
+
   const openNeed = (need) => {
     if (!canContinueHere) return;
     if (isCompleted(need)) return;
+    setRequestModalResumeState(null);
     setPickedNeed(need);
     setModalOpen(true);
   };
@@ -626,6 +655,11 @@ export default function FullPackageMissingScreen() {
         activeRequestId: requestId,
       });
 
+      setSnapshot({
+        route: { path: `/app/request/${requestId}`, search: "" },
+        weHelp: { activeRequestId: requestId },
+      });
+
       setModalOpen(false);
       navigate(`/app/request/${requestId}`, { replace: true });
     } catch (err) {
@@ -645,6 +679,39 @@ export default function FullPackageMissingScreen() {
   const progressPct = totalCount ? clamp(Math.round((doneCount / totalCount) * 100), 0, 100) : 0;
 
   const canTapTiles = canContinueHere;
+
+  useEffect(() => {
+    setSnapshot({
+      route: {
+        path: location.pathname,
+        search: location.search || "",
+      },
+      weHelp: {
+        track: safeTrack,
+        country,
+        fullPackage: {
+          screen: "missing",
+          parentRequestId: parentRequestId || "",
+          selectedItem: pickedNeed || "",
+          requestModal: {
+            open: modalOpen,
+            step: requestModalResumeState?.step || (modalOpen ? "form" : "closed"),
+            formState: requestModalResumeState?.formState || null,
+            selectedItem: pickedNeed || "",
+          },
+        },
+      },
+    });
+  }, [
+    location.pathname,
+    location.search,
+    safeTrack,
+    country,
+    parentRequestId,
+    pickedNeed,
+    modalOpen,
+    requestModalResumeState,
+  ]);
 
   const chipTrack =
     safeTrack === "study"
@@ -765,7 +832,7 @@ export default function FullPackageMissingScreen() {
 
                 {navMissingItems?.length ? (
                   <div className="mt-1 text-[11px] text-emerald-700">
-                    Using diagnostic results (items you didn’t tick).
+                    Completion Meter.
                   </div>
                 ) : parentRequestId ? (
                   <div className="mt-1 text-[11px] text-zinc-500">
@@ -886,6 +953,13 @@ export default function FullPackageMissingScreen() {
           defaultName={defaultName}
           defaultPhone={defaultPhone}
           defaultEmail={auth.currentUser?.email || email || ""}
+          paymentContext={{
+            flow: "fullPackage",
+            track: safeTrack,
+            selectedItem: pickedNeed || "",
+          }}
+          initialState={requestModalResumeState?.formState || null}
+          onStateChange={setRequestModalResumeState}
           enableAttachments={enableAttachments}
           maxPdfMb={10}
         />
@@ -893,4 +967,3 @@ export default function FullPackageMissingScreen() {
     </div>
   );
 }
-

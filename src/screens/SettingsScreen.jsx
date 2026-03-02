@@ -438,7 +438,7 @@ export default function SettingsScreen() {
               </button>
 
               <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                Note: Changing email requires re-verification.
+                Note: Changing email requires verification.
               </div>
             </div>
           </Tile>
