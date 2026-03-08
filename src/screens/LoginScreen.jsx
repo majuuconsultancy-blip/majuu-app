@@ -16,6 +16,7 @@ import {
 } from "firebase/auth";
 import { auth, authPersistenceReady, googleProvider } from "../firebase";
 import { ensureUserDoc } from "../services/userservice";
+import { isLikelyFirstSignIn, setBiometricPromptPending } from "../services/biometricLockService";
 
 /* ---------------- Icons ---------------- */
 function IconMail(props) {
@@ -325,6 +326,13 @@ export default function LoginScreen() {
       provider: (user.providerData?.[0]?.providerId || "").toString(),
       lastLoginAt: Date.now(),
     });
+    try {
+      if (isLikelyFirstSignIn(user)) {
+        await setBiometricPromptPending(user.uid, true);
+      }
+    } catch (error) {
+      void error;
+    }
     navigate("/dashboard", { replace: true });
   }
 

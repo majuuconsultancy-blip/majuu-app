@@ -1,10 +1,10 @@
-// ✅ src/components/StaffRequestChatPanel.jsx (FULL COPY-PASTE)
+// âœ… src/components/StaffRequestChatPanel.jsx (FULL COPY-PASTE)
 // Staff Chat (Portal modal, mobile-first, perfect overlay)
-// ✅ FIXED: file manager picker (no prompt())
-// ✅ FIXED: attach PDF meta like user panel (pickedPdf chip, not auto-send)
-// ✅ FIXED: supports sending BOTH text + pdf as ONE pending "bundle" (sendPendingBundle)
-// ✅ Supports rendering text/pdf/bundle for published + pending.
-// ✅ Marks read when opened.
+// âœ… FIXED: file manager picker (no prompt())
+// âœ… FIXED: attach PDF meta like user panel (pickedPdf chip, not auto-send)
+// âœ… FIXED: supports sending BOTH text + pdf as ONE pending "bundle" (sendPendingBundle)
+// âœ… Supports rendering text/pdf/bundle for published + pending.
+// âœ… Marks read when opened.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -18,6 +18,7 @@ import {
   sendPendingBundle,
 } from "../services/chatservice";
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
+import useKeyboardInset from "../hooks/useKeyboardInset";
 
 /* ---------------- helpers ---------------- */
 function safeStr(x) {
@@ -39,6 +40,60 @@ function formatTime(ts) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function dayKeyFromMs(ms) {
+  if (!ms) return "";
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+function formatDayLabel(ms) {
+  if (!ms) return "";
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const startDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startToday - startDay) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+}
+
+function useAutosizeTextArea(textareaRef, value, { maxRows = 6 } = {}) {
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+
+    const computed = window.getComputedStyle(el);
+    const lineHeight = parseFloat(computed.lineHeight || "20") || 20;
+    const paddingTop = parseFloat(computed.paddingTop || "0") || 0;
+    const paddingBottom = parseFloat(computed.paddingBottom || "0") || 0;
+    const maxHeight = maxRows * lineHeight + paddingTop + paddingBottom;
+
+    el.style.height = "auto";
+    const next = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [textareaRef, value, maxRows]);
+}
+
+function StatusTicks({ status }) {
+  const s = String(status || "").toLowerCase();
+  const tone = s === "delivered" || s === "approved" ? "text-emerald-300" : "text-zinc-300";
+  return (
+    <span className={`inline-flex items-center ${tone}`} title={s}>
+      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="-mr-1 h-3.5 w-3.5">
+        <path d="M2.5 8.5 5.7 11.3 13.2 4.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
+        <path d="M2.5 8.5 5.7 11.3 13.2 4.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
 function pickCreatedAt(doc) {
   return (
     doc?.createdAt ||
@@ -57,7 +112,7 @@ function roleLabel(role) {
   return "Admin";
 }
 
-/* ✅ Render helper: supports text/pdf/bundle */
+/* âœ… Render helper: supports text/pdf/bundle */
 function RenderMessageBody({ m, mine }) {
   const type = String(m?.type || "text").toLowerCase();
 
@@ -67,9 +122,9 @@ function RenderMessageBody({ m, mine }) {
       <div className="grid gap-1">
         <div className="text-xs font-semibold opacity-90">PDF</div>
         <div className="text-sm">
-          📎 {m?.pdfMeta?.name || "document.pdf"}
+          ðŸ“Ž {m?.pdfMeta?.name || "document.pdf"}
           {m?.pdfMeta?.size ? (
-            <span className="text-xs opacity-80"> • {m.pdfMeta.size} bytes</span>
+            <span className="text-xs opacity-80"> â€¢ {m.pdfMeta.size} bytes</span>
           ) : null}
         </div>
       </div>
@@ -89,8 +144,8 @@ function RenderMessageBody({ m, mine }) {
           <div className={`${mine ? "bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
             <div className="text-xs font-semibold opacity-90">PDF</div>
             <div className="text-xs opacity-90">
-              📎 {m?.pdfMeta?.name || "document.pdf"}
-              {m?.pdfMeta?.size ? ` • ${m.pdfMeta.size} bytes` : ""}
+              ðŸ“Ž {m?.pdfMeta?.name || "document.pdf"}
+              {m?.pdfMeta?.size ? ` â€¢ ${m.pdfMeta.size} bytes` : ""}
             </div>
           </div>
         ) : null}
@@ -154,16 +209,17 @@ function IconSend(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
       <path
-        d="M4.2 12l16.2-7-4.5 14-3.8-5.1L4.2 12Z"
+        d="M12 19V6.8"
         stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
+        strokeWidth="2"
+        strokeLinecap="round"
       />
       <path
-        d="M20.4 5L12.1 13.9"
+        d="M6.8 12 12 6.8 17.2 12"
         stroke="currentColor"
-        strokeWidth="1.8"
+        strokeWidth="2"
         strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );
@@ -177,7 +233,6 @@ export default function StaffRequestChatPanel({ requestId }) {
 
   const [uid, setUid] = useState("");
   const [open, setOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
   const hasUnreadChat = useNotifsV2Store((s) => Boolean(rid && s.unreadByRequest?.[rid]?.unread));
 
   const [published, setPublished] = useState([]); // /messages
@@ -187,10 +242,14 @@ export default function StaffRequestChatPanel({ requestId }) {
   const [pickedPdf, setPickedPdf] = useState(null); // { name, size, mime }
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState("");
+  const [composerFocused, setComposerFocused] = useState(false);
 
   const threadRef = useRef(null);
   const fileInputRef = useRef(null);
   const sendLockRef = useRef(false);
+  const taRef = useRef(null);
+  const keyboardInset = useKeyboardInset(open);
+  useAutosizeTextArea(taRef, text, { maxRows: 6 });
 
   /* ---------- auth (needed to filter staff pending) ---------- */
   useEffect(() => {
@@ -270,16 +329,6 @@ export default function StaffRequestChatPanel({ requestId }) {
     };
   }, [open]);
 
-  /* ---------- smooth open animation ---------- */
-  useEffect(() => {
-    if (!open) {
-      setMounted(false);
-      return;
-    }
-    const t = setTimeout(() => setMounted(true), 20);
-    return () => clearTimeout(t);
-  }, [open]);
-
   /* ---------- visible published messages for staff ---------- */
   const visiblePublished = useMemo(() => {
     return published.filter((m) => {
@@ -321,6 +370,24 @@ export default function StaffRequestChatPanel({ requestId }) {
     return all;
   }, [pendingMine, visiblePublished]);
 
+  const timelineRows = useMemo(() => {
+    const rows = [];
+    let prevDay = "";
+    timeline.forEach((item) => {
+      const dayKey = dayKeyFromMs(item?.createdAtMs || 0);
+      if (dayKey && dayKey !== prevDay) {
+        rows.push({
+          _kind: "day",
+          id: `d_${dayKey}_${item.id}`,
+          label: formatDayLabel(item?.createdAtMs || 0),
+        });
+        prevDay = dayKey;
+      }
+      rows.push({ _kind: "msg", id: item.id, item });
+    });
+    return rows;
+  }, [timeline]);
+
   /* ---------- auto scroll ---------- */
   useEffect(() => {
     if (!open) return;
@@ -328,6 +395,17 @@ export default function StaffRequestChatPanel({ requestId }) {
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [open, timeline.length]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (!composerFocused && !keyboardInset) return;
+    const el = threadRef.current;
+    if (!el) return;
+    const timer = window.setTimeout(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }, 48);
+    return () => window.clearTimeout(timer);
+  }, [open, composerFocused, keyboardInset, timeline.length]);
 
   /* ---------- file picker ---------- */
   const openPicker = () => fileInputRef.current?.click();
@@ -347,6 +425,9 @@ export default function StaffRequestChatPanel({ requestId }) {
   };
 
   const canSend = Boolean(safeStr(text) || pickedPdf);
+  const keepComposerFocusOnAction = (event) => {
+    event.preventDefault();
+  };
 
   /* ---------- actions ---------- */
   const sendNow = async () => {
@@ -364,15 +445,39 @@ export default function StaffRequestChatPanel({ requestId }) {
 
     setSending(true);
     try {
-      // ✅ Best: use bundle when both exist (ONE pending doc)
+      // âœ… Best: use bundle when both exist (ONE pending doc)
       if (pdf && t) {
-        await sendPendingBundle({
-          requestId: rid,
-          fromRole: "staff",
-          toRole: "user",
-          text: t,
-          pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
-        });
+        try {
+          await sendPendingBundle({
+            requestId: rid,
+            fromRole: "staff",
+            toRole: "user",
+            text: t,
+            pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
+          });
+        } catch (bundleErr) {
+          const code = String(bundleErr?.code || "").toLowerCase();
+          const msg = String(bundleErr?.message || "").toLowerCase();
+          const fallback =
+            code.includes("permission-denied") ||
+            msg.includes("permission") ||
+            msg.includes("invalid type") ||
+            msg.includes("bundle");
+          if (!fallback) throw bundleErr;
+
+          await sendPendingText({
+            requestId: rid,
+            fromRole: "staff",
+            toRole: "user",
+            text: t,
+          });
+          await sendPendingPdf({
+            requestId: rid,
+            fromRole: "staff",
+            toRole: "user",
+            pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
+          });
+        }
       } else if (pdf) {
         await sendPendingPdf({
           requestId: rid,
@@ -405,196 +510,170 @@ export default function StaffRequestChatPanel({ requestId }) {
     "inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]";
   const badge =
     "rounded-full border border-white/30 bg-white/15 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-white";
+  const sendBtnTone = canSend
+    ? "bg-emerald-600 text-white shadow-[0_0_0_3px_rgba(16,185,129,0.22)] hover:bg-emerald-700"
+    : "bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
+  const navLiftPad = keyboardInset > 0 ? "0px" : "var(--app-bottom-nav-lift, 0px)";
 
   const modal = (
-    <div className="fixed inset-0 z-[9999]">
-      {/* overlay */}
-      <button
-        type="button"
-        className={[
-          "absolute inset-0 bg-black/50 backdrop-blur-[2px] transition-opacity",
-          mounted ? "opacity-100" : "opacity-0",
-        ].join(" ")}
-        onClick={() => setOpen(false)}
-        aria-label="Close chat overlay"
-      />
-
-      {/* sheet */}
-      <div
-        className={[
-          "absolute inset-x-0 bottom-0 top-0 bg-white dark:bg-zinc-900/60 flex flex-col",
-          "sm:inset-y-6 sm:left-1/2 sm:h-auto sm:max-h-[85vh] sm:w-[min(520px,92vw)] sm:-translate-x-1/2 sm:rounded-2xl sm:border sm:border-zinc-200",
-          "shadow-[0_20px_60px_rgba(0,0,0,0.20)]",
-          "transition-transform transition-opacity duration-200",
-          mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3",
-        ].join(" ")}
-      >
-        {/* header */}
-        <div className="flex items-center justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 p-4">
-          <div className="min-w-0">
-            <div className="font-semibold text-zinc-900 dark:text-zinc-100">Request Chat</div>
-            <div className="text-xs text-zinc-500">Staff → Admin → User moderation</div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 active:scale-[0.99]"
-            title="Close"
-          >
-            <IconX className="h-5 w-5" />
-          </button>
+    <div className="fixed inset-0 z-[9999] flex flex-col bg-white dark:bg-zinc-950">
+      <div className="flex items-center justify-between gap-3 border-b border-zinc-200/80 dark:border-zinc-800/80 px-4 pb-2.5 pt-[calc(env(safe-area-inset-top,0px)+0.6rem)]">
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">Request Chat</div>
+          <div className="text-xs text-zinc-500">Staff support thread</div>
         </div>
 
-        {/* error */}
-        {err ? (
-          <div className="px-4 pt-3">
-            <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-              {err}
-            </div>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-300"
+          title="Close"
+        >
+          <IconX className="h-4.5 w-4.5" />
+        </button>
+      </div>
+
+      {err ? (
+        <div className="px-3 pt-2">
+          <div className="rounded-xl border border-rose-100 bg-rose-50/80 px-3 py-2 text-xs text-rose-700">
+            {err}
+          </div>
+        </div>
+      ) : null}
+
+      <div ref={threadRef} className="flex-1 overflow-y-auto px-3 py-2">
+        {timelineRows.length === 0 ? (
+          <div className="px-1 py-2 text-sm text-zinc-600 dark:text-zinc-300">No messages yet.</div>
+        ) : (
+          <div className="grid gap-2">
+            {timelineRows.map((row) => {
+              if (row._kind === "day") {
+                return (
+                  <div key={row.id} className="flex justify-center py-1">
+                    <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+                      {row.label}
+                    </span>
+                  </div>
+                );
+              }
+
+              const item = row.item;
+              const m = item.data || {};
+              const kind = item._kind;
+
+              const fromRole = String(m?.fromRole || "").toLowerCase();
+              const mine = fromRole === "staff";
+              const time = formatTime(pickCreatedAt(m));
+
+              const pendingStatus = String(m?.status || "pending").toLowerCase();
+              const isRejectedLike = pendingStatus === "rejected" || pendingStatus === "hidden";
+
+              const bubbleBase = "chat-bubble-in max-w-[85%] rounded-2xl px-3 py-2 text-sm";
+              const bubbleMine = "bg-emerald-600 text-white shadow-[0_10px_18px_rgba(5,150,105,0.2)]";
+              const bubbleOther = "bg-white dark:bg-zinc-900/70 text-zinc-900 dark:text-zinc-100 border border-zinc-200/90 dark:border-zinc-800";
+              const bubbleRejected = "bg-rose-50 text-rose-800 border border-rose-200";
+
+              const bubbleCls =
+                kind === "pending" && mine && isRejectedLike
+                  ? bubbleRejected
+                  : mine
+                  ? bubbleMine
+                  : bubbleOther;
+
+              const msgType = String(m?.type || "text").toLowerCase();
+              const status = kind === "published" ? "delivered" : pendingStatus;
+
+              return (
+                <div key={item.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                  <div className={`${bubbleBase} ${bubbleCls}`}>
+                    <RenderMessageBody m={m} mine={mine} />
+
+                    <div
+                      className={[
+                        "mt-1.5 flex items-center justify-end gap-2 text-[10px]",
+                        mine ? "text-white/80" : "text-zinc-500",
+                      ].join(" ")}
+                    >
+                      {mine && (msgType === "text" || msgType === "bundle" || msgType === "pdf") ? <StatusTicks status={status} /> : null}
+                      <span>{time}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div
+        className="px-3 pt-2"
+        style={{
+          paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + ${navLiftPad} + ${Math.max(0, keyboardInset - 8)}px + 0.65rem)`,
+        }}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf"
+          className="hidden"
+          onChange={onPickFile}
+        />
+
+        {pickedPdf ? (
+          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs">
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">{pickedPdf.name}</span>
+            <button
+              type="button"
+              onClick={() => setPickedPdf(null)}
+              className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+            >
+              Remove
+            </button>
           </div>
         ) : null}
 
-        {/* messages */}
-        <div ref={threadRef} className="flex-1 overflow-y-auto px-4 py-4 bg-zinc-50 dark:bg-zinc-950">
-          {timeline.length === 0 ? (
-            <div className="text-sm text-zinc-600 dark:text-zinc-300">No messages yet.</div>
-          ) : (
-            <div className="grid gap-2">
-              {timeline.map((item) => {
-                const m = item.data || {};
-                const kind = item._kind;
+        <div className="flex items-end gap-2">
+          <button
+            type="button"
+            onMouseDown={keepComposerFocusOnAction}
+            onTouchStart={keepComposerFocusOnAction}
+            onClick={openPicker}
+            disabled={sending}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-300 disabled:opacity-60"
+            title="Attach PDF"
+          >
+            <IconPlus className="h-5 w-5" />
+          </button>
 
-                const fromRole = String(m?.fromRole || "").toLowerCase();
-                const mine = fromRole === "staff";
-
-                const time = formatTime(pickCreatedAt(m));
-
-                const pendingStatus = String(m?.status || "pending").toLowerCase();
-                const isRejectedLike =
-                  pendingStatus === "rejected" || pendingStatus === "hidden";
-
-                const bubbleBase = "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm";
-                const bubbleMine = "bg-emerald-600 text-white";
-                const bubbleOther = "bg-white dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-800";
-                const bubbleRejected = "bg-rose-50 text-rose-800 border border-rose-200";
-
-                let statusChip = null;
-                if (kind === "pending" && mine) {
-                  statusChip = isRejectedLike ? (
-                    <span className="ml-2 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
-                      Rejected
-                    </span>
-                  ) : (
-                    <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                      Pending
-                    </span>
-                  );
-                }
-
-                const bubbleCls =
-                  kind === "pending" && mine && isRejectedLike
-                    ? bubbleRejected
-                    : mine
-                    ? bubbleMine
-                    : bubbleOther;
-
-                return (
-                  <div
-                    key={item.id}
-                    className={`flex ${mine ? "justify-end" : "justify-start"}`}
-                  >
-                    <div className={`${bubbleBase} ${bubbleCls}`}>
-                      <RenderMessageBody m={m} mine={mine} />
-
-                      <div
-                        className={[
-                          "mt-1 flex items-center justify-between gap-3 text-[10px]",
-                          mine ? "text-white/70" : "text-zinc-400",
-                        ].join(" ")}
-                      >
-                        <span className="font-semibold">
-                          {roleLabel(m.fromRole)} → {roleLabel(m.toRole)}
-                          {statusChip}
-                        </span>
-                        <span className="font-medium">{time}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <div className="h-2" />
-        </div>
-
-        {/* composer */}
-        <div className="border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-          {/* hidden file input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf"
-            className="hidden"
-            onChange={onPickFile}
+          <textarea
+            ref={taRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onFocus={() => setComposerFocused(true)}
+            onBlur={() => setComposerFocused(false)}
+            placeholder="Message"
+            rows={1}
+            className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+            style={{ overflowY: "hidden" }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (!sending && canSend) sendNow();
+              }
+            }}
           />
 
-          {/* picked file chip */}
-          {pickedPdf ? (
-            <div className="mb-2 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-xs">
-              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{pickedPdf.name}</span>
-              <span className="text-zinc-500">
-                {pickedPdf.size ? `${pickedPdf.size} bytes` : ""}
-              </span>
-              <button
-                type="button"
-                onClick={() => setPickedPdf(null)}
-                className="ml-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50"
-              >
-                Remove
-              </button>
-            </div>
-          ) : null}
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={openPicker}
-              disabled={sending}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60"
-              title="Attach PDF"
-            >
-              <IconPlus className="h-5 w-5" />
-            </button>
-
-            <input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Type a message…"
-              className="h-11 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-4 text-sm outline-none focus:border-emerald-200"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  if (!sending && canSend) sendNow();
-                }
-              }}
-            />
-
-            <button
-              type="button"
-              onClick={sendNow}
-              disabled={sending || !canSend}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60 active:scale-[0.99]"
-              title="Send"
-            >
-              <IconSend className="h-5 w-5" />
-              Send
-            </button>
-          </div>
-
-          <div className="mt-2 text-[11px] text-zinc-500">
-            Your messages go to admin first for approval.
-          </div>
+          <button
+            type="button"
+            onMouseDown={keepComposerFocusOnAction}
+            onTouchStart={keepComposerFocusOnAction}
+            onClick={sendNow}
+            disabled={sending || !canSend}
+            className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition ${sendBtnTone}`}
+            title="Send"
+          >
+            <IconSend className="h-5.5 w-5.5" />
+          </button>
         </div>
       </div>
     </div>

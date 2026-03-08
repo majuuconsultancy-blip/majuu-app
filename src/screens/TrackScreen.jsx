@@ -409,7 +409,7 @@ export default function TrackScreen({ track }) {
               className={[
                 "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 p-5 shadow-lg backdrop-blur motion-modal-panel",
                 "dark:border-zinc-800 dark:bg-zinc-900/70",
-                "sm:mb-0 mb-4",
+                "sm:mb-0 mb-[calc(var(--app-helpchoice-lift)+var(--app-safe-bottom))]",
               ].join(" ")}
               variants={sheetMotion}
               initial="hidden"

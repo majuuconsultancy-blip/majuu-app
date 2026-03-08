@@ -1,112 +1,193 @@
-// ✅ src/services/taskassignservice.js
 import {
   collection,
   deleteField,
   doc,
-  getDoc,
   getDocs,
   limit,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
-  writeBatch,
+  where,
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
+import {
+  getSpecialityLabel,
+  inferRequestSpeciality,
+  normalizeSpecialities,
+  normalizeSpecialityKey,
+} from "../constants/staffSpecialities";
 import { createStaffNotification, createUserNotification } from "./notificationDocs";
 
-/**
- * Performance thresholds (ONLY enforced after doneCount >= 5)
- * Tune these anytime:
- */
-const AUTO_BLOCK_MIN_DONE = 5; // only evaluate after 5 completed requests
-const AUTO_BLOCK_MIN_SUCCESS = 0.4; // success rate below this => block
-const AUTO_BLOCK_MAX_AVG_MIN = 72 * 60; // avg time above this (72h) => block
+const ACTIVE_REQUEST_STATUSES = new Set(["new", "contacted"]);
+
+const AUTO_BLOCK_MIN_DONE = 5;
+const AUTO_BLOCK_MIN_SUCCESS = 0.4;
+const AUTO_BLOCK_MAX_AVG_MIN = 72 * 60;
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
 
-/**
- * ✅ Backwards compatible performance reader:
- * supports either:
- *   staff.performance.{doneCount, successCount, avgMinutes, blocked, blockedReason...}
- * OR
- *   staff.stats.{totalDone, successCount, failCount, totalHours, avgMinutes}
- *
- * NOTE:
- * Your adminrequestservice.js updates:
- *   stats.totalDone, stats.successCount, stats.failCount, stats.totalHours
- * so here we derive avgMinutes if not present.
- */
-function computePerfSummary(staffDoc) {
-  const perf = staffDoc?.performance || {};
-  const stats = staffDoc?.stats || staffDoc?.stats?.stats || {}; // extra safety
-
-  // Prefer performance.* if present, else fallback to stats.*
-  const doneCount = Number(perf?.doneCount ?? stats?.totalDone ?? stats?.doneCount ?? 0) || 0;
-  const successCount = Number(perf?.successCount ?? stats?.successCount ?? 0) || 0;
-
-  // avgMinutes could exist in performance or stats,
-  // but if stats.totalHours exists we can derive avgMinutes:
-  const totalHours = Number(stats?.totalHours ?? 0) || 0;
-
-  const avgMinutesRaw = perf?.avgMinutes ?? stats?.avgMinutes ?? null;
-
-  let avgMinutes = Number.isFinite(Number(avgMinutesRaw)) ? Number(avgMinutesRaw) : 0;
-
-  // Derive avgMinutes from totalHours/totalDone if avgMinutes missing
-  if ((!avgMinutes || avgMinutes <= 0) && doneCount > 0 && totalHours > 0) {
-    avgMinutes = (totalHours / doneCount) * 60;
-  }
-
-  // blocked flag:
-  // - true if perf.blocked
-  // - OR staff.active === false (treat inactive as blocked for assignment safety)
-  const blocked = Boolean(perf?.blocked) || staffDoc?.active === false;
-
-  const successRate = doneCount > 0 ? clamp(successCount / doneCount, 0, 1) : 0;
-
-  return { doneCount, successCount, avgMinutes, successRate, blocked };
+function toNum(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
 }
 
-function shouldAutoBlock({ doneCount, successRate, avgMinutes }) {
-  // Only evaluate after enough history
-  if (doneCount < AUTO_BLOCK_MIN_DONE) return { block: false, reason: "" };
+function computePerfSummary(staffDoc) {
+  const perf = staffDoc?.performance || {};
+  const stats = staffDoc?.stats || staffDoc?.stats?.stats || {};
 
-  // Low success rate
+  const doneCount = toNum(perf?.doneCount ?? stats?.totalDone ?? stats?.doneCount, 0);
+  const reviewedCount = toNum(perf?.reviewedCount ?? stats?.totalReviewed, 0);
+  const matchCount = toNum(perf?.matchCount ?? stats?.matchedDecisionCount ?? stats?.successCount, 0);
+  const successCountLegacy = toNum(perf?.successCount ?? stats?.successCount, 0);
+  const totalMinutes = toNum(stats?.totalMinutes, 0);
+
+  const avgMinutesRaw = perf?.avgMinutes ?? stats?.avgMinutes ?? null;
+  let avgMinutes = toNum(avgMinutesRaw, 0);
+  if ((!avgMinutes || avgMinutes <= 0) && doneCount > 0 && totalMinutes > 0) {
+    avgMinutes = totalMinutes / doneCount;
+  }
+
+  let successRateRaw = Number(perf?.successRate ?? stats?.successRate ?? stats?.matchRate);
+  if (!Number.isFinite(successRateRaw)) {
+    if (reviewedCount > 0) successRateRaw = matchCount / reviewedCount;
+    else if (doneCount > 0) successRateRaw = successCountLegacy / doneCount;
+    else successRateRaw = 0;
+  }
+  const successRate = clamp(successRateRaw, 0, 1);
+
+  const blocked = Boolean(perf?.blocked) || staffDoc?.active === false;
+  return { doneCount, reviewedCount, matchCount, avgMinutes, successRate, blocked };
+}
+
+function shouldAutoBlock({ doneCount, reviewedCount, successRate, avgMinutes }) {
+  const reviewed = Math.max(toNum(doneCount, 0), toNum(reviewedCount, 0));
+  if (reviewed < AUTO_BLOCK_MIN_DONE) return { block: false, reason: "" };
+
   if (Number.isFinite(successRate) && successRate < AUTO_BLOCK_MIN_SUCCESS) {
     return {
       block: true,
-      reason: `Auto-blocked: low success rate (${Math.round(successRate * 100)}%) after ${doneCount} tasks`,
+      reason: `Auto-blocked: low match rate (${Math.round(successRate * 100)}%) after ${reviewed} reviews`,
     };
   }
 
-  // Too slow on average
   if (Number.isFinite(avgMinutes) && avgMinutes > AUTO_BLOCK_MAX_AVG_MIN) {
     return {
       block: true,
-      reason: `Auto-blocked: slow avg completion time (${Math.round(avgMinutes)} mins) after ${doneCount} tasks`,
+      reason: `Auto-blocked: slow avg completion time (${Math.round(avgMinutes)} mins) after ${reviewed} reviews`,
     };
   }
 
   return { block: false, reason: "" };
 }
 
-/** Admin: list staff docs (for dropdown) */
-export async function listStaff({ max = 50 } = {}) {
-  const q = query(collection(db, "staff"), orderBy("email"), limit(max));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
+function isCountedAsActiveLoad(requestDoc) {
+  const status = String(requestDoc?.status || "").trim().toLowerCase();
+  const staffStatus = String(requestDoc?.staffStatus || "assigned")
+    .trim()
+    .toLowerCase();
+
+  if (!ACTIVE_REQUEST_STATUSES.has(status)) return false;
+  if (staffStatus === "done") return false;
+  return true;
 }
 
-/** Admin: assign a request to a staff member */
+function computeRankScore(staffDoc) {
+  const perf = computePerfSummary(staffDoc);
+  const active = staffDoc?.active !== false;
+
+  let speedScore = 0.5;
+  if (perf.avgMinutes > 0) {
+    const bounded = clamp(perf.avgMinutes, 30, 10080);
+    speedScore = clamp(1 - bounded / 10500, 0.05, 1);
+  }
+
+  let score = 0;
+  if (perf.blocked) score -= 9999;
+  if (!active) score -= 2000;
+  score += perf.successRate * 100;
+  score += speedScore * 35;
+  score += clamp(perf.doneCount, 0, 40) * 1.2;
+  return Math.round(score);
+}
+
+function activeLoadQueryForStaff(staffUid) {
+  return query(
+    collection(db, "serviceRequests"),
+    where("assignedTo", "==", String(staffUid || "").trim()),
+    where("status", "in", Array.from(ACTIVE_REQUEST_STATUSES)),
+    limit(500)
+  );
+}
+
+function countActiveFromSnapshot(snap, { ignoreRequestId = "" } = {}) {
+  let count = 0;
+  snap.docs.forEach((d) => {
+    const data = d.data() || {};
+    if (!isCountedAsActiveLoad(data)) return;
+    if (ignoreRequestId && String(d.id) === String(ignoreRequestId)) return;
+    count += 1;
+  });
+  return count;
+}
+
+async function getActiveLoadMap() {
+  const qy = query(
+    collection(db, "serviceRequests"),
+    where("status", "in", Array.from(ACTIVE_REQUEST_STATUSES))
+  );
+  const snap = await getDocs(qy);
+  const counts = {};
+
+  snap.docs.forEach((d) => {
+    const data = d.data() || {};
+    const assignedTo = String(data?.assignedTo || "").trim();
+    if (!assignedTo) return;
+    if (!isCountedAsActiveLoad(data)) return;
+    counts[assignedTo] = (counts[assignedTo] || 0) + 1;
+  });
+
+  return counts;
+}
+
+export async function listStaff({ max = 50, includeLoad = false } = {}) {
+  const qy = query(collection(db, "staff"), orderBy("email"), limit(max));
+  const snap = await getDocs(qy);
+  const rows = snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
+
+  let activeLoadByUid = {};
+  if (includeLoad && rows.length) {
+    activeLoadByUid = await getActiveLoadMap();
+  }
+
+  return rows.map((staffDoc) => {
+    const perf = computePerfSummary(staffDoc);
+    const maxActive = Math.max(1, toNum(staffDoc?.maxActive, 2));
+    const activeLoad = includeLoad
+      ? Math.max(0, toNum(activeLoadByUid?.[String(staffDoc?.uid || "").trim()], 0))
+      : 0;
+
+    return {
+      ...staffDoc,
+      maxActive,
+      activeLoad,
+      availableSlots: Math.max(0, maxActive - activeLoad),
+      rankScore: computeRankScore(staffDoc),
+      perfDoneCount: perf.doneCount,
+      perfSuccessRate: perf.successRate,
+      perfAvgMinutes: perf.avgMinutes,
+      perfBlocked: perf.blocked,
+    };
+  });
+}
+
 export async function assignRequestToStaff({
   requestId,
   staffUid,
   speciality = "",
   track = "",
-
-  // optional fields to display in staff portal
   country = "",
   requestType = "",
   serviceName = "",
@@ -118,151 +199,255 @@ export async function assignRequestToStaff({
   const admin = auth.currentUser;
   if (!admin) throw new Error("Not signed in");
 
-  const staffRef = doc(db, "staff", staffUid);
-  const reqRef = doc(db, "serviceRequests", requestId);
-  const reqSnap = await getDoc(reqRef);
-  const reqData = reqSnap.exists() ? reqSnap.data() || {} : {};
-  const ownerUid = String(reqData?.uid || "").trim();
+  const safeRequestId = String(requestId || "").trim();
+  const safeStaffUid = String(staffUid || "").trim();
 
-  // ✅ Hard guard: check staff state + auto-block rule
-  const staffSnap = await getDoc(staffRef);
-  if (!staffSnap.exists()) throw new Error("Staff record not found");
+  const reqRef = doc(db, "serviceRequests", safeRequestId);
+  const staffRef = doc(db, "staff", safeStaffUid);
+  const taskRef = doc(db, "staff", safeStaffUid, "tasks", safeRequestId);
+  const loadQuery = activeLoadQueryForStaff(safeStaffUid);
 
-  const staffDoc = { uid: staffSnap.id, ...staffSnap.data() };
-  const active = staffDoc?.active !== false;
+  const txResult = await runTransaction(db, async (transaction) => {
+    const reqSnap = await transaction.get(reqRef);
+    if (!reqSnap.exists()) throw new Error("Request not found");
+    const reqData = reqSnap.data() || {};
 
-  const { doneCount, successRate, avgMinutes, blocked } = computePerfSummary(staffDoc);
+    const staffSnap = await transaction.get(staffRef);
+    if (!staffSnap.exists()) throw new Error("Staff record not found");
+    const staffDoc = { uid: staffSnap.id, ...staffSnap.data() };
 
-  // If already blocked or inactive, reject immediately
-  if (!active) throw new Error("This staff member is inactive.");
-  if (blocked) throw new Error("This staff member is blocked due to low performance.");
+    const perf = computePerfSummary(staffDoc);
+    const active = staffDoc?.active !== false;
+    if (!active) throw new Error("This staff member is inactive.");
+    if (perf.blocked) throw new Error("This staff member is blocked due to low performance.");
 
-  // Auto-block evaluation (ONLY after 5 completed tasks)
-  const auto = shouldAutoBlock({ doneCount, successRate, avgMinutes });
-  if (auto.block) {
-    // Mark them blocked and stop assignment
-    const batchBlock = writeBatch(db);
-
-    batchBlock.set(
-      staffRef,
-      {
-        performance: {
-          ...(staffDoc.performance || {}),
-          blocked: true,
-          blockedAt: serverTimestamp(),
-          blockedReason: auto.reason || "Auto-blocked by system",
+    const auto = shouldAutoBlock(perf);
+    if (auto.block) {
+      transaction.set(
+        staffRef,
+        {
+          performance: {
+            ...(staffDoc.performance || {}),
+            blocked: true,
+            blockedAt: serverTimestamp(),
+            blockedReason: auto.reason || "Auto-blocked by system",
+          },
+          active: false,
+          updatedAt: serverTimestamp(),
         },
-        // optional: also set active false for safety
-        active: false,
-        updatedAt: serverTimestamp(),
+        { merge: true }
+      );
+      return { autoBlocked: true };
+    }
+
+    const inferredSpeciality = inferRequestSpeciality({
+      ...reqData,
+      requestType: requestType || reqData?.requestType,
+      serviceName: serviceName || reqData?.serviceName,
+      fullPackageItem: reqData?.fullPackageItem,
+    });
+    const explicitSpeciality = normalizeSpecialityKey(speciality);
+    const safeSpeciality = explicitSpeciality !== "unknown" ? explicitSpeciality : inferredSpeciality;
+
+    const staffSpecialities = normalizeSpecialities(staffDoc?.specialities);
+    if (
+      safeSpeciality &&
+      safeSpeciality !== "unknown" &&
+      !staffSpecialities.includes(String(safeSpeciality))
+    ) {
+      throw new Error(`Speciality mismatch: this request needs ${getSpecialityLabel(safeSpeciality)}.`);
+    }
+
+    const loadSnap = await transaction.get(loadQuery);
+    const previousAssignee = String(reqData?.assignedTo || "").trim();
+    const ignoreRequestId = previousAssignee === safeStaffUid ? safeRequestId : "";
+    const activeAssignedCount = countActiveFromSnapshot(loadSnap, { ignoreRequestId });
+    const maxActive = Math.max(1, toNum(staffDoc?.maxActive, 2));
+    if (activeAssignedCount >= maxActive) {
+      throw new Error(
+        `This staff member is at capacity (${activeAssignedCount}/${maxActive} active requests).`
+      );
+    }
+
+    if (previousAssignee && previousAssignee !== safeStaffUid) {
+      const oldTaskRef = doc(db, "staff", previousAssignee, "tasks", safeRequestId);
+      transaction.delete(oldTaskRef);
+    }
+
+    transaction.set(
+      taskRef,
+      {
+        requestId: safeRequestId,
+        status: "assigned",
+        assignedAt: serverTimestamp(),
+        track: String(track || "").trim().toLowerCase(),
+        speciality: String(safeSpeciality || "").trim().toLowerCase(),
+        country: String(country || "").trim(),
+        requestType: String(requestType || "").trim().toLowerCase(),
+        serviceName: String(serviceName || "").trim(),
+        applicantName: String(applicantName || "").trim(),
+        assignedBy: admin.uid,
       },
       { merge: true }
     );
 
-    await batchBlock.commit();
+    transaction.set(
+      reqRef,
+      {
+        assignedTo: safeStaffUid,
+        assignedAt: serverTimestamp(),
+        assignedBy: admin.uid,
+        staffStatus: "assigned",
+        staffDecision: "none",
+        staffUpdatedAt: serverTimestamp(),
+        staffStartedAt: null,
+        staffStartedAtMs: null,
+        staffStartedBy: null,
+        staffCompletedAt: null,
+        staffCompletedAtMs: null,
+        staffCompletedBy: null,
+        staffWorkMinutes: null,
+        needsReassignment: false,
+        reassignUrgent: false,
+        reassignReason: deleteField(),
+        reassignNeededAt: deleteField(),
+        reassignFromStaffUid: deleteField(),
+        staffStartReminder3hSentAt: deleteField(),
+        staffStartReminder3hSentAtMs: deleteField(),
+      },
+      { merge: true }
+    );
+
+    const auditRef = doc(collection(db, "serviceRequests", safeRequestId, "assignmentAudit"));
+    transaction.set(auditRef, {
+      action: "assign",
+      requestId: safeRequestId,
+      fromStaffUid: previousAssignee || null,
+      toStaffUid: safeStaffUid,
+      byUid: admin.uid,
+      at: serverTimestamp(),
+      atMs: Date.now(),
+      speciality: String(safeSpeciality || "").trim().toLowerCase() || null,
+      track: String(track || "").trim().toLowerCase() || null,
+    });
+
+    return {
+      autoBlocked: false,
+      ownerUid: String(reqData?.uid || "").trim(),
+      previousAssignee,
+    };
+  });
+
+  if (txResult?.autoBlocked) {
     throw new Error("Staff auto-blocked (bad performance). Pick another staff.");
   }
 
-  // ✅ Proceed with normal assignment
-  const batch = writeBatch(db);
-
-  const taskRef = doc(db, "staff", staffUid, "tasks", requestId);
-
-  batch.set(
-    taskRef,
-    {
-      requestId,
-      // Keep task in "assigned" until staff explicitly taps Start work.
-      status: "assigned",
-      assignedAt: serverTimestamp(),
-
-      track: String(track || "").trim().toLowerCase(),
-      speciality: String(speciality || "").trim().toLowerCase(),
-
-      // optional display fields (safe)
-      country: String(country || "").trim(),
-      requestType: String(requestType || "").trim().toLowerCase(),
-      serviceName: String(serviceName || "").trim(),
-      applicantName: String(applicantName || "").trim(),
-
-      // audit
-      assignedBy: admin.uid,
-    },
-    { merge: true }
-  );
-
-  batch.set(
-    reqRef,
-    {
-      assignedTo: staffUid,
-      assignedAt: serverTimestamp(),
-      assignedBy: admin.uid,
-
-      // Reset staff workflow state on every assignment/reassignment so Start Work
-      // modal is shown and timing/scoring starts from the current assignee.
-      staffStatus: "assigned",
-      staffDecision: "none",
-      staffUpdatedAt: serverTimestamp(),
-
-      staffStartedAt: null,
-      staffStartedAtMs: null,
-      staffStartedBy: null,
-
-      staffCompletedAt: null,
-      staffCompletedAtMs: null,
-      staffCompletedBy: null,
-      staffWorkMinutes: null,
-    },
-    { merge: true }
-  );
-
-  await batch.commit();
-
   try {
-    if (ownerUid) {
+    if (txResult?.ownerUid) {
       await createUserNotification({
-        uid: ownerUid,
+        uid: txResult.ownerUid,
         type: "REQUEST_ASSIGNED",
-        requestId,
+        requestId: safeRequestId,
       });
     }
     await createStaffNotification({
-      uid: staffUid,
+      uid: safeStaffUid,
       type: "STAFF_ASSIGNED_REQUEST",
-      requestId,
+      requestId: safeRequestId,
     });
+    if (txResult?.previousAssignee && txResult.previousAssignee !== safeStaffUid) {
+      await createStaffNotification({
+        uid: txResult.previousAssignee,
+        type: "STAFF_UNASSIGNED_REQUEST",
+        requestId: safeRequestId,
+      });
+    }
   } catch (error) {
     console.warn("Failed to write assignment notifications:", error?.message || error);
   }
 
-  return { ok: true, requestId, staffUid };
+  return { ok: true, requestId: safeRequestId, staffUid: safeStaffUid };
 }
 
-/** Admin: unassign a request */
-export async function unassignRequest({ requestId, staffUid } = {}) {
+export async function unassignRequest({ requestId, staffUid, reason = "Manual unassign by admin" } = {}) {
   if (!requestId) throw new Error("requestId required");
-  if (!staffUid) throw new Error("staffUid required");
 
-  const batch = writeBatch(db);
+  const admin = auth.currentUser;
+  if (!admin) throw new Error("Not signed in");
 
-  const reqRef = doc(db, "serviceRequests", requestId);
-  const taskRef = doc(db, "staff", staffUid, "tasks", requestId);
+  const safeRequestId = String(requestId || "").trim();
+  const requestedUid = String(staffUid || "").trim();
+  const reqRef = doc(db, "serviceRequests", safeRequestId);
 
-  // remove task doc
-  batch.delete(taskRef);
+  const txResult = await runTransaction(db, async (transaction) => {
+    const reqSnap = await transaction.get(reqRef);
+    if (!reqSnap.exists()) throw new Error("Request not found");
+    const reqData = reqSnap.data() || {};
 
-  // remove assignment fields from request
-  batch.set(
-    reqRef,
-    {
-      assignedTo: deleteField(),
-      assignedAt: deleteField(),
-      assignedBy: deleteField(),
-    },
-    { merge: true }
-  );
+    const currentAssignedUid = String(reqData?.assignedTo || "").trim();
+    const targetUid = requestedUid || currentAssignedUid;
+    if (!targetUid) throw new Error("No assignee found.");
 
-  await batch.commit();
+    if (requestedUid && currentAssignedUid && requestedUid !== currentAssignedUid) {
+      throw new Error("Assignee mismatch. Refresh and try again.");
+    }
+
+    const taskRef = doc(db, "staff", targetUid, "tasks", safeRequestId);
+    transaction.delete(taskRef);
+
+    transaction.set(
+      reqRef,
+      {
+        assignedTo: deleteField(),
+        assignedAt: deleteField(),
+        assignedBy: deleteField(),
+        staffStatus: deleteField(),
+        staffDecision: deleteField(),
+        staffUpdatedAt: serverTimestamp(),
+        staffStartedAt: deleteField(),
+        staffStartedAtMs: deleteField(),
+        staffStartedBy: deleteField(),
+        staffCompletedAt: deleteField(),
+        staffCompletedAtMs: deleteField(),
+        staffCompletedBy: deleteField(),
+        staffWorkMinutes: deleteField(),
+        needsReassignment: false,
+        reassignUrgent: false,
+        reassignReason: deleteField(),
+        reassignNeededAt: deleteField(),
+        reassignFromStaffUid: deleteField(),
+        staffStartReminder3hSentAt: deleteField(),
+        staffStartReminder3hSentAtMs: deleteField(),
+      },
+      { merge: true }
+    );
+
+    const auditRef = doc(collection(db, "serviceRequests", safeRequestId, "assignmentAudit"));
+    transaction.set(auditRef, {
+      action: "unassign",
+      requestId: safeRequestId,
+      fromStaffUid: targetUid,
+      toStaffUid: null,
+      byUid: admin.uid,
+      at: serverTimestamp(),
+      atMs: Date.now(),
+      reason: String(reason || "").trim() || "Manual unassign",
+    });
+
+    return { unassignedUid: targetUid };
+  });
+
+  try {
+    if (txResult?.unassignedUid) {
+      await createStaffNotification({
+        uid: txResult.unassignedUid,
+        type: "STAFF_UNASSIGNED_REQUEST",
+        requestId: safeRequestId,
+      });
+    }
+  } catch (error) {
+    console.warn("Failed to write unassign notification:", error?.message || error);
+  }
 
   return { ok: true };
 }

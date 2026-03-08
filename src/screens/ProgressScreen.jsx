@@ -34,6 +34,7 @@ import { useNotifsV2Store } from "../services/notifsV2Store";
 import { getUserState } from "../services/userservice";
 import { getMyApplications } from "../services/progressservice";
 import { getResumeTarget } from "../resume/resumeEngine";
+import { buildFullPackageHubPath, toFullPackageItemKey } from "../services/fullpackageservice";
 
 const PERF_TAG = "[perf][ProgressScreen]";
 const REQUESTS_INITIAL_RENDER = 5;
@@ -700,11 +701,20 @@ export default function ProgressScreen() {
                   const canDelete = st === "closed" || st === "rejected";
                   const isDeleting = deletingId === r.id;
 
-                  const isFull = String(r.requestType || "").toLowerCase() === "full";
+                  const isFull =
+                    Boolean(r.isFullPackage) ||
+                    String(r.requestType || "").toLowerCase() === "full";
+                  const fullPackageId = String(
+                    r.fullPackageId || r.fullPackage?.fullPackageId || r.fullPackage?.id || ""
+                  ).trim();
+                  const isLinkedFullPackage = Boolean(r.isFullPackage) && Boolean(fullPackageId);
 
                   const titleLeft = `${String(r.track || "").toUpperCase()} • ${r.country || "-"}`;
                   const subtitle = isFull ? "Full package" : `Single: ${r.serviceName || "-"}`;
                   const createdLabel = formatCreatedAt(r.createdAt);
+                  const fullAccentCard = isFull
+                    ? "border-emerald-300/80 bg-emerald-50/45 dark:border-emerald-800/60 dark:bg-emerald-950/20"
+                    : "";
 
                   const rid = String(r.id || "");
                   const isPinned = (pinnedIds || []).includes(rid);
@@ -712,6 +722,39 @@ export default function ProgressScreen() {
                   const handleTryAgain = () => {
                     const country = r.country || "Not selected";
                     const countryQS2 = encodeURIComponent(country);
+
+                    if (isLinkedFullPackage) {
+                      const missingItems = Array.isArray(r.fullPackageSelectedItems)
+                        ? r.fullPackageSelectedItems
+                        : Array.isArray(r.missingItems)
+                        ? r.missingItems
+                        : parseMissingItemsFromNote(r.note);
+                      const fallbackItem =
+                        String(r.fullPackageItem || "").trim() ||
+                        String(missingItems?.[0] || "").trim() ||
+                        "Document checklist";
+                      const retryItemKey = String(
+                        r.fullPackageItemKey || toFullPackageItemKey(fallbackItem)
+                      ).trim();
+                      const hubPath = buildFullPackageHubPath({
+                        fullPackageId,
+                        track: safeTrack,
+                      });
+                      if (hubPath) {
+                        const qs = new URLSearchParams();
+                        if (country && country !== "Not selected") qs.set("country", country);
+                        qs.set("track", safeTrack);
+                        qs.set("autoOpen", "1");
+                        if (retryItemKey) qs.set("retryItemKey", retryItemKey);
+                        if (fallbackItem) qs.set("item", fallbackItem);
+                        const suffix = qs.toString();
+
+                        navigate(suffix ? `${hubPath}&${suffix}` : hubPath, {
+                          state: { fullPackageId, missingItems },
+                        });
+                        return;
+                      }
+                    }
 
                     if (isFull) {
                       let missingItems = Array.isArray(r.missingItems) ? r.missingItems : [];
@@ -750,8 +793,11 @@ export default function ProgressScreen() {
                     return (
                     <div
                       key={r.id}
-                      className={`${cardBase} ${cardHover} relative`}
+                      className={`${cardBase} ${cardHover} ${fullAccentCard} relative overflow-hidden`}
                     >
+                      {isFull ? (
+                        <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5 rounded-l-3xl bg-emerald-500/80 dark:bg-emerald-400/70" />
+                      ) : null}
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
@@ -765,6 +811,13 @@ export default function ProgressScreen() {
                           <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                             {subtitle}
                           </div>
+                          {isFull ? (
+                            <div className="mt-2">
+                              <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-100/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-900/35 dark:text-emerald-200">
+                                Full package
+                              </span>
+                            </div>
+                          ) : null}
 
                           {createdLabel ? (
                             <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">

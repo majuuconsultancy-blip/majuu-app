@@ -13,8 +13,9 @@ import {
   signInWithPopup,
   signInWithRedirect,
 } from "firebase/auth";
-import { auth, googleProvider } from "../firebase";
+import { auth, authPersistenceReady, googleProvider } from "../firebase";
 import { ensureUserDoc } from "../services/userservice";
+import { isLikelyFirstSignIn, setBiometricPromptPending } from "../services/biometricLockService";
 
 /* ---------------- Icons ---------------- */
 function IconMail(props) {
@@ -216,12 +217,20 @@ export default function SignupScreen() {
       provider: (user.providerData?.[0]?.providerId || "").toString(),
       lastLoginAt: Date.now(),
     });
+    try {
+      if (isLikelyFirstSignIn(user)) {
+        await setBiometricPromptPending(user.uid, true);
+      }
+    } catch (error) {
+      void error;
+    }
   }
 
   const handleGoogle = async () => {
     setError("");
     setLoading(true);
     try {
+      await authPersistenceReady.catch(() => {});
       const res = await signInWithPopup(auth, googleProvider);
       await finishLogin(res.user);
       navigate("/dashboard", { replace: true });
@@ -256,6 +265,7 @@ export default function SignupScreen() {
     setLoading(true);
 
     try {
+      await authPersistenceReady.catch(() => {});
       const userCred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
       await finishLogin(userCred.user);
 

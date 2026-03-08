@@ -35,11 +35,14 @@ import AdminGate from "./components/AdminGate";
 import GAPageView from "./components/GAPageView";
 import StaffGate from "./components/StaffGate";
 import AppLoading from "./components/AppLoading";
-import { auth, db, authPersistenceReady } from "./firebase";
+import { auth, db } from "./firebase";
 import { startNotifsV2Engine, stopNotifsV2Engine } from "./services/notifsV2Engine";
 import { cleanupPushBridge, initPushBridge } from "./services/pushBridge";
+import { sweepStaleAssignments } from "./services/adminrequestservice";
 import { hasSeenIntro } from "./utils/introFlag";
 import { isResumableRoute, setSnapshot } from "./resume/resumeEngine";
+import { waitForAuthRestore } from "./utils/authRestore";
+import BiometricAppLock from "./components/BiometricAppLock";
 
 /* ---------------- Lazy screens ---------------- */
 // Main user flows
@@ -122,20 +125,14 @@ function StartupRoute() {
 
   useEffect(() => {
     let cancelled = false;
-    let settled = false;
-    let unsubAuth = () => {};
     let timeoutId = null;
 
     const finalize = (next) => {
-      if (cancelled || settled) return;
-      settled = true;
+      if (cancelled) return;
       if (timeoutId) {
         window.clearTimeout(timeoutId);
         timeoutId = null;
       }
-      try {
-        unsubAuth?.();
-      } catch {}
       setTarget(next);
     };
 
@@ -146,43 +143,19 @@ function StartupRoute() {
       };
     }
 
-    // Fast path: if user is already hydrated, skip directly.
-    if (auth.currentUser) {
-      finalize("/dashboard");
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    try {
-      unsubAuth = onAuthStateChanged(auth, (user) => {
-        finalize(user ? "/dashboard" : "/login");
-      });
-    } catch {}
-
-    // Kick persistence in background (do not block listener wiring).
-    authPersistenceReady.catch(() => {});
-
-    if (typeof auth?.authStateReady === "function") {
-      auth
-        .authStateReady()
-        .then(() => {
-          finalize(auth.currentUser ? "/dashboard" : "/login");
-        })
-        .catch(() => {});
-    }
-
     // Last fallback to avoid hanging loader forever.
     timeoutId = window.setTimeout(() => {
       finalize(auth.currentUser ? "/dashboard" : "/login");
     }, 8000);
 
+    void (async () => {
+      const restoredUser = await waitForAuthRestore(8000);
+      finalize(restoredUser ? "/dashboard" : "/login");
+    })();
+
     return () => {
       cancelled = true;
       if (timeoutId) window.clearTimeout(timeoutId);
-      try {
-        unsubAuth?.();
-      } catch {}
     };
   }, []);
 
@@ -286,6 +259,7 @@ function RuntimeBridges() {
     let bootSeq = 0;
     let localEngineCleanup = () => {};
     let localPushCleanup = () => {};
+    let localSweepCleanup = () => {};
 
     const unsub = onAuthStateChanged(auth, (user) => {
       bootSeq += 1;
@@ -293,12 +267,22 @@ function RuntimeBridges() {
 
       try {
         localEngineCleanup?.();
-      } catch {}
+      } catch (error) {
+        void error;
+      }
       try {
         localPushCleanup?.();
-      } catch {}
+      } catch (error) {
+        void error;
+      }
+      try {
+        localSweepCleanup?.();
+      } catch (error) {
+        void error;
+      }
       localEngineCleanup = () => {};
       localPushCleanup = () => {};
+      localSweepCleanup = () => {};
 
       if (!user) {
         stopNotifsV2Engine();
@@ -323,6 +307,18 @@ function RuntimeBridges() {
         if (disposed || seq !== bootSeq) return;
         localEngineCleanup = startNotifsV2Engine({ role, uid: user.uid });
         localPushCleanup = initPushBridge({ navigate, role, uid: user.uid }) || (() => {});
+        if (role === "admin") {
+          const runSweep = async () => {
+            try {
+              await sweepStaleAssignments({ staleHours: 24, max: 350 });
+            } catch (error) {
+              console.warn("admin background sweep failed:", error?.message || error);
+            }
+          };
+          void runSweep();
+          const timer = window.setInterval(runSweep, 5 * 60 * 1000);
+          localSweepCleanup = () => window.clearInterval(timer);
+        }
       })().catch(() => {});
     });
 
@@ -330,10 +326,19 @@ function RuntimeBridges() {
       disposed = true;
       try {
         localEngineCleanup?.();
-      } catch {}
+      } catch (error) {
+        void error;
+      }
       try {
         localPushCleanup?.();
-      } catch {}
+      } catch (error) {
+        void error;
+      }
+      try {
+        localSweepCleanup?.();
+      } catch (error) {
+        void error;
+      }
       unsub();
       stopNotifsV2Engine();
       cleanupPushBridge();
@@ -371,7 +376,9 @@ function ResumeRouteWatcher() {
       let requestId = requestMatch[1];
       try {
         requestId = decodeURIComponent(requestId);
-      } catch {}
+      } catch (error) {
+        void error;
+      }
       patch.weHelp = { activeRequestId: requestId };
     }
 
@@ -390,6 +397,7 @@ function AppRoutes() {
       <GAPageView />
       <AndroidBackHandler />
       <RouteScrollReset />
+      <BiometricAppLock />
 
       <Suspense fallback={<AppLoading />}>
         <Routes>
@@ -535,6 +543,7 @@ export default function App() {
       <div className="app-safe-area">
         <AppRoutes />
       </div>
+      {IS_NATIVE_PLATFORM ? <div aria-hidden="true" className="app-native-nav-tab" /> : null}
     </Router>
   );
 }

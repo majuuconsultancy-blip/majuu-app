@@ -257,7 +257,7 @@ export default function AppLayout() {
         <div
           className="fixed left-0 right-0 z-40 pointer-events-none px-4"
           style={{
-            bottom: "calc(4.5rem + env(safe-area-inset-bottom))",
+            bottom: "calc(var(--app-active-track-lift) + var(--app-safe-bottom))",
             opacity: Math.max(0, 1 - scrollY / 120),
             transition: "opacity 120ms linear",
           }}
@@ -271,7 +271,10 @@ export default function AppLayout() {
         </div>
       )}
 
-      <nav className="app-bottom-nav fixed bottom-4 left-0 right-0 z-50 px-4 pb-[env(safe-area-inset-bottom)]">
+      <nav
+        className="app-bottom-nav fixed left-0 right-0 z-50 px-4"
+        style={{ bottom: "calc(var(--app-bottom-nav-lift) + var(--app-safe-bottom))" }}
+      >
         <div className="max-w-xl mx-auto">
           <div
             className="rounded-2xl border border-white/50 dark:border-zinc-700/45 bg-white/15 dark:bg-zinc-900/18 px-2 py-2 shadow-[0_10px_28px_rgba(15,23,42,0.10)] t-pop"

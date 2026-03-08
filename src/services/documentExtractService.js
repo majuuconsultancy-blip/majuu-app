@@ -1,4 +1,14 @@
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  documentId,
+  getDoc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
+} from "firebase/firestore";
 import { auth, db } from "../firebase";
 
 const EXTRACT_METHOD = "template_v1";
@@ -216,6 +226,51 @@ function resolveAttachmentId(attachment) {
   return safeId(attachment?.id || attachment?.attachmentId);
 }
 
+function normalizeNameForCompare(name) {
+  return safeStr(name, 200)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getAttachmentDisplayName(attachment) {
+  return (
+    safeStr(attachment?.name, 180) ||
+    safeStr(attachment?.filename, 180) ||
+    safeStr(attachment?.fileName, 180) ||
+    "Document"
+  );
+}
+
+function modeName(values) {
+  const counter = new Map();
+  values.forEach((value) => {
+    if (!value.normalized) return;
+    const current = counter.get(value.normalized) || {
+      count: 0,
+      display: value.display,
+    };
+    current.count += 1;
+    if (!current.display && value.display) {
+      current.display = value.display;
+    }
+    counter.set(value.normalized, current);
+  });
+
+  let winner = { normalized: "", display: "", count: 0 };
+  counter.forEach((entry, normalized) => {
+    if (entry.count > winner.count) {
+      winner = {
+        normalized,
+        display: entry.display || "",
+        count: entry.count,
+      };
+    }
+  });
+  return winner;
+}
+
 export function getTemplateFieldKeys(docType) {
   const normalized = normalizeDocTypeValue(docType) || "GENERIC";
   return DOC_TYPE_FIELD_MAP[normalized] || DOC_TYPE_FIELD_MAP.GENERIC;
@@ -426,4 +481,140 @@ export async function resetExtractToDraft(requestId, attachment, request = null,
 
   await setDoc(ref, payload, { merge: true });
   return payload;
+}
+
+export async function getExtractsByAttachmentIds(requestId, attachmentIds = []) {
+  const rid = safeId(requestId);
+  if (!rid) throw new Error("Missing requestId");
+
+  const uniqueIds = Array.from(
+    new Set(
+      (Array.isArray(attachmentIds) ? attachmentIds : [])
+        .map((id) => safeId(id))
+        .filter(Boolean)
+    )
+  );
+
+  if (uniqueIds.length === 0) return {};
+
+  const out = {};
+  const chunks = [];
+  for (let i = 0; i < uniqueIds.length; i += 10) {
+    chunks.push(uniqueIds.slice(i, i + 10));
+  }
+
+  for (const chunk of chunks) {
+    const ref = collection(db, "serviceRequests", rid, "documentExtracts");
+    const qy = query(ref, where(documentId(), "in", chunk));
+    const snap = await getDocs(qy);
+    snap.docs.forEach((d) => {
+      out[d.id] = { id: d.id, ...d.data() };
+    });
+  }
+
+  return out;
+}
+
+export function buildNameUniformityProofread({
+  attachments = [],
+  extractsByAttachmentId = {},
+  request = null,
+} = {}) {
+  const rows = (Array.isArray(attachments) ? attachments : []).map((attachment) => {
+    const attachmentId = resolveAttachmentId(attachment);
+    const extract = extractsByAttachmentId?.[attachmentId] || null;
+    const extractedName = safeStr(extract?.fields?.fullName, 160);
+    const normalized = normalizeNameForCompare(extractedName);
+
+    return {
+      attachmentId,
+      attachmentName: getAttachmentDisplayName(attachment),
+      extractedName,
+      normalizedName: normalized,
+      hasExtract: Boolean(extract),
+      extractStatus: safeStr(extract?.status, 40) || "",
+      fullNameConfidence: clamp01(extract?.confidence?.fullName),
+    };
+  });
+
+  const candidateNames = rows
+    .filter((row) => row.normalizedName)
+    .map((row) => ({ normalized: row.normalizedName, display: row.extractedName }));
+
+  const winner = modeName(candidateNames);
+  const requestName = safeStr(request?.name || request?.fullName, 160);
+  const requestNormalized = normalizeNameForCompare(requestName);
+
+  const baselineNormalized = winner.normalized || requestNormalized;
+  const baselineDisplay = winner.display || requestName;
+
+  let uniformCount = 0;
+  let mismatchCount = 0;
+  let missingCount = 0;
+
+  const rowChecks = rows.map((row) => {
+    if (!baselineNormalized) {
+      missingCount += 1;
+      return {
+        ...row,
+        status: "missing_name",
+        verdict: "No comparable name found yet",
+      };
+    }
+
+    if (!row.normalizedName) {
+      missingCount += 1;
+      return {
+        ...row,
+        status: "missing_name",
+        verdict: "Name is missing in this document extract",
+      };
+    }
+
+    if (row.normalizedName === baselineNormalized) {
+      uniformCount += 1;
+      return {
+        ...row,
+        status: "uniform",
+        verdict: "Name matches baseline",
+      };
+    }
+
+    mismatchCount += 1;
+    return {
+      ...row,
+      status: "mismatch",
+      verdict: "Name differs from baseline",
+    };
+  });
+
+  const totalDocs = rows.length;
+  const checkedDocs = rowChecks.filter((row) => row.status !== "missing_name").length;
+
+  let summaryStatus = "ok";
+  if (!baselineNormalized) summaryStatus = "insufficient_data";
+  else if (mismatchCount > 0) summaryStatus = "attention";
+  else if (missingCount > 0) summaryStatus = "partial";
+
+  const summaryLine =
+    summaryStatus === "attention"
+      ? `${mismatchCount} document${mismatchCount === 1 ? "" : "s"} have name mismatch`
+      : summaryStatus === "partial"
+      ? "No mismatches found, but some documents are missing extracted names"
+      : summaryStatus === "insufficient_data"
+      ? "No extracted names found to compare yet"
+      : "All checked document names look uniform";
+
+  return {
+    baselineName: baselineDisplay,
+    baselineNormalized,
+    totalDocs,
+    checkedDocs,
+    uniformCount,
+    mismatchCount,
+    missingCount,
+    summaryStatus,
+    summaryLine,
+    rows: rowChecks,
+  };
 }

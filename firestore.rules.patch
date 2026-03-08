@@ -1,53 +1,120 @@
-// PATCH SNIPPET
-// Insert these helpers and match block inside your existing Firestore rules file.
-// The repo currently does not include a baseline firestore.rules to patch directly.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
 
-// --- helper functions (add once in match /databases/{database}/documents) ---
-function signedIn() {
-  return request.auth != null;
+    function authUid() {
+      return request.auth.uid;
+    }
+
+    function userDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid));
+    }
+
+    function userRole(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid))
+        ? userDoc(uid).data.role
+        : "";
+    }
+
+    function isAdmin() {
+      return signedIn() && (
+        request.auth.token.admin == true ||
+        userRole(authUid()) == "admin"
+      );
+    }
+
+    function isStaffSelf(staffUid) {
+      return signedIn() && authUid() == staffUid;
+    }
+
+    function requestDoc(requestId) {
+      return get(/databases/$(database)/documents/serviceRequests/$(requestId));
+    }
+
+    function requestExists(requestId) {
+      return exists(/databases/$(database)/documents/serviceRequests/$(requestId));
+    }
+
+    function isAssignedTo(staffUid, requestId) {
+      return requestExists(requestId) && requestDoc(requestId).data.assignedTo == staffUid;
+    }
+
+    function requestFinalized(requestId) {
+      return requestExists(requestId) && (
+        requestDoc(requestId).data.staffStatus == "done" ||
+        requestDoc(requestId).data.status == "closed" ||
+        requestDoc(requestId).data.status == "rejected"
+      );
+    }
+
+    /*
+      NOTE:
+      - maxActive counting and speciality filtering are enforced in transactional code.
+      - if you later move those checks to Cloud Functions, keep these rules strict.
+    */
+
+    match /users/{uid} {
+      allow read, update, delete: if isAdmin() || (signedIn() && authUid() == uid);
+      allow create: if signedIn() && authUid() == uid;
+
+      match /notifications/{notificationId} {
+        allow read, update, delete: if isAdmin() || (signedIn() && authUid() == uid);
+        allow create: if isAdmin() || (signedIn() && authUid() == uid);
+      }
+    }
+
+    match /staff/{staffUid} {
+      allow read: if isAdmin() || isStaffSelf(staffUid);
+      allow create, update, delete: if isAdmin();
+
+      match /notifications/{notificationId} {
+        allow read, update, delete: if isAdmin() || isStaffSelf(staffUid);
+        allow create: if isAdmin() || isStaffSelf(staffUid);
+      }
+
+      match /tasks/{requestId} {
+        allow read: if isAdmin() || isStaffSelf(staffUid);
+
+        // Admin creates assignment rows.
+        allow create: if isAdmin();
+
+        // Staff can update only when currently assigned to them.
+        allow update: if isAdmin() || (isStaffSelf(staffUid) && isAssignedTo(staffUid, requestId));
+
+        // Permission fix: staff can delete from Done list.
+        allow delete: if isAdmin() || (
+          isStaffSelf(staffUid) &&
+          (
+            resource.data.status == "done" ||
+            requestFinalized(requestId)
+          )
+        );
+      }
+    }
+
+    match /serviceRequests/{requestId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+
+      // Admin has full control. Staff can update assigned requests.
+      allow update: if isAdmin() || (
+        signedIn() &&
+        resource.data.assignedTo == authUid()
+      ) || (
+        signedIn() &&
+        resource.data.uid == authUid()
+      );
+
+      allow delete: if isAdmin();
+
+      match /assignmentAudit/{auditId} {
+        allow read: if isAdmin() || (signedIn() && isAssignedTo(authUid(), requestId));
+        allow create: if isAdmin();
+        allow update, delete: if false;
+      }
+    }
+  }
 }
-
-function isAdmin() {
-  return signedIn() && request.auth.token.email == "brioneroo@gmail.com";
-}
-
-function hasActiveStaffDoc() {
-  return signedIn()
-    && exists(/databases/$(database)/documents/staff/$(request.auth.uid))
-    && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.active == true;
-}
-
-function requestDoc(requestId) {
-  return get(/databases/$(database)/documents/serviceRequests/$(requestId));
-}
-
-function requestExists(requestId) {
-  return exists(/databases/$(database)/documents/serviceRequests/$(requestId));
-}
-
-function staffCanWorkOnRequest(requestId) {
-  return signedIn()
-    && hasActiveStaffDoc()
-    && requestExists(requestId)
-    && (
-      requestDoc(requestId).data.assignedTo == request.auth.uid
-      || exists(/databases/$(database)/documents/staff/$(request.auth.uid)/tasks/$(requestId))
-    );
-}
-
-function resourceParentOwnerOrStaff(requestId) {
-  return signedIn()
-    && requestExists(requestId)
-    && (
-      requestDoc(requestId).data.uid == request.auth.uid
-      || staffCanWorkOnRequest(requestId)
-    );
-}
-
-// --- add inside your existing match /serviceRequests/{id} { ... } ---
-match /documentExtracts/{attachmentId} {
-  allow read: if isAdmin() || resourceParentOwnerOrStaff(id);
-  allow create, update: if isAdmin() || staffCanWorkOnRequest(id);
-  allow delete: if isAdmin();
-}
-

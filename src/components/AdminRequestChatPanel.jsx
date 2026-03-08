@@ -1,6 +1,6 @@
-// ✅ src/components/AdminRequestChatPanel.jsx (FULL COPY-PASTE)
+// âœ… src/components/AdminRequestChatPanel.jsx (FULL COPY-PASTE)
 // FIX:
-// ✅ White screen was caused by missing Firestore import: `collection`
+// âœ… White screen was caused by missing Firestore import: `collection`
 //    You call collection(...) but it wasn't imported, so runtime crashed.
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -10,15 +10,17 @@ import {
   query,
   where,
   doc,
-  collection, // ✅ FIX: required (was missing)
+  collection, // âœ… FIX: required (was missing)
 } from "firebase/firestore";
 import { db } from "../firebase";
 import {
   adminApprovePendingMessage,
   adminHidePendingMessage,
+  adminSendBundleDirect,
   adminSendTextDirect,
   adminSendPdfMetaDirect,
 } from "../services/chatservice";
+import useKeyboardInset from "../hooks/useKeyboardInset";
 
 /* ---------------- helpers ---------------- */
 function safeStr(x) {
@@ -40,6 +42,27 @@ function formatTime(ts) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function dayKeyFromMs(ms) {
+  if (!ms) return "";
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+function formatDayLabel(ms) {
+  if (!ms) return "";
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const startDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startToday - startDay) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+}
+
 function pickCreatedAt(docu) {
   return docu?.createdAt || docu?.approvedAt || docu?.editedAt || docu?.rejectedAt || null;
 }
@@ -54,10 +77,17 @@ function roleLabel(role) {
 function msgPreview(m) {
   const type = String(m?.type || "text").toLowerCase();
   if (type === "pdf") return `PDF: ${m?.pdfMeta?.name || "document.pdf"}`;
+  if (type === "bundle") {
+    const text = safeStr(m?.text);
+    const pdf = safeStr(m?.pdfMeta?.name);
+    if (text && pdf) return `${text}\nPDF: ${pdf}`;
+    if (pdf) return `PDF: ${pdf}`;
+    return text;
+  }
   return safeStr(m?.text || "");
 }
 
-/* ✅ autosize textarea like ChatGPT */
+/* âœ… autosize textarea like ChatGPT */
 function useAutosizeTextArea(textareaRef, value, { maxRows = 6 } = {}) {
   useEffect(() => {
     const el = textareaRef.current;
@@ -76,29 +106,11 @@ function useAutosizeTextArea(textareaRef, value, { maxRows = 6 } = {}) {
   }, [textareaRef, value, maxRows]);
 }
 
-/* ✅ UI-only merge rule for adjacent pdf+text */
+/* âœ… UI-only merge rule for adjacent pdf+text */
 function shouldMergePair(a, b, WINDOW_MS) {
-  if (!a || !b) return false;
-
-  const aFromRole = String(a?.fromRole || "").toLowerCase();
-  const bFromRole = String(b?.fromRole || "").toLowerCase();
-  if (aFromRole !== bFromRole) return false;
-
-  const aFromUid = safeStr(a?.fromUid);
-  const bFromUid = safeStr(b?.fromUid);
-  if (aFromUid && bFromUid && aFromUid !== bFromUid) return false;
-
-  const aType = String(a?.type || "text").toLowerCase();
-  const bType = String(b?.type || "text").toLowerCase();
-  const pairOk =
-    (aType === "pdf" && bType === "text") || (aType === "text" && bType === "pdf");
-  if (!pairOk) return false;
-
-  const aMs = Number(a?._createdAtMs || 0) || 0;
-  const bMs = Number(b?._createdAtMs || 0) || 0;
-  if (!aMs || !bMs) return false;
-
-  return Math.abs(bMs - aMs) <= WINDOW_MS;
+  if (!a || !b || !WINDOW_MS) return false;
+  // Keep timeline stable and avoid UI jumps after sends.
+  return false;
 }
 
 function makeBundleView(first, second) {
@@ -149,18 +161,34 @@ function IconSend(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
       <path
-        d="M4.2 12l16.2-7-4.5 14-3.8-5.1L4.2 12Z"
+        d="M12 19V6.8"
         stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M20.4 5L12.1 13.9"
-        stroke="currentColor"
-        strokeWidth="1.8"
+        strokeWidth="2"
         strokeLinecap="round"
       />
+      <path
+        d="M6.8 12 12 6.8 17.2 12"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
+  );
+}
+
+function StatusTicks({ status }) {
+  const s = String(status || "").toLowerCase();
+  const tone = s === "delivered" || s === "approved" ? "text-emerald-300" : "text-zinc-300";
+  return (
+    <span className={`inline-flex items-center ${tone}`} title={s}>
+      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="-mr-1 h-3.5 w-3.5">
+        <path d="M2.5 8.5 5.7 11.3 13.2 4.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
+        <path d="M2.5 8.5 5.7 11.3 13.2 4.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
   );
 }
 
@@ -187,13 +215,13 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   const [busyKey, setBusyKey] = useState(""); // message id or bundle id
   const [err, setErr] = useState("");
 
-  // ✅ NEW: track whether staff is assigned
+  // âœ… NEW: track whether staff is assigned
   const [assignedStaffUid, setAssignedStaffUid] = useState("");
 
-  // ✅ Hide removes message instantly (optimistic)
+  // âœ… Hide removes message instantly (optimistic)
   const [optimisticHidden, setOptimisticHidden] = useState(() => new Set());
 
-  // ✅ Accept removes buttons instantly and NEVER rolls back
+  // âœ… Accept removes buttons instantly and NEVER rolls back
   const [optimisticNoActions, setOptimisticNoActions] = useState(() => new Set());
 
   // admin composer
@@ -201,10 +229,12 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   const [text, setText] = useState("");
   const [pickedPdf, setPickedPdf] = useState(null); // { name, size, mime }
   const [sending, setSending] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
 
   const fileInputRef = useRef(null);
   const threadRef = useRef(null);
   const composerRef = useRef(null);
+  const keyboardInset = useKeyboardInset(true);
 
   const taRef = useRef(null);
   useAutosizeTextArea(taRef, text, { maxRows: 6 });
@@ -373,10 +403,37 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     return out;
   }, [pending, published, optimisticHidden]);
 
+  const timelineRows = useMemo(() => {
+    const rows = [];
+    let prevDay = "";
+    timeline.forEach((item) => {
+      const dayKey = dayKeyFromMs(item?.createdAtMs || 0);
+      if (dayKey && dayKey !== prevDay) {
+        rows.push({
+          _kind: "day",
+          id: `d_${dayKey}_${item.id}`,
+          label: formatDayLabel(item?.createdAtMs || 0),
+        });
+        prevDay = dayKey;
+      }
+      rows.push({ _kind: "msg", id: item.id, item });
+    });
+    return rows;
+  }, [timeline]);
+
   useEffect(() => {
     scrollToBottom();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeline.length, err]);
+
+  useEffect(() => {
+    if (!composerFocused && !keyboardInset) return;
+    const timer = window.setTimeout(() => {
+      scrollToBottom();
+    }, 48);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerFocused, keyboardInset, timeline.length]);
 
   /* ---------- optimistic helpers ---------- */
   const hidePendingOptimistic = (pendingId) => {
@@ -402,7 +459,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
     setBusyKey(bundleId);
 
-    // ✅ Accept: hide buttons immediately & permanently
+    // âœ… Accept: hide buttons immediately & permanently
     pendingChildren.forEach((c) => disableActionsOptimistic(c.id));
 
     try {
@@ -411,7 +468,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
       }
     } catch (e) {
       console.error(e);
-      // ✅ DO NOT rollback button hide
+      // âœ… DO NOT rollback button hide
       setErr(e?.message || "Approve failed (buttons will stay hidden).");
     } finally {
       setBusyKey("");
@@ -424,7 +481,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
     setBusyKey(bundleId);
 
-    // ✅ Hide: remove bubble instantly
+    // âœ… Hide: remove bubble instantly
     pendingChildren.forEach((c) => hidePendingOptimistic(c.id));
 
     try {
@@ -449,14 +506,14 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     setErr("");
     setBusyKey(p.id);
 
-    // ✅ Accept: hide buttons immediately & permanently
+    // âœ… Accept: hide buttons immediately & permanently
     disableActionsOptimistic(p.id);
 
     try {
       await adminApprovePendingMessage({ requestId: rid, pendingId: p.id });
     } catch (e) {
       console.error(e);
-      // ✅ DO NOT rollback button hide
+      // âœ… DO NOT rollback button hide
       setErr(e?.message || "Approve failed (buttons will stay hidden).");
     } finally {
       setBusyKey("");
@@ -487,6 +544,9 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
   /* ---------- admin direct send ---------- */
   const openPicker = () => fileInputRef.current?.click();
+  const keepComposerFocusOnAction = (event) => {
+    event.preventDefault();
+  };
 
   const onPickFile = (e) => {
     const f = e.target.files?.[0];
@@ -512,15 +572,38 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
     setSending(true);
     try {
-      if (pdf) {
+      if (pdf && t) {
+        try {
+          await adminSendBundleDirect({
+            requestId: rid,
+            toRole: sendTo,
+            text: t,
+            pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
+          });
+        } catch (bundleErr) {
+          const code = String(bundleErr?.code || "").toLowerCase();
+          const msg = String(bundleErr?.message || "").toLowerCase();
+          const fallback =
+            code.includes("permission-denied") ||
+            msg.includes("permission") ||
+            msg.includes("invalid type") ||
+            msg.includes("bundle");
+          if (!fallback) throw bundleErr;
+
+          await adminSendTextDirect({ requestId: rid, toRole: sendTo, text: t });
+          await adminSendPdfMetaDirect({
+            requestId: rid,
+            toRole: sendTo,
+            pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
+          });
+        }
+      } else if (pdf) {
         await adminSendPdfMetaDirect({
           requestId: rid,
           toRole: sendTo,
           pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
         });
-      }
-
-      if (t) {
+      } else if (t) {
         await adminSendTextDirect({ requestId: rid, toRole: sendTo, text: t });
       }
 
@@ -542,34 +625,33 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   };
 
   /* ---------- UI ---------- */
-  const card =
-    "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-xl";
   const bubbleBase = "max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap";
   const bubbleLeft =
-    "bg-white dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-800";
-  const bubbleRight = "bg-emerald-600 text-white";
+    "bg-white dark:bg-zinc-900/70 text-zinc-900 dark:text-zinc-100 border border-zinc-200/90 dark:border-zinc-800";
+  const bubbleRight = "bg-emerald-600 text-white shadow-[0_10px_18px_rgba(5,150,105,0.2)]";
 
   const smallBtn =
     "inline-flex items-center justify-center rounded-xl border px-2.5 py-1 text-[12px] font-semibold transition disabled:opacity-60";
-
-  const composerHeight = composerRef.current?.offsetHeight || 92;
+  const sendBtnTone = canSend
+    ? "bg-emerald-600 text-white shadow-[0_0_0_3px_rgba(16,185,129,0.22)] hover:bg-emerald-700"
+    : "bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
+  const navLiftPad = keyboardInset > 0 ? "0px" : "var(--app-bottom-nav-lift, 0px)";
 
   return (
-    <div className={`w-full ${card} h-[85vh] max-h-[85vh] overflow-hidden`}>
-      {/* header */}
-      <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4">
-        <div className="flex items-center gap-2">
+    <div className="fixed inset-0 z-[999999] flex flex-col bg-white dark:bg-zinc-950">
+      <div className="flex items-center justify-between gap-3 border-b border-zinc-200/80 dark:border-zinc-800/80 px-4 pb-2.5 pt-[calc(env(safe-area-inset-top,0px)+0.6rem)]">
+        <div className="flex min-w-0 items-center gap-2">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/70">
             <IconChat className="h-5 w-5 text-emerald-800" />
           </span>
           <div className="min-w-0">
-            <div className="font-semibold text-zinc-900 dark:text-zinc-100">Request chat</div>
+            <div className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">Request Chat</div>
             <div className="text-xs text-zinc-500">
-              Left = User • Right = Staff & Admin • Accept/Hide pending inline.
+              Moderation thread
               {assignedStaffUid ? (
-                <span className="ml-2 text-emerald-700 font-semibold">• Staff assigned</span>
+                <span className="ml-2 font-semibold text-emerald-700">• Staff assigned</span>
               ) : (
-                <span className="ml-2 text-amber-700 font-semibold">• No staff assigned</span>
+                <span className="ml-2 font-semibold text-amber-700">• No staff assigned</span>
               )}
             </div>
           </div>
@@ -579,234 +661,228 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
           <span className="rounded-full border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
             Pending: {pending.length}
           </span>
-
           {onClose ? (
             <button
               type="button"
               onClick={onClose}
-              className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-300"
+              title="Close"
             >
-              Close
+              x
             </button>
           ) : null}
         </div>
       </div>
 
-      {/* body */}
-      <div className="flex h-full flex-col">
-        {err ? (
-          <div className="px-4 pt-4">
-            <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-              {err}
-            </div>
+      {err ? (
+        <div className="px-3 pt-2">
+          <div className="rounded-xl border border-rose-100 bg-rose-50/80 px-3 py-2 text-xs text-rose-700">
+            {err}
           </div>
-        ) : null}
+        </div>
+      ) : null}
 
-        {/* thread */}
-        <div className="flex-1 px-4 pb-3 pt-4 overflow-hidden">
-          <div
-            ref={threadRef}
-            className="h-full overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/40 p-3"
-          >
-            {timeline.length === 0 ? (
-              <div className="text-sm text-zinc-600 dark:text-zinc-300">No messages yet.</div>
-            ) : (
-              <div className="grid gap-2">
-                {timeline.map((item) => {
-                  const m = item.data || {};
-                  const fromRole = String(m.fromRole || "").toLowerCase();
+      <div ref={threadRef} className="flex-1 overflow-y-auto px-3 py-2">
+        {timelineRows.length === 0 ? (
+          <div className="px-1 py-2 text-sm text-zinc-600 dark:text-zinc-300">No messages yet.</div>
+        ) : (
+          <div className="grid gap-2">
+            {timelineRows.map((row) => {
+              if (row._kind === "day") {
+                return (
+                  <div key={row.id} className="flex justify-center py-1">
+                    <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+                      {row.label}
+                    </span>
+                  </div>
+                );
+              }
 
-                  const isLeft = fromRole === "user";
-                  const bubbleCls = isLeft ? bubbleLeft : bubbleRight;
+              const item = row.item;
+              const m = item.data || {};
+              const fromRole = String(m.fromRole || "").toLowerCase();
+              const isLeft = fromRole === "user";
+              const bubbleCls = isLeft ? bubbleLeft : bubbleRight;
+              const time = formatTime(pickCreatedAt(m));
 
-                  const time = formatTime(pickCreatedAt(m));
+              const isBundleView =
+                item._kind === "bundle_view" ||
+                String(m.type || "").toLowerCase() === "bundle_view" ||
+                String(m.type || "").toLowerCase() === "bundle";
 
-                  const isBundleView =
-                    item._kind === "bundle_view" ||
-                    String(m.type || "").toLowerCase() === "bundle_view";
+              const pendingChildren = isBundleView ? item._pendingChildren || [] : [];
+              const isPending = item._kind === "pending" || (isBundleView && pendingChildren.length > 0);
 
-                  const pendingChildren = isBundleView ? item._pendingChildren || [] : [];
+              const originOk = fromRole === "user" || fromRole === "staff";
+              const bundleHasActionable =
+                isBundleView && pendingChildren.some((c) => !optimisticNoActions.has(c.id));
 
-                  const isPending =
-                    item._kind === "pending" || (isBundleView && pendingChildren.length > 0);
+              const showActions =
+                originOk &&
+                ((item._kind === "pending" && !optimisticNoActions.has(m.id)) ||
+                  (isBundleView && bundleHasActionable));
 
-                  const originOk = fromRole === "user" || fromRole === "staff";
+              const busy = busyKey === m.id || busyKey === item.id;
+              const status = item._kind === "published" ? "delivered" : String(m.status || "pending").toLowerCase();
 
-                  const bundleHasActionable =
-                    isBundleView &&
-                    pendingChildren.some((c) => !optimisticNoActions.has(c.id));
+              return (
+                <div key={item.id} className={`chat-bubble-in flex ${isLeft ? "justify-start" : "justify-end"}`}>
+                  <div className={`${bubbleBase} ${bubbleCls}`}>
+                    {isBundleView ? (
+                      <div className="mt-1 grid gap-2">
+                        {safeStr(m.text) ? <div className="break-words">{m.text}</div> : null}
 
-                  const showActions =
-                    originOk &&
-                    ((item._kind === "pending" && !optimisticNoActions.has(m.id)) ||
-                      (isBundleView && bundleHasActionable));
-
-                  const busy = busyKey === m.id || busyKey === item.id;
-
-                  return (
-                    <div key={item.id} className={`flex ${isLeft ? "justify-start" : "justify-end"}`}>
-                      <div className={`${bubbleBase} ${bubbleCls}`}>
-                        <div
-                          className={`flex items-center justify-between gap-3 text-[11px] ${
-                            isLeft ? "text-zinc-500" : "text-white/80"
-                          }`}
-                        >
-                          <span className="font-semibold">
-                            {roleLabel(fromRole)}
-                            {isPending ? (
-                              <span
-                                className={`ml-2 font-semibold ${
-                                  isLeft ? "text-amber-700" : "text-white/90"
-                                }`}
-                              >
-                                • Pending
-                              </span>
-                            ) : null}
-                          </span>
-                          <span className="font-medium">{time}</span>
-                        </div>
-
-                        {isBundleView ? (
-                          <div className="mt-1 grid gap-2">
-                            {safeStr(m.text) ? <div className="break-words">{m.text}</div> : null}
-
-                            {m?.pdfMeta?.name ? (
-                              <div
-                                className={`${
-                                  isLeft
-                                    ? "bg-zinc-50 dark:bg-zinc-950"
-                                    : "bg-white/10 dark:bg-zinc-900/60"
-                                } rounded-xl p-2`}
-                              >
-                                <div className="text-xs font-semibold opacity-90">PDF</div>
-                                <div className="text-xs opacity-90">
-                                  {m?.pdfMeta?.name || "document.pdf"}
-                                  {m?.pdfMeta?.size ? ` • ${m.pdfMeta.size} bytes` : ""}
-                                </div>
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <div className="mt-1 break-words">{msgPreview(m)}</div>
-                        )}
-
-                        {showActions ? (
-                          <div className={`mt-2 flex gap-2 ${isLeft ? "" : "justify-end"}`}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (isBundleView) return approveBundle(item.id, pendingChildren);
-                                return approveSingle(m);
-                              }}
-                              disabled={busy}
-                              className={`${smallBtn} border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700`}
-                            >
-                              {busy ? "…" : "Accept"}
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (isBundleView) return hideBundle(item.id, pendingChildren);
-                                return hideSingle(m);
-                              }}
-                              disabled={busy}
-                              className={`${smallBtn} border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-800 hover:bg-zinc-50`}
-                            >
-                              {busy ? "…" : "Hide"}
-                            </button>
+                        {m?.pdfMeta?.name ? (
+                          <div
+                            className={`${
+                              isLeft
+                                ? "bg-zinc-50 dark:bg-zinc-950"
+                                : "bg-white/10 dark:bg-zinc-900/60"
+                            } rounded-xl p-2`}
+                          >
+                            <div className="text-xs font-semibold opacity-90">PDF</div>
+                            <div className="text-xs opacity-90">
+                              {m?.pdfMeta?.name || "document.pdf"}
+                              {m?.pdfMeta?.size ? ` • ${m.pdfMeta.size} bytes` : ""}
+                            </div>
                           </div>
                         ) : null}
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                    ) : (
+                      <div className="mt-1 break-words">{msgPreview(m)}</div>
+                    )}
 
-            <div style={{ height: composerHeight }} />
+                    <div
+                      className={`mt-1.5 flex items-center justify-end gap-2 text-[10px] ${
+                        isLeft ? "text-zinc-500" : "text-white/80"
+                      }`}
+                    >
+                      {!isLeft ? <StatusTicks status={status} /> : null}
+                      <span>{time}</span>
+                    </div>
+
+                    {isPending ? (
+                      <div className={`mt-1 text-[10px] font-semibold ${isLeft ? "text-amber-700" : "text-white/85"}`}>
+                        Pending moderation
+                      </div>
+                    ) : null}
+
+                    {showActions ? (
+                      <div className={`mt-2 flex gap-2 ${isLeft ? "" : "justify-end"}`}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isBundleView) return approveBundle(item.id, pendingChildren);
+                            return approveSingle(m);
+                          }}
+                          disabled={busy}
+                          className={`${smallBtn} border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700`}
+                        >
+                          {busy ? "…" : "Accept"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isBundleView) return hideBundle(item.id, pendingChildren);
+                            return hideSingle(m);
+                          }}
+                          disabled={busy}
+                          className={`${smallBtn} border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-800 hover:bg-zinc-50`}
+                        >
+                          {busy ? "…" : "Hide"}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
           </div>
+        )}
+      </div>
+
+      <div
+        ref={composerRef}
+        className="px-3 pt-2"
+        style={{
+          paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + ${navLiftPad} + ${Math.max(0, keyboardInset - 8)}px + 0.75rem)`,
+        }}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf"
+          className="hidden"
+          onChange={onPickFile}
+        />
+
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs font-semibold text-zinc-500">Send as Admin</div>
+          <select
+            value={sendTo}
+            onChange={(e) => setSendTo(e.target.value)}
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 px-3 py-2 text-sm"
+          >
+            <option value="user">To User</option>
+            <option value="staff">To Staff</option>
+          </select>
         </div>
 
-        {/* composer */}
-        <div
-          ref={composerRef}
-          className="sticky bottom-0 z-20 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf"
-            className="hidden"
-            onChange={onPickFile}
+        {pickedPdf ? (
+          <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs">
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">{pickedPdf.name}</span>
+            <button
+              type="button"
+              onClick={() => setPickedPdf(null)}
+              className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+            >
+              Remove
+            </button>
+          </div>
+        ) : null}
+
+        <div className="mt-2 flex items-end gap-2">
+          <button
+            type="button"
+            onMouseDown={keepComposerFocusOnAction}
+            onTouchStart={keepComposerFocusOnAction}
+            onClick={openPicker}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-300"
+            title="Attach PDF"
+          >
+            <IconPlus className="h-5 w-5" />
+          </button>
+
+          <textarea
+            ref={taRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onFocus={() => setComposerFocused(true)}
+            onBlur={() => setComposerFocused(false)}
+            placeholder="Message"
+            rows={1}
+            className="w-full resize-none rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+            style={{ overflowY: "hidden" }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (!sending && canSend) sendNow();
+              }
+            }}
           />
 
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-xs font-semibold text-zinc-500">Send as Admin</div>
-            <select
-              value={sendTo}
-              onChange={(e) => setSendTo(e.target.value)}
-              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-sm"
-            >
-              <option value="user">To User</option>
-              <option value="staff">To Staff</option>
-            </select>
-          </div>
-
-          {pickedPdf ? (
-            <div className="mt-2 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-xs">
-              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{pickedPdf.name}</span>
-              <span className="text-zinc-500">{pickedPdf.size ? `${pickedPdf.size} bytes` : ""}</span>
-              <button
-                type="button"
-                onClick={() => setPickedPdf(null)}
-                className="ml-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50"
-              >
-                Remove
-              </button>
-            </div>
-          ) : null}
-
-          <div className="mt-2 flex items-end gap-2">
-            <button
-              type="button"
-              onClick={openPicker}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 active:scale-[0.99]"
-              title="Attach PDF meta (demo)"
-            >
-              <IconPlus className="h-5 w-5" />
-            </button>
-
-            <textarea
-              ref={taRef}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Type admin message…"
-              rows={1}
-              className="w-full resize-none rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-4 py-3 text-sm outline-none focus:border-emerald-200"
-              style={{ overflowY: "hidden" }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  if (!sending && canSend) sendNow();
-                }
-              }}
-            />
-
-            <button
-              type="button"
-              onClick={sendNow}
-              disabled={sending || !canSend}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-4 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60 active:scale-[0.99]"
-            >
-              <IconSend className="h-5 w-5" />
-              Send
-            </button>
-          </div>
-
-          <div className="mt-2 text-[11px] text-zinc-500">
-            <span className="ml-2">Demo.</span>
-          </div>
+          <button
+            type="button"
+            onMouseDown={keepComposerFocusOnAction}
+            onTouchStart={keepComposerFocusOnAction}
+            onClick={sendNow}
+            disabled={sending || !canSend}
+            className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition ${sendBtnTone}`}
+            title="Send"
+          >
+            <IconSend className="h-5.5 w-5.5" />
+          </button>
         </div>
       </div>
     </div>

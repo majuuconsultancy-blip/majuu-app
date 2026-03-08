@@ -4,6 +4,7 @@ import { collection, doc, getDoc, onSnapshot, orderBy, query } from "firebase/fi
 import { db } from "../firebase";
 import { smartBack } from "../utils/navBack";
 import DocumentExtractPanel from "../components/DocumentExtractPanel";
+import DocumentProofreadPanel from "../components/DocumentProofreadPanel";
 
 /* ---------- Minimal icons ---------- */
 function IconBack(props) {
@@ -205,6 +206,12 @@ export default function AdminRequestDocumentsScreen() {
             </div>
             <span className="text-xs text-zinc-500">{attachments.length} files</span>
           </div>
+
+          <DocumentProofreadPanel
+            requestId={validId}
+            request={requestData}
+            attachments={attachments}
+          />
 
           {loading ? (
             <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">

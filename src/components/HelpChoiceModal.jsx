@@ -259,7 +259,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-8 motion-modal-backdrop"
+        className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-4 pb-[calc(var(--app-safe-bottom)+3rem)] motion-modal-backdrop"
         variants={overlay}
         initial="hidden"
         animate="show"
@@ -274,7 +274,13 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
         />
 
         {/* Modal */}
-        <motion.div variants={sheet} initial="hidden" animate="show" exit="exit" className={rootCard}>
+        <motion.div
+          variants={sheet}
+          initial="hidden"
+          animate="show"
+          exit="exit"
+          className={`${rootCard} -mt-[calc(var(--app-helpchoice-lift)-2rem)]`}
+        >
           {/* subtle glow */}
           <div className="pointer-events-none absolute -top-10 -right-10 h-28 w-28 rounded-full bg-emerald-200/30 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-12 -left-10 h-32 w-32 rounded-full bg-sky-200/25 blur-3xl" />
@@ -377,6 +383,8 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
             </div>
           </div>
         </motion.div>
+
+        <div aria-hidden="true" className="pointer-events-none h-24 w-full max-w-sm shrink-0" />
       </motion.div>
     </AnimatePresence>
   );

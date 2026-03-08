@@ -96,18 +96,49 @@ function buildReturnState({ paymentContext, formState, requestDraftId }) {
 
   if (flow === "fullpackage") {
     const track = String(context.track || "").trim().toLowerCase();
+    const country = String(context.country || "").trim();
+    const fullPackageId = String(context.fullPackageId || "").trim();
     const selectedItem = String(context.selectedItem || "").trim();
     if (!track) return null;
 
     return {
+      ...(fullPackageId ? { fullPackageId } : {}),
       resumeFullPackage: {
         track,
+        country,
+        fullPackageId,
         selectedItem,
         requestModal: {
           open: true,
           selectedItem,
           step: "submit",
           formState: mergedFormState,
+        },
+      },
+    };
+  }
+
+  if (flow === "fullpackagedeposit") {
+    const track = String(context.track || "").trim().toLowerCase();
+    const fullPackageId = String(context.fullPackageId || "").trim();
+    const selectedItems = Array.isArray(context.selectedItems)
+      ? context.selectedItems.map((x) => String(x || "").trim()).filter(Boolean)
+      : [];
+    const depositAmount = Number(context.depositAmount || 0);
+    if (!track || !fullPackageId) return null;
+
+    return {
+      resumeWeHelp: {
+        track,
+        fullPackage: {
+          detailsOpen: true,
+          diagnosticOpen: true,
+          deposit: {
+            requestDraftId: String(requestDraftId || ""),
+            fullPackageId,
+            selectedItems,
+            depositAmount,
+          },
         },
       },
     };

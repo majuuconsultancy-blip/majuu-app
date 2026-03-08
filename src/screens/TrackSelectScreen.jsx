@@ -1,12 +1,3 @@
-// ✅ TrackSelectScreen.jsx (FULL COPY-PASTE)
-// UI POLISHES (backend untouched — same auth/firestore/services):
-// - ✅ More “floaty” tiles + subtle entrance animation + nicer hover/press states
-// - ✅ Cleaner header + badge-like loading tiles
-// - ✅ Dark mode consistency across screen
-// - ✅ Staff Portal button refined (smaller, premium, still staff-only)
-// - ✅ Better loading skeleton + softMsg preserved
-// - ✅ Keeps: staff/{uid}.active check (fail-closed), setSelectedTrack + localStorage, skip logic
-
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
@@ -24,6 +15,16 @@ import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { getUserState, setSelectedTrack } from "../services/userservice";
 import { getResumeTarget, setSnapshot } from "../resume/resumeEngine";
+import { waitForAuthRestore } from "../utils/authRestore";
+import {
+  enableBiometricLockForUser,
+  getBiometricCapability,
+  getBiometricLockEnabled,
+  isBiometricPromptPending,
+  setBiometricPromptPending,
+} from "../services/biometricLockService";
+
+const AUTH_NULL_GRACE_MS = 1200;
 
 export default function TrackSelectScreen() {
   const navigate = useNavigate();
@@ -32,56 +33,113 @@ export default function TrackSelectScreen() {
   const [userState, setUserState] = useState(null);
 
   const [loading, setLoading] = useState(true);
-  const [softMsg, setSoftMsg] = useState("Loading…");
-  const [going, setGoing] = useState(""); // track being clicked
+  const [softMsg, setSoftMsg] = useState("Loading...");
+  const [going, setGoing] = useState("");
 
-  // ✅ staff check
   const [isStaff, setIsStaff] = useState(false);
 
-  // ✅ light entrance animation for tiles
   const [mounted, setMounted] = useState(false);
+  const [bioPromptOpen, setBioPromptOpen] = useState(false);
+  const [bioPromptBusy, setBioPromptBusy] = useState(false);
+  const [bioPromptErr, setBioPromptErr] = useState("");
 
   useEffect(() => {
+    let unsub = () => {};
+    let cancelled = false;
+    let nullTimer = null;
+
+    const clearNullTimer = () => {
+      if (nullTimer) {
+        window.clearTimeout(nullTimer);
+        nullTimer = null;
+      }
+    };
+
     const timer = setTimeout(() => {
       setSoftMsg("Taking longer than usual. Please check your connection.");
       setLoading(false);
     }, 7000);
 
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      clearTimeout(timer);
+    void (async () => {
+      await waitForAuthRestore(7000);
+      if (cancelled) return;
 
-      if (!user) {
-        setLoading(false);
-        navigate("/login", { replace: true });
-        return;
-      }
+      unsub = onAuthStateChanged(auth, async (user) => {
+        clearTimeout(timer);
+        clearNullTimer();
 
-      setUid(user.uid);
+        if (!user) {
+          setLoading(true);
+          nullTimer = window.setTimeout(() => {
+            if (cancelled) return;
+            if (auth.currentUser) return;
+            setLoading(false);
+            navigate("/login", { replace: true });
+          }, AUTH_NULL_GRACE_MS);
+          return;
+        }
 
-      // ✅ staff role check (fails closed)
-      try {
-        const staffSnap = await getDoc(doc(db, "staff", user.uid));
-        const ok = staffSnap.exists() && Boolean(staffSnap.data()?.active);
-        setIsStaff(ok);
-      } catch (e) {
-        setIsStaff(false);
-      }
+        setUid(user.uid);
 
-      try {
-        const state = await getUserState(user.uid);
-        setUserState(state || null);
-        setSoftMsg("");
-      } catch (e) {
-        console.error("TrackSelect getUserState error:", e);
-        setSoftMsg("Could not load your profile state.");
-      } finally {
-        setLoading(false);
-        setTimeout(() => setMounted(true), 40);
-      }
-    });
+        try {
+          const staffSnap = await getDoc(doc(db, "staff", user.uid));
+          const ok = staffSnap.exists() && Boolean(staffSnap.data()?.active);
+          if (!cancelled) setIsStaff(ok);
+        } catch (error) {
+          void error;
+          if (!cancelled) setIsStaff(false);
+        }
+
+        try {
+          const state = await getUserState(user.uid);
+          if (!cancelled) {
+            setUserState(state || null);
+            setSoftMsg("");
+          }
+        } catch (error) {
+          console.error("TrackSelect getUserState error:", error);
+          if (!cancelled) setSoftMsg("Could not load your profile state.");
+        } finally {
+          if (!cancelled) {
+            setLoading(false);
+            window.setTimeout(() => {
+              if (!cancelled) setMounted(true);
+            }, 40);
+          }
+        }
+
+        try {
+          const [pendingPrompt, lockEnabled, capability] = await Promise.all([
+            isBiometricPromptPending(user.uid),
+            getBiometricLockEnabled(user.uid),
+            getBiometricCapability(),
+          ]);
+
+          if (cancelled) return;
+          if (pendingPrompt && lockEnabled) {
+            await setBiometricPromptPending(user.uid, false);
+            return;
+          }
+
+          if (
+            pendingPrompt &&
+            !lockEnabled &&
+            capability.supported &&
+            (capability.available || capability.deviceSecure)
+          ) {
+            setBioPromptErr("");
+            setBioPromptOpen(true);
+          }
+        } catch (error) {
+          void error;
+        }
+      });
+    })();
 
     return () => {
+      cancelled = true;
       clearTimeout(timer);
+      clearNullTimer();
       unsub();
     };
   }, [navigate]);
@@ -129,9 +187,8 @@ export default function TrackSelectScreen() {
 
     try {
       await setSelectedTrack(uid, track);
-    } catch (e) {
-      console.error("setSelectedTrack error:", e);
-      // still navigate even if saving failed
+    } catch (error) {
+      console.error("setSelectedTrack error:", error);
     } finally {
       navigate(`/app/${track}`);
     }
@@ -162,6 +219,37 @@ export default function TrackSelectScreen() {
       return;
     }
     navigate("/app/progress");
+  };
+
+  const skipBiometricPrompt = async () => {
+    if (!uid) {
+      setBioPromptOpen(false);
+      return;
+    }
+    setBioPromptBusy(true);
+    setBioPromptErr("");
+    try {
+      await setBiometricPromptPending(uid, false);
+      setBioPromptOpen(false);
+    } finally {
+      setBioPromptBusy(false);
+    }
+  };
+
+  const turnOnBiometricPrompt = async () => {
+    if (!uid) return;
+    setBioPromptBusy(true);
+    setBioPromptErr("");
+    try {
+      const result = await enableBiometricLockForUser(uid, "Turn on secure app unlock");
+      if (result.ok) {
+        setBioPromptOpen(false);
+        return;
+      }
+      setBioPromptErr(result.message || "Could not turn on biometric unlock.");
+    } finally {
+      setBioPromptBusy(false);
+    }
   };
 
   if (loading) {
@@ -223,7 +311,7 @@ export default function TrackSelectScreen() {
 
             {active ? (
               <div className="mt-3 text-xs font-semibold text-emerald-700 dark:text-emerald-200">
-                Opening…
+                Opening...
               </div>
             ) : null}
           </div>
@@ -240,24 +328,19 @@ export default function TrackSelectScreen() {
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
         <div className="max-w-xl mx-auto px-5 py-8">
-          {/* Header */}
           <div className="flex items-end justify-between gap-3">
             <div>
               <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Choose your path
               </h1>
-              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                Study • Work • Travel
-              </p>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">Study / Work / Travel</p>
             </div>
 
             <div className="h-11 w-11 rounded-2xl border border-emerald-100 bg-emerald-50/60 dark:border-zinc-800 dark:bg-zinc-950/40" />
           </div>
 
-          {/* Lower content wrapper (stronger offset for Android/Capacitor visual spacing) */}
           <div className="pt-20 sm:pt-24">
             <div aria-hidden="true" className="mb-4 h-8" />
-            {/* ✅ Staff Portal button (ONLY for staff) */}
             {isStaff ? (
               <div className={`transition ${mounted ? "opacity-100" : "opacity-0"}`}>
                 <button
@@ -282,7 +365,6 @@ export default function TrackSelectScreen() {
               </div>
             ) : null}
 
-            {/* Tiles */}
             <div className={[isStaff ? "mt-4" : "", "grid gap-3"].join(" ").trim()}>
               <Tile
                 icon={BookOpen}
@@ -312,7 +394,6 @@ export default function TrackSelectScreen() {
               />
             </div>
 
-            {/* Skip block */}
             {showSkip ? (
               <div
                 className={[
@@ -348,8 +429,46 @@ export default function TrackSelectScreen() {
           <div className="h-6" />
         </div>
       </div>
+
+      {bioPromptOpen ? (
+        <div className="fixed inset-0 z-50 bg-zinc-950/45 backdrop-blur-[1px]">
+          <div className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-end px-5 pb-6 sm:items-center sm:pb-0">
+            <div className="w-full rounded-3xl border border-zinc-200 bg-white p-5 shadow-lg">
+              <h2 className="text-base font-semibold tracking-tight text-zinc-900">
+                Turn on biometric unlock?
+              </h2>
+              <p className="mt-1 text-sm text-zinc-600">
+                Keep your account signed in and protect app reopen with fingerprint, face, or device lock.
+              </p>
+
+              {bioPromptErr ? (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {bioPromptErr}
+                </div>
+              ) : null}
+
+              <div className="mt-4 grid gap-2">
+                <button
+                  type="button"
+                  onClick={turnOnBiometricPrompt}
+                  disabled={bioPromptBusy}
+                  className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                >
+                  {bioPromptBusy ? "Please wait..." : "Turn on"}
+                </button>
+                <button
+                  type="button"
+                  onClick={skipBiometricPrompt}
+                  disabled={bioPromptBusy}
+                  className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 disabled:opacity-60"
+                >
+                  Not now
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
-
-

@@ -11,6 +11,12 @@ import {
 } from "firebase/auth";
 import { auth } from "../firebase";
 import { smartBack } from "../utils/navBack";
+import {
+  disableBiometricLockForUser,
+  enableBiometricLockForUser,
+  getBiometricCapability,
+  getBiometricLockEnabled,
+} from "../services/biometricLockService";
 
 /* -------- Minimal icons (no emojis) -------- */
 function IconBack(props) {
@@ -132,29 +138,68 @@ export default function SettingsScreen() {
   // Change email
   const [newEmail, setNewEmail] = useState("");
 
+  // Secure app unlock
+  const [bioEnabled, setBioEnabled] = useState(false);
+  const [bioBusy, setBioBusy] = useState(false);
+  const [bioLoading, setBioLoading] = useState(true);
+  const [bioCapability, setBioCapability] = useState({
+    supported: false,
+    available: false,
+    strongAvailable: false,
+    deviceSecure: false,
+    reason: "",
+    code: "",
+  });
+
   // ✅ separate loading flags (fixes your issue)
   const [busyPw, setBusyPw] = useState(false);
   const [busyEmail, setBusyEmail] = useState(false);
   const [busyReset, setBusyReset] = useState(false);
   const [busyOut, setBusyOut] = useState(false);
 
-  const anyBusy = busyPw || busyEmail || busyReset || busyOut;
+  const anyBusy = busyPw || busyEmail || busyReset || busyOut || bioBusy;
 
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
+    let cancelled = false;
+
+    const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) {
         navigate("/login", { replace: true });
         return;
       }
+
       setUserEmail(u.email || "");
       setIsPasswordUser(isEmailPasswordUser(u));
-      setChecking(false);
+
+      try {
+        const [enabled, capability] = await Promise.all([
+          getBiometricLockEnabled(u.uid),
+          getBiometricCapability(),
+        ]);
+        if (cancelled) return;
+        setBioEnabled(Boolean(enabled));
+        setBioCapability(capability);
+      } catch (error) {
+        void error;
+      } finally {
+        if (!cancelled) {
+          setBioLoading(false);
+          setChecking(false);
+        }
+      }
     });
-    return () => unsub();
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, [navigate]);
+
+  const canUseSecureUnlock =
+    bioCapability.supported && (bioCapability.available || bioCapability.deviceSecure);
 
   const canChangePassword = useMemo(() => {
     if (!isPasswordUser) return false;
@@ -191,6 +236,52 @@ export default function SettingsScreen() {
       navigate("/login", { replace: true });
     } finally {
       setBusyOut(false);
+    }
+  };
+
+  const doToggleSecureUnlock = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      setErr("Not signed in.");
+      return;
+    }
+
+    setErr("");
+    setOk("");
+    setBioBusy(true);
+
+    try {
+      if (bioEnabled) {
+        const result = await disableBiometricLockForUser(user.uid);
+        if (!result.ok) {
+          setErr(result.message || "Could not turn off secure unlock.");
+          return;
+        }
+        setBioEnabled(false);
+        setOk("Secure unlock turned off.");
+        return;
+      }
+
+      const latestCapability = await getBiometricCapability();
+      setBioCapability(latestCapability);
+      if (!latestCapability.supported) {
+        setErr("Secure unlock is available only in Android/iOS app builds.");
+        return;
+      }
+      if (!latestCapability.available && !latestCapability.deviceSecure) {
+        setErr("Set up biometrics or a phone screen lock first.");
+        return;
+      }
+
+      const result = await enableBiometricLockForUser(user.uid, "Enable secure app unlock");
+      if (!result.ok) {
+        setErr(result.message || "Could not turn on secure unlock.");
+        return;
+      }
+      setBioEnabled(true);
+      setOk("Secure unlock turned on.");
+    } finally {
+      setBioBusy(false);
     }
   };
 
@@ -344,6 +435,49 @@ export default function SettingsScreen() {
               </div>
             </div>
           </div>
+        </div>
+
+        <div className="mt-3">
+          <Tile
+            title="Secure app unlock"
+            subtitle="Require biometrics or device lock when reopening the app."
+          >
+            <div className="grid gap-3">
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3 py-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    {bioEnabled ? "Enabled" : "Disabled"}
+                  </div>
+                  <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                    {bioLoading
+                      ? "Checking device security support..."
+                      : canUseSecureUnlock
+                      ? "Fingerprint, face, or phone PIN/pattern can be used."
+                      : "Set up phone security to enable this feature."}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={doToggleSecureUnlock}
+                  disabled={bioLoading || bioBusy || (!canUseSecureUnlock && !bioEnabled)}
+                  className={`shrink-0 rounded-xl border px-4 py-2 text-sm font-semibold transition disabled:opacity-60 ${
+                    bioEnabled
+                      ? "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-50"
+                      : "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
+                  }`}
+                >
+                  {bioBusy ? "Please wait..." : bioEnabled ? "Turn off" : "Turn on"}
+                </button>
+              </div>
+
+              {!canUseSecureUnlock && !bioEnabled && !bioLoading ? (
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Device support status: {bioCapability.reason || "No biometric/screen lock support detected."}
+                </div>
+              ) : null}
+            </div>
+          </Tile>
         </div>
 
         {/* Change password */}

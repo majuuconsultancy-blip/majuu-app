@@ -11,6 +11,7 @@ function buildNotificationCopy(type, requestId) {
   const routeRequest = rid ? `/app/request/${encodeURIComponent(rid)}` : "/app/progress";
   const routeRequestChat = rid ? `${routeRequest}?openChat=1` : "/app/progress";
   const routeStaffRequest = rid ? `/staff/request/${encodeURIComponent(rid)}?openChat=1` : "/staff/tasks";
+  const routeStaffStart = rid ? `/staff/request/${encodeURIComponent(rid)}/start` : "/staff/tasks";
 
   switch (safeStr(type).toUpperCase()) {
     case "REQUEST_ASSIGNED":
@@ -48,6 +49,30 @@ function buildNotificationCopy(type, requestId) {
         title: "New assignment",
         body: "You have been assigned a request.",
         route: "/staff/tasks",
+      };
+    case "STAFF_UNASSIGNED_REQUEST":
+      return {
+        title: "Assignment removed",
+        body: "A request was unassigned from your queue.",
+        route: "/staff/tasks",
+      };
+    case "STAFF_REQUEST_EXPIRING_SOON":
+      return {
+        title: "Action needed soon",
+        body: "A new request is close to reassignment timeout.",
+        route: routeStaffStart,
+      };
+    case "STAFF_REQUEST_ACCEPTED_BY_ADMIN":
+      return {
+        title: "Request finalized",
+        body: "Admin accepted this request.",
+        route: routeStaffRequest,
+      };
+    case "STAFF_REQUEST_REJECTED_BY_ADMIN":
+      return {
+        title: "Request finalized",
+        body: "Admin rejected this request.",
+        route: routeStaffRequest,
       };
     case "STAFF_NEW_MESSAGE":
       return {

@@ -28,26 +28,27 @@ function IconChat(props) {
   );
 }
 
-export default function RequestChatLauncher({ requestId }) {
+export default function RequestChatLauncher({ requestId, variant = "default" }) {
   const navigate = useNavigate();
   const location = useLocation();
   const rid = useMemo(() => safeStr(requestId), [requestId]);
+  const isFloating = variant === "floating";
 
   const [open, setOpen] = useState(false);
-  const [canPortal, setCanPortal] = useState(false);
+  const [canPortal] = useState(() => typeof document !== "undefined");
   const returnToRef = useRef("");
   const unreadCount = useNotifsV2Store(
     (s) => (safeStr(rid) ? Number(s.unreadByRequest?.[rid]?.count || 0) || 0 : 0)
   );
 
-  useEffect(() => setCanPortal(true), []);
-
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    document.body.classList.add("request-modal-open");
     return () => {
       document.body.style.overflow = prev;
+      document.body.classList.remove("request-modal-open");
     };
   }, [open]);
 
@@ -58,7 +59,9 @@ export default function RequestChatLauncher({ requestId }) {
       params.delete("openChat");
       const qs = params.toString();
       nextSearch = qs ? `?${qs}` : "";
-    } catch {}
+    } catch {
+      // ignore malformed URLSearchParams
+    }
     returnToRef.current = `${location.pathname}${nextSearch}`;
     if (rid) notifsV2Store.markChatRead(rid).catch(() => {});
     setOpen(true);
@@ -74,7 +77,7 @@ export default function RequestChatLauncher({ requestId }) {
     }
     if (params.get("openChat") !== "1") return;
 
-    openChat();
+    const timer = window.setTimeout(() => openChat(), 0);
 
     params.delete("openChat");
     const qs = params.toString();
@@ -82,6 +85,8 @@ export default function RequestChatLauncher({ requestId }) {
     if (nextUrl !== `${location.pathname}${location.search || ""}`) {
       navigate(nextUrl, { replace: true });
     }
+
+    return () => window.clearTimeout(timer);
   }, [rid, open, location.pathname, location.search, navigate, openChat]);
 
   useEffect(() => {
@@ -89,13 +94,19 @@ export default function RequestChatLauncher({ requestId }) {
     try {
       const params = new URLSearchParams(location.search || "");
       if (params.get("openChat") === "1") return;
-    } catch {}
+    } catch {
+      // ignore malformed URLSearchParams
+    }
     let shouldOpen = false;
     try {
       shouldOpen = sessionStorage.getItem(`maj_open_chat:${rid}`) === "1";
       if (shouldOpen) sessionStorage.removeItem(`maj_open_chat:${rid}`);
-    } catch {}
-    if (shouldOpen) openChat();
+    } catch {
+      // ignore session storage errors
+    }
+    if (!shouldOpen) return;
+    const timer = window.setTimeout(() => openChat(), 0);
+    return () => window.clearTimeout(timer);
   }, [rid, open, openChat, location.search]);
 
   const closeChat = useCallback(() => {
@@ -121,6 +132,8 @@ export default function RequestChatLauncher({ requestId }) {
   const btn =
     "w-full inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99]";
   const btnMain = "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700";
+  const floatingBtn =
+    "relative inline-flex h-14 w-14 items-center justify-center rounded-full border border-emerald-200 bg-emerald-600 text-white shadow-[0_14px_30px_rgba(5,150,105,0.34)] transition hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 active:scale-[0.97]";
 
   const Modal = (
     <div className="fixed inset-0 z-[999999] pointer-events-none" aria-hidden={!open}>
@@ -132,15 +145,30 @@ export default function RequestChatLauncher({ requestId }) {
 
   return (
     <>
-      <button type="button" onClick={openChat} className={`${btn} ${btnMain}`}>
-        <IconChat className="h-5 w-5" />
-        CHAT
-        {unreadCount > 0 ? (
-          <span className="ml-2 inline-flex min-w-[22px] items-center justify-center rounded-full bg-white/90 px-2 py-0.5 text-[11px] font-bold text-emerald-800 dark:bg-zinc-900/60">
-            {unreadCount > 99 ? "99+" : unreadCount}
-          </span>
-        ) : null}
-      </button>
+      {isFloating ? (
+        <button
+          type="button"
+          onClick={openChat}
+          className={floatingBtn}
+          aria-label="Open chat"
+          title="Chat"
+        >
+          <IconChat className="h-6 w-6" />
+          {unreadCount > 0 ? (
+            <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-zinc-900" />
+          ) : null}
+        </button>
+      ) : (
+        <button type="button" onClick={openChat} className={`${btn} ${btnMain}`}>
+          <IconChat className="h-5 w-5" />
+          CHAT
+          {unreadCount > 0 ? (
+            <span className="ml-2 inline-flex min-w-[22px] items-center justify-center rounded-full bg-white/90 px-2 py-0.5 text-[11px] font-bold text-emerald-800 dark:bg-zinc-900/60">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          ) : null}
+        </button>
+      )}
 
       {open && canPortal ? createPortal(Modal, document.body) : null}
     </>

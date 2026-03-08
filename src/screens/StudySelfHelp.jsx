@@ -6,22 +6,18 @@
 // Everything else (layout/logic/keys) unchanged.
 // Keeps visited memory key: majuu_visited_links_v1
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "../utils/motionProxy";
 import { smartBack } from "../utils/navBack";
 import {
   BookOpen,
   Link2,
-  CheckCircle2,
   ArrowLeft,
-  Copy,
-  ExternalLink,
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
-import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
-import OpenExternalLinkDialog from "../components/OpenExternalLinkDialog";
-import { clearPendingExternalLink, setSnapshot } from "../resume/resumeEngine";
+import { ICON_SM } from "../constants/iconSizes";
+import { setSnapshot } from "../resume/resumeEngine";
 
 /* ---------- Visited links memory ---------- */
 const VISITED_KEY = "majuu_visited_links_v1";
@@ -54,42 +50,6 @@ function getDomain(url) {
   }
 }
 
-function getGoogleQueryFromUrl(url) {
-  try {
-    const u = new URL(url);
-    if (u.hostname.includes("google.") && u.pathname === "/search") {
-      return u.searchParams.get("q") || "";
-    }
-    return "";
-  } catch {
-    return "";
-  }
-}
-
-async function copyText(text) {
-  const t = String(text || "").trim();
-  if (!t) return false;
-  try {
-    await navigator.clipboard.writeText(t);
-    return true;
-  } catch {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = t;
-      ta.style.position = "fixed";
-      ta.style.left = "-9999px";
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-
 /* ---------- Motion ---------- */
 const pageIn = {
   hidden: { opacity: 0, y: 10 },
@@ -102,116 +62,46 @@ const cardFloat = {
   tap: { scale: 0.985 },
 };
 
-function LinkRow({ item, visitedMap, onRefreshVisited, onOpenLink }) {
+function LinkRow({ item, visitedMap, onRefreshVisited }) {
   const visited = Boolean(visitedMap[item.url]);
   const domain = getDomain(item.url);
-  const googleQ = getGoogleQueryFromUrl(item.url);
-
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const ok = await copyText(googleQ || item.title);
-    if (!ok) return;
-    setCopied(true);
-    setTimeout(() => setCopied(false), 900);
-  };
 
   const handleOpen = () => {
-    onOpenLink?.(item);
     markVisited(item.url);
     onRefreshVisited?.();
   };
 
   return (
-    <motion.a
+    <a
       href={item.url}
       target="_blank"
       rel="noreferrer"
       onClick={handleOpen}
-      variants={cardFloat}
-      initial="rest"
-      whileHover="hover"
-      whileTap="tap"
       className={[
-        "group relative flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 backdrop-blur-xl transition",
+        "group flex w-full items-start gap-3 rounded-xl border px-4 py-3 transition",
         visited
-          ? "border-emerald-200/70 bg-emerald-50/55"
-          : "border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 hover:border-emerald-200 hover:bg-white/85",
-        "shadow-[0_10px_30px_rgba(0,0,0,0.06)]",
+          ? "border-emerald-200/80 bg-emerald-50/50"
+          : "border-zinc-200/80 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 hover:border-emerald-200/80 hover:bg-white",
       ].join(" ")}
       title={item.url}
     >
-      <span className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition group-hover:opacity-100 bg-gradient-to-b from-white/55 via-white/10 to-transparent" />
-
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span
-            className={[
-              "inline-flex h-9 w-9 items-center justify-center rounded-2xl border",
-              visited
-                ? "border-emerald-200 bg-white/60 dark:bg-zinc-900/60 text-emerald-800"
-                : "border-emerald-100 bg-emerald-50/60 text-emerald-700",
-            ].join(" ")}
-          >
-            <AppIcon size={ICON_SM} icon={Link2} />
-          </span>
-
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              {item.title}
-            </div>
-
-            <div className="mt-0.5 flex flex-wrap items-center gap-2">
-              {item.note ? (
-                <div className="truncate text-xs text-zinc-600 dark:text-zinc-300">{item.note}</div>
-              ) : (
-                <div className="truncate text-xs text-zinc-500">Open resource</div>
-              )}
-
-              {domain ? (
-                <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-                  <AppIcon size={ICON_SM} icon={ExternalLink} />
-                  {domain}
-                </span>
-              ) : null}
-            </div>
-          </div>
+      <AppIcon
+        size={ICON_SM}
+        icon={Link2}
+        className={[
+          "mt-0.5 shrink-0 transition-colors",
+          visited ? "text-emerald-700" : "text-zinc-500 group-hover:text-emerald-700",
+        ].join(" ")}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">{item.title}</div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+          <span className="truncate">{item.note || "Tap to open"}</span>
+          {domain ? <span className="text-zinc-500 dark:text-zinc-400">• {domain}</span> : null}
+          {visited ? <span className="text-emerald-700">Opened</span> : null}
         </div>
       </div>
-
-      <div className="shrink-0 flex items-center gap-2">
-        {googleQ ? (
-          <button
-            type="button"
-            onClick={handleCopy}
-            className={[
-              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition active:scale-[0.99]",
-              copied
-                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-white",
-            ].join(" ")}
-            aria-label="Copy search phrase"
-            title="Copy search phrase"
-          >
-            <AppIcon size={ICON_SM} icon={Copy} />
-            {copied ? "Copied" : "Copy"}
-          </button>
-        ) : null}
-
-        {visited ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white/70 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
-            <AppIcon size={ICON_SM} icon={CheckCircle2} />
-            Visited
-          </span>
-        ) : (
-          <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-            Open
-          </span>
-        )}
-      </div>
-    </motion.a>
+    </a>
   );
 }
 
@@ -222,18 +112,14 @@ function SectionCard({ title, subtitle, children, index }) {
       initial="hidden"
       animate="show"
       transition={{ delay: Math.min(index * 0.04, 0.18) }}
-      className="rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/72 dark:bg-zinc-900/60 p-5 shadow-[0_14px_40px_rgba(0,0,0,0.08)] backdrop-blur-xl"
+      className="rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/70 p-4 sm:p-5"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
-          {subtitle ? <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">{subtitle}</p> : null}
-        </div>
-
-        <div className="hidden sm:block h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/60" />
+      <div className="min-w-0">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
+        {subtitle ? <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">{subtitle}</p> : null}
       </div>
 
-      <div className="mt-4 grid gap-3">{children}</div>
+      <div className="mt-3 grid gap-2.5">{children}</div>
     </motion.div>
   );
 }
@@ -242,10 +128,8 @@ export default function StudySelfHelp() {
   const navigate = useNavigate();
   const location = useLocation();
   const country = new URLSearchParams(location.search).get("country") || "";
-  const resumePromptHandledRef = useRef(false);
 
   const [visitedMap, setVisitedMap] = useState({});
-  const [pendingExternalLinkPrompt, setPendingExternalLinkPrompt] = useState(null);
   const refreshVisited = () => setVisitedMap(loadVisited());
 
   useEffect(() => {
@@ -270,22 +154,6 @@ export default function StudySelfHelp() {
       },
     });
   }, [country, location.pathname, location.search]);
-
-  useEffect(() => {
-    if (resumePromptHandledRef.current) return;
-    const pending = location.state?.resumePendingExternalLink;
-    if (!pending?.url) return;
-
-    resumePromptHandledRef.current = true;
-    setPendingExternalLinkPrompt(pending);
-
-    const nextState = { ...(location.state || {}) };
-    delete nextState.resumePendingExternalLink;
-    navigate(`${location.pathname}${location.search}`, {
-      replace: true,
-      state: nextState,
-    });
-  }, [location.pathname, location.search, location.state, navigate]);
 
   // âœ… Desired back destination (TrackScreen)
   const backUrl = `/app/study?country=${encodeURIComponent(country || "")}&from=choice`;
@@ -314,36 +182,6 @@ export default function StudySelfHelp() {
   };
 
   const qs = encodeURIComponent(country || "selected country");
-
-  const captureExternalLink = (item) => {
-    setSnapshot({
-      selfHelp: {
-        track: "study",
-        country,
-        screenKey: `study:${country || "not-selected"}`,
-        pendingExternalLink: {
-          url: item?.url || "",
-          title: item?.title || "",
-          tappedAt: Date.now(),
-        },
-      },
-    });
-  };
-
-  const cancelPendingExternalLink = () => {
-    setPendingExternalLinkPrompt(null);
-    clearPendingExternalLink();
-  };
-
-  const openPendingExternalLink = () => {
-    const url = String(pendingExternalLinkPrompt?.url || "").trim();
-    if (url) {
-      try {
-        window.open(url, "_blank", "noopener,noreferrer");
-      } catch {}
-    }
-    cancelPendingExternalLink();
-  };
 
   const sections = useMemo(() => {
     return [
@@ -419,7 +257,7 @@ export default function StudySelfHelp() {
         <div className="absolute bottom-0 right-0 h-72 w-72 rounded-full bg-emerald-100/25 blur-3xl" />
       </div>
 
-      <motion.div variants={pageIn} initial="hidden" animate="show" className="px-5 py-6 max-w-xl mx-auto">
+      <motion.div variants={pageIn} initial="hidden" animate="show" className="px-5 py-6 max-w-2xl mx-auto">
         <button
           onClick={goBackToChoice}
           className="mb-4 inline-flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm backdrop-blur transition hover:bg-white active:scale-[0.99]"
@@ -434,18 +272,16 @@ export default function StudySelfHelp() {
               <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/80 dark:bg-zinc-900/60 border border-emerald-100">
                 <AppIcon size={ICON_SM} className="text-emerald-700" icon={BookOpen} />
               </span>
-              Study Abroad Â· Self-Help
+              Study self-help
             </div>
 
             <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-              Do it yourself, step by step
+              Study links
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              All the links below are curated for your selected destination.
+              Tap any link to open in your browser.
             </p>
           </div>
-
-          <div className="shrink-0 h-12 w-12 rounded-3xl border border-emerald-100 bg-emerald-50/80 shadow-sm" />
         </div>
 
         <motion.div
@@ -453,18 +289,18 @@ export default function StudySelfHelp() {
           initial="rest"
           whileHover="hover"
           whileTap="tap"
-          className="mt-5 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/72 dark:bg-zinc-900/60 p-4 shadow-[0_14px_40px_rgba(0,0,0,0.08)] backdrop-blur-xl"
+          className="mt-5 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/70 p-4"
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs font-semibold text-zinc-500">Selected country</p>
+              <p className="text-xs font-semibold text-zinc-500">Country</p>
               <p className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                {country || "Not selected"}
+                {country || "No country selected"}
               </p>
             </div>
 
             <div className="shrink-0 text-right">
-              <p className="text-xs font-semibold text-zinc-500">Websites</p>
+              <p className="text-xs font-semibold text-zinc-500">Links</p>
               <p className="mt-1 text-sm font-semibold text-emerald-800">{totalSites}</p>
             </div>
           </div>
@@ -479,40 +315,22 @@ export default function StudySelfHelp() {
                   item={l}
                   visitedMap={visitedMap}
                   onRefreshVisited={refreshVisited}
-                  onOpenLink={captureExternalLink}
                 />
               ))}
             </SectionCard>
           ))}
 
-          <motion.div
-            variants={cardFloat}
-            initial="rest"
-            whileHover="hover"
-            whileTap="tap"
-            className="rounded-3xl border border-dashed border-zinc-300 dark:border-zinc-700 bg-white/55 dark:bg-zinc-900/60 p-5 text-sm text-zinc-700 dark:text-zinc-300 backdrop-blur"
-          >
-            <div className="font-semibold text-zinc-900 dark:text-zinc-100">Safety tip</div>
-            <p className="mt-1">
-              The safest info is always the <b>official government/embassy</b> page for your destination.
+          <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Safety
             </p>
-            <p className="mt-2 text-xs text-zinc-500">
-              Only open links you trust. MAJUU canâ€™t guarantee external sites.
-            </p>
-          </motion.div>
+            <p className="mt-1">Always verify important details on official embassy or government websites.</p>
+          </div>
         </div>
 
         <div className="h-10" />
       </motion.div>
 
-      <OpenExternalLinkDialog
-        open={Boolean(pendingExternalLinkPrompt)}
-        title="Open external link?"
-        description="Open this external link now?"
-        linkLabel={pendingExternalLinkPrompt?.title || pendingExternalLinkPrompt?.url || ""}
-        onOpen={openPendingExternalLink}
-        onCancel={cancelPendingExternalLink}
-      />
     </div>
   );
 }

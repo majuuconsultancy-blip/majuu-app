@@ -20,5 +20,7 @@ public class MainActivity extends BridgeActivity {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             getWindow().setAttributes(params);
         }
+
+        registerPlugin(SafeAreaInsetsPlugin.class);
     }
 }

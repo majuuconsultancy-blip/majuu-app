@@ -12,8 +12,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { adminSoftDeleteRequest, getRequests } from "../services/adminrequestservice";
+import {
+  adminSoftDeleteRequest,
+  getRequests,
+  sweepStaleAssignments,
+} from "../services/adminrequestservice";
 import { setStaffAccessByEmail } from "../services/staffservice";
+import { STAFF_SPECIALITY_OPTIONS } from "../constants/staffSpecialities";
 
 import {
   collection,
@@ -65,13 +70,17 @@ const PERF_TAG = "[perf][AdminRequests]";
 function startPerf(label) {
   try {
     console.time(label);
-  } catch {}
+  } catch {
+    // no-op
+  }
 }
 
 function endPerf(label) {
   try {
     console.timeEnd(label);
-  } catch {}
+  } catch {
+    // no-op
+  }
 }
 
 function logIndexHint(scope, error) {
@@ -122,6 +131,12 @@ function pill(status) {
 
 function staffPill(staffStatus) {
   const s = String(staffStatus || "assigned").toLowerCase();
+  if (s === "reassignment_needed") {
+    return {
+      label: "Staff: Re-assignment needed",
+      cls: "bg-rose-50 text-rose-700 border border-rose-200",
+    };
+  }
   if (s === "in_progress") {
     return {
       label: "Staff: In progress",
@@ -218,17 +233,36 @@ function StaffAccessPanel() {
 
   const [email, setEmail] = useState("");
   const [maxActive, setMaxActive] = useState(2);
-  const [specText, setSpecText] = useState("");
+  const [selectedSpecialities, setSelectedSpecialities] = useState([]);
+  const [specialityOpen, setSpecialityOpen] = useState(false);
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
 
-  const specialities = useMemo(() => {
-    return String(specText || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }, [specText]);
+  const specialityMenuRef = useRef(null);
+
+  useEffect(() => {
+    if (!specialityOpen) return undefined;
+    const onPointerDown = (event) => {
+      if (!specialityMenuRef.current) return;
+      if (!specialityMenuRef.current.contains(event.target)) {
+        setSpecialityOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [specialityOpen]);
+
+  const selectedSpecialityLabels = useMemo(() => {
+    const selectedSet = new Set(
+      (Array.isArray(selectedSpecialities) ? selectedSpecialities : [])
+        .map((key) => String(key || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    return STAFF_SPECIALITY_OPTIONS
+      .filter((opt) => selectedSet.has(String(opt.key || "").toLowerCase()))
+      .map((opt) => opt.label);
+  }, [selectedSpecialities]);
 
   const shell =
     "rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/65 dark:bg-zinc-900/60 shadow-sm backdrop-blur transition dark:border-zinc-800 dark:bg-zinc-900/40";
@@ -245,6 +279,18 @@ function StaffAccessPanel() {
     "border border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700";
   const revokeBtn =
     "border border-rose-200 bg-rose-50/70 text-rose-700 hover:bg-rose-100 dark:bg-rose-950/25 dark:text-rose-200 dark:border-rose-900/40 dark:hover:bg-rose-950/35";
+
+  const toggleSpeciality = (key) => {
+    const safeKey = String(key || "").trim().toLowerCase();
+    if (!safeKey) return;
+    setSelectedSpecialities((prev) => {
+      const current = Array.isArray(prev) ? prev : [];
+      if (current.includes(safeKey)) {
+        return current.filter((item) => item !== safeKey);
+      }
+      return [...current, safeKey];
+    });
+  };
 
   const run = async (action) => {
     setErr("");
@@ -263,10 +309,13 @@ function StaffAccessPanel() {
         email: safeEmail,
         action, // "grant" | "revoke"
         maxActive: Number(maxActive) || 2,
-        specialities,
+        specialities: selectedSpecialities,
       });
 
       setMsg(action === "grant" ? `✅ Staff enabled: ${res.email}` : `✅ Staff revoked: ${res.email}`);
+      if (action === "grant") {
+        setSpecialityOpen(false);
+      }
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to update staff access.");
@@ -277,7 +326,7 @@ function StaffAccessPanel() {
 
   return (
     <div className="mt-5">
-      <div className={`${shell} overflow-hidden`}>
+      <div className={`${shell} overflow-visible`}>
         <button type="button" onClick={() => setOpen((v) => !v)} className={headerBtn}>
           <div className="min-w-0">
             <div className={smallTitle}>Staff Hire System</div>
@@ -327,22 +376,78 @@ function StaffAccessPanel() {
                     onChange={(e) => setEmail(e.target.value)}
                   />
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      className={input}
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={maxActive}
-                      onChange={(e) => setMaxActive(e.target.value)}
-                      placeholder="maxActive"
-                    />
-                    <input
-                      className={input}
-                      value={specText}
-                      onChange={(e) => setSpecText(e.target.value)}
-                      placeholder="specialities (comma separated)"
-                    />
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="col-span-1">
+                      <div className="mb-1.5 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">
+                        Max active
+                      </div>
+                      <input
+                        className={input}
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={maxActive}
+                        onChange={(e) => setMaxActive(e.target.value)}
+                        placeholder="2"
+                      />
+                    </div>
+
+                    <div
+                      ref={specialityMenuRef}
+                      className={`relative col-span-2 ${specialityOpen ? "z-[10020]" : "z-20"}`}
+                    >
+                      <div className="mb-1.5 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">
+                        Select specialities
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSpecialityOpen((v) => !v)}
+                        className={`${input} text-left inline-flex items-center justify-between gap-2`}
+                      >
+                        <span className="min-w-0 truncate">
+                          {selectedSpecialityLabels.length
+                            ? selectedSpecialityLabels.join(", ")
+                            : "Select speciality"}
+                        </span>
+                        <AppIcon
+                          size={ICON_SM}
+                          icon={ChevronDown}
+                          className={`shrink-0 transition ${specialityOpen ? "rotate-180" : ""}`}
+                        />
+                      </button>
+
+                      {specialityOpen ? (
+                        <div className="absolute left-0 right-0 z-[10030] mt-2 max-h-56 overflow-y-auto rounded-2xl border border-zinc-200 bg-white/96 p-2 shadow-xl backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/96">
+                          {STAFF_SPECIALITY_OPTIONS.map((opt) => {
+                            const checked = selectedSpecialities.includes(opt.key);
+                            return (
+                              <button
+                                key={opt.key}
+                                type="button"
+                                onClick={() => toggleSpeciality(opt.key)}
+                                className={[
+                                  "mb-1 inline-flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-semibold transition",
+                                  checked
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+                                    : "border-zinc-200 bg-white/80 text-zinc-800 hover:border-emerald-200 dark:border-zinc-700 dark:bg-zinc-900/75 dark:text-zinc-100",
+                                ].join(" ")}
+                              >
+                                <span className="truncate">{opt.label}</span>
+                                <span
+                                  className={`ml-2 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[10px] ${
+                                    checked
+                                      ? "border-emerald-500 bg-emerald-500 text-white"
+                                      : "border-zinc-300 text-transparent dark:border-zinc-600"
+                                  }`}
+                                >
+                                  v
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -368,7 +473,7 @@ function StaffAccessPanel() {
                   </div>
 
                   <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                    Uses query to find UID by email.
+                    Specialities are used to filter assignable staff by request type.
                   </div>
                 </div>
               </div>
@@ -433,6 +538,7 @@ export default function AdminRequestsScreen() {
   const keyboardFocusTimeoutRef = useRef(null);
   const longPressTimerRef = useRef(null);
   const longPressStateRef = useRef({ id: "", fired: false, x: 0, y: 0 });
+  const staleSweepAtRef = useRef(0);
 
   // ✅ subtle entrance
   const [enter, setEnter] = useState(false);
@@ -544,6 +650,16 @@ export default function AdminRequestsScreen() {
     setMsg("");
 
     try {
+      const now = Date.now();
+      if (now - staleSweepAtRef.current > 60 * 1000) {
+        staleSweepAtRef.current = now;
+        try {
+          await sweepStaleAssignments({ staleHours: 24, max: 350 });
+        } catch (sweepErr) {
+          console.warn("stale assignment sweep failed:", sweepErr?.message || sweepErr);
+        }
+      }
+
       if (status === "assigned") {
         const assignedTimer = `${PERF_TAG} transform:assigned merge/filter`;
         startPerf(assignedTimer);
@@ -745,6 +861,8 @@ export default function AdminRequestsScreen() {
         r.staffStatus,
         r.staffDecision,
         r.assignedTo,
+        r.needsReassignment ? "reassignment needed" : "",
+        r.reassignReason,
         r.id,
       ]
         .filter(Boolean)
@@ -1218,6 +1336,7 @@ export default function AdminRequestsScreen() {
                         <option value="assigned">assigned</option>
                         <option value="in_progress">in_progress</option>
                         <option value="done">done</option>
+                        <option value="reassignment_needed">reassignment_needed</option>
                       </select>
                     </label>
                   </div>
@@ -1272,11 +1391,29 @@ export default function AdminRequestsScreen() {
               const staffStatus = String(r?.staffStatus || "").trim();
               const staffDecision = String(r?.staffDecision || "").trim();
               const staffUpdatedAt = formatShortTS(r?.staffUpdatedAt);
+              const requestType = String(r?.requestType || "").trim().toLowerCase();
+              const isFull = Boolean(r?.isFullPackage) || requestType === "full";
+              const needsReassignment =
+                Boolean(r?.needsReassignment) || String(r?.staffStatus || "").toLowerCase() === "reassignment_needed";
+              const urgentReassign = needsReassignment || Boolean(r?.reassignUrgent);
 
               const sp = assignedTo ? staffPill(staffStatus || "assigned") : null;
               const rp = assignedTo ? staffRecPill(staffDecision) : null;
 
               const hasNew = pendingSet?.has(rid);
+              const fullAccent = isFull
+                ? "border-emerald-300/80 bg-emerald-50/35 dark:border-emerald-800/60 dark:bg-emerald-950/15"
+                : "";
+              const urgentAccent = urgentReassign
+                ? "border-rose-300/80 bg-rose-50/45 dark:border-rose-800/60 dark:bg-rose-950/20"
+                : "";
+              const sideAccentClass = urgentReassign
+                ? "bg-rose-600/80"
+                : isFull
+                  ? "bg-emerald-500/80 dark:bg-emerald-400/70"
+                  : hasNew
+                    ? "bg-rose-600/80"
+                    : "";
 
               return (
                 <motion.div
@@ -1297,10 +1434,10 @@ export default function AdminRequestsScreen() {
                       handleRequestTileActivate(r);
                     }
                   }}
-                  className={`${tile} relative overflow-hidden`}
+                  className={`${tile} ${fullAccent} ${urgentAccent} relative overflow-hidden`}
                 >
-                  {hasNew ? (
-                    <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5 bg-rose-600/80" />
+                  {sideAccentClass ? (
+                    <span className={`pointer-events-none absolute inset-y-0 left-0 w-1.5 ${sideAccentClass}`} />
                   ) : null}
 
                   <div className="flex items-start justify-between gap-3">
@@ -1308,6 +1445,11 @@ export default function AdminRequestsScreen() {
                       <div className="flex items-center gap-2">
                         <div className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">{left}</div>
                         {hasNew ? <RedDot /> : null}
+                        {urgentReassign ? (
+                          <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-100/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-800 dark:border-rose-800/60 dark:bg-rose-900/35 dark:text-rose-200">
+                            Re-assignment needed
+                          </span>
+                        ) : null}
                         {(pinsByTab?.[status] || []).includes(rid) ? (
                           <span
                             className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50/80 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200"
@@ -1321,6 +1463,14 @@ export default function AdminRequestsScreen() {
 
                       <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{right}</div>
 
+                      {isFull ? (
+                        <div className="mt-2">
+                          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-100/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-900/35 dark:text-emerald-200">
+                            Full package
+                          </span>
+                        </div>
+                      ) : null}
+
                       {assignedTo ? (
                         <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
                           Assigned to:{" "}
@@ -1328,6 +1478,12 @@ export default function AdminRequestsScreen() {
                           {staffUpdatedAt ? (
                             <span className="ml-2 text-zinc-500 dark:text-zinc-400">• Updated: {staffUpdatedAt}</span>
                           ) : null}
+                        </div>
+                      ) : null}
+
+                      {urgentReassign ? (
+                        <div className="mt-2 text-xs text-rose-700 dark:text-rose-300">
+                          {String(r?.reassignReason || "Urgent: this request needs reassignment.")}
                         </div>
                       ) : null}
 

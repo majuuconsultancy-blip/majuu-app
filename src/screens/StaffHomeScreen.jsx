@@ -54,8 +54,6 @@ export default function StaffHomeScreen() {
 
   const cardBase =
     "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 backdrop-blur p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60";
-  const cardHover =
-    "transition hover:border-emerald-200 hover:bg-white hover:shadow-md dark:hover:border-emerald-900/40 dark:hover:bg-zinc-900";
 
   useEffect(() => {
     let unsub = null;
@@ -181,7 +179,7 @@ export default function StaffHomeScreen() {
                 onClick={() => navigate("/staff/onboarding")}
                 className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
               >
-                Edit onboarding
+                View staff guide
                 <IconChevronRight className="ml-2 inline h-4 w-4" />
               </button>
             </div>
@@ -192,8 +190,8 @@ export default function StaffHomeScreen() {
               Tip
             </div>
             <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              Tasks are assigned based on your specialities. If you don’t see
-              tasks, update onboarding and wait for assignment.
+              Tasks are assigned based on your specialities. If you do not see
+              tasks, review the staff guide and wait for assignment.
             </div>
           </div>
         </div>
@@ -201,6 +199,9 @@ export default function StaffHomeScreen() {
     </div>
   );
 }
+
+
+
 
 
 

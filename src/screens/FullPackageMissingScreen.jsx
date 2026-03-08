@@ -1,19 +1,14 @@
-// ✅ FullPackageMissingScreen.jsx (FULL COPY-PASTE — FIXED: uses missingItems from Diagnostic Modal)
-// Fixes:
-// ✅ Uses location.state.missingItems FIRST (from FullPackageDiagnosticModal)
-// ✅ Falls back to parent request remainingItems/missingItems only if state not present
-// ✅ Falls back to default list only if neither exists
-// ✅ createServiceRequest now sends the correct "missingItems" list (not the fallback list)
-// ✅ Keeps your auth soft-reconnect behavior (no instant redirect on transient null)
-
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { doc, onSnapshot } from "firebase/firestore";
-import { motion } from "../utils/motionProxy";
-import { smartBack } from "../utils/navBack";
-
+import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import RequestModal from "../components/RequestModal";
+import { createPendingAttachment } from "../services/attachmentservice";
+import {
+  normalizeFullPackageItems,
+  syncFullPackageItemStates,
+  toFullPackageItemKey,
+} from "../services/fullpackageservice";
 import { createServiceRequest } from "../services/requestservice";
 import {
   getUserState,
@@ -21,546 +16,328 @@ import {
   upsertUserContact,
 } from "../services/userservice";
 import { getMissingProfileFields } from "../utils/profileGuard";
-import { createPendingAttachment } from "../services/attachmentservice";
 import { setSnapshot } from "../resume/resumeEngine";
 
-/* ---------------- Icons (minimal, consistent stroke) ---------------- */
+function toMillis(value) {
+  if (!value) return 0;
+  if (typeof value?.toDate === "function") {
+    const d = value.toDate();
+    return d instanceof Date ? d.getTime() : 0;
+  }
+  if (typeof value?.seconds === "number") return value.seconds * 1000;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return value;
+  const parsed = Date.parse(String(value || ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeRequestOutcome(req) {
+  const status = String(req?.status || "").trim().toLowerCase();
+  const finalDecision = String(req?.finalDecision || "").trim().toLowerCase();
+  if (status === "rejected" || finalDecision === "rejected") return "rejected";
+  if (status === "closed" || status === "accepted" || finalDecision === "accepted") return "accepted";
+  return "submitted";
+}
+
+function mapTrack(input) {
+  const t = String(input || "").trim().toLowerCase();
+  return t === "study" || t === "work" || t === "travel" ? t : "study";
+}
+
+function titleForTrack(track) {
+  if (track === "work") return "Work Abroad";
+  if (track === "travel") return "Travel Abroad";
+  return "Study Abroad";
+}
+
 function IconBack(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M15 6 9 12l6 6"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <path d="M15 6 9 12l6 6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
-function IconChevronRight(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M10 7l5 5-5 5"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
+
 function IconCheck(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M6 12.5 10 16.5 18 7.8"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <path d="M6 12.5 10 16.5 18 7.8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
+
+function IconRetry(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path d="M20 11a8 8 0 1 0-2.3 5.7" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+      <path d="M20 6v5h-5" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function IconLock(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M7.5 11V8.8A4.5 4.5 0 0 1 12 4.3 4.5 4.5 0 0 1 16.5 8.8V11"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M6.5 11h11a2 2 0 0 1 2 2v5.2a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V13a2 2 0 0 1 2-2Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
+      <path d="M7.5 11V8.8A4.5 4.5 0 0 1 12 4.3 4.5 4.5 0 0 1 16.5 8.8V11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M6.5 11h11a2 2 0 0 1 2 2v5.2a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V13a2 2 0 0 1 2-2Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
     </svg>
   );
 }
-function IconDoc(props) {
+
+function IconSend(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M8 3.8h6l3 3V20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5.8a2 2 0 0 1 2-2Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M14 3.8V7a2 2 0 0 0 2 2h3"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M9 11h6M9 14h6M9 17h4"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+      <path d="M3 13.5l18-7.5-7.5 18-2.2-7.1L3 13.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M11.3 16.9 21 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
-}
-function IconPen(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M4 20h4l10.5-10.5a2.3 2.3 0 0 0 0-3.2l-.8-.8a2.3 2.3 0 0 0-3.2 0L4 16v4Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M13.7 6.3 17.7 10.3"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-function IconIdCard(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M4 7.5h16a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M7 15.6c.8-1.4 2.1-2.1 3.6-2.1s2.8.7 3.6 2.1"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M10.6 12a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path
-        d="M15.6 10h3"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M15.6 13h3"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-function IconChat(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M7 18.5 3.8 20V6.8A2.3 2.3 0 0 1 6.1 4.5H18a2.5 2.5 0 0 1 2.5 2.5V14A2.5 2.5 0 0 1 18 16.5H7Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M7.5 9.5h8M7.5 12.5h6"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-function IconPlane(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M3 13.5l18-7.5-7.5 18-2.2-7.1L3 13.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M11.3 16.9 21 6"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-function IconBriefcase(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M8 7V5.8A1.8 1.8 0 0 1 9.8 4h4.4A1.8 1.8 0 0 1 16 5.8V7"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M4 7h16a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M2 12h20"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-function IconBook(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M5.5 4.8h11a2 2 0 0 1 2 2V19a2 2 0 0 0-2-2h-11a2 2 0 0 0-2 2V6.8a2 2 0 0 1 2-2Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M7.5 8h8M7.5 11h8M7.5 14h6"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-function IconShieldCheck(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M12 3.5 19 6.7v6.5c0 4.3-3 8.2-7 9.3-4-1.1-7-5-7-9.3V6.7L12 3.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="m9.3 12.4 1.8 1.8 3.8-4.1"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-function IconMoney(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M4 7h16a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M12 14.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path
-        d="M6 10h0M18 14h0"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-/* ---------------- Helpers ---------------- */
-function clamp(n, min, max) {
-  return Math.max(min, Math.min(max, n));
-}
-
-/* ---------------- Icon mapping for items ---------------- */
-function getItemMeta(item, safeTrack) {
-  const s = String(item || "").toLowerCase();
-
-  if (s.includes("document checklist") || s.includes("checklist"))
-    return { icon: IconDoc, sub: "We’ll confirm what’s needed and what’s missing." };
-
-  if (s.includes("sop") || s.includes("motivation"))
-    return { icon: IconPen, sub: "Draft, improve, and make it convincing." };
-
-  if (s.includes("cv") || s.includes("resume"))
-    return { icon: IconIdCard, sub: "Format + improve for your target country." };
-
-  if (s.includes("interview"))
-    return { icon: IconChat, sub: "Questions, answers, and confidence practice." };
-
-  if (s.includes("pre-departure") || s.includes("pre departure") || s.includes("flight"))
-    return { icon: IconPlane, sub: "Packing, bookings, arrival plan, and tips." };
-
-  if (s.includes("passport"))
-    return { icon: IconBook, sub: "Checklist + guidance for a clean application." };
-
-  if (s.includes("visa"))
-    return { icon: IconShieldCheck, sub: "Forms, requirements, and submission steps." };
-
-  if (s.includes("ielts"))
-    return { icon: IconBook, sub: "Prep plan + resources + practice schedule." };
-
-  if (s.includes("proof of funds") || s.includes("fund"))
-    return { icon: IconMoney, sub: "What to show and how to present it." };
-
-  if (s.includes("offer letter"))
-    return { icon: IconDoc, sub: "Review details and confirm requirements." };
-
-  if (safeTrack === "work") return { icon: IconBriefcase, sub: "Continue this step with our team." };
-  if (safeTrack === "study") return { icon: IconBook, sub: "Continue this step with our team." };
-  return { icon: IconPlane, sub: "Continue this step with our team." };
 }
 
 export default function FullPackageMissingScreen() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { track } = useParams();
-  const reduceMotion = true;
+  const { track: trackParam } = useParams();
+  const queryParams = useMemo(() => new URLSearchParams(location.search || ""), [location.search]);
 
-  const safeTrack = useMemo(() => {
-    const t = String(track || "").toLowerCase().trim();
-    return ["study", "work", "travel"].includes(t) ? t : "travel";
-  }, [track]);
+  const fullPackageId = useMemo(() => {
+    const fromState = String(location.state?.fullPackageId || "").trim();
+    const fromResumeState = String(location.state?.resumeFullPackage?.fullPackageId || "").trim();
+    const fromQuery = String(queryParams.get("fullPackageId") || "").trim();
+    return fromState || fromResumeState || fromQuery;
+  }, [location.state, queryParams]);
 
-  const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
-  const country = params.get("country") || "Not selected";
-  const parentRequestId = params.get("parentRequestId") || params.get("parent") || "";
+  const fallbackTrack = useMemo(() => {
+    const fromRoute = String(trackParam || "").trim();
+    if (["study", "work", "travel"].includes(fromRoute.toLowerCase())) return mapTrack(fromRoute);
+    return mapTrack(queryParams.get("track"));
+  }, [trackParam, queryParams]);
 
-  const shouldAutoOpen = params.get("autoOpen") === "1";
-  const autoItem = String(params.get("item") || "").trim();
-
-  const titleText = useMemo(() => {
-    if (safeTrack === "study") return "Study Abroad";
-    if (safeTrack === "work") return "Work Abroad";
-    return "Travel Abroad";
-  }, [safeTrack]);
-
-  const headerIcon = safeTrack === "study" ? IconBook : safeTrack === "work" ? IconBriefcase : IconPlane;
-  const HeaderIcon = headerIcon;
-
-  // ✅ Auth state for this screen only (no hard redirects during transient null)
   const [authChecked, setAuthChecked] = useState(false);
-
-  const [uid, setUid] = useState(null);
+  const [uid, setUid] = useState("");
   const [email, setEmail] = useState("");
-
   const [userState, setUserState] = useState(null);
-  const [missing, setMissing] = useState([]);
-
-  const [parentReq, setParentReq] = useState(null);
-  const [parentErr, setParentErr] = useState("");
-
-  const [modalOpen, setModalOpen] = useState(false);
-  const [pickedNeed, setPickedNeed] = useState(null);
-  const [autoOpened, setAutoOpened] = useState(false);
-  const [requestModalResumeState, setRequestModalResumeState] = useState(null);
-  const fullPackageRestoreAppliedRef = useRef(false);
+  const [profileMissing, setProfileMissing] = useState([]);
 
   const [defaultName, setDefaultName] = useState("");
   const [defaultPhone, setDefaultPhone] = useState("");
 
-  const goBack = () => smartBack(navigate, "/app/home");
-  const goToProfile = () => navigate("/app/profile");
+  const [fullPackageDoc, setFullPackageDoc] = useState(null);
+  const [fullPackageErr, setFullPackageErr] = useState("");
+  const [linkedRequests, setLinkedRequests] = useState([]);
 
-  // ✅ 1) missing items from Diagnostic Modal navigation state
-  const navMissingItems = useMemo(() => {
-    const raw = location?.state?.missingItems;
+  const [modalOpen, setModalOpen] = useState(false);
+  const [pickedNeed, setPickedNeed] = useState("");
+  const [requestModalResumeState, setRequestModalResumeState] = useState(null);
+  const [autoOpened, setAutoOpened] = useState(false);
 
-    if (!raw) return null;
-    if (!Array.isArray(raw)) return null;
+  const restoreAppliedRef = useRef(false);
+  const syncedItemStateRef = useRef("");
 
-    const cleaned = raw
-      .map((x) => String(x || "").trim())
-      .filter(Boolean);
-
-    // if it's empty array, treat as no data
-    if (!cleaned.length) return null;
-
-    // de-dupe while preserving order
-    const seen = new Set();
-    const uniq = [];
-    for (const it of cleaned) {
-      if (!seen.has(it)) {
-        seen.add(it);
-        uniq.push(it);
-      }
-    }
-    return uniq.length ? uniq : null;
-  }, [location?.state]);
-
-  // ✅ IMPORTANT: Avoid navigating to /login instantly if auth is temporarily null
   useEffect(() => {
-    let alive = true;
-    const start = Date.now();
-
-    const tick = async () => {
-      const user = auth.currentUser;
-
-      if (!alive) return;
-
-      if (!user && Date.now() - start < 1200) {
-        setTimeout(tick, 150);
-        return;
-      }
-
+    const unsub = auth.onAuthStateChanged(async (user) => {
       setAuthChecked(true);
-
       if (!user) {
-        setUid(null);
+        setUid("");
         setEmail("");
         setUserState(null);
-        setMissing([]);
+        setProfileMissing([]);
         return;
       }
 
       setUid(user.uid);
       setEmail(user.email || "");
-
       try {
-        // ✅ pass email so getUserState can auto-heal doc if missing
         const s = await getUserState(user.uid, user.email || "");
-        if (!alive) return;
-
         setUserState(s || null);
-        setDefaultName(s?.name || "");
-        setDefaultPhone(s?.phone || "");
-        setMissing(getMissingProfileFields(s || {}));
-      } catch (e) {
-        console.error("FullPackageMissing getUserState error:", e);
+        setDefaultName(String(s?.name || ""));
+        setDefaultPhone(String(s?.phone || ""));
+        setProfileMissing(getMissingProfileFields(s || {}));
+      } catch (error) {
+        console.error("FullPackageMissing getUserState error:", error);
       }
-    };
-
-    tick();
-    return () => {
-      alive = false;
-    };
+    });
+    return () => unsub();
   }, []);
 
-  // Parent request snapshot (only if parentRequestId exists)
   useEffect(() => {
-    if (!parentRequestId) return;
-
-    const ref = doc(db, "serviceRequests", parentRequestId);
+    if (!uid || !fullPackageId) return;
+    const ref = doc(db, "fullPackages", fullPackageId);
     const unsub = onSnapshot(
       ref,
       (snap) => {
         if (!snap.exists()) {
-          setParentReq(null);
-          setParentErr("Parent request not found.");
+          setFullPackageDoc(null);
+          setFullPackageErr("Full package not found. Please start again from We-Help.");
           return;
         }
-        setParentReq({ id: snap.id, ...snap.data() });
-        setParentErr("");
+        const data = { id: snap.id, ...snap.data() };
+        if (String(data.uid || "") !== String(uid || "")) {
+          setFullPackageDoc(null);
+          setFullPackageErr("This full package belongs to a different account.");
+          return;
+        }
+        setFullPackageErr("");
+        setFullPackageDoc(data);
       },
-      (e) => {
-        console.error("parent request snapshot error:", e);
-        setParentErr(e?.message || "Failed to load parent request.");
+      (error) => {
+        setFullPackageDoc(null);
+        setFullPackageErr(error?.message || "Failed to load full package.");
       }
     );
-
     return () => unsub();
-  }, [parentRequestId]);
+  }, [uid, fullPackageId]);
 
-  // ✅ 2) missing items from parent request (fallback)
-  const parentMissingItems = useMemo(() => {
-    const arr =
-      parentReq?.remainingItems ||
-      parentReq?.missingItems ||
-      parentReq?.remaining ||
-      parentReq?.items ||
-      [];
+  useEffect(() => {
+    if (!uid || !fullPackageId) return;
+    const reqQ = query(collection(db, "serviceRequests"), where("fullPackageId", "==", fullPackageId));
+    const unsub = onSnapshot(
+      reqQ,
+      (snap) => {
+        const rows = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((row) => String(row.uid || "") === uid && Boolean(row.isFullPackage));
+        setLinkedRequests(rows);
+      },
+      (error) => {
+        console.error("full package serviceRequests snapshot error:", error);
+      }
+    );
+    return () => unsub();
+  }, [uid, fullPackageId]);
 
-    if (Array.isArray(arr) && arr.length) {
-      const cleaned = arr.map((x) => String(x || "").trim()).filter(Boolean);
-      return cleaned.length ? cleaned : null;
+  const safeTrack = useMemo(
+    () => mapTrack(fullPackageDoc?.track || queryParams.get("track") || fallbackTrack),
+    [fullPackageDoc?.track, queryParams, fallbackTrack]
+  );
+  const country = useMemo(
+    () => String(fullPackageDoc?.country || queryParams.get("country") || "Not selected"),
+    [fullPackageDoc?.country, queryParams]
+  );
+  const trackTitle = useMemo(() => titleForTrack(safeTrack), [safeTrack]);
+
+  const selectedItems = useMemo(() => {
+    const fromDoc = normalizeFullPackageItems(fullPackageDoc?.selectedItems);
+    if (fromDoc.length > 0) return fromDoc;
+    return normalizeFullPackageItems(location.state?.missingItems);
+  }, [fullPackageDoc?.selectedItems, location.state]);
+
+  const depositPaid = Boolean(fullPackageDoc?.depositPaid);
+  const canUseRequestFlow = Boolean(uid) && profileMissing.length === 0 && depositPaid;
+  const backToWeHelpHref = `/app/${safeTrack}/we-help?country=${encodeURIComponent(country)}`;
+
+  const latestByItemKey = useMemo(() => {
+    const map = new Map();
+    for (const req of linkedRequests) {
+      const key = String(
+        req.fullPackageItemKey ||
+          toFullPackageItemKey(req.fullPackageItem || req.serviceName || "")
+      ).trim();
+      if (!key) continue;
+
+      const ts = Math.max(toMillis(req.updatedAt), toMillis(req.decidedAt), toMillis(req.createdAt));
+      const existing = map.get(key);
+      if (!existing || ts >= existing.__ts) map.set(key, { ...req, __ts: ts });
     }
-    return null;
-  }, [parentReq]);
+    return map;
+  }, [linkedRequests]);
 
-  // ✅ 3) final source-of-truth list for tiles + request payload
-  const finalMissingItems = useMemo(() => {
-    // priority: navigation state > parent request > default list
-    if (navMissingItems?.length) return navMissingItems;
-    if (parentMissingItems?.length) return parentMissingItems;
+  const itemRows = useMemo(() => {
+    return selectedItems.map((item) => {
+      const key = toFullPackageItemKey(item);
+      const latestRequest = latestByItemKey.get(key) || null;
+      const outcome = latestRequest ? normalizeRequestOutcome(latestRequest) : "not_started";
 
-    return [
-      "Document checklist",
-      "SOP / Motivation Letter",
-      "CV / Resume",
-      "Interview preparation",
-      "Pre-departure guidance",
-    ];
-  }, [navMissingItems, parentMissingItems]);
+      let state = "NOT_STARTED";
+      if (outcome === "accepted") state = "DONE";
+      else if (outcome === "rejected") state = "RETRY";
+      else if (latestRequest) state = "SUBMITTED";
 
-  // ✅ Completed list (if parent request has progress)
-  const completedList = useMemo(() => {
-    const done = parentReq?.completedItems || parentReq?.doneItems || [];
-    return Array.isArray(done) ? done.map((x) => String(x)) : [];
-  }, [parentReq]);
+      return {
+        key,
+        item,
+        state,
+        latestRequest,
+        clickable: state === "NOT_STARTED" || state === "RETRY",
+      };
+    });
+  }, [selectedItems, latestByItemKey]);
 
-  const isCompleted = (need) => completedList.includes(String(need));
-
-  const canContinueHere = missing.length === 0;
-
-  useEffect(() => {
-    if (autoOpened) return;
-    if (!shouldAutoOpen) return;
-    if (!canContinueHere) return;
-
-    const picked = autoItem || String(finalMissingItems?.[0] || "").trim() || "Document checklist";
-
-    setPickedNeed(picked);
-    setModalOpen(true);
-    setAutoOpened(true);
-  }, [autoOpened, shouldAutoOpen, canContinueHere, autoItem, finalMissingItems]);
+  const itemStatePayload = useMemo(() => {
+    const out = {};
+    for (const row of itemRows) {
+      if (row.state === "DONE") out[row.key] = "accepted";
+      else if (row.state === "SUBMITTED") out[row.key] = "submitted";
+      else if (row.state === "RETRY") out[row.key] = "rejected";
+      else out[row.key] = "not_started";
+    }
+    return out;
+  }, [itemRows]);
 
   useEffect(() => {
-    if (fullPackageRestoreAppliedRef.current) return;
+    if (!fullPackageId || !depositPaid || !Object.keys(itemStatePayload).length) return;
+    const serialized = JSON.stringify(itemStatePayload);
+    if (serialized === syncedItemStateRef.current) return;
+    syncedItemStateRef.current = serialized;
+    syncFullPackageItemStates({ fullPackageId, itemStates: itemStatePayload }).catch((error) => {
+      console.warn("Failed to sync full package item states:", error?.message || error);
+    });
+  }, [fullPackageId, depositPaid, itemStatePayload]);
 
+  useEffect(() => {
+    if (restoreAppliedRef.current) return;
+    if (!canUseRequestFlow) return;
     const resumeState = location.state?.resumeFullPackage;
     if (!resumeState) return;
 
-    fullPackageRestoreAppliedRef.current = true;
-
+    restoreAppliedRef.current = true;
     const selectedItem = String(
       resumeState?.selectedItem || resumeState?.requestModal?.selectedItem || ""
     ).trim();
-
-    if (selectedItem) setPickedNeed(selectedItem);
+    if (selectedItem) {
+      queueMicrotask(() => setPickedNeed(selectedItem));
+    }
 
     const modalState = resumeState?.requestModal;
-    if (modalState?.open && canContinueHere) {
-      setRequestModalResumeState(modalState);
-      setPickedNeed(
-        selectedItem || String(finalMissingItems?.[0] || "").trim() || "Document checklist"
-      );
+    if (modalState?.open) {
+      const fallbackItem =
+        selectedItem || itemRows.find((x) => x.clickable)?.item || itemRows[0]?.item || "";
+      if (!fallbackItem) return;
+      queueMicrotask(() => {
+        setPickedNeed(fallbackItem);
+        setRequestModalResumeState(modalState);
+        setModalOpen(true);
+        setAutoOpened(true);
+      });
+    }
+  }, [location.state, canUseRequestFlow, itemRows]);
+
+  useEffect(() => {
+    if (autoOpened || !canUseRequestFlow) return;
+    const shouldAutoOpen = queryParams.get("autoOpen") === "1";
+    const retryItemKey = String(queryParams.get("retryItemKey") || "").trim();
+    const fallbackItem = String(queryParams.get("item") || "").trim();
+    if (!shouldAutoOpen && !retryItemKey && !fallbackItem) return;
+
+    const byRetryKey = retryItemKey ? itemRows.find((row) => row.key === retryItemKey) : null;
+    const byFallbackItem = fallbackItem
+      ? itemRows.find((row) => row.item === fallbackItem || row.key === toFullPackageItemKey(fallbackItem))
+      : null;
+    const firstClickable = itemRows.find((row) => row.clickable);
+    const picked = byRetryKey || byFallbackItem || firstClickable || null;
+    if (!picked || !picked.clickable) return;
+    queueMicrotask(() => {
+      setPickedNeed(picked.item);
       setModalOpen(true);
       setAutoOpened(true);
-    }
-  }, [location.state, canContinueHere, finalMissingItems]);
+    });
+  }, [autoOpened, canUseRequestFlow, queryParams, itemRows]);
 
-  const openNeed = (need) => {
-    if (!canContinueHere) return;
-    if (isCompleted(need)) return;
+  const openNeed = (row) => {
+    if (!row?.clickable || !canUseRequestFlow) return;
     setRequestModalResumeState(null);
-    setPickedNeed(need);
+    setPickedNeed(row.item);
     setModalOpen(true);
   };
-
-  const enableAttachments = true;
 
   const submitFullPackage = async ({
     name,
@@ -573,14 +350,17 @@ export default function FullPackageMissingScreen() {
     paid,
     paymentMeta,
   }) => {
-    if (!uid) return;
+    if (!uid || !fullPackageId || !pickedNeed) return;
 
     const missingNow = getMissingProfileFields(userState || {});
     if (missingNow.length > 0) {
       alert(`Please complete your profile first:\n- ${missingNow.join("\n- ")}`);
       setModalOpen(false);
-      goToProfile();
+      navigate("/app/profile");
       return;
+    }
+    if (!depositPaid) {
+      throw new Error("Deposit is required before submitting full package items.");
     }
 
     try {
@@ -590,108 +370,70 @@ export default function FullPackageMissingScreen() {
         await upsertUserContact(uid, { name: cleanName, phone: cleanPhone });
         setDefaultName(cleanName);
         setDefaultPhone(cleanPhone);
-        setUserState((prev) => ({
-          ...(prev || {}),
-          name: cleanName,
-          phone: cleanPhone,
-        }));
+        setUserState((prev) => ({ ...(prev || {}), name: cleanName, phone: cleanPhone }));
       }
-    } catch (e) {
-      console.warn("upsertUserContact failed (continuing anyway):", e);
+    } catch (error) {
+      console.warn("upsertUserContact failed (continuing):", error);
     }
 
-    const autoContext = [
-      "Full package continuation",
-      `ParentRequestId: ${parentRequestId || "-"}`,
-      `Track: ${safeTrack}`,
-      `Country: ${country}`,
-      pickedNeed ? `Selected item: ${pickedNeed}` : null,
-      finalMissingItems?.length ? `Missing items: ${finalMissingItems.join(", ")}` : null,
-    ]
-      .filter(Boolean)
-      .join(" | ");
+    const itemKey = toFullPackageItemKey(pickedNeed);
+    const parentRequestId = String(latestByItemKey.get(itemKey)?.id || "");
+    const finalNote = String(note || "").trim();
 
-    const finalNote = String(note || "").trim()
-      ? `${String(note).trim()}\n\n---\n${autoContext}`
-      : autoContext;
+    const requestId = await createServiceRequest({
+      uid,
+      email: String(formEmail || email || "").trim(),
+      track: safeTrack,
+      country,
+      requestType: "full",
+      serviceName: "Full Package",
+      missingItems: selectedItems,
+      name,
+      phone,
+      note: finalNote,
+      city: String(city || "").trim(),
+      paid: Boolean(paid),
+      paymentMeta: paymentMeta || null,
+      requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
+      parentRequestId,
+      isFullPackage: true,
+      fullPackageId,
+      fullPackageItem: pickedNeed,
+      fullPackageItemKey: itemKey,
+      fullPackageSelectedItems: selectedItems,
+    });
 
-    try {
-      const requestId = await createServiceRequest({
-        uid,
-        email: String(formEmail || email || "").trim(),
-        track: safeTrack,
-        country,
-        requestType: "full",
-        serviceName: "Full Package",
-
-        // ✅ CRITICAL: send the correct missing items list
-        missingItems: Array.isArray(finalMissingItems) ? finalMissingItems : [],
-
-        name,
-        phone,
-        note: finalNote,
-
-        city: String(city || "").trim(),
-        paid: Boolean(paid),
-        paymentMeta: paymentMeta || null,
-
-        requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
-        parentRequestId: parentRequestId || "",
-        fullPackageItem: pickedNeed || "",
-      });
-
-      const picked = Array.isArray(dummyFiles) ? dummyFiles : [];
-      if (picked.length > 0) {
-        for (const file of picked) {
-          await createPendingAttachment({ requestId, file });
-        }
-      }
-
-      await setActiveProcessDetails(uid, {
-        hasActiveProcess: true,
-        activeTrack: safeTrack,
-        activeCountry: country,
-        activeHelpType: "we",
-        activeRequestId: requestId,
-      });
-
-      setSnapshot({
-        route: { path: `/app/request/${requestId}`, search: "" },
-        weHelp: { activeRequestId: requestId },
-      });
-
-      setModalOpen(false);
-      navigate(`/app/request/${requestId}`, { replace: true });
-    } catch (err) {
-      if (err?.code === "auth/email-not-verified") {
-        navigate("/verify-email", { replace: false });
-      }
-      throw err;
+    const files = Array.isArray(dummyFiles) ? dummyFiles : [];
+    for (const file of files) {
+      await createPendingAttachment({ requestId, file });
     }
+
+    await setActiveProcessDetails(uid, {
+      hasActiveProcess: true,
+      activeTrack: safeTrack,
+      activeCountry: country,
+      activeHelpType: "we",
+      activeRequestId: requestId,
+    });
+
+    setSnapshot({
+      route: { path: `/app/request/${requestId}`, search: "" },
+      weHelp: { activeRequestId: requestId },
+    });
+
+    setModalOpen(false);
+    navigate(`/app/request/${requestId}`, { replace: true });
   };
-
-  const totalCount = finalMissingItems.length;
-  const doneCount = useMemo(
-    () => finalMissingItems.filter((x) => isCompleted(x)).length,
-    [finalMissingItems, completedList]
-  );
-  const remainingCount = Math.max(0, totalCount - doneCount);
-  const progressPct = totalCount ? clamp(Math.round((doneCount / totalCount) * 100), 0, 100) : 0;
-
-  const canTapTiles = canContinueHere;
 
   useEffect(() => {
     setSnapshot({
-      route: {
-        path: location.pathname,
-        search: location.search || "",
-      },
+      route: { path: location.pathname, search: location.search || "" },
       weHelp: {
         track: safeTrack,
         country,
         fullPackage: {
           screen: "missing",
-          parentRequestId: parentRequestId || "",
+          fullPackageId: fullPackageId || "",
           selectedItem: pickedNeed || "",
           requestModal: {
             open: modalOpen,
@@ -707,33 +449,18 @@ export default function FullPackageMissingScreen() {
     location.search,
     safeTrack,
     country,
-    parentRequestId,
+    fullPackageId,
     pickedNeed,
     modalOpen,
     requestModalResumeState,
   ]);
 
-  const chipTrack =
-    safeTrack === "study"
-      ? "border-emerald-200 bg-emerald-50/60 text-emerald-900"
-      : safeTrack === "work"
-        ? "border-sky-200 bg-sky-50/60 text-sky-900"
-        : "border-emerald-200 bg-emerald-50/60 text-emerald-900";
-
-  const cardBase = "rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur";
-
-  const btnPrimary =
-    "inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]";
-
-  // ✅ Simple auth UI (no forced redirect)
   if (!authChecked) {
     return (
       <div className="min-h-screen px-5 py-10">
-        <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 p-5 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="text-base font-semibold">Reconnecting…</div>
-          <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300 dark:text-zinc-400">
-            Restoring your session.
-          </div>
+        <div className="rounded-3xl border border-zinc-200 bg-white/80 p-5">
+          <div className="text-base font-semibold">Reconnecting...</div>
+          <div className="mt-1 text-sm text-zinc-600">Restoring your session.</div>
         </div>
       </div>
     );
@@ -742,15 +469,10 @@ export default function FullPackageMissingScreen() {
   if (authChecked && !uid) {
     return (
       <div className="min-h-screen px-5 py-10">
-        <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 p-5 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="text-base font-semibold">You’re signed out</div>
-          <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300 dark:text-zinc-400">
-            Please sign in again to continue.
-          </div>
-          <button
-            onClick={() => navigate("/login", { replace: true })}
-            className="mt-4 w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white active:scale-[0.99]"
-          >
+        <div className="rounded-3xl border border-zinc-200 bg-white/80 p-5">
+          <div className="text-base font-semibold">You are signed out</div>
+          <div className="mt-1 text-sm text-zinc-600">Please sign in again to continue.</div>
+          <button onClick={() => navigate("/login", { replace: true })} className="mt-4 w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white active:scale-[0.99]">
             Go to Login
           </button>
         </div>
@@ -758,212 +480,132 @@ export default function FullPackageMissingScreen() {
     );
   }
 
+  if (!fullPackageId) {
+    return (
+      <div className="min-h-screen px-5 py-10">
+        <div className="rounded-3xl border border-rose-200 bg-rose-50 p-5 text-rose-800">
+          <div className="text-base font-semibold">Invalid full package link</div>
+          <div className="mt-1 text-sm">Open Full Package from We-Help to continue.</div>
+          <button onClick={() => navigate(backToWeHelpHref, { replace: true })} className="mt-4 w-full rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm font-semibold text-rose-700">
+            Back to We-Help
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen">
-      <div className="px-5 py-6">
-        <button
-          onClick={goBack}
-          className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800"
-        >
-          <IconBack className="h-5 w-5" />
-          Back
-        </button>
+    <div className="min-h-screen px-5 py-6">
+      <button onClick={() => navigate(backToWeHelpHref, { replace: true })} className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800">
+        <IconBack className="h-5 w-5" />
+        Back
+      </button>
 
-        <div className="flex items-end justify-between gap-3">
+      <div className="rounded-3xl border border-zinc-200 bg-white/80 p-4 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <div
-              className={[
-                "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold",
-                chipTrack,
-              ].join(" ")}
-            >
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-emerald-100 bg-white/70 dark:bg-zinc-900/60">
-                <HeaderIcon className="h-4 w-4 opacity-90" />
-              </span>
-              Full package • {titleText}
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-900">
+              Full package hub
             </div>
-
-            <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-              Continue your full package
-            </h1>
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">Tap any tile to continue that step.</p>
+            <h1 className="mt-2 text-lg font-semibold text-zinc-900">{trackTitle} - Continue your full package</h1>
+            <p className="mt-1 text-sm text-zinc-600">Country: <span className="font-semibold text-zinc-900">{country}</span></p>
           </div>
-
-          <div className="h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70" />
+          <span className={["rounded-full border px-2.5 py-1 text-xs font-semibold", depositPaid ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"].join(" ")}>
+            {depositPaid ? "Deposit paid" : "Deposit required"}
+          </span>
         </div>
+      </div>
 
-        {parentErr ? (
-          <div className="mt-4 rounded-3xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-            {parentErr}
-          </div>
-        ) : null}
+      {fullPackageErr ? <div className="mt-4 rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{fullPackageErr}</div> : null}
 
-        {!canContinueHere ? (
-          <div className="mt-5 rounded-3xl border border-amber-200 bg-amber-50/60 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                  Complete your profile to continue
-                </div>
-                <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
-                  Missing: <span className="font-semibold">{missing.join(", ")}</span>
-                </div>
-              </div>
-
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-amber-200 bg-white/70 dark:bg-zinc-900/60 text-amber-800">
-                <IconLock className="h-5 w-5" />
-              </span>
-            </div>
-
-            <button onClick={goToProfile} className={`${btnPrimary} mt-4 w-full`}>
-              Go to Profile
-            </button>
-          </div>
-        ) : null}
-
-        <div className="mt-6 grid gap-3">
-          <div className={`${cardBase} p-4`}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Remaining steps</div>
-                <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                  Country: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{country}</span>
-                </div>
-
-                {navMissingItems?.length ? (
-                  <div className="mt-1 text-[11px] text-emerald-700">
-                    Completion Meter.
-                  </div>
-                ) : parentRequestId ? (
-                  <div className="mt-1 text-[11px] text-zinc-500">
-                    Continuation from request{" "}
-                    <span className="font-semibold">{parentRequestId}</span>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="text-right">
-                <div className="inline-flex items-center gap-2">
-                  <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-                    Done {doneCount}/{totalCount}
-                  </span>
-                  <span className="rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-1 text-[11px] font-semibold text-emerald-900">
-                    {remainingCount} left
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-zinc-200/70">
-              <motion.div
-                initial={false}
-                animate={{ width: `${progressPct}%` }}
-                transition={reduceMotion ? { duration: 0 } : { duration: 0.28, ease: "easeOut" }}
-                className="h-full rounded-full bg-emerald-600"
-              />
-            </div>
-
-            <div className="mt-2 text-[11px] text-zinc-500">
-              Tip: Attach PDFs when submitting — it speeds up the review.
+      {!depositPaid ? (
+        <div className="mt-4 rounded-3xl border border-amber-200 bg-amber-50/70 p-4">
+          <div className="flex items-start gap-3">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-200 bg-white text-amber-900">
+              <IconLock className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="text-sm font-semibold text-zinc-900">Deposit payment is required</div>
+              <div className="mt-1 text-sm text-zinc-700">This hub is locked until the deposit is paid from the full package diagnostic modal.</div>
             </div>
           </div>
+          <button onClick={() => navigate(backToWeHelpHref, { replace: true })} className="mt-4 w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white">
+            Back to Full Package
+          </button>
         </div>
+      ) : null}
 
-        <div className="mt-4 grid gap-3">
-          {finalMissingItems.map((need) => {
-            const done = isCompleted(need);
-            const disabled = !canTapTiles || done;
+      {profileMissing.length > 0 ? (
+        <div className="mt-4 rounded-3xl border border-amber-200 bg-amber-50/70 p-4">
+          <div className="text-sm font-semibold text-zinc-900">Complete your profile to continue</div>
+          <div className="mt-1 text-sm text-zinc-700">Missing: <span className="font-semibold">{profileMissing.join(", ")}</span></div>
+          <button onClick={() => navigate("/app/profile")} className="mt-4 w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white">
+            Go to Profile
+          </button>
+        </div>
+      ) : null}
 
-            const meta = getItemMeta(need, safeTrack);
-            const TileIcon = meta.icon;
+      <div className="mt-5 grid gap-3">
+        {itemRows.length === 0 ? (
+          <div className="rounded-3xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600">No selected items found for this full package.</div>
+        ) : (
+          itemRows.map((row) => {
+            const isSubmitted = row.state === "SUBMITTED";
+            const isDone = row.state === "DONE";
+            const isRetry = row.state === "RETRY";
+            const disabled = !canUseRequestFlow || !row.clickable;
+
+            const badgeLabel = isDone ? "Done" : isSubmitted ? "Already applied" : isRetry ? "Try again" : "Open";
+            const subLabel = isDone
+              ? "Done"
+              : isSubmitted
+                ? "Already applied"
+                : isRetry
+                  ? "Last request was rejected. Try again."
+                  : "Start this step.";
 
             return (
-              <button
-                key={need}
-                type="button"
-                onClick={() => openNeed(need)}
-                disabled={disabled}
-                className={[
-                  "w-full text-left rounded-3xl border px-4 py-4 transition",
-                  "shadow-[0_14px_46px_rgba(0,0,0,0.07)] backdrop-blur",
-                  "active:scale-[0.99]",
-                  done
-                    ? "border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 text-zinc-500"
-                    : "border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 hover:bg-white/85 hover:border-emerald-200/70",
-                  disabled && !done ? "opacity-60 cursor-not-allowed" : "",
-                ].join(" ")}
-              >
+              <button key={row.key} type="button" disabled={disabled} onClick={() => openNeed(row)} className={["w-full rounded-3xl border p-4 text-left shadow-sm transition", disabled ? "cursor-not-allowed border-zinc-200 bg-zinc-50/70 text-zinc-500" : isRetry ? "border-rose-200 bg-rose-50/70 hover:bg-rose-50" : "border-zinc-200 bg-white/75 hover:border-emerald-200 hover:bg-white"].join(" ")}>
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex items-start gap-3">
-                    <span
-                      className={[
-                        "inline-flex h-11 w-11 items-center justify-center rounded-2xl border",
-                        done
-                          ? "border-emerald-200 bg-emerald-50/70 text-emerald-800"
-                          : "border-emerald-100 bg-emerald-50/50 text-emerald-800",
-                      ].join(" ")}
-                    >
-                      {done ? <IconCheck className="h-5 w-5" /> : <TileIcon className="h-5 w-5" />}
-                    </span>
-
-                    <div className="min-w-0">
-                      <div className="truncate text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">
-                        {need}
-                      </div>
-                      <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                        {done ? "Completed" : meta.sub}
-                      </div>
-
-                      {!done ? (
-                        <div className="mt-2 inline-flex items-center gap-2">
-                          <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-                            PDFs allowed
-                          </span>
-                          <span className="rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-1 text-[11px] font-semibold text-emerald-900">
-                            Continue
-                          </span>
-                        </div>
-                      ) : null}
-                    </div>
+                  <div className="min-w-0">
+                    <div className="text-[15px] font-semibold text-zinc-900">{row.item}</div>
+                    <div className="mt-1 text-sm text-zinc-600">{subLabel}</div>
                   </div>
-
-                  <span
-                    className={[
-                      "shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
-                      done
-                        ? "border-emerald-200 bg-emerald-50/70 text-emerald-900"
-                        : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300",
-                    ].join(" ")}
-                  >
-                    {done ? "Done" : "Open"}
-                    {!done ? <IconChevronRight className="h-4 w-4" /> : null}
+                  <span className={["inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold", isDone ? "border-emerald-200 bg-emerald-50 text-emerald-900" : isSubmitted ? "border-zinc-200 bg-white text-zinc-700" : isRetry ? "border-rose-200 bg-white text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-900"].join(" ")}>
+                    {isDone ? <IconCheck className="h-3.5 w-3.5" /> : null}
+                    {isRetry ? <IconRetry className="h-3.5 w-3.5" /> : null}
+                    {!isDone && !isRetry ? <IconSend className="h-3.5 w-3.5" /> : null}
+                    {badgeLabel}
                   </span>
                 </div>
               </button>
             );
-          })}
-        </div>
-
-        <RequestModal
-          open={modalOpen}
-          onClose={() => setModalOpen(false)}
-          onSubmit={submitFullPackage}
-          title={pickedNeed ? `Continue: ${pickedNeed}` : "Continue Full Package"}
-          subtitle={`${titleText} • ${country}`}
-          defaultName={defaultName}
-          defaultPhone={defaultPhone}
-          defaultEmail={auth.currentUser?.email || email || ""}
-          paymentContext={{
-            flow: "fullPackage",
-            track: safeTrack,
-            selectedItem: pickedNeed || "",
-          }}
-          initialState={requestModalResumeState?.formState || null}
-          onStateChange={setRequestModalResumeState}
-          enableAttachments={enableAttachments}
-          maxPdfMb={10}
-        />
+          })
+        )}
       </div>
+
+      <RequestModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onSubmit={submitFullPackage}
+        title={pickedNeed ? `Continue: ${pickedNeed}` : "Continue Full Package"}
+        subtitle={`${trackTitle} - ${country}`}
+        defaultName={defaultName}
+        defaultPhone={defaultPhone}
+        defaultEmail={auth.currentUser?.email || email || ""}
+        paymentContext={{
+          flow: "fullPackage",
+          track: safeTrack,
+          country,
+          selectedItem: pickedNeed || "",
+          fullPackageId: fullPackageId || "",
+        }}
+        initialState={requestModalResumeState?.formState || null}
+        onStateChange={setRequestModalResumeState}
+        enableAttachments={true}
+        maxPdfMb={10}
+      />
     </div>
   );
 }
+

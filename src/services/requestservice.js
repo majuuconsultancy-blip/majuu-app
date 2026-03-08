@@ -17,6 +17,31 @@ function cleanRequestType(x) {
   return t === "full" ? "full" : "single";
 }
 
+function cleanItemKey(x) {
+  const raw = cleanStr(x, 120).toLowerCase();
+  if (!raw) return "";
+  return raw
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+}
+
+function cleanStringList(input, { maxItems = 60, maxLen = 120 } = {}) {
+  const arr = Array.isArray(input) ? input : [];
+  const seen = new Set();
+  const out = [];
+
+  for (const item of arr) {
+    const clean = cleanStr(item, maxLen);
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    out.push(clean);
+    if (out.length >= maxItems) break;
+  }
+
+  return out;
+}
+
 function cleanUploadMeta(meta) {
   const raw = meta && typeof meta === "object" ? meta : null;
   const files = Array.isArray(raw?.files) ? raw.files : [];
@@ -114,6 +139,17 @@ export async function createServiceRequest(payload) {
     : "";
 
   const parentRequestId = cleanStr(payload?.parentRequestId, 64);
+  const fullPackageId = cleanStr(payload?.fullPackageId, 120);
+  const fullPackageItem = cleanStr(payload?.fullPackageItem, 120);
+  const fullPackageItemKey = cleanItemKey(
+    payload?.fullPackageItemKey || payload?.serviceKey || fullPackageItem
+  );
+  const fullPackageSelectedItems = cleanStringList(
+    payload?.fullPackageSelectedItems,
+    { maxItems: 60, maxLen: 120 }
+  );
+  const isFullPackage =
+    Boolean(fullPackageId) && (Boolean(payload?.isFullPackage) || isFull);
 
   const paid = Boolean(payload?.paid);
   const paymentMetaRaw = cleanPaymentMeta(payload?.paymentMeta);
@@ -140,6 +176,11 @@ export async function createServiceRequest(payload) {
 
     missingItems: cleanMissingItems,
     parentRequestId: parentRequestId || "",
+    isFullPackage,
+    fullPackageId: isFullPackage ? fullPackageId : "",
+    fullPackageItem: isFullPackage ? fullPackageItem : "",
+    fullPackageItemKey: isFullPackage ? fullPackageItemKey : "",
+    fullPackageSelectedItems: isFullPackage ? fullPackageSelectedItems : [],
 
     paid,
     paymentMeta,

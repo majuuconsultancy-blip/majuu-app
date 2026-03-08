@@ -15,6 +15,7 @@ import {
   onSnapshot,
   query,
   orderBy,
+  where,
 } from "firebase/firestore";
 import { motion, AnimatePresence } from "../utils/motionProxy";
 import RequestChatLauncher from "../components/RequestChatLauncher";
@@ -22,6 +23,11 @@ import RequestChatLauncher from "../components/RequestChatLauncher";
 import { auth, db } from "../firebase";
 import { clearActiveProcess } from "../services/userservice";
 import { smartBack } from "../utils/navBack";
+import {
+  buildFullPackageHubPath,
+  normalizeFullPackageItems,
+  toFullPackageItemKey,
+} from "../services/fullpackageservice";
 
 /* ---------------- Minimal icons ---------------- */
 function IconReceipt(props) {
@@ -154,6 +160,27 @@ function bytesToLabel(bytes) {
   return `${Math.round((b / 1024 / 1024) * 10) / 10} MB`;
 }
 
+function toMillis(value) {
+  if (!value) return 0;
+  if (typeof value?.toDate === "function") {
+    const d = value.toDate();
+    return d instanceof Date ? d.getTime() : 0;
+  }
+  if (typeof value?.seconds === "number") return value.seconds * 1000;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return value;
+  const parsed = Date.parse(String(value || ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeRequestOutcome(req) {
+  const status = String(req?.status || "").trim().toLowerCase();
+  const finalDecision = String(req?.finalDecision || "").trim().toLowerCase();
+  if (status === "rejected" || finalDecision === "rejected") return "rejected";
+  if (status === "closed" || status === "accepted" || finalDecision === "accepted") return "accepted";
+  return "submitted";
+}
+
 /** ✅ Fallback for old requests: parse "Missing items: ..." from note */
 function parseMissingItemsFromNote(note) {
   const text = String(note || "");
@@ -208,6 +235,8 @@ export default function RequestStatusScreen() {
 
   const [adminFilesErr, setAdminFilesErr] = useState("");
   const [adminFiles, setAdminFiles] = useState([]);
+  const [fullPackageItems, setFullPackageItems] = useState([]);
+  const [fullPackageLinkedRequests, setFullPackageLinkedRequests] = useState([]);
 
   // subtle "apple-ish" entrance animation (CSS-only, no deps)
   const [enter, setEnter] = useState(false);
@@ -220,6 +249,17 @@ export default function RequestStatusScreen() {
     const id = String(requestId || "").trim();
     return id.length > 0 ? id : null;
   }, [requestId]);
+
+  const isFullRequest =
+    Boolean(req?.isFullPackage) || String(req?.requestType || "").toLowerCase() === "full";
+  const fullPackageIdValue = String(
+    req?.fullPackageId || req?.fullPackage?.fullPackageId || req?.fullPackage?.id || ""
+  ).trim();
+  const fallbackFullPackageItems = useMemo(() => {
+    return normalizeFullPackageItems(
+      req?.fullPackageSelectedItems || req?.missingItems || parseMissingItemsFromNote(req?.note)
+    );
+  }, [req?.fullPackageSelectedItems, req?.missingItems, req?.note]);
 
   // ✅ IMPORTANT: ensure any modal/portal chat always sits on top
   const TOP_LAYER_CLS = "relative isolate z-0";
@@ -321,6 +361,104 @@ export default function RequestStatusScreen() {
     };
   }, [navigate, validRequestId]);
 
+  useEffect(() => {
+    if (!isFullRequest || !fullPackageIdValue) return;
+
+    const unsubs = [];
+    const ownerUid = String(req?.uid || "").trim();
+
+    const fpRef = doc(db, "fullPackages", fullPackageIdValue);
+    unsubs.push(
+      onSnapshot(fpRef, (snap) => {
+        if (!snap.exists()) {
+          setFullPackageItems(fallbackFullPackageItems);
+          return;
+        }
+        const items = normalizeFullPackageItems(snap.data()?.selectedItems);
+        setFullPackageItems(items.length ? items : fallbackFullPackageItems);
+      })
+    );
+
+    const linkedQ = query(
+      collection(db, "serviceRequests"),
+      where("fullPackageId", "==", fullPackageIdValue)
+    );
+    unsubs.push(
+      onSnapshot(
+        linkedQ,
+        (snap) => {
+          const rows = snap.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .filter((row) => {
+              const sameOwner = !ownerUid || String(row.uid || "") === ownerUid;
+              const isFullRow =
+                Boolean(row.isFullPackage) ||
+                String(row.requestType || "").toLowerCase() === "full";
+              return sameOwner && isFullRow;
+            });
+          setFullPackageLinkedRequests(rows);
+        },
+        (error) => {
+          console.error("full package status list snapshot error:", error);
+          setFullPackageLinkedRequests([]);
+        }
+      )
+    );
+
+    return () => {
+      unsubs.forEach((fn) => {
+        try {
+          fn?.();
+        } catch (error) {
+          void error;
+        }
+      });
+    };
+  }, [isFullRequest, fullPackageIdValue, req?.uid, fallbackFullPackageItems]);
+
+  const latestFullPackageByItemKey = useMemo(() => {
+    const out = new Map();
+    for (const row of fullPackageLinkedRequests) {
+      const key = String(
+        row.fullPackageItemKey ||
+          toFullPackageItemKey(row.fullPackageItem || row.serviceName || "")
+      ).trim();
+      if (!key) continue;
+
+      const ts = Math.max(
+        toMillis(row.updatedAt),
+        toMillis(row.decidedAt),
+        toMillis(row.createdAt)
+      );
+      const existing = out.get(key);
+      if (!existing || ts >= existing.__ts) {
+        out.set(key, { ...row, __ts: ts });
+      }
+    }
+    return out;
+  }, [fullPackageLinkedRequests]);
+
+  const fullPackageStatusRows = useMemo(() => {
+    if (!isFullRequest) return [];
+    const sourceItems = fullPackageItems.length ? fullPackageItems : fallbackFullPackageItems;
+    return sourceItems.map((item) => {
+      const key = toFullPackageItemKey(item);
+      const latest = latestFullPackageByItemKey.get(key);
+      const outcome = latest ? normalizeRequestOutcome(latest) : "not_started";
+
+      let toneClass = "text-zinc-900";
+      if (outcome === "accepted") toneClass = "text-emerald-700";
+      else if (outcome === "rejected") toneClass = "text-rose-700";
+
+      return { key, item, toneClass };
+    });
+  }, [
+    isFullRequest,
+    fullPackageItems,
+    fallbackFullPackageItems,
+    latestFullPackageByItemKey,
+  ]);
+
   // ✅ keep your original base styles, just slightly upgraded
   const cardBase =
     "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur transition duration-300 ease-out";
@@ -368,38 +506,39 @@ export default function RequestStatusScreen() {
   const track = String(req?.track || "").toLowerCase();
   const safeTrack = track === "work" || track === "travel" ? track : "study";
   const st = String(req?.status || "new").toLowerCase();
+  const country = String(req?.country || "Not selected");
 
   const adminNote = String(
     req?.adminDecisionNote || req?.decisionNote || req?.adminNote || ""
   ).trim();
-  const isFull = String(req?.requestType || "").toLowerCase() === "full";
-
-  const canContinue = isFull && (st === "contacted" || st === "closed");
+  const isFull = isFullRequest;
+  const fullPackageHubPath = buildFullPackageHubPath({
+    fullPackageId: fullPackageIdValue,
+    track: safeTrack,
+  });
+  const canBackToFullPackage = isFull && Boolean(fullPackageHubPath);
   const canStartNew = !isFull && st === "closed";
   const canTryAgain = st === "rejected";
 
-  const handleContinue = () => {
-    const country = req?.country || "Not selected";
+  const goToFullPackageHub = ({ autoOpen = false, retryItemKey = "", item = "" } = {}) => {
+    if (!fullPackageHubPath) return;
+    const qs = new URLSearchParams();
+    if (country && country !== "Not selected") qs.set("country", country);
+    qs.set("track", safeTrack);
+    if (autoOpen) qs.set("autoOpen", "1");
+    if (retryItemKey) qs.set("retryItemKey", retryItemKey);
+    if (item) qs.set("item", item);
 
-    let missingItems = Array.isArray(req?.missingItems) ? req.missingItems : [];
-    if (!missingItems.length) missingItems = parseMissingItemsFromNote(req?.note);
+    const missingItems =
+      fullPackageItems.length > 0 ? fullPackageItems : fallbackFullPackageItems;
+    const suffix = qs.toString();
 
-    try {
-      sessionStorage.setItem(`fp_missing_${safeTrack}`, JSON.stringify(missingItems));
-    } catch {}
-
-    if (!missingItems.length) {
-      alert(
-        "We couldn't find your missing items.\nPlease re-open Full Package and tick your checklist again."
-      );
-      navigate(`/app/${safeTrack}/we-help?country=${encodeURIComponent(country)}`);
-      return;
-    }
-
-    navigate(
-      `/app/full-package/${safeTrack}?country=${encodeURIComponent(country)}&requestId=${req?.id}`,
-      { state: { missingItems } }
-    );
+    navigate(suffix ? `${fullPackageHubPath}&${suffix}` : fullPackageHubPath, {
+      state: {
+        fullPackageId: fullPackageIdValue,
+        missingItems,
+      },
+    });
   };
 
   const handleTryAgain = () => {
@@ -407,22 +546,25 @@ export default function RequestStatusScreen() {
     const countryQS2 = encodeURIComponent(country);
 
     if (isFull) {
+      const fallbackItem =
+        String(req?.fullPackageItem || "").trim() ||
+        String(fullPackageItems?.[0] || fallbackFullPackageItems?.[0] || "").trim() ||
+        "Document checklist";
+      const retryItemKey = String(
+        req?.fullPackageItemKey || toFullPackageItemKey(fallbackItem)
+      ).trim();
+
+      if (fullPackageHubPath) {
+        goToFullPackageHub({ autoOpen: true, retryItemKey, item: fallbackItem });
+        return;
+      }
+
       let missingItems = Array.isArray(req?.missingItems) ? req.missingItems : [];
       if (!missingItems.length) missingItems = parseMissingItemsFromNote(req?.note);
-
-      try {
-        sessionStorage.setItem(`fp_missing_${safeTrack}`, JSON.stringify(missingItems));
-      } catch {}
-
-      const picked =
-        String(req?.fullPackageItem || "").trim() ||
-        String(missingItems?.[0] || "").trim() ||
-        "Document checklist";
-
       navigate(
-        `/app/full-package/${safeTrack}?country=${countryQS2}&parentRequestId=${encodeURIComponent(
-          String(req?.id || requestId || "")
-        )}&autoOpen=1&item=${encodeURIComponent(picked)}`,
+        `/app/full-package/${safeTrack}?country=${countryQS2}&autoOpen=1&item=${encodeURIComponent(
+          fallbackItem
+        )}`,
         { state: { missingItems } }
       );
       return;
@@ -454,7 +596,7 @@ export default function RequestStatusScreen() {
         variants={pageIn}
         initial="hidden"
         animate="show"
-        className={`max-w-xl mx-auto px-5 py-6 pb-10 relative ${enterWrap} ${enterCls}`}
+        className={`max-w-xl mx-auto px-5 py-6 pb-24 relative ${enterWrap} ${enterCls}`}
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-3">
@@ -473,26 +615,22 @@ export default function RequestStatusScreen() {
           </span>
         </div>
 
+        {isFull && fullPackageStatusRows.length > 0 ? (
+          <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              Full package items
+            </div>
+            <div className="mt-2 grid gap-1">
+              {fullPackageStatusRows.map((row) => (
+                <div key={row.key} className={`text-sm font-medium ${row.toneClass}`}>
+                  {row.item}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <motion.div variants={stagger} initial="hidden" animate="show" className="mt-5 grid gap-4">
-          {/* ✅ Chat row (UNCHANGED layout; only floaty interactions) */}
-          <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
-            <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-4`}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Chat with MAJUU team</div>
-                  <div className="mt-1 text-xs text-zinc-500">
-                    Ask questions, follow up, and get updates.
-                  </div>
-                </div>
-
-                {/* ✅ KEY FIX stays */}
-                <div className="shrink-0 relative z-[9999]">
-                  <RequestChatLauncher requestId={validRequestId} />
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-
           {/* Service + contact details */}
           <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
             <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
@@ -705,14 +843,14 @@ export default function RequestStatusScreen() {
         </motion.div>
 
         {/* Bottom action buttons */}
-        {canContinue || canStartNew || canTryAgain ? (
-          <div className="mt-5">
-            {canContinue ? (
+        {canBackToFullPackage || canStartNew || canTryAgain ? (
+          <div className="mt-5 grid gap-2">
+            {canBackToFullPackage ? (
               <button
                 className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
-                onClick={handleContinue}
+                onClick={() => goToFullPackageHub()}
               >
-                Continue
+                Back to Full Package
               </button>
             ) : null}
 
@@ -749,6 +887,16 @@ export default function RequestStatusScreen() {
 
         <div className="h-10" />
       </motion.div>
+
+      <div
+        className="fixed z-[10000]"
+        style={{
+          right: "1.25rem",
+          bottom: "calc(8rem + env(safe-area-inset-bottom, 0px))",
+        }}
+      >
+        <RequestChatLauncher requestId={validRequestId} variant="floating" />
+      </div>
     </div>
   );
 }

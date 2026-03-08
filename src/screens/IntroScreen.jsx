@@ -1,32 +1,28 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion } from "../utils/motionProxy";
 import { setIntroSeen } from "../utils/introFlag";
 
 const SLIDES = [
   {
-    title: "Study, Work and Travel made Accessible",
-    pills: ["Self-Help", "We-Help",],
+    title: "Study, Work and Travel made accessible",
+    subtitle: "Move from confusion to clear next steps with guided options.",
+    pills: ["Self-Help", "We-Help"],
     image: "/onboarding/intro-1.png",
     imageAlt: "Slide 1 onboarding visual",
-    bgClass:
-      "bg-gradient-to-br from-emerald-100 via-emerald-50 to-sky-100 dark:from-zinc-900 dark:via-zinc-950 dark:to-sky-950/40",
   },
   {
     title: "Track everything in one place",
-    pills: ["Progress", "Auto-saved",],
+    subtitle: "Follow your request status, updates and timeline without switching tabs.",
+    pills: ["Progress", "Auto-saved"],
     image: "/onboarding/intro-2.png",
     imageAlt: "Slide 2 onboarding visual",
-    bgClass:
-      "bg-gradient-to-br from-sky-100 via-cyan-50 to-emerald-100 dark:from-sky-950/40 dark:via-zinc-950 dark:to-emerald-950/35",
   },
   {
     title: "Support when it matters most",
-    pills: ["Fast processing", "Expert guidance",],
+    subtitle: "Get guided help for critical steps with faster, clearer outcomes.",
+    pills: ["Fast processing", "Expert guidance"],
     image: "/onboarding/intro-3.png",
     imageAlt: "Slide 3 onboarding visual",
-    bgClass:
-      "bg-gradient-to-br from-emerald-100 via-amber-50 to-sky-100 dark:from-emerald-950/35 dark:via-zinc-950 dark:to-sky-950/35",
   },
 ];
 
@@ -36,18 +32,31 @@ function cx(...parts) {
 
 export default function IntroScreen() {
   const navigate = useNavigate();
-  const reduceMotion = true;
-
-  const [i, setI] = useState(0);
-  const [brokenImages, setBrokenImages] = useState({});
   const scrollerRef = useRef(null);
+  const touchStartRef = useRef({ x: null, y: null });
+  const touchStartSlideRef = useRef(0);
+  const exitTimerRef = useRef(null);
+
+  const [index, setIndex] = useState(0);
+  const [brokenImages, setBrokenImages] = useState({});
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
+  const [exitDirection, setExitDirection] = useState("left");
 
   const lastIndex = SLIDES.length - 1;
-  const isLast = i === lastIndex;
-  const continueLabel = useMemo(() => (isLast ? "Continue" : "Next"), [isLast]);
+  const isLast = index === lastIndex;
 
   useEffect(() => {
-    setIntroSeen();
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const apply = () => setReduceMotion(Boolean(media.matches));
+    apply();
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", apply);
+      return () => media.removeEventListener("change", apply);
+    }
+    media.addListener(apply);
+    return () => media.removeListener(apply);
   }, []);
 
   useEffect(() => {
@@ -55,46 +64,137 @@ export default function IntroScreen() {
     if (!el) return;
 
     const onScroll = () => {
-      const nextIndex = Math.round(el.scrollLeft / el.clientWidth);
-      if (nextIndex !== i && nextIndex >= 0 && nextIndex <= lastIndex) {
-        setI(nextIndex);
+      const next = Math.round(el.scrollLeft / el.clientWidth);
+      if (next !== index && next >= 0 && next <= lastIndex) {
+        setIndex(next);
       }
     };
 
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [i, lastIndex]);
+  }, [index, lastIndex]);
 
   useEffect(() => {
     const onResize = () => {
       const el = scrollerRef.current;
       if (!el) return;
-      el.scrollTo({ left: i * el.clientWidth, behavior: "auto" });
+      el.scrollTo({ left: index * el.clientWidth, behavior: "auto" });
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [i]);
+  }, [index]);
 
-  const goToAuth = () => navigate("/login", { replace: true });
-  const skip = () => goToAuth();
+  const goToAuth = useCallback(() => {
+    setIntroSeen();
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
-  const scrollToIndex = (idx) => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    const clamped = Math.max(0, Math.min(lastIndex, idx));
-    el.scrollTo({
-      left: clamped * el.clientWidth,
-      behavior: reduceMotion ? "auto" : "smooth",
-    });
-    setI(clamped);
-  };
+  const goToAuthWithTransition = useCallback(
+    (direction = "left") => {
+      if (isExiting) return;
+      if (reduceMotion) {
+        goToAuth();
+        return;
+      }
+      setExitDirection(direction);
+      setIsExiting(true);
+      exitTimerRef.current = window.setTimeout(() => {
+        goToAuth();
+      }, 220);
+    },
+    [goToAuth, isExiting, reduceMotion]
+  );
 
-  const next = () => {
+  const scrollToIndex = useCallback(
+    (nextIndex) => {
+      const el = scrollerRef.current;
+      if (!el) return;
+      const clamped = Math.max(0, Math.min(lastIndex, nextIndex));
+      el.scrollTo({
+        left: clamped * el.clientWidth,
+        behavior: reduceMotion ? "auto" : "smooth",
+      });
+      setIndex(clamped);
+    },
+    [lastIndex, reduceMotion]
+  );
+
+  const onContinue = useCallback(() => {
     if (isLast) {
-      goToAuth();
+      goToAuthWithTransition("left");
       return;
     }
-    scrollToIndex(i + 1);
+    scrollToIndex(index + 1);
+  }, [goToAuthWithTransition, index, isLast, scrollToIndex]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      const tag = String(event?.target?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        if (isLast) return;
+        scrollToIndex(index + 1);
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        if (index === 0) return;
+        scrollToIndex(index - 1);
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        onContinue();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [index, isLast, onContinue, scrollToIndex]);
+
+  useEffect(() => {
+    const nextSlide = SLIDES[index + 1];
+    if (!nextSlide || typeof Image === "undefined") return;
+    const img = new Image();
+    img.src = nextSlide.image;
+  }, [index]);
+
+  useEffect(() => {
+    return () => {
+      if (exitTimerRef.current) {
+        window.clearTimeout(exitTimerRef.current);
+      }
+    };
+  }, []);
+
+  const onSwipeStart = (event) => {
+    const point = event.touches?.[0];
+    const el = scrollerRef.current;
+    if (!point || !el) return;
+    touchStartRef.current = { x: point.clientX, y: point.clientY };
+    touchStartSlideRef.current = Math.round(el.scrollLeft / el.clientWidth);
+  };
+
+  const onSwipeEnd = (event) => {
+    const point = event.changedTouches?.[0];
+    const startX = touchStartRef.current.x;
+    const startY = touchStartRef.current.y;
+    const el = scrollerRef.current;
+    if (!point || startX == null || startY == null || !el) return;
+
+    const deltaX = point.clientX - startX;
+    const deltaY = Math.abs(point.clientY - startY);
+    const endSlide = Math.round(el.scrollLeft / el.clientWidth);
+    const startedOnLast = touchStartSlideRef.current === lastIndex;
+    const endedOnLast = endSlide === lastIndex;
+    const isHorizontal = Math.abs(deltaX) > deltaY * 1.15;
+    const didLeftSwipe = deltaX < -56;
+
+    touchStartRef.current = { x: null, y: null };
+
+    if (startedOnLast && endedOnLast && isHorizontal && didLeftSwipe) {
+      goToAuthWithTransition("left");
+    }
   };
 
   const markImageBroken = (src) => {
@@ -105,73 +205,107 @@ export default function IntroScreen() {
   };
 
   return (
-    <div className="h-[100dvh] overflow-hidden bg-zinc-50 dark:bg-zinc-950">
-      <div className="mx-auto flex h-full max-w-xl flex-col px-5 pt-5 pb-32">
-        <div className="relative flex items-center justify-center">
-          <h1 className="text-3xl font-extrabold tracking-tight text-emerald-600 text-center">
+    <div
+      className={cx(
+        "h-[calc(100dvh-var(--app-safe-top))] overflow-hidden overscroll-none bg-white transition-[opacity,transform,filter] duration-200",
+        isExiting &&
+          (exitDirection === "left"
+            ? "pointer-events-none -translate-x-6 opacity-0 blur-[2px]"
+            : "pointer-events-none translate-x-6 opacity-0 blur-[2px]")
+      )}
+    >
+      <div className="mx-auto flex h-full max-w-xl flex-col px-5 pt-6 pb-[calc(var(--app-safe-bottom)+2rem)]">
+        <header className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
+          <div className="justify-self-start text-xs font-semibold text-zinc-500">
+            {index + 1}/{SLIDES.length}
+          </div>
+
+          <h1 className="justify-self-center whitespace-nowrap text-center text-[1.45rem] leading-none font-black tracking-[0.08em] text-emerald-700 drop-shadow-[0_1px_3px_rgba(5,150,105,0.3)]">
             MAJUU APP
           </h1>
 
-          <motion.button
+          <button
             type="button"
-            onClick={skip}
-            className="absolute right-0 top-0 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white/85 dark:bg-zinc-900/65 px-3.5 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm hover:bg-white"
+            onClick={goToAuth}
+            className="justify-self-end text-sm font-semibold text-zinc-500 transition hover:text-zinc-800"
           >
             Skip
-          </motion.button>
+          </button>
+        </header>
+
+        <div className="mt-3 flex items-center justify-center gap-2">
+          {SLIDES.map((_, idx) => (
+            <button
+              key={idx}
+              type="button"
+              onClick={() => scrollToIndex(idx)}
+              aria-label={`Go to slide ${idx + 1}`}
+              className={cx(
+                "h-2 rounded-full transition",
+                idx === index ? "w-7 bg-emerald-600" : "w-2 bg-zinc-300"
+              )}
+            />
+          ))}
         </div>
 
         <div
           ref={scrollerRef}
-          className="mt-3 -mx-5 flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          onTouchStart={onSwipeStart}
+          onTouchEnd={onSwipeEnd}
+          className="mt-3 -mx-5 flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none] [touch-action:pan-x] [&::-webkit-scrollbar]:hidden"
         >
           {SLIDES.map((slide, idx) => {
             const imageMissing = Boolean(brokenImages[slide.image]);
-
             return (
               <section
                 key={slide.image}
-                className={cx(
-                  "relative w-full shrink-0 snap-center snap-always overflow-hidden",
-                  slide.bgClass
-                )}
+                className="w-full shrink-0 snap-start [scroll-snap-stop:always] px-5 bg-white"
               >
-                {!imageMissing ? (
-                  <img
-                    src={slide.image}
-                    alt={slide.imageAlt}
-                    className="absolute inset-0 h-full w-full object-contain"
-                    onError={() => markImageBroken(slide.image)}
-                    loading={idx === 0 ? "eager" : "lazy"}
-                    decoding="async"
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
-                    <div>
-                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        Add slide image
-                      </div>
-                      <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                        Place file at <code>{slide.image}</code>
-                      </div>
-                    </div>
+                <div className="flex h-full flex-col">
+                  <div className="pt-3">
+                    <h2 className="text-center text-[1.22rem] leading-tight font-semibold tracking-tight text-zinc-900">
+                      {slide.title}
+                    </h2>
+                    <p className="mt-2 text-center text-sm text-zinc-600">{slide.subtitle}</p>
                   </div>
-                )}
 
-                <div className="relative flex h-full flex-col items-center px-5 pt-[8vh]">
-                  <h2 className="text-center text-[1.35rem] leading-tight font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-                    {slide.title}
-                  </h2>
+                  <div className="min-h-0 flex-1 pt-4">
+                    {!imageMissing ? (
+                      <div className="flex h-full items-center justify-center">
+                        <img
+                          src={slide.image}
+                          alt={slide.imageAlt}
+                          className="h-full w-full object-contain"
+                          onError={() => markImageBroken(slide.image)}
+                          loading={idx === 0 ? "eager" : "lazy"}
+                          decoding="async"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex h-full items-center justify-center px-6 text-center">
+                        <div>
+                          <div className="text-sm font-semibold text-zinc-900">
+                            Add slide image
+                          </div>
+                          <div className="mt-1 text-xs text-zinc-500">
+                            Place file at <code>{slide.image}</code>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                    {(slide.pills || []).map((p) => (
-                      <span
-                        key={p}
-                        className="rounded-full border border-emerald-400/60 bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white text-center"
-                      >
-                        {p}
-                      </span>
-                    ))}
+                  <div className="-translate-y-2 pb-2 pt-2">
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      {(slide.pills || []).map((pill) => (
+                        <span
+                          key={pill}
+                          className="text-[11px] font-bold uppercase tracking-[0.09em] text-emerald-700 [text-shadow:0_0_8px_rgba(16,185,129,0.45)]"
+                        >
+                          {pill}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </section>
@@ -179,30 +313,19 @@ export default function IntroScreen() {
           })}
         </div>
 
-        <div className="mt-4 flex items-center justify-center gap-2.5">
-          {SLIDES.map((_, idx) => (
-            <div
-              key={idx}
-              aria-hidden="true"
-              className={cx(
-                "h-2.5 rounded-full transition",
-                idx === i ? "w-8 bg-emerald-600" : "w-2.5 bg-zinc-300 dark:bg-zinc-700"
-              )}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="fixed inset-x-0 bottom-6 z-40 px-5 pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto max-w-xl">
-          <motion.button
-            onClick={next}
-            className="mx-auto block w-full max-w-[320px] rounded-2xl border border-emerald-200 bg-emerald-600 px-5 py-3.5 text-sm font-semibold text-white shadow-[0_12px_36px_rgba(16,185,129,0.35)] transition hover:bg-emerald-700"
-            type="button"
-          >
-            {continueLabel}
-          </motion.button>
-        </div>
+        <footer className="mt-3 flex items-center justify-end text-sm font-semibold">
+          {isLast ? (
+            <button
+              type="button"
+              onClick={() => goToAuthWithTransition("left")}
+              className="mr-3 font-extrabold tracking-tight text-emerald-700 transition hover:text-emerald-800"
+            >
+              Continue
+            </button>
+          ) : (
+            <span aria-hidden="true" className="mr-3 w-16" />
+          )}
+        </footer>
       </div>
     </div>
   );

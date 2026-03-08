@@ -6,7 +6,7 @@
 //
 // Everything else unchanged.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { isStandalone } from "../utils/isStandalone";
 import {
@@ -302,6 +302,7 @@ export default function RequestModal({
   const panelRef = useRef(null);
   const scrollRef = useRef(null);
   const wasOpenRef = useRef(false);
+  const lastStateEmitRef = useRef("");
 
   // ✅ prevents "tap causes close + blur" on Android
   const startedInsidePanelRef = useRef(false);
@@ -356,10 +357,11 @@ export default function RequestModal({
     return clean || DEFAULT_PAYMENT_AMOUNT;
   }, [paymentAmount]);
 
-  // reset when opened
-  useEffect(() => {
+  // Seed form state before paint on each open cycle to avoid visible field blink.
+  useLayoutEffect(() => {
     if (!open) {
       wasOpenRef.current = false;
+      lastStateEmitRef.current = "";
       return;
     }
 
@@ -401,10 +403,13 @@ export default function RequestModal({
   }, [open, defaultName, defaultPhone, defaultEmail, initialState, queryDraftId]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      lastStateEmitRef.current = "";
+      return;
+    }
     if (typeof onStateChange !== "function") return;
 
-    onStateChange({
+    const payload = {
       open: Boolean(open),
       step: paid ? "submit" : "form",
       formState: {
@@ -417,7 +422,18 @@ export default function RequestModal({
         paid: Boolean(paid),
         requestDraftId: String(requestDraftId || ""),
       },
-    });
+    };
+
+    const serialized = JSON.stringify(payload);
+    if (serialized === lastStateEmitRef.current) return;
+
+    const timer = setTimeout(() => {
+      if (serialized === lastStateEmitRef.current) return;
+      lastStateEmitRef.current = serialized;
+      onStateChange(payload);
+    }, 90);
+
+    return () => clearTimeout(timer);
   }, [onStateChange, open, paid, name, phone, email, city, note, pickedFileMetas, requestDraftId]);
 
   useEffect(() => {
@@ -512,7 +528,13 @@ export default function RequestModal({
     }
     if (flow === "fullpackage") {
       const selectedItem = String(paymentContext?.selectedItem || "").trim();
+      const fullPackageId = String(paymentContext?.fullPackageId || "").trim();
+      const track = String(paymentContext?.track || "").trim().toLowerCase();
+      const country = String(paymentContext?.country || "").trim();
       if (selectedItem) qs.set("item", selectedItem);
+      if (fullPackageId) qs.set("fullPackageId", fullPackageId);
+      if (track) qs.set("track", track);
+      if (country) qs.set("country", country);
     }
 
     const returnTo = qs.toString() ? `${location.pathname}?${qs.toString()}` : location.pathname;

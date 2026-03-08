@@ -1,12 +1,11 @@
-// ✅ src/components/AdminRequestChatLauncher.jsx
-// Simple launcher that opens AdminRequestChatPanel in a scrollable modal.
-
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
+
 import AdminRequestChatPanel from "./AdminRequestChatPanel";
 
-function safeStr(x) {
-  return String(x || "").trim();
+function safeStr(x, max = 500) {
+  return String(x || "").trim().slice(0, max);
 }
 
 function IconChat(props) {
@@ -18,39 +17,51 @@ function IconChat(props) {
         strokeWidth="1.8"
         strokeLinejoin="round"
       />
-      <path
-        d="M7.8 8.7h8.4M7.8 12h5.6"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+      <path d="M7.8 8.7h8.4M7.8 12h5.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
 
 export default function AdminRequestChatLauncher({ requestId }) {
-  const rid = useMemo(() => safeStr(requestId), [requestId]);
-  const location = useLocation();
   const navigate = useNavigate();
+  const location = useLocation();
+  const rid = useMemo(() => safeStr(requestId), [requestId]);
+
   const [open, setOpen] = useState(false);
+  const [canPortal] = useState(() => typeof document !== "undefined");
+  const returnToRef = useRef("");
 
   useEffect(() => {
-    if (!rid || open) return;
+    if (!open) return;
+
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.body.classList.add("request-modal-open");
+
+    return () => {
+      document.body.style.overflow = prev;
+      document.body.classList.remove("request-modal-open");
+    };
+  }, [open]);
+
+  const openChat = useCallback(() => {
+    let nextSearch = location.search || "";
     try {
       const params = new URLSearchParams(location.search || "");
-      if (params.get("openChat") === "1") return;
-    } catch {}
-    let shouldOpen = false;
-    try {
-      shouldOpen = sessionStorage.getItem(`maj_open_admin_chat:${rid}`) === "1";
-      if (shouldOpen) sessionStorage.removeItem(`maj_open_admin_chat:${rid}`);
-    } catch {}
-    if (shouldOpen) setOpen(true);
-  }, [rid, open, location.search]);
+      params.delete("openChat");
+      const qs = params.toString();
+      nextSearch = qs ? `?${qs}` : "";
+    } catch {
+      // ignore
+    }
+    returnToRef.current = `${location.pathname}${nextSearch}`;
+    setOpen(true);
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     if (!rid || open) return;
-    let params = null;
+
+    let params;
     try {
       params = new URLSearchParams(location.search || "");
     } catch {
@@ -58,7 +69,7 @@ export default function AdminRequestChatLauncher({ requestId }) {
     }
     if (params.get("openChat") !== "1") return;
 
-    setOpen(true);
+    const timer = window.setTimeout(() => openChat(), 0);
 
     params.delete("openChat");
     const qs = params.toString();
@@ -66,48 +77,69 @@ export default function AdminRequestChatLauncher({ requestId }) {
     if (nextUrl !== `${location.pathname}${location.search || ""}`) {
       navigate(nextUrl, { replace: true });
     }
-  }, [rid, open, location.pathname, location.search, navigate]);
+
+    return () => window.clearTimeout(timer);
+  }, [rid, open, location.pathname, location.search, navigate, openChat]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!rid || open) return;
+    try {
+      const params = new URLSearchParams(location.search || "");
+      if (params.get("openChat") === "1") return;
+    } catch {
+      // ignore
+    }
 
+    try {
+      const key = `maj_open_admin_chat:${rid}`;
+      if (sessionStorage.getItem(key) === "1") {
+        sessionStorage.removeItem(key);
+        const timer = window.setTimeout(() => openChat(), 0);
+        return () => window.clearTimeout(timer);
+      }
+    } catch {
+      // ignore
+    }
+  }, [rid, open, openChat, location.search]);
+
+  const closeChat = useCallback(() => {
+    setOpen(false);
+    const backTo = safeStr(returnToRef.current);
+    if (backTo) {
+      navigate(backTo, { replace: true });
+      return;
+    }
+    if (rid) navigate(`/app/admin/request/${rid}`, { replace: true });
+  }, [navigate, rid]);
+
+  useEffect(() => {
+    if (!open) return undefined;
     const onAndroidBack = (event) => {
-      // Let the global Android back handler close this modal first.
       event.preventDefault();
-      setOpen(false);
+      closeChat();
     };
-
     window.addEventListener("majuu:back", onAndroidBack);
     return () => window.removeEventListener("majuu:back", onAndroidBack);
-  }, [open]);
+  }, [open, closeChat]);
 
-  const btn =
-    "inline-flex items-center justify-center gap-2 rounded-2xl border px-3.5 py-2 text-sm font-semibold shadow-sm transition active:scale-[0.99]";
-  const btnMain =
-    "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700";
+  const btn = "inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]";
+
+  const modal = (
+    <div className="fixed inset-0 z-[999999] pointer-events-none" aria-hidden={!open}>
+      <div className="absolute inset-0 pointer-events-auto">
+        <AdminRequestChatPanel requestId={rid} onClose={closeChat} />
+      </div>
+    </div>
+  );
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className={`${btn} ${btnMain}`}
-      >
+      <button type="button" onClick={openChat} className={btn}>
         <IconChat className="h-5 w-5" />
         Open chat
       </button>
 
-      {open ? (
-        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/40 p-3 sm:items-center">
-          {/* ✅ wrapper limits height; the panel itself already has max-h + overflow */}
-          <div className="w-full max-w-xl">
-            <AdminRequestChatPanel
-              requestId={rid}
-              onClose={() => setOpen(false)}
-            />
-          </div>
-        </div>
-      ) : null}
+      {open && canPortal ? createPortal(modal, document.body) : null}
     </>
   );
 }
