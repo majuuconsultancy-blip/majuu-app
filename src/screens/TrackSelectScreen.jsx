@@ -24,7 +24,7 @@ import {
   setBiometricPromptPending,
 } from "../services/biometricLockService";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
-import { isEligibleStaffProfile } from "../services/staffaccessservice";
+import { isStaffAccessEnabled } from "../services/staffaccessservice";
 
 const AUTH_NULL_GRACE_MS = 1200;
 
@@ -95,19 +95,16 @@ export default function TrackSelectScreen() {
         ]);
         const hasStaffDoc = Boolean(staffSnap?.exists?.());
         const staffData = hasStaffDoc ? staffSnap.data() || {} : null;
-        const byStaffDoc = hasStaffDoc && isEligibleStaffProfile(staffData);
+        const byStaffDoc = hasStaffDoc && isStaffAccessEnabled(staffData);
         const byRoleCtx = roleCtx?.role === "staff";
 
-        let byAssignmentSignal = false;
-        if (!hasStaffDoc) {
-          const [taskProbe, requestProbe] = await Promise.all([
-            getDocs(query(collection(db, "staff", user.uid, "tasks"), limit(1))).catch(() => null),
-            getDocs(
-              query(collection(db, "serviceRequests"), where("assignedTo", "==", user.uid), limit(1))
-            ).catch(() => null),
-          ]);
-          byAssignmentSignal = Boolean(taskProbe?.docs?.length || requestProbe?.docs?.length);
-        }
+        const [taskProbe, requestProbe] = await Promise.all([
+          getDocs(query(collection(db, "staff", user.uid, "tasks"), limit(1))).catch(() => null),
+          getDocs(
+            query(collection(db, "serviceRequests"), where("assignedTo", "==", user.uid), limit(1))
+          ).catch(() => null),
+        ]);
+        const byAssignmentSignal = Boolean(taskProbe?.docs?.length || requestProbe?.docs?.length);
 
         if (!cancelled) setIsStaff(Boolean(byStaffDoc || byRoleCtx || byAssignmentSignal));
 
