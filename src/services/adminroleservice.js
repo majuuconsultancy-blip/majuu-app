@@ -1,0 +1,135 @@
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "../firebase";
+import { isEligibleStaffProfile } from "./staffaccessservice";
+
+export const HARDCODED_SUPER_ADMIN_EMAIL = "brioneroo@gmail.com";
+export const ADMIN_SCOPE_AVAILABILITIES = new Set(["active", "busy", "offline"]);
+
+function safeStr(value) {
+  return String(value || "").trim();
+}
+
+function lower(value) {
+  return safeStr(value).toLowerCase();
+}
+
+export function normalizeUserRole(role) {
+  const r = lower(role);
+  if (r === "superadmin" || r === "super_admin") return "superAdmin";
+  if (r === "assignedadmin" || r === "assigned_admin") return "assignedAdmin";
+  if (r === "admin") return "assignedAdmin"; // legacy admin compatibility
+  if (r === "staff") return "staff";
+  return "user";
+}
+
+export function isSuperAdminRole(role) {
+  return normalizeUserRole(role) === "superAdmin";
+}
+
+export function isAssignedAdminRole(role) {
+  return normalizeUserRole(role) === "assignedAdmin";
+}
+
+export function isAnyAdminRole(role) {
+  const normalized = normalizeUserRole(role);
+  return normalized === "superAdmin" || normalized === "assignedAdmin";
+}
+
+export function normalizeAdminAvailability(value) {
+  const v = lower(value);
+  return ADMIN_SCOPE_AVAILABILITIES.has(v) ? v : "active";
+}
+
+export function normalizeAdminScope(rawScope) {
+  const scope = rawScope && typeof rawScope === "object" ? rawScope : {};
+  const maxActiveRequests = Number(scope?.maxActiveRequests || 0);
+  const responseTimeoutMinutes = Number(scope?.responseTimeoutMinutes || 0);
+  return {
+    counties: Array.isArray(scope?.counties)
+      ? scope.counties.map((v) => safeStr(v)).filter(Boolean)
+      : [],
+    countiesLower: Array.isArray(scope?.countiesLower)
+      ? scope.countiesLower.map((v) => lower(v)).filter(Boolean)
+      : [],
+    town: safeStr(scope?.town),
+    availability: normalizeAdminAvailability(scope?.availability),
+    active: scope?.active !== false,
+    maxActiveRequests: Number.isFinite(maxActiveRequests) && maxActiveRequests > 0
+      ? Math.min(120, Math.max(1, Math.round(maxActiveRequests)))
+      : 12,
+    responseTimeoutMinutes: Number.isFinite(responseTimeoutMinutes) && responseTimeoutMinutes > 0
+      ? Math.min(240, Math.max(5, Math.round(responseTimeoutMinutes)))
+      : 20,
+  };
+}
+
+export function resolveRoleFromUserDoc({
+  role,
+  email,
+  hasActiveStaffAccess = false,
+}) {
+  const normalizedRole = normalizeUserRole(role);
+  const safeEmail = lower(email);
+
+  // Hardcoded super admin source of truth.
+  if (safeEmail && safeEmail === lower(HARDCODED_SUPER_ADMIN_EMAIL)) {
+    return "superAdmin";
+  }
+
+  // Everyone else stays in assigned-admin or lower roles.
+  if (normalizedRole === "superAdmin") return "assignedAdmin";
+  if (normalizedRole === "assignedAdmin") return "assignedAdmin";
+
+  if (hasActiveStaffAccess) return "staff";
+  return normalizedRole;
+}
+
+export async function getCurrentUserRoleContext(uid = "") {
+  const currentUid = safeStr(uid || auth.currentUser?.uid);
+  const currentEmail = safeStr(auth.currentUser?.email);
+  if (!currentUid) {
+    return {
+      uid: "",
+      email: currentEmail,
+      role: "user",
+      roleSource: "none",
+      adminScope: normalizeAdminScope({}),
+      isAdmin: false,
+      isSuperAdmin: false,
+      isAssignedAdmin: false,
+    };
+  }
+
+  const userSnap = await getDoc(doc(db, "users", currentUid));
+  const userData = userSnap.exists() ? userSnap.data() || {} : {};
+
+  let hasActiveStaffAccess = false;
+  try {
+    const staffSnap = await getDoc(doc(db, "staff", currentUid));
+    hasActiveStaffAccess = staffSnap.exists() && isEligibleStaffProfile(staffSnap.data() || {});
+  } catch {
+    hasActiveStaffAccess = false;
+  }
+
+  const email = safeStr(userData?.email || currentEmail);
+  const role = resolveRoleFromUserDoc({
+    role: userData?.role,
+    email,
+    hasActiveStaffAccess,
+  });
+
+  const adminScope = normalizeAdminScope(userData?.adminScope);
+  const isSuperAdmin = isSuperAdminRole(role);
+  const isAssignedAdmin = isAssignedAdminRole(role);
+
+  return {
+    uid: currentUid,
+    email,
+    role,
+    roleSource: safeStr(userData?.role) ? "userDoc" : hasActiveStaffAccess ? "staffDoc" : "fallback",
+    adminScope,
+    isAdmin: isSuperAdmin || isAssignedAdmin,
+    isSuperAdmin,
+    isAssignedAdmin,
+  };
+}

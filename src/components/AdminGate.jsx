@@ -3,8 +3,8 @@ import { onAuthStateChanged } from "firebase/auth";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { auth, authPersistenceReady } from "../firebase";
+import { getCurrentUserRoleContext } from "../services/adminroleservice";
 
-const ADMIN_EMAIL = "brioneroo@gmail.com";
 const AUTH_NULL_GRACE_MS = 1200;
 
 export default function AdminGate({ children }) {
@@ -60,14 +60,18 @@ export default function AdminGate({ children }) {
           return;
         }
 
-        const email = (user?.email || "").toLowerCase();
-
-        if (email !== ADMIN_EMAIL.toLowerCase()) {
-          navigate("/dashboard", { replace: true });
-          return;
-        }
-
-        setChecking(false);
+        (async () => {
+          try {
+            const roleCtx = await getCurrentUserRoleContext(user.uid);
+            if (!roleCtx.isAdmin) {
+              navigate("/dashboard", { replace: true });
+              return;
+            }
+            setChecking(false);
+          } catch {
+            navigate("/dashboard", { replace: true });
+          }
+        })();
       });
 
       return unsub;

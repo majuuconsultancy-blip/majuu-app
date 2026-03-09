@@ -240,8 +240,12 @@ async function upsertPushToken({ uid, role, token }) {
   const safeToken = safeStr(token);
   if (!safeUid || !safeToken) return;
 
+  const normalizedRole = safeRole === "assignedadmin" ? "admin" : safeRole;
+
   const roleValue =
-    safeRole === "admin" || safeRole === "staff" || safeRole === "user" ? safeRole : "user";
+    normalizedRole === "admin" || normalizedRole === "staff" || normalizedRole === "user"
+      ? normalizedRole
+      : "user";
   const tokenDocId = encodeURIComponent(safeToken);
   const rootCollection = roleValue === "staff" ? "staff" : "users";
   const pushTokenRef = doc(db, rootCollection, safeUid, "pushTokens", tokenDocId);

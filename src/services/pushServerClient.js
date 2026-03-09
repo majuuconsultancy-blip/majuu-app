@@ -83,7 +83,8 @@ export async function sendClientTriggeredPush({
   body,
   data = {},
 } = {}) {
-  const role = safeStr(toRole).toLowerCase();
+  const inputRole = safeStr(toRole).toLowerCase();
+  const role = inputRole === "assignedadmin" ? "admin" : inputRole;
   const uid = safeStr(toUid);
   if (!uid) return { ok: false, skipped: true, reason: "missing_to_uid" };
   if (!["user", "staff", "admin"].includes(role)) {
@@ -168,4 +169,3 @@ export async function sendPushForNotificationDoc({ scope, uid, notification } = 
     },
   });
 }
-

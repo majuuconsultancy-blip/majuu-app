@@ -7,6 +7,16 @@ function cleanStr(x, max = 500) {
   return String(x || "").trim().slice(0, max);
 }
 
+function cleanRequiredCounty(value) {
+  const county = cleanStr(value, 80);
+  if (!county) {
+    const err = new Error("County is required.");
+    err.code = "request/county-required";
+    throw err;
+  }
+  return county;
+}
+
 function cleanTrack(x) {
   const t = cleanStr(x, 20).toLowerCase();
   return t === "study" || t === "work" || t === "travel" ? t : "study";
@@ -156,6 +166,8 @@ export async function createServiceRequest(payload) {
   const paymentMeta = paid ? paymentMetaRaw : null;
 
   const requestUploadMeta = cleanUploadMeta(payload?.requestUploadMeta);
+  const county = cleanRequiredCounty(payload?.county);
+  const town = cleanStr(payload?.town || payload?.city, 80);
 
   const clean = {
     uid: user.uid,
@@ -171,8 +183,10 @@ export async function createServiceRequest(payload) {
     name: cleanStr(payload?.name, 120),
     phone: cleanStr(payload?.phone, 40),
     note: cleanStr(payload?.note, 1500),
-
-    city: cleanStr(payload?.city, 80),
+    county,
+    countyLower: county.toLowerCase(),
+    town,
+    city: town, // legacy compatibility
 
     missingItems: cleanMissingItems,
     parentRequestId: parentRequestId || "",
@@ -187,6 +201,25 @@ export async function createServiceRequest(payload) {
     requestUploadMeta,
 
     status: "new",
+    currentAdminUid: "",
+    currentAdminRole: "",
+    currentAdminAvailability: "",
+    ownerLockedAdminUid: "",
+    escalationCount: 0,
+    responseDeadlineAtMs: 0,
+    routingMeta: {
+      county,
+      town,
+      currentAdminUid: "",
+      routedAtMs: 0,
+      routingReason: "awaiting_auto_route",
+      adminAvailabilityAtRouting: "",
+      escalationReason: "",
+      escalationCount: 0,
+      reassignmentHistory: [],
+      acceptedAtMs: 0,
+      lockedOwnerAdminUid: "",
+    },
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };

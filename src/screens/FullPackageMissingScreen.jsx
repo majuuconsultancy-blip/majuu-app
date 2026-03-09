@@ -120,6 +120,8 @@ export default function FullPackageMissingScreen() {
 
   const [defaultName, setDefaultName] = useState("");
   const [defaultPhone, setDefaultPhone] = useState("");
+  const [defaultCounty, setDefaultCounty] = useState("");
+  const [defaultTown, setDefaultTown] = useState("");
 
   const [fullPackageDoc, setFullPackageDoc] = useState(null);
   const [fullPackageErr, setFullPackageErr] = useState("");
@@ -151,6 +153,8 @@ export default function FullPackageMissingScreen() {
         setUserState(s || null);
         setDefaultName(String(s?.name || ""));
         setDefaultPhone(String(s?.phone || ""));
+        setDefaultCounty(String(s?.county || ""));
+        setDefaultTown(String(s?.town || s?.city || ""));
         setProfileMissing(getMissingProfileFields(s || {}));
       } catch (error) {
         console.error("FullPackageMissing getUserState error:", error);
@@ -346,7 +350,8 @@ export default function FullPackageMissingScreen() {
     dummyFiles,
     requestUploadMeta,
     email: formEmail,
-    city,
+    county,
+    town,
     paid,
     paymentMeta,
   }) => {
@@ -391,7 +396,9 @@ export default function FullPackageMissingScreen() {
       name,
       phone,
       note: finalNote,
-      city: String(city || "").trim(),
+      county: String(county || "").trim(),
+      town: String(town || "").trim(),
+      city: String(town || "").trim(),
       paid: Boolean(paid),
       paymentMeta: paymentMeta || null,
       requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
@@ -593,6 +600,8 @@ export default function FullPackageMissingScreen() {
         defaultName={defaultName}
         defaultPhone={defaultPhone}
         defaultEmail={auth.currentUser?.email || email || ""}
+        defaultCounty={defaultCounty}
+        defaultTown={defaultTown}
         paymentContext={{
           flow: "fullPackage",
           track: safeTrack,
@@ -608,4 +617,3 @@ export default function FullPackageMissingScreen() {
     </div>
   );
 }
-

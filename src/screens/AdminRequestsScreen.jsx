@@ -17,7 +17,14 @@ import {
   getRequests,
   sweepStaleAssignments,
 } from "../services/adminrequestservice";
+import { routeUnroutedNewRequests } from "../services/adminroutingservice";
 import { setStaffAccessByEmail } from "../services/staffservice";
+import {
+  listAssignedAdmins,
+  setAssignedAdminByEmail,
+} from "../services/assignedadminservice";
+import { getCurrentUserRoleContext } from "../services/adminroleservice";
+import { KENYA_COUNTY_OPTIONS, normalizeCountyList } from "../constants/kenyaCounties";
 import { STAFF_SPECIALITY_OPTIONS } from "../constants/staffSpecialities";
 
 import {
@@ -225,6 +232,323 @@ function classifyTabFromRequestDoc(data) {
 
 function isAdminSoftDeletedRequest(r) {
   return r?.deletedByAdmin === true || !!r?.adminDeletedAt;
+}
+
+function AssignedAdminAccessPanel() {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [town, setTown] = useState("");
+  const [availability, setAvailability] = useState("active");
+  const [maxActiveRequests, setMaxActiveRequests] = useState(12);
+  const [responseTimeoutMinutes, setResponseTimeoutMinutes] = useState(20);
+  const [selectedCounties, setSelectedCounties] = useState([]);
+  const [countySearch, setCountySearch] = useState("");
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [rows, setRows] = useState([]);
+  const [loadingRows, setLoadingRows] = useState(false);
+
+  const normalizedSelectedCounties = useMemo(
+    () => normalizeCountyList(selectedCounties),
+    [selectedCounties]
+  );
+
+  const filteredCounties = useMemo(() => {
+    const needle = String(countySearch || "").trim().toLowerCase();
+    if (!needle) return KENYA_COUNTY_OPTIONS;
+    return KENYA_COUNTY_OPTIONS.filter((countyName) =>
+      countyName.toLowerCase().includes(needle)
+    );
+  }, [countySearch]);
+
+  const loadRows = async () => {
+    setLoadingRows(true);
+    try {
+      const list = await listAssignedAdmins({ max: 200 });
+      setRows(Array.isArray(list) ? list : []);
+    } catch (error) {
+      console.error(error);
+      setErr(error?.message || "Failed to load assigned admins.");
+    } finally {
+      setLoadingRows(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    loadRows();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const toggleCounty = (countyName) => {
+    setSelectedCounties((prev) => {
+      const normalized = normalizeCountyList(prev);
+      if (normalized.includes(countyName)) {
+        return normalized.filter((v) => v !== countyName);
+      }
+      return [...normalized, countyName];
+    });
+  };
+
+  const fillFromRow = (row) => {
+    const safeEmail = String(row?.email || "").trim().toLowerCase();
+    const scope = row?.adminScope || {};
+    setEmail(safeEmail);
+    setSelectedCounties(normalizeCountyList(scope?.counties || []));
+    setTown(String(scope?.town || "").trim());
+    setAvailability(String(scope?.availability || "active").toLowerCase() || "active");
+    setMaxActiveRequests(Number(scope?.maxActiveRequests || 12) || 12);
+    setResponseTimeoutMinutes(Number(scope?.responseTimeoutMinutes || 20) || 20);
+    setMsg("");
+    setErr("");
+  };
+
+  const runUpsert = async () => {
+    setErr("");
+    setMsg("");
+    const safeEmail = String(email || "").trim().toLowerCase();
+    if (!safeEmail || !safeEmail.includes("@")) {
+      setErr("Enter a valid email.");
+      return;
+    }
+    if (!normalizedSelectedCounties.length) {
+      setErr("Select at least one county.");
+      return;
+    }
+
+    try {
+      setBusy("save");
+      const result = await setAssignedAdminByEmail({
+        email: safeEmail,
+        action: "upsert",
+        counties: normalizedSelectedCounties,
+        town,
+        availability,
+        maxActiveRequests,
+        responseTimeoutMinutes,
+      });
+      setMsg(`Assigned admin saved: ${result.email}`);
+      await loadRows();
+    } catch (error) {
+      console.error(error);
+      setErr(error?.message || "Failed to save assigned admin.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const runRemove = async () => {
+    setErr("");
+    setMsg("");
+    const safeEmail = String(email || "").trim().toLowerCase();
+    if (!safeEmail || !safeEmail.includes("@")) {
+      setErr("Enter the assigned admin email to remove.");
+      return;
+    }
+
+    try {
+      setBusy("remove");
+      const result = await setAssignedAdminByEmail({
+        email: safeEmail,
+        action: "remove",
+      });
+      setMsg(`Assigned admin removed: ${result.email}`);
+      setSelectedCounties([]);
+      setTown("");
+      setAvailability("active");
+      await loadRows();
+    } catch (error) {
+      console.error(error);
+      setErr(error?.message || "Failed to remove assigned admin.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const shell =
+    "rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/65 dark:bg-zinc-900/60 shadow-sm backdrop-blur transition dark:border-zinc-800 dark:bg-zinc-900/40";
+  const headerBtn =
+    "w-full text-left flex items-center justify-between gap-3 px-4 py-3 transition active:scale-[0.99]";
+  const input =
+    "w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-4 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-4 focus:ring-emerald-100/60 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-100 dark:focus:ring-emerald-500/10";
+  const btnBase =
+    "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold shadow-sm transition active:scale-[0.99] disabled:opacity-60";
+  const saveBtn = "border border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700";
+  const removeBtn =
+    "border border-rose-200 bg-rose-50/70 text-rose-700 hover:bg-rose-100 dark:bg-rose-950/25 dark:text-rose-200 dark:border-rose-900/40 dark:hover:bg-rose-950/35";
+
+  return (
+    <div className="mt-5">
+      <div className={shell}>
+        <button type="button" onClick={() => setOpen((v) => !v)} className={headerBtn}>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Assigned Admin Control
+            </div>
+            <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+              Promote, update counties, and remove assigned admins.
+            </div>
+          </div>
+          <span className="rounded-full border border-emerald-100 bg-emerald-50/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+            Super Admin
+          </span>
+        </button>
+
+        <div className={`grid transition-all duration-300 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+          <div className="overflow-hidden">
+            <div className="px-4 pb-4 grid gap-4">
+              {err ? (
+                <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/35 dark:text-rose-200">
+                  {err}
+                </div>
+              ) : null}
+
+              {msg ? (
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                  {msg}
+                </div>
+              ) : null}
+
+              <div className="grid gap-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/45">
+                <input
+                  className={input}
+                  placeholder="assigned.admin@email.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+
+                <div className="grid grid-cols-2 gap-3">
+                  <select
+                    value={availability}
+                    onChange={(e) => setAvailability(e.target.value)}
+                    className={input}
+                  >
+                    <option value="active">Availability: active</option>
+                    <option value="busy">Availability: busy</option>
+                    <option value="offline">Availability: offline</option>
+                  </select>
+                  <input
+                    className={input}
+                    value={town}
+                    onChange={(e) => setTown(e.target.value)}
+                    placeholder="Base town/city (optional)"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="number"
+                    min={1}
+                    max={120}
+                    className={input}
+                    value={maxActiveRequests}
+                    onChange={(e) => setMaxActiveRequests(e.target.value)}
+                    placeholder="Max active requests"
+                  />
+                  <input
+                    type="number"
+                    min={5}
+                    max={240}
+                    className={input}
+                    value={responseTimeoutMinutes}
+                    onChange={(e) => setResponseTimeoutMinutes(e.target.value)}
+                    placeholder="Response timeout (min)"
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-3">
+                  <input
+                    className={input}
+                    value={countySearch}
+                    onChange={(e) => setCountySearch(e.target.value)}
+                    placeholder="Search counties..."
+                  />
+                  <div className="mt-3 max-h-48 overflow-y-auto grid gap-1">
+                    {filteredCounties.map((countyName) => {
+                      const on = normalizedSelectedCounties.includes(countyName);
+                      return (
+                        <button
+                          key={countyName}
+                          type="button"
+                          onClick={() => toggleCounty(countyName)}
+                          className={[
+                            "w-full rounded-xl border px-3 py-2 text-left text-sm transition",
+                            on
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+                              : "border-zinc-200 bg-white/80 text-zinc-800 hover:border-emerald-200 dark:border-zinc-700 dark:bg-zinc-900/75 dark:text-zinc-100",
+                          ].join(" ")}
+                        >
+                          {countyName}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    Selected: {normalizedSelectedCounties.length}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={runUpsert}
+                    disabled={busy === "save" || busy === "remove"}
+                    className={`${btnBase} ${saveBtn}`}
+                  >
+                    {busy === "save" ? "Saving..." : "Save assigned admin"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={runRemove}
+                    disabled={busy === "save" || busy === "remove"}
+                    className={`${btnBase} ${removeBtn}`}
+                  >
+                    {busy === "remove" ? "Removing..." : "Remove assigned admin"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/45">
+                <div className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                  Current assigned admins
+                </div>
+                {loadingRows ? (
+                  <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">Loading...</div>
+                ) : rows.length === 0 ? (
+                  <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">None yet.</div>
+                ) : (
+                  <div className="mt-3 grid gap-2">
+                    {rows.map((row) => {
+                      const counties = normalizeCountyList(row?.adminScope?.counties || []);
+                      return (
+                        <button
+                          key={row.uid}
+                          type="button"
+                          onClick={() => fillFromRow(row)}
+                          className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/70 p-3 text-left transition hover:border-emerald-200"
+                        >
+                          <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                            {String(row?.email || row.uid)}
+                          </div>
+                          <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                            Counties: {counties.join(", ") || "None"}
+                          </div>
+                          <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                            Availability: {String(row?.adminScope?.availability || "active")}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /* ---------- ✅ Staff panel (smaller + collapsible) ---------- */
@@ -517,9 +841,13 @@ export default function AdminRequestsScreen() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
+  const [routingBusy, setRoutingBusy] = useState(false);
+  const [routingErr, setRoutingErr] = useState("");
+  const [routingMsg, setRoutingMsg] = useState("");
   const [search, setSearch] = useState(String(qFromUrl));
   const [debouncedSearch, setDebouncedSearch] = useState(String(qFromUrl));
   const [visibleCount, setVisibleCount] = useState(INITIAL_RENDER_COUNT);
+  const [roleCtx, setRoleCtx] = useState(null);
 
   // ✅ Filter UI (minimal popover beside search)
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -562,6 +890,23 @@ export default function AdminRequestsScreen() {
     const t = window.setTimeout(() => setDebouncedSearch(String(search || "")), SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(t);
   }, [search]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const ctx = await getCurrentUserRoleContext();
+        if (cancelled) return;
+        setRoleCtx(ctx);
+      } catch (error) {
+        if (cancelled) return;
+        console.error(error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     setVisibleCount(INITIAL_RENDER_COUNT);
@@ -704,6 +1049,34 @@ export default function AdminRequestsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
+  const runBulkRouteUnrouted = async () => {
+    setRoutingErr("");
+    setRoutingMsg("");
+    setRoutingBusy(true);
+    try {
+      const result = await routeUnroutedNewRequests({ max: 180 });
+      const routed = Number(result?.routed || 0);
+      const scanned = Number(result?.scanned || 0);
+      const skipped = Number(result?.skippedAlreadyRouted || 0);
+      const noCandidate = Number(result?.noCandidate || 0);
+      const failed = Number(result?.failed || 0);
+      const lockedSkips = Number(result?.skippedInvalidLockedOwner || 0);
+      setRoutingMsg(
+        `Bulk route complete. Routed ${routed}/${scanned}. ` +
+          `Skipped already routed: ${skipped}. ` +
+          `No candidate: ${noCandidate}. ` +
+          `Locked-owner skips: ${lockedSkips}. ` +
+          `Failed: ${failed}.`
+      );
+      await load();
+    } catch (error) {
+      console.error(error);
+      setRoutingErr(String(error?.message || "Bulk route failed."));
+    } finally {
+      setRoutingBusy(false);
+    }
+  };
+
   useEffect(() => {
     const uids = Array.from(
       new Set(
@@ -751,6 +1124,11 @@ export default function AdminRequestsScreen() {
 
   // 1) One global listener: collectionGroup pendingMessages (status == pending)
   useEffect(() => {
+    if (roleCtx?.isAssignedAdmin) {
+      setPendingSet(new Set());
+      return () => {};
+    }
+
     const cg = collectionGroup(db, "pendingMessages");
     const qy = query(cg, where("status", "==", "pending"), limit(LIMIT_PENDING));
 
@@ -777,7 +1155,7 @@ export default function AdminRequestsScreen() {
     );
 
     return () => unsub();
-  }, []);
+  }, [roleCtx?.isAssignedAdmin]);
 
   // 2) Batch-lookup request docs for pending IDs to classify which tab gets a red dot.
   useEffect(() => {
@@ -1145,6 +1523,12 @@ export default function AdminRequestsScreen() {
     />
   );
 
+  const adminLabel = roleCtx?.isSuperAdmin
+    ? "Super Admin"
+    : roleCtx?.isAssignedAdmin
+    ? "Assigned Admin"
+    : "Admin";
+
   return (
     <div ref={screenRef} className={`min-h-screen ${softBg}`}>
       <motion.div variants={pageIn} initial="hidden" animate="show" className={`px-5 py-6 ${enterWrap} ${enterCls}`}>
@@ -1157,6 +1541,9 @@ export default function AdminRequestsScreen() {
               </h1>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 Manage incoming requests, assignments and decisions.
+              </p>
+              <p className="mt-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                Session role: {adminLabel}
               </p>
             </div>
 
@@ -1174,8 +1561,41 @@ export default function AdminRequestsScreen() {
           <div className="mt-3 h-px w-full bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent dark:via-emerald-500/20" />
         </div>
 
-        {/* Staff access panel */}
-        <StaffAccessPanel />
+        {roleCtx?.isSuperAdmin ? <AssignedAdminAccessPanel /> : null}
+        {roleCtx?.isSuperAdmin ? (
+          <div className="mt-5 rounded-3xl border border-emerald-200 bg-emerald-50/45 p-4 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  Manual Bulk Routing
+                </div>
+                <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                  Routes only <span className="font-semibold">new</span> requests that do not have a current admin.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={runBulkRouteUnrouted}
+                disabled={routingBusy}
+                className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+              >
+                <AppIcon size={ICON_MD} icon={RefreshCw} />
+                {routingBusy ? "Routing..." : "Route Unrouted New"}
+              </button>
+            </div>
+            {routingErr ? (
+              <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/35 dark:text-rose-200">
+                {routingErr}
+              </div>
+            ) : null}
+            {routingMsg ? (
+              <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-200">
+                {routingMsg}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {roleCtx?.isAssignedAdmin ? <StaffAccessPanel /> : null}
 
         {/* Tabs */}
         <div className="mt-6 flex flex-wrap gap-2">

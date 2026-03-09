@@ -4,6 +4,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebase";
 import { getUserState, updateUserProfile } from "../services/userservice";
 import { smartBack } from "../utils/navBack";
+import { KENYA_COUNTY_OPTIONS, normalizeCountyName } from "../constants/kenyaCounties";
 
 const RESIDENCE_COUNTRIES = [
   "Kenya",
@@ -65,9 +66,11 @@ export default function EditProfileScreen() {
   const [name, setName] = useState("");
   const [residence, setResidence] = useState("");
   const [phone, setPhone] = useState("");
+  const [county, setCounty] = useState("");
+  const [town, setTown] = useState("");
 
   // originals (for "changed" detection + reset)
-  const originalRef = useRef({ name: "", residence: "", phone: "" });
+  const originalRef = useRef({ name: "", residence: "", phone: "", county: "", town: "" });
 
   const isKenya = residence === "Kenya";
 
@@ -76,9 +79,11 @@ export default function EditProfileScreen() {
     return (
       normalizeName(name) !== normalizeName(o.name) ||
       String(residence || "") !== String(o.residence || "") ||
-      String(phone || "").trim() !== String(o.phone || "").trim()
+      String(phone || "").trim() !== String(o.phone || "").trim() ||
+      String(county || "").trim() !== String(o.county || "").trim() ||
+      String(town || "").trim() !== String(o.town || "").trim()
     );
-  }, [name, residence, phone]);
+  }, [name, residence, phone, county, town]);
 
   // ✅ Soft auth init (reduces “random logout feeling” on resume)
   useEffect(() => {
@@ -105,12 +110,16 @@ export default function EditProfileScreen() {
         const n = s?.name || "";
         const r = s?.countryOfResidence || "";
         const p = s?.phone || "";
+        const cty = s?.county || "";
+        const twn = s?.town || "";
 
         setName(n);
         setResidence(r);
         setPhone(p);
+        setCounty(cty);
+        setTown(twn);
 
-        originalRef.current = { name: n, residence: r, phone: p };
+        originalRef.current = { name: n, residence: r, phone: p, county: cty, town: twn };
       } catch (e) {
         console.error(e);
         setErr(e?.message || "Failed to load profile.");
@@ -130,6 +139,8 @@ export default function EditProfileScreen() {
     setName(o.name || "");
     setResidence(o.residence || "");
     setPhone(o.phone || "");
+    setCounty(o.county || "");
+    setTown(o.town || "");
     setErr("");
   };
 
@@ -158,10 +169,18 @@ export default function EditProfileScreen() {
         name: cleanName,
         phone: finalPhone,
         countryOfResidence: String(residence || "").trim(),
+        county: normalizeCountyName(county),
+        town: String(town || "").trim(),
       });
 
       // update local originals
-      originalRef.current = { name: cleanName, residence, phone: finalPhone };
+      originalRef.current = {
+        name: cleanName,
+        residence,
+        phone: finalPhone,
+        county: normalizeCountyName(county),
+        town: String(town || "").trim(),
+      };
 
       navigate("/app/profile", { replace: true });
     } catch (e) {
@@ -308,6 +327,37 @@ export default function EditProfileScreen() {
               {residence ? (
                 <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">({residence})</div>
               ) : null}
+            </div>
+
+            <div className="rounded-2xl border border-white/40 bg-white/55 dark:bg-zinc-900/60 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
+              <div className="text-[11px] font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
+                Preferred county
+              </div>
+              <select
+                value={county}
+                onChange={(e) => setCounty(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200/80 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
+              >
+                <option value="">Select county (optional)</option>
+                {KENYA_COUNTY_OPTIONS.map((countyName) => (
+                  <option key={countyName} value={countyName}>
+                    {countyName}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="rounded-2xl border border-white/40 bg-white/55 dark:bg-zinc-900/60 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
+              <div className="text-[11px] font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
+                Preferred town / city (optional)
+              </div>
+              <input
+                value={town}
+                onChange={(e) => setTown(e.target.value)}
+                placeholder="e.g. Westlands, Eldoret, Kisumu CBD"
+                enterKeyHint="done"
+                className="mt-2 w-full rounded-xl border border-zinc-200/80 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+              />
             </div>
 
             {/* Actions */}

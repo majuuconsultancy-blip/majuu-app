@@ -44,6 +44,9 @@ function notificationCollectionForRole(role, uid) {
   if (!safeUid) return null;
   if (safeRole === "user") return collection(db, "users", safeUid, "notifications");
   if (safeRole === "staff") return collection(db, "staff", safeUid, "notifications");
+  if (safeRole === "admin" || safeRole === "assignedadmin") {
+    return collection(db, "users", safeUid, "notifications");
+  }
   return null;
 }
 
@@ -174,14 +177,23 @@ function createNotificationsListener({ role, uid }) {
   );
 }
 
-function createAdminForegroundPushWatchers() {
+function createAdminForegroundPushWatchers({ role, uid }) {
+  const safeRole = safeStr(role).toLowerCase();
+  const safeUid = safeStr(uid);
   const unsubs = [];
   let initializedRequests = false;
   let initializedPending = false;
 
   unsubs.push(
     onSnapshot(
-      query(collection(db, "serviceRequests"), orderBy("createdAt", "desc"), limit(60)),
+      safeRole === "assignedadmin"
+        ? query(
+            collection(db, "serviceRequests"),
+            where("currentAdminUid", "==", safeUid),
+            orderBy("createdAt", "desc"),
+            limit(60)
+          )
+        : query(collection(db, "serviceRequests"), orderBy("createdAt", "desc"), limit(60)),
       (snap) => {
         if (initializedRequests) {
           snap.docChanges().forEach((change) => {
@@ -207,33 +219,35 @@ function createAdminForegroundPushWatchers() {
     )
   );
 
-  unsubs.push(
-    onSnapshot(
-      query(collectionGroup(db, "pendingMessages"), where("status", "==", "pending")),
-      (snap) => {
-        if (initializedPending) {
-          snap.docChanges().forEach((change) => {
-            if (change.type !== "added") return;
-            const rid = parseRequestIdFromPendingDoc(change.doc);
-            const mid = safeStr(change.doc.id);
-            if (!rid || !mid) return;
-            scheduleForegroundLocalNotification({
-              dedupeKey: `admin:pending:${rid}:${mid}`,
-              title: "New message for moderation",
-              body: "A user or staff message is waiting for admin review.",
-              route: `/app/admin/request/${encodeURIComponent(rid)}?openChat=1`,
-              extra: { type: "ADMIN_NEW_MESSAGE", requestId: rid, pendingId: mid },
-            }).catch(() => {});
-          });
-        } else {
-          initializedPending = true;
+  if (safeRole !== "assignedadmin") {
+    unsubs.push(
+      onSnapshot(
+        query(collectionGroup(db, "pendingMessages"), where("status", "==", "pending")),
+        (snap) => {
+          if (initializedPending) {
+            snap.docChanges().forEach((change) => {
+              if (change.type !== "added") return;
+              const rid = parseRequestIdFromPendingDoc(change.doc);
+              const mid = safeStr(change.doc.id);
+              if (!rid || !mid) return;
+              scheduleForegroundLocalNotification({
+                dedupeKey: `admin:pending:${rid}:${mid}`,
+                title: "New message for moderation",
+                body: "A user or staff message is waiting for admin review.",
+                route: `/app/admin/request/${encodeURIComponent(rid)}?openChat=1`,
+                extra: { type: "ADMIN_NEW_MESSAGE", requestId: rid, pendingId: mid },
+              }).catch(() => {});
+            });
+          } else {
+            initializedPending = true;
+          }
+        },
+        (error) => {
+          console.error("notifsV2Engine admin pendingMessages watcher failed:", error);
         }
-      },
-      (error) => {
-        console.error("notifsV2Engine admin pendingMessages watcher failed:", error);
-      }
-    )
-  );
+      )
+    );
+  }
 
   return () => {
     unsubs.forEach((fn) => {
@@ -260,12 +274,12 @@ export function startNotifsV2Engine({ role, uid }) {
 
   const safeRole = safeStr(role).toLowerCase();
   const safeUid = safeStr(uid);
-  if (!safeUid || !["user", "staff", "admin"].includes(safeRole)) {
+  if (!safeUid || !["user", "staff", "admin", "assignedadmin"].includes(safeRole)) {
     return () => {};
   }
 
   notifsV2Store.setSession({ role: safeRole, uid: safeUid });
-  if (safeRole === "admin") {
+  if (safeRole === "admin" || safeRole === "assignedadmin") {
     notifsV2Store.setNotifications([]);
   }
 
@@ -295,7 +309,7 @@ export function startNotifsV2Engine({ role, uid }) {
     notifsV2Store.pruneUnreadRequests(ids);
   };
 
-  if (safeRole === "user" || safeRole === "staff") {
+  if (safeRole === "user" || safeRole === "staff" || safeRole === "assignedadmin") {
     notificationsUnsub = createNotificationsListener({ role: safeRole, uid: safeUid });
   }
 
@@ -325,8 +339,8 @@ export function startNotifsV2Engine({ role, uid }) {
         syncRequestTrackers([]);
       }
     );
-  } else if (safeRole === "admin") {
-    adminPushCleanup = createAdminForegroundPushWatchers();
+  } else if (safeRole === "admin" || safeRole === "assignedadmin") {
+    adminPushCleanup = createAdminForegroundPushWatchers({ role: safeRole, uid: safeUid });
     notifsV2Store.pruneUnreadRequests([]);
   }
 

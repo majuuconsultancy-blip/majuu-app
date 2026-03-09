@@ -4,13 +4,13 @@ import {
   doc,
   getDocs,
   limit,
-  orderBy,
   query,
   runTransaction,
   serverTimestamp,
   where,
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
+import { getCurrentUserRoleContext } from "./adminroleservice";
 import {
   getSpecialityLabel,
   inferRequestSpeciality,
@@ -19,7 +19,7 @@ import {
 } from "../constants/staffSpecialities";
 import { createStaffNotification, createUserNotification } from "./notificationDocs";
 
-const ACTIVE_REQUEST_STATUSES = new Set(["new", "contacted"]);
+const ACTIVE_TASK_STATUSES = new Set(["assigned", "active"]);
 
 const AUTO_BLOCK_MIN_DONE = 5;
 const AUTO_BLOCK_MIN_SUCCESS = 0.4;
@@ -83,15 +83,9 @@ function shouldAutoBlock({ doneCount, reviewedCount, successRate, avgMinutes }) 
   return { block: false, reason: "" };
 }
 
-function isCountedAsActiveLoad(requestDoc) {
-  const status = String(requestDoc?.status || "").trim().toLowerCase();
-  const staffStatus = String(requestDoc?.staffStatus || "assigned")
-    .trim()
-    .toLowerCase();
-
-  if (!ACTIVE_REQUEST_STATUSES.has(status)) return false;
-  if (staffStatus === "done") return false;
-  return true;
+function isCountedAsActiveLoad(taskDoc) {
+  const taskStatus = String(taskDoc?.status || "").trim().toLowerCase();
+  return ACTIVE_TASK_STATUSES.has(taskStatus);
 }
 
 function computeRankScore(staffDoc) {
@@ -114,10 +108,10 @@ function computeRankScore(staffDoc) {
 }
 
 function activeLoadQueryForStaff(staffUid) {
+  const safeStaffUid = String(staffUid || "").trim();
   return query(
-    collection(db, "serviceRequests"),
-    where("assignedTo", "==", String(staffUid || "").trim()),
-    where("status", "in", Array.from(ACTIVE_REQUEST_STATUSES)),
+    collection(db, "staff", safeStaffUid, "tasks"),
+    where("status", "in", Array.from(ACTIVE_TASK_STATUSES)),
     limit(500)
   );
 }
@@ -133,33 +127,39 @@ function countActiveFromSnapshot(snap, { ignoreRequestId = "" } = {}) {
   return count;
 }
 
-async function getActiveLoadMap() {
-  const qy = query(
-    collection(db, "serviceRequests"),
-    where("status", "in", Array.from(ACTIVE_REQUEST_STATUSES))
-  );
-  const snap = await getDocs(qy);
+async function getActiveLoadMap(staffRows = []) {
   const counts = {};
-
-  snap.docs.forEach((d) => {
-    const data = d.data() || {};
-    const assignedTo = String(data?.assignedTo || "").trim();
-    if (!assignedTo) return;
-    if (!isCountedAsActiveLoad(data)) return;
-    counts[assignedTo] = (counts[assignedTo] || 0) + 1;
-  });
+  await Promise.all(
+    staffRows.map(async (row) => {
+      const uid = String(row?.uid || "").trim();
+      if (!uid) return;
+      const snap = await getDocs(activeLoadQueryForStaff(uid));
+      counts[uid] = countActiveFromSnapshot(snap);
+    })
+  );
 
   return counts;
 }
 
 export async function listStaff({ max = 50, includeLoad = false } = {}) {
-  const qy = query(collection(db, "staff"), orderBy("email"), limit(max));
+  const actorUid = String(auth.currentUser?.uid || "").trim();
+  if (!actorUid) throw new Error("Not signed in");
+
+  const roleCtx = await getCurrentUserRoleContext(actorUid);
+  if (!roleCtx?.isAdmin) throw new Error("Admin access required.");
+
+  const maxRows = Math.max(1, Number(max) || 50);
+  const qy = roleCtx.isAssignedAdmin
+    ? query(collection(db, "staff"), where("ownerAdminUid", "==", actorUid), limit(maxRows))
+    : query(collection(db, "staff"), limit(maxRows));
   const snap = await getDocs(qy);
-  const rows = snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
+  const rows = snap.docs
+    .map((d) => ({ uid: d.id, ...d.data() }))
+    .sort((a, b) => String(a?.email || "").localeCompare(String(b?.email || "")));
 
   let activeLoadByUid = {};
   if (includeLoad && rows.length) {
-    activeLoadByUid = await getActiveLoadMap();
+    activeLoadByUid = await getActiveLoadMap(rows);
   }
 
   return rows.map((staffDoc) => {
@@ -198,6 +198,8 @@ export async function assignRequestToStaff({
 
   const admin = auth.currentUser;
   if (!admin) throw new Error("Not signed in");
+  const roleCtx = await getCurrentUserRoleContext(admin.uid);
+  if (!roleCtx?.isAdmin) throw new Error("Admin access required.");
 
   const safeRequestId = String(requestId || "").trim();
   const safeStaffUid = String(staffUid || "").trim();
@@ -206,6 +208,8 @@ export async function assignRequestToStaff({
   const staffRef = doc(db, "staff", safeStaffUid);
   const taskRef = doc(db, "staff", safeStaffUid, "tasks", safeRequestId);
   const loadQuery = activeLoadQueryForStaff(safeStaffUid);
+  const preLoadSnap = await getDocs(loadQuery);
+  const preActiveAssignedCount = countActiveFromSnapshot(preLoadSnap);
 
   const txResult = await runTransaction(db, async (transaction) => {
     const reqSnap = await transaction.get(reqRef);
@@ -215,6 +219,20 @@ export async function assignRequestToStaff({
     const staffSnap = await transaction.get(staffRef);
     if (!staffSnap.exists()) throw new Error("Staff record not found");
     const staffDoc = { uid: staffSnap.id, ...staffSnap.data() };
+
+    const ownerAdminUid = String(staffDoc?.ownerAdminUid || "").trim();
+    if (roleCtx?.isAssignedAdmin && ownerAdminUid && ownerAdminUid !== admin.uid) {
+      throw new Error("You can only assign staff that belong to your admin account.");
+    }
+
+    if (roleCtx?.isAssignedAdmin) {
+      const requestAdminUid = String(reqData?.currentAdminUid || "").trim();
+      const lockAdminUid = String(reqData?.ownerLockedAdminUid || "").trim();
+      const effectiveOwnerUid = lockAdminUid || requestAdminUid;
+      if (effectiveOwnerUid && effectiveOwnerUid !== admin.uid) {
+        throw new Error("You can only assign staff for requests routed to your admin account.");
+      }
+    }
 
     const perf = computePerfSummary(staffDoc);
     const active = staffDoc?.active !== false;
@@ -258,10 +276,11 @@ export async function assignRequestToStaff({
       throw new Error(`Speciality mismatch: this request needs ${getSpecialityLabel(safeSpeciality)}.`);
     }
 
-    const loadSnap = await transaction.get(loadQuery);
     const previousAssignee = String(reqData?.assignedTo || "").trim();
     const ignoreRequestId = previousAssignee === safeStaffUid ? safeRequestId : "";
-    const activeAssignedCount = countActiveFromSnapshot(loadSnap, { ignoreRequestId });
+    const activeAssignedCount = ignoreRequestId
+      ? Math.max(0, preActiveAssignedCount - 1)
+      : preActiveAssignedCount;
     const maxActive = Math.max(1, toNum(staffDoc?.maxActive, 2));
     if (activeAssignedCount >= maxActive) {
       throw new Error(
@@ -374,6 +393,8 @@ export async function unassignRequest({ requestId, staffUid, reason = "Manual un
 
   const admin = auth.currentUser;
   if (!admin) throw new Error("Not signed in");
+  const roleCtx = await getCurrentUserRoleContext(admin.uid);
+  if (!roleCtx?.isAdmin) throw new Error("Admin access required.");
 
   const safeRequestId = String(requestId || "").trim();
   const requestedUid = String(staffUid || "").trim();
@@ -387,6 +408,23 @@ export async function unassignRequest({ requestId, staffUid, reason = "Manual un
     const currentAssignedUid = String(reqData?.assignedTo || "").trim();
     const targetUid = requestedUid || currentAssignedUid;
     if (!targetUid) throw new Error("No assignee found.");
+
+    const lockAdminUid = String(reqData?.ownerLockedAdminUid || "").trim();
+    const requestAdminUid = String(reqData?.currentAdminUid || "").trim();
+    if (roleCtx?.isAssignedAdmin) {
+      const effectiveOwnerUid = lockAdminUid || requestAdminUid;
+      if (effectiveOwnerUid && effectiveOwnerUid !== admin.uid) {
+        throw new Error("You can only unassign staff on requests in your admin scope.");
+      }
+    }
+
+    const targetStaffRef = doc(db, "staff", targetUid);
+    const targetStaffSnap = await transaction.get(targetStaffRef);
+    const targetStaff = targetStaffSnap.exists() ? targetStaffSnap.data() || {} : {};
+    const ownerAdminUid = String(targetStaff?.ownerAdminUid || "").trim();
+    if (roleCtx?.isAssignedAdmin && ownerAdminUid && ownerAdminUid !== admin.uid) {
+      throw new Error("You can only unassign staff that belong to your admin account.");
+    }
 
     if (requestedUid && currentAssignedUid && requestedUid !== currentAssignedUid) {
       throw new Error("Assignee mismatch. Refresh and try again.");

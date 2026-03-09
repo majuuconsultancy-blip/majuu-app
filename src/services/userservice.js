@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
+import { normalizeCountyLower, normalizeCountyName } from "../constants/kenyaCounties";
 
 /* ----------------- helpers ----------------- */
 function onlyDigits(s) {
@@ -8,6 +9,22 @@ function onlyDigits(s) {
 
 function normalizeName(name) {
   return String(name || "").trim().replace(/\s+/g, " ");
+}
+
+function normalizeTown(input) {
+  return String(input || "").trim().replace(/\s+/g, " ").slice(0, 80);
+}
+
+function defaultAdminScope() {
+  return {
+    counties: [],
+    countiesLower: [],
+    town: "",
+    availability: "active",
+    active: true,
+    maxActiveRequests: 12,
+    responseTimeoutMinutes: 20,
+  };
 }
 
 function normalizePhoneByResidence(countryOfResidence, phoneRaw) {
@@ -84,6 +101,11 @@ export async function ensureUserDoc({ uid, email }) {
     name: "",
     phone: "",
     countryOfResidence: "",
+    county: "",
+    countyLower: "",
+    town: "",
+    role: "user",
+    adminScope: defaultAdminScope(),
     selectedTrack: null,
     hasActiveProcess: false,
     activeTrack: null,
@@ -111,6 +133,11 @@ export async function ensureUserDoc({ uid, email }) {
     setIfMissing("name", "");
     setIfMissing("phone", "");
     setIfMissing("countryOfResidence", "");
+    setIfMissing("county", "");
+    setIfMissing("countyLower", "");
+    setIfMissing("town", "");
+    setIfMissing("role", "user");
+    setIfMissing("adminScope", defaultAdminScope());
     setIfMissing("selectedTrack", null);
     setIfMissing("hasActiveProcess", false);
     setIfMissing("activeTrack", null);
@@ -249,7 +276,7 @@ export async function upsertUserContact(uid, { name, phone }) {
   });
 }
 
-export async function updateUserProfile(uid, { name, phone, countryOfResidence }) {
+export async function updateUserProfile(uid, { name, phone, countryOfResidence, county, town }) {
   const ref = doc(db, "users", uid);
 
   // ensure doc exists so updateDoc never fails
@@ -283,6 +310,16 @@ export async function updateUserProfile(uid, { name, phone, countryOfResidence }
     payload.phone = residence
       ? normalizePhoneByResidence(residence, phone)
       : String(phone || "").trim();
+  }
+
+  if (typeof county !== "undefined") {
+    const countyName = normalizeCountyName(county);
+    payload.county = countyName;
+    payload.countyLower = normalizeCountyLower(countyName);
+  }
+
+  if (typeof town !== "undefined") {
+    payload.town = normalizeTown(town);
   }
 
   await updateDoc(ref, payload);

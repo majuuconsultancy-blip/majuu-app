@@ -2,7 +2,6 @@ import {
   collection,
   query,
   where,
-  orderBy,
   limit as qLimit,
   getDocs,
   getDoc,
@@ -16,6 +15,7 @@ import {
 
 import { db, auth } from "../firebase";
 import { createStaffNotification, createUserNotification } from "./notificationDocs";
+import { getCurrentUserRoleContext } from "./adminroleservice";
 
 const ACTIVE_REQUEST_STATUSES = ["new", "contacted"];
 const STALE_ASSIGNMENT_HOURS = 24;
@@ -43,6 +43,36 @@ function expectedRecommendationForDecision(finalDecision) {
   return finalDecision === "accepted" ? "recommend_accept" : "recommend_reject";
 }
 
+function sortByCreatedAtDesc(rows) {
+  return rows.sort((a, b) => {
+    const aSec = Number(a?.createdAt?.seconds || 0);
+    const bSec = Number(b?.createdAt?.seconds || 0);
+    return bSec - aSec;
+  });
+}
+
+async function requireAdminActorContext() {
+  const actorUid = String(auth.currentUser?.uid || "").trim();
+  if (!actorUid) throw new Error("Not signed in");
+  const roleCtx = await getCurrentUserRoleContext(actorUid);
+  if (!roleCtx?.isAdmin) {
+    throw new Error("Admin access required.");
+  }
+  return { actorUid, roleCtx };
+}
+
+function assertRequestInActorScope(reqData, { actorUid, roleCtx }) {
+  if (!roleCtx?.isAssignedAdmin) return;
+
+  const scopedAdminUid = String(
+    reqData?.ownerLockedAdminUid || reqData?.currentAdminUid || ""
+  ).trim();
+
+  if (scopedAdminUid && scopedAdminUid !== actorUid) {
+    throw new Error("This request is outside your assigned admin scope.");
+  }
+}
+
 export async function getRequests({
   status = "",
   track = "",
@@ -50,6 +80,9 @@ export async function getRequests({
   max,
   limit = 50,
 } = {}) {
+  const actorUid = String(auth.currentUser?.uid || "").trim();
+  const roleCtx = actorUid ? await getCurrentUserRoleContext(actorUid).catch(() => null) : null;
+
   const ref = collection(db, "serviceRequests");
   const clauses = [];
 
@@ -60,12 +93,16 @@ export async function getRequests({
   if (s) clauses.push(where("status", "==", s));
   if (t) clauses.push(where("track", "==", t));
   if (u) clauses.push(where("uid", "==", u));
+  if (roleCtx?.isAssignedAdmin) {
+    clauses.push(where("currentAdminUid", "==", actorUid));
+  }
 
   const take = Number.isFinite(Number(max)) ? Number(max) : Number(limit) || 50;
-  const qy = query(ref, ...clauses, orderBy("createdAt", "desc"), qLimit(take));
+  const qy = query(ref, ...clauses, qLimit(take));
   const snap = await getDocs(qy);
 
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return sortByCreatedAtDesc(rows);
 }
 
 export async function sweepStaleAssignments({
@@ -401,18 +438,38 @@ async function updateStaffStatsAfterDecision({ requestId, finalDecision }) {
 
 export async function adminAcceptRequest({ requestId, note = "" }) {
   if (!requestId) throw new Error("Missing requestId");
+  const { actorUid: actingAdminUid, roleCtx } = await requireAdminActorContext();
 
   const reqRef = doc(db, "serviceRequests", requestId);
   const snap = await getDoc(reqRef);
   if (!snap.exists()) throw new Error("Request not found");
 
   const req = snap.data() || {};
+  assertRequestInActorScope(req, { actorUid: actingAdminUid, roleCtx });
   const uid = String(req?.uid || "").trim();
+  const lockedAdminUid = String(
+    req?.ownerLockedAdminUid || req?.currentAdminUid || actingAdminUid
+  ).trim();
+  const nowMs = Date.now();
+  const existingRoutingMeta = req?.routingMeta && typeof req.routingMeta === "object"
+    ? req.routingMeta
+    : {};
 
   await updateDoc(reqRef, {
     status: "closed",
     adminDecisionNote: String(note || "").trim(),
     decidedAt: serverTimestamp(),
+    adminRespondedAt: serverTimestamp(),
+    adminRespondedAtMs: nowMs,
+    adminRespondedBy: actingAdminUid || null,
+    ownerLockedAdminUid: lockedAdminUid || "",
+    ownerLockedAt: serverTimestamp(),
+    routingMeta: {
+      ...existingRoutingMeta,
+      handledAt: serverTimestamp(),
+      handledAtMs: nowMs,
+      lockedOwnerAdminUid: lockedAdminUid || "",
+    },
     updatedAt: serverTimestamp(),
   });
 
@@ -456,18 +513,38 @@ export async function adminAcceptRequest({ requestId, note = "" }) {
 export async function adminRejectRequest({ requestId, note = "" }) {
   if (!requestId) throw new Error("Missing requestId");
   if (!String(note || "").trim()) throw new Error("Note is required for rejection");
+  const { actorUid: actingAdminUid, roleCtx } = await requireAdminActorContext();
 
   const reqRef = doc(db, "serviceRequests", requestId);
   const snap = await getDoc(reqRef);
   if (!snap.exists()) throw new Error("Request not found");
 
   const req = snap.data() || {};
+  assertRequestInActorScope(req, { actorUid: actingAdminUid, roleCtx });
   const uid = String(req?.uid || "").trim();
+  const lockedAdminUid = String(
+    req?.ownerLockedAdminUid || req?.currentAdminUid || actingAdminUid
+  ).trim();
+  const nowMs = Date.now();
+  const existingRoutingMeta = req?.routingMeta && typeof req.routingMeta === "object"
+    ? req.routingMeta
+    : {};
 
   await updateDoc(reqRef, {
     status: "rejected",
     adminDecisionNote: String(note || "").trim(),
     decidedAt: serverTimestamp(),
+    adminRespondedAt: serverTimestamp(),
+    adminRespondedAtMs: nowMs,
+    adminRespondedBy: actingAdminUid || null,
+    ownerLockedAdminUid: lockedAdminUid || "",
+    ownerLockedAt: serverTimestamp(),
+    routingMeta: {
+      ...existingRoutingMeta,
+      handledAt: serverTimestamp(),
+      handledAtMs: nowMs,
+      lockedOwnerAdminUid: lockedAdminUid || "",
+    },
     updatedAt: serverTimestamp(),
   });
 
@@ -510,17 +587,18 @@ export async function adminRejectRequest({ requestId, note = "" }) {
 
 export async function adminSoftDeleteRequest({ requestId } = {}) {
   if (!requestId) throw new Error("Missing requestId");
+  const { actorUid: actingAdminUid, roleCtx } = await requireAdminActorContext();
 
   const reqRef = doc(db, "serviceRequests", requestId);
   const snap = await getDoc(reqRef);
   if (!snap.exists()) throw new Error("Request not found");
-
-  const adminUid = String(auth.currentUser?.uid || "").trim();
+  const req = snap.data() || {};
+  assertRequestInActorScope(req, { actorUid: actingAdminUid, roleCtx });
 
   await updateDoc(reqRef, {
     deletedByAdmin: true,
     adminDeletedAt: serverTimestamp(),
-    adminDeletedBy: adminUid || null,
+    adminDeletedBy: actingAdminUid || null,
     updatedAt: serverTimestamp(),
   });
 

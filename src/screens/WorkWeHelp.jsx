@@ -176,6 +176,8 @@ export default function WorkWeHelp() {
   // Autofill for modal
   const [defaultName, setDefaultName] = useState("");
   const [defaultPhone, setDefaultPhone] = useState("");
+  const [defaultCounty, setDefaultCounty] = useState("");
+  const [defaultTown, setDefaultTown] = useState("");
 
   // Request modal (single services only)
   const [modalOpen, setModalOpen] = useState(false);
@@ -238,6 +240,8 @@ export default function WorkWeHelp() {
 
         setDefaultName(s?.name || "");
         setDefaultPhone(s?.phone || "");
+        setDefaultCounty(s?.county || "");
+        setDefaultTown(s?.town || s?.city || "");
 
         setMissing(getMissingProfileFields(s || {}));
       } catch (e) {
@@ -375,7 +379,8 @@ export default function WorkWeHelp() {
     dummyFiles,
     requestUploadMeta,
     email: formEmail,
-    city,
+    county,
+    town,
     paid,
     paymentMeta,
   }) => {
@@ -420,7 +425,9 @@ export default function WorkWeHelp() {
         phone,
         note,
 
-        city: String(city || "").trim(),
+        county: String(county || "").trim(),
+        town: String(town || "").trim(),
+        city: String(town || "").trim(),
         paid: Boolean(paid),
         paymentMeta: paymentMeta || null,
         requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
@@ -772,6 +779,8 @@ export default function WorkWeHelp() {
         defaultName={defaultName}
         defaultPhone={defaultPhone}
         defaultEmail={auth.currentUser?.email || email || ""}
+        defaultCounty={defaultCounty}
+        defaultTown={defaultTown}
         paymentContext={{
           flow: "weHelp",
           track: "work",

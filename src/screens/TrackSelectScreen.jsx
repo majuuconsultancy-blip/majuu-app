@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
 import {
   BookOpen,
   Briefcase,
@@ -23,6 +23,8 @@ import {
   isBiometricPromptPending,
   setBiometricPromptPending,
 } from "../services/biometricLockService";
+import { getCurrentUserRoleContext } from "../services/adminroleservice";
+import { isEligibleStaffProfile } from "../services/staffaccessservice";
 
 const AUTH_NULL_GRACE_MS = 1200;
 
@@ -81,14 +83,33 @@ export default function TrackSelectScreen() {
 
         setUid(user.uid);
 
-        try {
-          const staffSnap = await getDoc(doc(db, "staff", user.uid));
-          const ok = staffSnap.exists() && Boolean(staffSnap.data()?.active);
-          if (!cancelled) setIsStaff(ok);
-        } catch (error) {
-          void error;
-          if (!cancelled) setIsStaff(false);
+        const [staffSnap, roleCtx] = await Promise.all([
+          getDoc(doc(db, "staff", user.uid)).catch((error) => {
+            console.warn("TrackSelect staff doc read failed:", error?.code || error?.message || error);
+            return null;
+          }),
+          getCurrentUserRoleContext(user.uid).catch((error) => {
+            console.warn("TrackSelect role context failed:", error?.code || error?.message || error);
+            return null;
+          }),
+        ]);
+        const hasStaffDoc = Boolean(staffSnap?.exists?.());
+        const staffData = hasStaffDoc ? staffSnap.data() || {} : null;
+        const byStaffDoc = hasStaffDoc && isEligibleStaffProfile(staffData);
+        const byRoleCtx = roleCtx?.role === "staff";
+
+        let byAssignmentSignal = false;
+        if (!hasStaffDoc) {
+          const [taskProbe, requestProbe] = await Promise.all([
+            getDocs(query(collection(db, "staff", user.uid, "tasks"), limit(1))).catch(() => null),
+            getDocs(
+              query(collection(db, "serviceRequests"), where("assignedTo", "==", user.uid), limit(1))
+            ).catch(() => null),
+          ]);
+          byAssignmentSignal = Boolean(taskProbe?.docs?.length || requestProbe?.docs?.length);
         }
+
+        if (!cancelled) setIsStaff(Boolean(byStaffDoc || byRoleCtx || byAssignmentSignal));
 
         try {
           const state = await getUserState(user.uid);

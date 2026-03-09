@@ -9,7 +9,6 @@ import {
 } from "react-router-dom";
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 
@@ -35,10 +34,11 @@ import AdminGate from "./components/AdminGate";
 import GAPageView from "./components/GAPageView";
 import StaffGate from "./components/StaffGate";
 import AppLoading from "./components/AppLoading";
-import { auth, db } from "./firebase";
+import { auth } from "./firebase";
 import { startNotifsV2Engine, stopNotifsV2Engine } from "./services/notifsV2Engine";
 import { cleanupPushBridge, initPushBridge } from "./services/pushBridge";
 import { sweepStaleAssignments } from "./services/adminrequestservice";
+import { getCurrentUserRoleContext } from "./services/adminroleservice";
 import { hasSeenIntro } from "./utils/introFlag";
 import { isResumableRoute, setSnapshot } from "./resume/resumeEngine";
 import { waitForAuthRestore } from "./utils/authRestore";
@@ -77,12 +77,7 @@ const StaffStartWorkModalScreen = lazy(() => import("./screens/StaffStartWorkMod
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
 const ROOT_EXIT_PATHS = new Set(["/app/home", "/dashboard", "/staff", "/staff/tasks"]);
 const SAFE_FALLBACK_PATH = "/app/home";
-const ADMIN_EMAIL = "brioneroo@gmail.com";
 const SCROLL_RESET_EXCLUDED_ROUTES = [/^\/staff\/request\/[^/]+\/start$/];
-
-function isAdminEmail(email) {
-  return String(email || "").trim().toLowerCase() === ADMIN_EMAIL;
-}
 
 function shouldResetRouteScroll(pathname) {
   const path = String(pathname || "").trim();
@@ -291,23 +286,20 @@ function RuntimeBridges() {
       }
 
       (async () => {
-        let role = isAdminEmail(user.email) ? "admin" : "user";
-
-        if (role !== "admin") {
-          try {
-            const staffSnap = await getDoc(doc(db, "staff", user.uid));
-            if (staffSnap.exists() && staffSnap.data()?.active === true) {
-              role = "staff";
-            }
-          } catch {
-            // default keeps user role
-          }
-        }
+        const ctx = await getCurrentUserRoleContext(user.uid);
+        const role =
+          ctx.role === "superAdmin"
+            ? "admin"
+            : ctx.role === "assignedAdmin"
+            ? "assignedAdmin"
+            : ctx.role === "staff"
+            ? "staff"
+            : "user";
 
         if (disposed || seq !== bootSeq) return;
         localEngineCleanup = startNotifsV2Engine({ role, uid: user.uid });
         localPushCleanup = initPushBridge({ navigate, role, uid: user.uid }) || (() => {});
-        if (role === "admin") {
+        if (role === "admin" || role === "assignedAdmin") {
           const runSweep = async () => {
             try {
               await sweepStaleAssignments({ staleHours: 24, max: 350 });

@@ -26,6 +26,11 @@ import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
 
 import { auth } from "../firebase";
 import { getUserState } from "../services/userservice";
+import {
+  isAnyAdminRole,
+  normalizeUserRole,
+  resolveRoleFromUserDoc,
+} from "../services/adminroleservice";
 import ThemeToggle from "../components/ThemeToggle";
 
 const PERF_TAG = "[perf][ProfileScreen]";
@@ -57,6 +62,9 @@ function readProfileCache(uid) {
       name: String(parsed?.name || ""),
       phone: String(parsed?.phone || ""),
       countryOfResidence: String(parsed?.countryOfResidence || ""),
+      county: String(parsed?.county || ""),
+      town: String(parsed?.town || ""),
+      role: String(parsed?.role || ""),
       activeTrack: String(parsed?.activeTrack || "").toLowerCase(),
       updatedAt: Number(parsed?.updatedAt || 0) || 0,
     };
@@ -72,6 +80,9 @@ function writeProfileCache(uid, payload) {
       name: String(payload?.name || ""),
       phone: String(payload?.phone || ""),
       countryOfResidence: String(payload?.countryOfResidence || ""),
+      county: String(payload?.county || ""),
+      town: String(payload?.town || ""),
+      role: String(payload?.role || ""),
       activeTrack: String(payload?.activeTrack || "").toLowerCase(),
       updatedAt: Date.now(),
     };
@@ -93,7 +104,6 @@ const floatCard = {
 
 export default function ProfileScreen() {
   const navigate = useNavigate();
-  const ADMIN_EMAIL = "brioneroo@gmail.com";
   const mountAtRef = useRef(typeof performance !== "undefined" ? performance.now() : 0);
   const firstPaintLoggedRef = useRef(false);
   const lastHydratedUidRef = useRef("");
@@ -107,16 +117,22 @@ export default function ProfileScreen() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [countryOfResidence, setCountryOfResidence] = useState("");
+  const [county, setCounty] = useState("");
+  const [town, setTown] = useState("");
+  const [role, setRole] = useState("");
 
   // ✅ for back target
   const [activeTrack, setActiveTrack] = useState(""); // "study" | "work" | "travel" | ""
 
   const [busy, setBusy] = useState("");
 
-  const isAdmin = useMemo(
-    () => (email || "").toLowerCase() === ADMIN_EMAIL.toLowerCase(),
-    [email]
-  );
+  const isAdmin = useMemo(() => isAnyAdminRole(role), [role]);
+  const adminBadgeLabel = useMemo(() => {
+    const normalized = normalizeUserRole(role);
+    if (normalized === "superAdmin") return "Super Admin";
+    if (normalized === "assignedAdmin") return "Assigned Admin";
+    return "Admin";
+  }, [role]);
 
   const initials = useMemo(() => {
     const base = (name || email || "U").trim();
@@ -156,6 +172,15 @@ export default function ProfileScreen() {
         setName(cached.name || "");
         setPhone(cached.phone || "");
         setCountryOfResidence(cached.countryOfResidence || "");
+        setCounty(cached.county || "");
+        setTown(cached.town || "");
+        setRole(
+          resolveRoleFromUserDoc({
+            role: cached.role || "",
+            email: user.email || "",
+            hasActiveStaffAccess: false,
+          })
+        );
         if (cached.activeTrack === "study" || cached.activeTrack === "work" || cached.activeTrack === "travel") {
           setActiveTrack(cached.activeTrack);
         }
@@ -174,9 +199,19 @@ export default function ProfileScreen() {
         const n = s?.name || "";
         const p = s?.phone || "";
         const c = s?.countryOfResidence || "";
+        const countyValue = s?.county || "";
+        const townValue = s?.town || "";
+        const roleValue = resolveRoleFromUserDoc({
+          role: s?.role,
+          email: user.email || s?.email || "",
+          hasActiveStaffAccess: false,
+        });
         setName(n);
         setPhone(p);
         setCountryOfResidence(c);
+        setCounty(countyValue);
+        setTown(townValue);
+        setRole(roleValue);
 
         const t = String(s?.activeTrack || s?.selectedTrack || "").toLowerCase();
         if (t === "study" || t === "work" || t === "travel") setActiveTrack(t);
@@ -186,6 +221,9 @@ export default function ProfileScreen() {
           name: n,
           phone: p,
           countryOfResidence: c,
+          county: countyValue,
+          town: townValue,
+          role: roleValue,
           activeTrack: t,
         });
       } catch (e) {
@@ -336,7 +374,7 @@ export default function ProfileScreen() {
                 </div>
                 {isAdmin ? (
                   <span className="absolute -bottom-2 -right-2 rounded-full border border-emerald-200/70 bg-emerald-50/80 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:border-emerald-900/45 dark:bg-emerald-950/30 dark:text-emerald-200">
-                    Admin
+                    {adminBadgeLabel}
                   </span>
                 ) : null}
               </div>
@@ -406,6 +444,50 @@ export default function ProfileScreen() {
                 </div>
                 <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                   {phone?.trim() ? phone : "Not set"}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.div
+            variants={floatCard}
+            initial="rest"
+            whileHover="hover"
+            whileTap="tap"
+            className={`${tile} p-4`}
+          >
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100/70 bg-emerald-50/70 text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
+                <AppIcon size={ICON_MD} icon={Flag} />
+              </span>
+              <div className="min-w-0">
+                <div className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
+                  Preferred County
+                </div>
+                <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  {county?.trim() ? county : "Not set"}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.div
+            variants={floatCard}
+            initial="rest"
+            whileHover="hover"
+            whileTap="tap"
+            className={`${tile} p-4`}
+          >
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100/70 bg-emerald-50/70 text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
+                <AppIcon size={ICON_MD} icon={Flag} />
+              </span>
+              <div className="min-w-0">
+                <div className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
+                  Preferred Town/City
+                </div>
+                <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  {town?.trim() ? town : "Not set"}
                 </div>
               </div>
             </div>

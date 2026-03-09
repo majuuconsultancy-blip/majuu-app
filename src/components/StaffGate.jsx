@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { auth, db, authPersistenceReady } from "../firebase";
+import { isEligibleStaffProfile } from "../services/staffaccessservice";
 import ScreenLoader from "./ScreenLoader";
 
 const AUTH_NULL_GRACE_MS = 1200;
@@ -63,22 +64,31 @@ export default function StaffGate({ children }) {
 
         try {
           const staffRef = doc(db, "staff", user.uid);
-          const staffSnap = await getDoc(staffRef);
+          const staffSnap = await getDoc(staffRef).catch(() => null);
+          const hasStaffDoc = Boolean(staffSnap?.exists?.());
+          const staff = hasStaffDoc ? staffSnap.data() || {} : null;
 
-          if (!staffSnap.exists()) {
+          if (hasStaffDoc && !isEligibleStaffProfile(staff)) {
             navigate("/dashboard", { replace: true });
             return;
           }
 
-          const staff = staffSnap.data() || {};
-
-          if (staff.active !== true) {
-            navigate("/dashboard", { replace: true });
-            return;
+          if (!hasStaffDoc) {
+            const [taskProbe, requestProbe] = await Promise.all([
+              getDocs(query(collection(db, "staff", user.uid, "tasks"), limit(1))).catch(() => null),
+              getDocs(
+                query(collection(db, "serviceRequests"), where("assignedTo", "==", user.uid), limit(1))
+              ).catch(() => null),
+            ]);
+            const hasAssignmentSignal = Boolean(taskProbe?.docs?.length || requestProbe?.docs?.length);
+            if (!hasAssignmentSignal) {
+              navigate("/dashboard", { replace: true });
+              return;
+            }
           }
 
           const isOnboardingRoute = pathRef.current.startsWith("/staff/onboarding");
-          if (staff.onboarded !== true && !isOnboardingRoute) {
+          if (staff && staff.onboarded !== true && !isOnboardingRoute) {
             navigate("/staff/onboarding", { replace: true });
             return;
           }

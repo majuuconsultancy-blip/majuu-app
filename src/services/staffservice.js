@@ -9,8 +9,9 @@ import {
   serverTimestamp,
   where,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
 import { normalizeSpecialities } from "../constants/staffSpecialities";
+import { getCurrentUserRoleContext } from "./adminroleservice";
 
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -27,7 +28,16 @@ export async function setStaffAccessByEmail({
   maxActive = 2,
   specialities = [],
   tracks = [],
+  ownerAdminUid = "",
 } = {}) {
+  const actorUid = String(auth.currentUser?.uid || "").trim();
+  if (!actorUid) throw new Error("You must be signed in.");
+
+  const roleCtx = await getCurrentUserRoleContext(actorUid);
+  if (!roleCtx?.isAdmin) {
+    throw new Error("Only admins can manage staff.");
+  }
+
   const safeEmail = normalizeEmail(email);
   if (!safeEmail || !safeEmail.includes("@")) throw new Error("Invalid email.");
 
@@ -39,6 +49,9 @@ export async function setStaffAccessByEmail({
   const userDoc = snap.docs[0];
   const uid = userDoc.id;
   const staffRef = doc(db, "staff", uid);
+  const requestedOwner = String(ownerAdminUid || "").trim();
+  const effectiveOwnerUid =
+    roleCtx?.isSuperAdmin && requestedOwner ? requestedOwner : roleCtx.uid;
 
   if (action === "grant") {
     const normalizedSpecs = normalizeSpecialities(specialities);
@@ -53,6 +66,12 @@ export async function setStaffAccessByEmail({
     const txResult = await runTransaction(db, async (transaction) => {
       const staffSnap = await transaction.get(staffRef);
       const existing = staffSnap.exists() ? staffSnap.data() || {} : {};
+      const existingOwnerUid = String(existing?.ownerAdminUid || "").trim();
+
+      if (roleCtx?.isAssignedAdmin && existingOwnerUid && existingOwnerUid !== roleCtx.uid) {
+        throw new Error("This staff member belongs to another assigned admin.");
+      }
+
       const existingAccess = existing?.access || {};
       const revokeCount = toNum(existingAccess?.revokeCount, 0);
       const rehireCount = toNum(existingAccess?.rehireCount, 0);
@@ -65,6 +84,9 @@ export async function setStaffAccessByEmail({
         email: safeEmail,
         active: true,
         onboarded: false,
+        ownerAdminUid: effectiveOwnerUid,
+        ownerAdminRole: roleCtx.role,
+        ownerAdminEmail: String(roleCtx.email || "").trim().toLowerCase(),
         maxActive: Math.max(1, toNum(maxActive, 2)),
         specialities: normalizedSpecs,
         tracks: normalizedTracks,
@@ -167,6 +189,15 @@ export async function setStaffAccessByEmail({
     const txResult = await runTransaction(db, async (transaction) => {
       const staffSnap = await transaction.get(staffRef);
       const existing = staffSnap.exists() ? staffSnap.data() || {} : {};
+      const existingOwnerUid = String(existing?.ownerAdminUid || "").trim();
+      if (
+        roleCtx?.isAssignedAdmin &&
+        existingOwnerUid &&
+        existingOwnerUid !== roleCtx.uid
+      ) {
+        throw new Error("You cannot revoke staff owned by another assigned admin.");
+      }
+
       const existingAccess = existing?.access || {};
       const revokeCount = toNum(existingAccess?.revokeCount, 0);
       const rehireCount = toNum(existingAccess?.rehireCount, 0);

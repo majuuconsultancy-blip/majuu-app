@@ -9,11 +9,14 @@ import {
   updateDoc,
   serverTimestamp,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
 import {
   adminAcceptRequest,
   adminRejectRequest,
 } from "../services/adminrequestservice";
+import { getCurrentUserRoleContext } from "../services/adminroleservice";
+import { listAssignedAdmins } from "../services/assignedadminservice";
+import { superAdminOverrideRouteRequest } from "../services/adminroutingservice";
 import {
   stageAdminFile,
   deleteStagedAdminFile,
@@ -64,6 +67,14 @@ function formatDT(createdAt) {
   return d.toLocaleString();
 }
 
+function formatDeadlineMs(value) {
+  const ms = Number(value || 0);
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString();
+}
+
 function safeStr(x) {
   return String(x || "").trim();
 }
@@ -105,6 +116,12 @@ export default function AdminRequestDetailsScreen() {
 
   // ✅ chat notification
   const [chatPendingCount, setChatPendingCount] = useState(0);
+  const [roleCtx, setRoleCtx] = useState(null);
+  const [assignedAdminRows, setAssignedAdminRows] = useState([]);
+  const [overrideTargetAdminUid, setOverrideTargetAdminUid] = useState("");
+  const [overrideBusy, setOverrideBusy] = useState(false);
+  const [overrideErr, setOverrideErr] = useState("");
+  const [overrideMsg, setOverrideMsg] = useState("");
 
   const status = String(req?.status || "new").toLowerCase();
   const statusPill = useMemo(() => pill(status), [status]);
@@ -152,6 +169,41 @@ export default function AdminRequestDetailsScreen() {
     if (requestId) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const ctx = await getCurrentUserRoleContext();
+        if (!cancelled) setRoleCtx(ctx || null);
+      } catch (error) {
+        if (!cancelled) setRoleCtx(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!roleCtx?.isSuperAdmin) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await listAssignedAdmins({ max: 200 });
+        if (cancelled) return;
+        setAssignedAdminRows(Array.isArray(rows) ? rows : []);
+      } catch (error) {
+        if (!cancelled) {
+          setAssignedAdminRows([]);
+          console.warn("Failed to load assigned admins:", error?.message || error);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [roleCtx?.isSuperAdmin]);
 
   /* ✅ FIX: pending chat count without orderBy (no index needed) */
   useEffect(() => {
@@ -322,6 +374,45 @@ export default function AdminRequestDetailsScreen() {
     }
   };
 
+  const runSuperAdminOverride = async () => {
+    if (!req?.id) return;
+    setOverrideErr("");
+    setOverrideMsg("");
+    setOverrideBusy(true);
+    try {
+      const result = await superAdminOverrideRouteRequest({
+        requestId: req.id,
+        targetAdminUid: String(overrideTargetAdminUid || "").trim(),
+        reason: "super_admin_manual_override_from_request_details",
+      });
+      if (result?.ok) {
+        const mode = String(result?.mode || "manual");
+        setOverrideMsg(
+          mode === "auto"
+            ? "Routing override applied (auto best route)."
+            : "Routing override applied."
+        );
+      } else {
+        setOverrideErr(
+          String(result?.result?.reason || result?.reason || "Routing override failed.")
+        );
+      }
+      await load();
+    } catch (error) {
+      console.error(error);
+      const code = String(error?.code || "").trim();
+      const details = String(error?.details || "").trim();
+      const message = String(error?.message || "").trim();
+      setOverrideErr(
+        details ||
+          message ||
+          (code ? `Failed to override routing (${code}).` : "Failed to override routing.")
+      );
+    } finally {
+      setOverrideBusy(false);
+    }
+  };
+
   const accept = async () => {
     if (!req) return;
 
@@ -361,9 +452,39 @@ export default function AdminRequestDetailsScreen() {
   };
 
   const setContacted = async () => {
+    if (roleCtx?.isAssignedAdmin) {
+      const scopedAdminUid = String(
+        req?.ownerLockedAdminUid || req?.currentAdminUid || ""
+      ).trim();
+      const actorUid = String(auth.currentUser?.uid || "").trim();
+      if (scopedAdminUid && actorUid && scopedAdminUid !== actorUid) {
+        return alert("This request is outside your assigned admin scope.");
+      }
+    }
+
+    const actingAdminUid = String(auth.currentUser?.uid || "").trim();
+    const lockAdminUid = String(
+      req?.ownerLockedAdminUid || req?.currentAdminUid || actingAdminUid
+    ).trim();
+    const nowMs = Date.now();
+    const existingRoutingMeta = req?.routingMeta && typeof req.routingMeta === "object"
+      ? req.routingMeta
+      : {};
+
     try {
       await updateDoc(doc(db, "serviceRequests", requestId), {
         status: "contacted",
+        adminRespondedAt: serverTimestamp(),
+        adminRespondedAtMs: nowMs,
+        adminRespondedBy: actingAdminUid || null,
+        ownerLockedAdminUid: lockAdminUid || "",
+        ownerLockedAt: serverTimestamp(),
+        routingMeta: {
+          ...existingRoutingMeta,
+          handledAt: serverTimestamp(),
+          handledAtMs: nowMs,
+          lockedOwnerAdminUid: lockAdminUid || "",
+        },
         updatedAt: serverTimestamp(),
       });
       await load();
@@ -425,6 +546,14 @@ export default function AdminRequestDetailsScreen() {
       : "Review the applicant details and documents, then make a decision.";
 
   const badgeText = chatPendingCount > 99 ? "99+" : String(chatPendingCount);
+  const routeDeadlineLabel = formatDeadlineMs(
+    req?.responseDeadlineAtMs || req?.routingMeta?.responseDeadlineAtMs
+  );
+  const routeAdminLabel = String(req?.currentAdminEmail || req?.currentAdminUid || "-");
+  const escalationCount = Number(req?.escalationCount || req?.routingMeta?.escalationCount || 0);
+  const reassignmentCount = Array.isArray(req?.routingMeta?.reassignmentHistory)
+    ? req.routingMeta.reassignmentHistory.length
+    : 0;
 
   return (
     <div className={pageBg}>
@@ -523,6 +652,82 @@ export default function AdminRequestDetailsScreen() {
           </div>
         </div>
 
+        <div className={`mt-4 ${card} p-4`}>
+          <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Routing overview
+          </div>
+          <div className="mt-2 grid gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+            <div>
+              Current admin: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{routeAdminLabel}</span>
+            </div>
+            <div>
+              Availability at route:{" "}
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                {String(req?.currentAdminAvailability || req?.routingMeta?.adminAvailabilityAtRouting || "-")}
+              </span>
+            </div>
+            <div>
+              Escalation count:{" "}
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{escalationCount}</span>
+            </div>
+            <div>
+              Reassignments:{" "}
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{reassignmentCount}</span>
+            </div>
+            <div>
+              Last escalation reason:{" "}
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                {String(req?.escalationReason || req?.routingMeta?.escalationReason || "-")}
+              </span>
+            </div>
+            <div>
+              Response deadline:{" "}
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                {routeDeadlineLabel || "-"}
+              </span>
+            </div>
+          </div>
+
+          {roleCtx?.isSuperAdmin ? (
+            <div className="mt-4 rounded-2xl border border-emerald-200/70 bg-emerald-50/40 p-3">
+              <div className="text-xs font-semibold text-emerald-800">Super admin override</div>
+              <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
+                <select
+                  value={overrideTargetAdminUid}
+                  onChange={(e) => setOverrideTargetAdminUid(e.target.value)}
+                  disabled={overrideBusy}
+                  className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                >
+                  <option value="">Auto best route</option>
+                  {assignedAdminRows.map((row) => (
+                    <option key={row.uid} value={row.uid}>
+                      {String(row?.email || row.uid)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={runSuperAdminOverride}
+                  disabled={overrideBusy}
+                  className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                >
+                  {overrideBusy ? "Applying..." : "Apply override"}
+                </button>
+              </div>
+              {overrideErr ? (
+                <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs text-rose-700">
+                  {overrideErr}
+                </div>
+              ) : null}
+              {overrideMsg ? (
+                <div className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-800">
+                  {overrideMsg}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
         {/* ✅ STAFF ASSIGNMENT */}
         {req && !decisionLocked ? (
           <AssignStaffPanel request={req} />
@@ -570,6 +775,18 @@ export default function AdminRequestDetailsScreen() {
               <div className="text-xs font-semibold text-zinc-500">Email</div>
               <div className="font-semibold text-zinc-900 dark:text-zinc-100 break-words">
                 {req?.email || "-"}
+              </div>
+            </div>
+
+            <div className="grid gap-1">
+              <div className="text-xs font-semibold text-zinc-500">County</div>
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">{req?.county || "-"}</div>
+            </div>
+
+            <div className="grid gap-1">
+              <div className="text-xs font-semibold text-zinc-500">Town / City</div>
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                {req?.town || req?.city || "-"}
               </div>
             </div>
 

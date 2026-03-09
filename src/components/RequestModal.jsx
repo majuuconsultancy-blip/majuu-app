@@ -9,6 +9,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { isStandalone } from "../utils/isStandalone";
+import { KENYA_COUNTY_OPTIONS, normalizeCountyName } from "../constants/kenyaCounties";
 import {
   clearDummyPaymentDraft,
   clearDummyPaymentState,
@@ -281,6 +282,8 @@ export default function RequestModal({
   defaultName = "",
   defaultPhone = "",
   defaultEmail = "",
+  defaultCounty = "",
+  defaultTown = "",
   onPay,
   paymentContext = null,
   paymentAmount = "",
@@ -341,7 +344,8 @@ export default function RequestModal({
   const [name, setName] = useState(defaultName);
   const [phone, setPhone] = useState(defaultPhone);
   const [email, setEmail] = useState(defaultEmail);
-  const [city, setCity] = useState("");
+  const [county, setCounty] = useState(defaultCounty);
+  const [town, setTown] = useState(defaultTown);
   const [note, setNote] = useState("");
   const [requestDraftId, setRequestDraftId] = useState("");
 
@@ -389,7 +393,12 @@ export default function RequestModal({
     setName(seeded?.name ?? storedForm?.name ?? defaultName ?? "");
     setPhone(seeded?.phone ?? storedForm?.phone ?? defaultPhone ?? "");
     setEmail(seeded?.email ?? storedForm?.email ?? defaultEmail ?? "");
-    setCity(seeded?.city ?? storedForm?.city ?? "");
+    setCounty(
+      normalizeCountyName(
+        seeded?.county ?? storedForm?.county ?? defaultCounty ?? ""
+      )
+    );
+    setTown(seeded?.town ?? seeded?.city ?? storedForm?.town ?? storedForm?.city ?? defaultTown ?? "");
     setNote(seeded?.note ?? storedForm?.note ?? "");
     setPickedFiles([]);
     setPickedFileMetas(restoredMetas);
@@ -400,7 +409,7 @@ export default function RequestModal({
     requestAnimationFrame(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = 0;
     });
-  }, [open, defaultName, defaultPhone, defaultEmail, initialState, queryDraftId]);
+  }, [open, defaultName, defaultPhone, defaultEmail, defaultCounty, defaultTown, initialState, queryDraftId]);
 
   useEffect(() => {
     if (!open) {
@@ -416,7 +425,9 @@ export default function RequestModal({
         name: String(name || ""),
         phone: String(phone || ""),
         email: String(email || ""),
-        city: String(city || ""),
+        county: String(county || ""),
+        town: String(town || ""),
+        city: String(town || ""),
         note: String(note || ""),
         fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
         paid: Boolean(paid),
@@ -434,7 +445,7 @@ export default function RequestModal({
     }, 90);
 
     return () => clearTimeout(timer);
-  }, [onStateChange, open, paid, name, phone, email, city, note, pickedFileMetas, requestDraftId]);
+  }, [onStateChange, open, paid, name, phone, email, county, town, note, pickedFileMetas, requestDraftId]);
 
   useEffect(() => {
     if (!open) return;
@@ -446,7 +457,9 @@ export default function RequestModal({
         name: String(name || ""),
         phone: String(phone || ""),
         email: String(email || ""),
-        city: String(city || ""),
+        county: String(county || ""),
+        town: String(town || ""),
+        city: String(town || ""),
         note: String(note || ""),
         fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
         paid: Boolean(paid),
@@ -462,7 +475,8 @@ export default function RequestModal({
     name,
     phone,
     email,
-    city,
+    county,
+    town,
     note,
     pickedFileMetas,
     paid,
@@ -501,8 +515,15 @@ export default function RequestModal({
   }, [name, phone, email, loading]);
 
   const canSubmit = useMemo(() => {
-    return name.trim().length > 0 && phone.trim().length > 0 && isValidEmail(email) && paid && !loading;
-  }, [name, phone, email, paid, loading]);
+    return (
+      name.trim().length > 0 &&
+      phone.trim().length > 0 &&
+      isValidEmail(email) &&
+      String(county || "").trim().length > 0 &&
+      paid &&
+      !loading
+    );
+  }, [name, phone, email, county, paid, loading]);
 
   if (!open) return null;
 
@@ -547,7 +568,9 @@ export default function RequestModal({
         name: String(name || ""),
         phone: String(phone || ""),
         email: String(email || ""),
-        city: String(city || ""),
+        county: String(county || ""),
+        town: String(town || ""),
+        city: String(town || ""),
         note: String(note || ""),
         fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
         paid: Boolean(paid),
@@ -580,7 +603,9 @@ export default function RequestModal({
           name: String(name || ""),
           phone: String(phone || ""),
           email: String(email || ""),
-          city: String(city || ""),
+          county: String(county || ""),
+          town: String(town || ""),
+          city: String(town || ""),
           note: String(note || ""),
           fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
         },
@@ -594,12 +619,14 @@ export default function RequestModal({
     const cleanName = String(name || "").trim();
     const cleanPhone = normalizePhone(phone);
     const cleanEmail = String(email || "").trim().toLowerCase();
-    const cleanCity = String(city || "").trim();
+    const cleanCounty = normalizeCountyName(county);
+    const cleanTown = String(town || "").trim();
 
     if (!cleanName) return setErr("Please enter your full name.");
     if (!cleanPhone) return setErr("Please enter your phone / WhatsApp.");
     if (!cleanEmail) return setErr("Please enter your email address.");
     if (!isValidEmail(cleanEmail)) return setErr("Please enter a valid email address.");
+    if (!cleanCounty) return setErr("Please select your county.");
     if (!paid) return setErr("Please press Pay first to unlock sending.");
 
     let fileMetas = [];
@@ -625,7 +652,9 @@ export default function RequestModal({
         name: cleanName,
         phone: cleanPhone,
         email: cleanEmail,
-        city: cleanCity,
+        county: cleanCounty,
+        town: cleanTown,
+        city: cleanTown,
         note: String(note || "").trim(),
 
         dummyFiles: enableAttachments ? pickedFiles : [],
@@ -829,18 +858,42 @@ export default function RequestModal({
                   ) : null}
                 </div>
 
-                {/* City */}
+                {/* County */}
                 <div>
                   <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                    City / Town (optional)
+                    County <span className="text-rose-600">*</span>
+                  </label>
+                  <div className={fieldWrap}>
+                    <IconPin className="h-5 w-5 text-zinc-500" />
+                    <select
+                      className={inputBase}
+                      value={county}
+                      onChange={(e) => setCounty(normalizeCountyName(e.target.value))}
+                      disabled={loading}
+                      {...focusProps}
+                    >
+                      <option value="">Select county</option>
+                      {KENYA_COUNTY_OPTIONS.map((countyName) => (
+                        <option key={countyName} value={countyName}>
+                          {countyName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Town / City */}
+                <div>
+                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                    Town / City (optional)
                   </label>
                   <div className={fieldWrap}>
                     <IconPin className="h-5 w-5 text-zinc-500" />
                     <input
                       className={inputBase}
-                      value={city}
-                      onChange={(e) => setCity(e.target.value)}
-                      placeholder="Nairobi..."
+                      value={town}
+                      onChange={(e) => setTown(e.target.value)}
+                      placeholder="Westlands, Eldoret, Kisumu CBD..."
                       disabled={loading}
                       enterKeyHint="next"
                       {...focusProps}
