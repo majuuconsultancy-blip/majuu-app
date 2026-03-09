@@ -66,6 +66,9 @@ export function normalizeAdminScope(rawScope) {
 export function resolveRoleFromUserDoc({
   role,
   email,
+  adminScope = null,
+  adminUpdatedBy = "",
+  adminUpdatedAt = null,
   hasActiveStaffAccess = false,
 }) {
   const normalizedRole = normalizeUserRole(role);
@@ -79,6 +82,15 @@ export function resolveRoleFromUserDoc({
   // Everyone else stays in assigned-admin or lower roles.
   if (normalizedRole === "superAdmin") return "assignedAdmin";
   if (normalizedRole === "assignedAdmin") return "assignedAdmin";
+
+  // Recovery path: if role is stale but admin scope clearly looks assigned-admin managed,
+  // treat as assigned admin so access does not break.
+  if (normalizedRole === "user") {
+    const scope = normalizeAdminScope(adminScope);
+    const hasScopeSignal = Array.isArray(scope?.counties) && scope.counties.length > 0 && scope.active !== false;
+    const hasAdminAuditSignal = Boolean(safeStr(adminUpdatedBy)) || Boolean(adminUpdatedAt);
+    if (hasScopeSignal && hasAdminAuditSignal) return "assignedAdmin";
+  }
 
   if (hasActiveStaffAccess) return "staff";
   return normalizedRole;
@@ -115,6 +127,9 @@ export async function getCurrentUserRoleContext(uid = "") {
   const role = resolveRoleFromUserDoc({
     role: userData?.role,
     email,
+    adminScope: userData?.adminScope,
+    adminUpdatedBy: userData?.adminUpdatedBy,
+    adminUpdatedAt: userData?.adminUpdatedAt,
     hasActiveStaffAccess,
   });
 

@@ -49,6 +49,7 @@ import {
   ChevronDown,
   UserPlus,
   UserX,
+  Users,
   SlidersHorizontal,
   X,
   Calendar,
@@ -553,6 +554,7 @@ function AssignedAdminAccessPanel() {
 
 /* ---------- ✅ Staff panel (smaller + collapsible) ---------- */
 function StaffAccessPanel() {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
 
   const [email, setEmail] = useState("");
@@ -603,6 +605,8 @@ function StaffAccessPanel() {
     "border border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700";
   const revokeBtn =
     "border border-rose-200 bg-rose-50/70 text-rose-700 hover:bg-rose-100 dark:bg-rose-950/25 dark:text-rose-200 dark:border-rose-900/40 dark:hover:bg-rose-950/35";
+  const manageBtn =
+    "border border-zinc-200 bg-white/80 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 dark:hover:bg-zinc-900/90";
 
   const toggleSpeciality = (key) => {
     const safeKey = String(key || "").trim().toLowerCase();
@@ -650,7 +654,7 @@ function StaffAccessPanel() {
 
   return (
     <div className="mt-5">
-      <div className={`${shell} overflow-visible`}>
+      <div className={`${shell} relative overflow-visible ${specialityOpen ? "z-[10010]" : "z-20"}`}>
         <button type="button" onClick={() => setOpen((v) => !v)} className={headerBtn}>
           <div className="min-w-0">
             <div className={smallTitle}>Staff Hire System</div>
@@ -673,7 +677,7 @@ function StaffAccessPanel() {
         </button>
 
         <div className={`grid transition-all duration-300 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
-          <div className="overflow-hidden">
+          <div className={open ? "overflow-visible" : "overflow-hidden"}>
             <div className="px-4 pb-4">
               <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/45">
                 <div className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -793,6 +797,15 @@ function StaffAccessPanel() {
                     >
                       <AppIcon size={ICON_MD} icon={UserX} />
                       {busy === "revoke" ? "Revoking…" : "Revoke"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => navigate("/app/admin/manage-staff")}
+                      className={`${btnBase} ${manageBtn} col-span-2`}
+                    >
+                      <AppIcon size={ICON_MD} icon={Users} />
+                      Manage Staff
                     </button>
                   </div>
 

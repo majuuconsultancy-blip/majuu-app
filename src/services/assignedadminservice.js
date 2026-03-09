@@ -34,6 +34,51 @@ function normalizeEmail(email) {
   return safeStr(email).toLowerCase();
 }
 
+function toTimestampMs(value) {
+  if (!value) return 0;
+  if (typeof value?.toMillis === "function") {
+    const ms = Number(value.toMillis());
+    return Number.isFinite(ms) ? ms : 0;
+  }
+  const seconds = Number(value?.seconds || 0);
+  const nanos = Number(value?.nanoseconds || 0);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return seconds * 1000 + Math.floor((Number.isFinite(nanos) ? nanos : 0) / 1e6);
+  }
+  return 0;
+}
+
+function pickPrimaryDoc(rows = []) {
+  const sorted = [...rows].sort((a, b) => {
+    const aUpdated = toTimestampMs(a?.updatedAt);
+    const bUpdated = toTimestampMs(b?.updatedAt);
+    if (bUpdated !== aUpdated) return bUpdated - aUpdated;
+
+    const aCreated = toTimestampMs(a?.createdAt);
+    const bCreated = toTimestampMs(b?.createdAt);
+    if (bCreated !== aCreated) return bCreated - aCreated;
+
+    return safeStr(a?.uid).localeCompare(safeStr(b?.uid));
+  });
+  return sorted[0] || null;
+}
+
+function dedupeByEmail(rows = []) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const key = normalizeEmail(row?.email);
+    if (!key) return;
+    const current = map.get(key);
+    if (!current) {
+      map.set(key, row);
+      return;
+    }
+    const winner = pickPrimaryDoc([current, row]);
+    map.set(key, winner || current);
+  });
+  return Array.from(map.values());
+}
+
 function toBoundedInt(value, fallback, min, max) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -62,19 +107,29 @@ async function requireSuperAdmin() {
   return roleCtx;
 }
 
-async function findUserUidByEmail(email) {
+async function findUserDocsByEmail(email) {
   const safeEmail = normalizeEmail(email);
   if (!safeEmail || !safeEmail.includes("@")) {
     throw new Error("Enter a valid email.");
   }
 
   const snap = await getDocs(
-    query(collection(db, "users"), where("email", "==", safeEmail), limit(1))
+    query(collection(db, "users"), where("email", "==", safeEmail), limit(20))
   );
   if (snap.empty) {
     throw new Error("No user found with that email. They must sign up first.");
   }
-  return snap.docs[0]?.id || "";
+
+  const rows = snap.docs.map((d) => ({ uid: d.id, ...(d.data() || {}) }));
+  const primary = pickPrimaryDoc(rows);
+  if (!primary?.uid) {
+    throw new Error("Found user docs, but failed to resolve target account.");
+  }
+  return {
+    email: safeEmail,
+    rows,
+    primaryUid: primary.uid,
+  };
 }
 
 export async function listAssignedAdmins({ max = 100 } = {}) {
@@ -87,8 +142,8 @@ export async function listAssignedAdmins({ max = 100 } = {}) {
       limit(maxRows)
     )
   );
-  return snap.docs
-    .map((d) => ({ uid: d.id, ...(d.data() || {}) }))
+  const rows = snap.docs.map((d) => ({ uid: d.id, ...(d.data() || {}) }));
+  return dedupeByEmail(rows)
     .sort((a, b) => normalizeEmail(a?.email).localeCompare(normalizeEmail(b?.email)));
 }
 
@@ -103,8 +158,20 @@ export async function setAssignedAdminByEmail({
   responseTimeoutMinutes = 20,
 } = {}) {
   const superAdmin = await requireSuperAdmin();
-  const uid = await findUserUidByEmail(email);
-  const userRef = doc(db, "users", uid);
+  const match = await findUserDocsByEmail(email);
+  const targetRows = Array.isArray(match?.rows) ? match.rows : [];
+  const targetUids = targetRows.map((row) => safeStr(row?.uid)).filter(Boolean);
+
+  if (!targetUids.length) {
+    throw new Error("No user uid found for this email.");
+  }
+  if (targetUids.length > 1) {
+    console.warn(
+      "[assignedadminservice] duplicate users docs for email, applying update to all matches:",
+      normalizeEmail(email),
+      targetUids
+    );
+  }
 
   const mode = safeStr(action).toLowerCase();
   if (mode !== "upsert" && mode !== "remove") {
@@ -112,18 +179,27 @@ export async function setAssignedAdminByEmail({
   }
 
   if (mode === "remove") {
-    await setDoc(
-      userRef,
-      {
-        role: "user",
-        adminScope: defaultAdminScopePayload(),
-        adminUpdatedBy: superAdmin.uid,
-        adminUpdatedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
+    await Promise.all(
+      targetUids.map((uid) =>
+        setDoc(
+          doc(db, "users", uid),
+          {
+            role: "user",
+            adminScope: defaultAdminScopePayload(),
+            adminUpdatedBy: superAdmin.uid,
+            adminUpdatedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        )
+      )
     );
-    return { uid, email: normalizeEmail(email), action: "removed" };
+    return {
+      uid: match.primaryUid,
+      uids: targetUids,
+      email: normalizeEmail(email),
+      action: "removed",
+    };
   }
 
   const cleanCounties = normalizeCountyList(counties);
@@ -141,20 +217,25 @@ export async function setAssignedAdminByEmail({
     responseTimeoutMinutes: toBoundedInt(responseTimeoutMinutes, 20, 5, 240),
   };
 
-  await setDoc(
-    userRef,
-    {
-      role: "assignedAdmin",
-      adminScope: scopePayload,
-      adminUpdatedBy: superAdmin.uid,
-      adminUpdatedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true }
+  await Promise.all(
+    targetUids.map((uid) =>
+      setDoc(
+        doc(db, "users", uid),
+        {
+          role: "assignedAdmin",
+          adminScope: scopePayload,
+          adminUpdatedBy: superAdmin.uid,
+          adminUpdatedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      )
+    )
   );
 
   return {
-    uid,
+    uid: match.primaryUid,
+    uids: targetUids,
     email: normalizeEmail(email),
     action: "upserted",
     counties: scopePayload.counties,

@@ -204,6 +204,9 @@ export default function ProfileScreen() {
         const roleValue = resolveRoleFromUserDoc({
           role: s?.role,
           email: user.email || s?.email || "",
+          adminScope: s?.adminScope,
+          adminUpdatedBy: s?.adminUpdatedBy,
+          adminUpdatedAt: s?.adminUpdatedAt,
           hasActiveStaffAccess: false,
         });
         setName(n);

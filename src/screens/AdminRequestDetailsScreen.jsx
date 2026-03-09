@@ -67,14 +67,6 @@ function formatDT(createdAt) {
   return d.toLocaleString();
 }
 
-function formatDeadlineMs(value) {
-  const ms = Number(value || 0);
-  if (!Number.isFinite(ms) || ms <= 0) return null;
-  const d = new Date(ms);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleString();
-}
-
 function safeStr(x) {
   return String(x || "").trim();
 }
@@ -546,11 +538,6 @@ export default function AdminRequestDetailsScreen() {
       : "Review the applicant details and documents, then make a decision.";
 
   const badgeText = chatPendingCount > 99 ? "99+" : String(chatPendingCount);
-  const routeDeadlineLabel = formatDeadlineMs(
-    req?.responseDeadlineAtMs || req?.routingMeta?.responseDeadlineAtMs
-  );
-  const routeAdminLabel = String(req?.currentAdminEmail || req?.currentAdminUid || "-");
-  const escalationCount = Number(req?.escalationCount || req?.routingMeta?.escalationCount || 0);
   const reassignmentCount = Array.isArray(req?.routingMeta?.reassignmentHistory)
     ? req.routingMeta.reassignmentHistory.length
     : 0;
@@ -658,33 +645,8 @@ export default function AdminRequestDetailsScreen() {
           </div>
           <div className="mt-2 grid gap-2 text-sm text-zinc-700 dark:text-zinc-300">
             <div>
-              Current admin: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{routeAdminLabel}</span>
-            </div>
-            <div>
-              Availability at route:{" "}
-              <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                {String(req?.currentAdminAvailability || req?.routingMeta?.adminAvailabilityAtRouting || "-")}
-              </span>
-            </div>
-            <div>
-              Escalation count:{" "}
-              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{escalationCount}</span>
-            </div>
-            <div>
               Reassignments:{" "}
               <span className="font-semibold text-zinc-900 dark:text-zinc-100">{reassignmentCount}</span>
-            </div>
-            <div>
-              Last escalation reason:{" "}
-              <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                {String(req?.escalationReason || req?.routingMeta?.escalationReason || "-")}
-              </span>
-            </div>
-            <div>
-              Response deadline:{" "}
-              <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                {routeDeadlineLabel || "-"}
-              </span>
             </div>
           </div>
 

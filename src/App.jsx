@@ -65,6 +65,7 @@ const RequestStatusScreen = lazy(() => import("./screens/RequestStatusScreen"));
 const AdminRequestsScreen = lazy(() => import("./screens/AdminRequestsScreen"));
 const AdminRequestDetailsScreen = lazy(() => import("./screens/AdminRequestDetailsScreen"));
 const AdminRequestDocumentsScreen = lazy(() => import("./screens/AdminRequestDocumentsScreen"));
+const AdminManageStaffScreen = lazy(() => import("./screens/AdminManageStaffScreen"));
 
 // Staff
 const StaffHomeScreen = lazy(() => import("./screens/StaffHomeScreen"));
@@ -513,6 +514,14 @@ function AppRoutes() {
               element={
                 <AdminGate>
                   <AdminRequestDocumentsScreen />
+                </AdminGate>
+              }
+            />
+            <Route
+              path="admin/manage-staff"
+              element={
+                <AdminGate>
+                  <AdminManageStaffScreen />
                 </AdminGate>
               }
             />
