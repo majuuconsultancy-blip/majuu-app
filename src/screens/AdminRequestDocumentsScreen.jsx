@@ -5,6 +5,7 @@ import { db } from "../firebase";
 import { smartBack } from "../utils/navBack";
 import DocumentExtractPanel from "../components/DocumentExtractPanel";
 import DocumentProofreadPanel from "../components/DocumentProofreadPanel";
+import { normalizeTextDeep } from "../utils/textNormalizer";
 
 /* ---------- Minimal icons ---------- */
 function IconBack(props) {
@@ -95,7 +96,7 @@ export default function AdminRequestDocumentsScreen() {
 
   const validId = useMemo(() => {
     const id = String(requestId || "").trim();
-    return id ? id : null;
+    return id ?id : null;
   }, [requestId]);
 
   const [loading, setLoading] = useState(true);
@@ -114,7 +115,7 @@ export default function AdminRequestDocumentsScreen() {
       try {
         const snap = await getDoc(doc(db, "serviceRequests", validId));
         if (!active) return;
-        setRequestData(snap.exists() ? snap.data() || null : null);
+        setRequestData(snap.exists() ?normalizeTextDeep(snap.data() || null) : null);
       } catch (error) {
         console.error("request fetch error:", error);
         if (active) setRequestData(null);
@@ -142,7 +143,7 @@ export default function AdminRequestDocumentsScreen() {
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        setAttachments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setAttachments(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
         setLoading(false);
       },
       (e) => {
@@ -192,7 +193,7 @@ export default function AdminRequestDocumentsScreen() {
           </button>
         </div>
 
-        {err ? (
+        {err ?(
           <div className="mt-6 rounded-2xl border border-rose-100 bg-rose-50/70 p-4 text-sm text-rose-700">
             {err}
           </div>
@@ -213,11 +214,11 @@ export default function AdminRequestDocumentsScreen() {
             attachments={attachments}
           />
 
-          {loading ? (
+          {loading ?(
             <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
               Loading…
             </div>
-          ) : attachments.length === 0 ? (
+          ) : attachments.length === 0 ?(
             <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
               No documents uploaded yet.
             </div>
@@ -257,26 +258,26 @@ export default function AdminRequestDocumentsScreen() {
                             {attStatusLabel(a.status)}
                           </span>
 
-                          {label ? (
+                          {label ?(
                             <span className="inline-flex rounded-full border border-emerald-100 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
                               {label}
                             </span>
                           ) : null}
 
-                          {kind ? (
+                          {kind ?(
                             <span className="inline-flex rounded-full border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
                               {kind}
                             </span>
                           ) : null}
                         </div>
 
-                        {metaNote ? (
+                        {metaNote ?(
                           <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
                             {metaNote}
                           </div>
                         ) : null}
 
-                        {hasLink ? (
+                        {hasLink ?(
                           <a
                             href={url}
                             target="_blank"

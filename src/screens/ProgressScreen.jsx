@@ -35,6 +35,7 @@ import { getUserState } from "../services/userservice";
 import { getMyApplications } from "../services/progressservice";
 import { getResumeTarget } from "../resume/resumeEngine";
 import { buildFullPackageHubPath, toFullPackageItemKey } from "../services/fullpackageservice";
+import { normalizeTextDeep } from "../utils/textNormalizer";
 
 const PERF_TAG = "[perf][ProgressScreen]";
 const REQUESTS_INITIAL_RENDER = 5;
@@ -72,8 +73,8 @@ function readProgressCache(uid) {
     if (!parsed || typeof parsed !== "object") return null;
     return {
       state: parsed?.state || null,
-      requests: Array.isArray(parsed?.requests) ? parsed.requests : [],
-      apps: Array.isArray(parsed?.apps) ? parsed.apps : [],
+      requests: Array.isArray(parsed?.requests) ?parsed.requests : [],
+      apps: Array.isArray(parsed?.apps) ?parsed.apps : [],
       updatedAt: Number(parsed?.updatedAt || 0) || 0,
     };
   } catch {
@@ -86,8 +87,8 @@ function writeProgressCache(uid, payload) {
   try {
     const safe = {
       state: payload?.state || null,
-      requests: Array.isArray(payload?.requests) ? payload.requests : [],
-      apps: Array.isArray(payload?.apps) ? payload.apps : [],
+      requests: Array.isArray(payload?.requests) ?payload.requests : [],
+      apps: Array.isArray(payload?.apps) ?payload.apps : [],
       updatedAt: Date.now(),
     };
     window.localStorage.setItem(progressCacheKey(uid), JSON.stringify(safe));
@@ -217,7 +218,7 @@ const pageIn = {
 
 export default function ProgressScreen() {
   const navigate = useNavigate();
-  const mountAtRef = useRef(typeof performance !== "undefined" ? performance.now() : 0);
+  const mountAtRef = useRef(typeof performance !== "undefined" ?performance.now() : 0);
   const firstReqSnapSeenRef = useRef(false);
   const firstPaintLoggedRef = useRef(false);
 
@@ -254,7 +255,7 @@ export default function ProgressScreen() {
     if (firstPaintLoggedRef.current) return;
     firstPaintLoggedRef.current = true;
     const raf = window.requestAnimationFrame(() => {
-      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      const now = typeof performance !== "undefined" ?performance.now() : 0;
       const delta = Math.max(0, now - (mountAtRef.current || 0));
       console.log(`${PERF_TAG} mount->first-paint: ${delta.toFixed(1)}ms`);
     });
@@ -318,8 +319,8 @@ export default function ProgressScreen() {
       const cached = readProgressCache(user.uid);
       if (cached) {
         setState(cached.state || null);
-        setRequests(Array.isArray(cached.requests) ? cached.requests : []);
-        setApps(Array.isArray(cached.apps) ? cached.apps : []);
+        setRequests(Array.isArray(cached.requests) ?cached.requests : []);
+        setApps(Array.isArray(cached.apps) ?cached.apps : []);
         setLoading(false);
       } else {
         setLoading(true);
@@ -332,7 +333,7 @@ export default function ProgressScreen() {
       try {
         const userStateTimer = `${PERF_TAG} firestore:getUserState`;
         startPerf(userStateTimer);
-        const s = await getUserState(user.uid);
+        const s = normalizeTextDeep(await getUserState(user.uid));
         endPerf(userStateTimer);
         setState(s);
         writeProgressCache(user.uid, {
@@ -359,7 +360,7 @@ export default function ProgressScreen() {
             }
             const mapSortTimer = `${PERF_TAG} transform:map+sort requests`;
             startPerf(mapSortTimer);
-            const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            const data = snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
             data.sort(
               (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
             );
@@ -446,7 +447,7 @@ export default function ProgressScreen() {
   const activeCountry = String(state?.activeCountry || "-");
   const activeMode =
     String(state?.activeHelpType || "").toLowerCase() === "we"
-      ? "We-Help"
+      ?"We-Help"
       : "Self-Help";
 
   const cardBase =
@@ -462,7 +463,7 @@ export default function ProgressScreen() {
 
   const requestsCountLabel = useMemo(() => {
     const n = requests.length;
-    return n === 1 ? "1 request" : `${n} requests`;
+    return n === 1 ?"1 request" : `${n} requests`;
   }, [requests.length]);
 
   /* ✅ reorder: pinned first (in pin order), then rest as-is */
@@ -511,7 +512,7 @@ export default function ProgressScreen() {
 
     const id = String(rid || "");
     setPinnedIds((prev) => {
-      const curr = Array.isArray(prev) ? prev.map(String) : [];
+      const curr = Array.isArray(prev) ?prev.map(String) : [];
       const exists = curr.includes(id);
 
       let next = curr;
@@ -570,11 +571,11 @@ export default function ProgressScreen() {
                 Current process
               </h2>
               <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                {Boolean(state?.hasActiveProcess) ? "Live" : "Idle"}
+                {Boolean(state?.hasActiveProcess) ?"Live" : "Idle"}
               </span>
             </div>
 
-            {Boolean(state?.hasActiveProcess) ? (
+            {Boolean(state?.hasActiveProcess) ?(
               <div className="mt-3 grid gap-2">
                 <div className="grid gap-1.5 text-sm">
                   <div className="flex items-center justify-between">
@@ -593,7 +594,7 @@ export default function ProgressScreen() {
                     <span className="text-zinc-500 dark:text-zinc-400">Mode</span>
                     <span className="font-medium text-zinc-900 dark:text-zinc-100">
                       {String(state?.activeHelpType || "").toLowerCase() === "we"
-                        ? "We-Help"
+                        ?"We-Help"
                         : "Self-Help"}
                     </span>
                   </div>
@@ -636,15 +637,15 @@ export default function ProgressScreen() {
                       Notifications
                     </div>
                     <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      {unreadNotifCount ? "Tap to view new updates" : "Tap to view history"}
+                      {unreadNotifCount ?"Tap to view new updates" : "Tap to view history"}
                     </div>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
-                  {unreadNotifCount ? (
+                  {unreadNotifCount ?(
                     <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-rose-600 px-2 text-[11px] font-semibold text-white">
-                      {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
+                      {unreadNotifCount > 99 ?"99+" : unreadNotifCount}
                     </span>
                   ) : (
                     <span className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -659,7 +660,7 @@ export default function ProgressScreen() {
           </div>
 
           {/* Error */}
-          {err ? (
+          {err ?(
             <div className="mt-4 rounded-3xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
               {err}
             </div>
@@ -676,7 +677,7 @@ export default function ProgressScreen() {
                 </span>
               </div>
 
-              {requests.length === 0 ? (
+              {requests.length === 0 ?(
                 <div className={`mt-3 ${cardBase}`}>
                   <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                     No requests yet
@@ -695,7 +696,7 @@ export default function ProgressScreen() {
                   {visibleRenderRows.map((r) => {
                   const ui = statusUI(r.status);
                   const track = String(r.track || "").toLowerCase();
-                  const safeTrack = track === "work" || track === "travel" ? track : "study";
+                  const safeTrack = track === "work" || track === "travel" ?track : "study";
 
                   const st = String(r.status || "new").toLowerCase();
                   const canDelete = st === "closed" || st === "rejected";
@@ -710,10 +711,10 @@ export default function ProgressScreen() {
                   const isLinkedFullPackage = Boolean(r.isFullPackage) && Boolean(fullPackageId);
 
                   const titleLeft = `${String(r.track || "").toUpperCase()} • ${r.country || "-"}`;
-                  const subtitle = isFull ? "Full package" : `Single: ${r.serviceName || "-"}`;
+                  const subtitle = isFull ?"Full package" : `Single: ${r.serviceName || "-"}`;
                   const createdLabel = formatCreatedAt(r.createdAt);
                   const fullAccentCard = isFull
-                    ? "border-emerald-300/80 bg-emerald-50/45 dark:border-emerald-800/60 dark:bg-emerald-950/20"
+                    ?"border-emerald-300/80 bg-emerald-50/45 dark:border-emerald-800/60 dark:bg-emerald-950/20"
                     : "";
 
                   const rid = String(r.id || "");
@@ -725,9 +726,9 @@ export default function ProgressScreen() {
 
                     if (isLinkedFullPackage) {
                       const missingItems = Array.isArray(r.fullPackageSelectedItems)
-                        ? r.fullPackageSelectedItems
+                        ?r.fullPackageSelectedItems
                         : Array.isArray(r.missingItems)
-                        ? r.missingItems
+                        ?r.missingItems
                         : parseMissingItemsFromNote(r.note);
                       const fallbackItem =
                         String(r.fullPackageItem || "").trim() ||
@@ -749,7 +750,7 @@ export default function ProgressScreen() {
                         if (fallbackItem) qs.set("item", fallbackItem);
                         const suffix = qs.toString();
 
-                        navigate(suffix ? `${hubPath}&${suffix}` : hubPath, {
+                        navigate(suffix ?`${hubPath}&${suffix}` : hubPath, {
                           state: { fullPackageId, missingItems },
                         });
                         return;
@@ -757,7 +758,7 @@ export default function ProgressScreen() {
                     }
 
                     if (isFull) {
-                      let missingItems = Array.isArray(r.missingItems) ? r.missingItems : [];
+                      let missingItems = Array.isArray(r.missingItems) ?r.missingItems : [];
                       if (!missingItems.length) missingItems = parseMissingItemsFromNote(r.note);
 
                       try {
@@ -795,7 +796,7 @@ export default function ProgressScreen() {
                       key={r.id}
                       className={`${cardBase} ${cardHover} ${fullAccentCard} relative overflow-hidden`}
                     >
-                      {isFull ? (
+                      {isFull ?(
                         <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5 rounded-l-3xl bg-emerald-500/80 dark:bg-emerald-400/70" />
                       ) : null}
                       <div className="flex items-start justify-between gap-3">
@@ -811,7 +812,7 @@ export default function ProgressScreen() {
                           <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                             {subtitle}
                           </div>
-                          {isFull ? (
+                          {isFull ?(
                             <div className="mt-2">
                               <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-100/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-900/35 dark:text-emerald-200">
                                 Full package
@@ -819,7 +820,7 @@ export default function ProgressScreen() {
                             </div>
                           ) : null}
 
-                          {createdLabel ? (
+                          {createdLabel ?(
                             <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
                               Created: <span className="font-medium">{createdLabel}</span>
                             </div>
@@ -853,7 +854,7 @@ export default function ProgressScreen() {
                           <button
                             disabled={isDeleting}
                             onClick={async () => {
-                              const ok = window.confirm("Delete this request? This cannot be undone.");
+                              const ok = window.confirm("Delete this request?This cannot be undone.");
                               if (!ok) return;
 
                               setErr("");
@@ -882,12 +883,12 @@ export default function ProgressScreen() {
                             className="inline-flex items-center gap-2 rounded-3xl border border-rose-200 bg-rose-50/70 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/55"
                           >
                             <AppIcon size={ICON_SM} icon={Trash2} />
-                            {isDeleting ? "Deleting…" : "Delete"}
+                            {isDeleting ?"Deleting…" : "Delete"}
                           </button>
                         )}
                       </div>
 
-                      {st === "new" ? (
+                      {st === "new" ?(
                         <div className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
                           Received — you’ll see updates here as we process it.
                         </div>
@@ -896,23 +897,23 @@ export default function ProgressScreen() {
                       <button
                         onClick={() => togglePin(rid)}
                         type="button"
-                        title={isPinned ? "Unpin" : pinnedIds.length >= 2 ? "Pin limit reached" : "Pin"}
-                        aria-label={isPinned ? "Unpin request" : "Pin request"}
+                        title={isPinned ?"Unpin" : pinnedIds.length >= 2 ?"Pin limit reached" : "Pin"}
+                        aria-label={isPinned ?"Unpin request" : "Pin request"}
                         disabled={!isPinned && pinnedIds.length >= 2}
                         className={`absolute bottom-3 right-3 inline-flex items-center justify-center rounded-2xl border p-2 transition active:scale-[0.99] disabled:opacity-50
                           ${
                             isPinned
-                              ? "border-emerald-200 bg-emerald-50/60 text-emerald-800 ring-2 ring-emerald-300/60 shadow-[0_0_0_1px_rgba(16,185,129,0.25),0_10px_30px_rgba(16,185,129,0.18)] dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-200 dark:ring-emerald-500/30 dark:shadow-[0_0_0_1px_rgba(16,185,129,0.18),0_10px_30px_rgba(16,185,129,0.12)]"
+                              ?"border-emerald-200 bg-emerald-50/60 text-emerald-800 ring-2 ring-emerald-300/60 shadow-[0_0_0_1px_rgba(16,185,129,0.25),0_10px_30px_rgba(16,185,129,0.18)] dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-200 dark:ring-emerald-500/30 dark:shadow-[0_0_0_1px_rgba(16,185,129,0.18),0_10px_30px_rgba(16,185,129,0.12)]"
                               : "border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200 dark:hover:bg-zinc-900"
                           }`}
                       >
-                        {isPinned ? <AppIcon size={ICON_SM} icon={PinOff} /> : <AppIcon size={ICON_SM} icon={Pin} />}
+                        {isPinned ?<AppIcon size={ICON_SM} icon={PinOff} /> : <AppIcon size={ICON_SM} icon={Pin} />}
                       </button>
                     </div>
                   );
                 })}
 
-                  {visibleCount < requestsSorted.length ? (
+                  {visibleCount < requestsSorted.length ?(
                     <button
                       type="button"
                       onClick={() => setVisibleCount((prev) => prev + REQUESTS_INITIAL_RENDER)}

@@ -38,6 +38,7 @@ import { auth, db } from "../firebase";
 
 import StaffRequestChatPanel from "../components/StaffRequestChatPanel";
 import { smartBack } from "../utils/navBack";
+import { normalizeTextDeep } from "../utils/textNormalizer";
 
 /* ---------- Minimal icons ---------- */
 function IconChevronLeft(props) {
@@ -236,7 +237,7 @@ export default function StaffRequestDetailsScreen() {
   }, []);
   const enterWrap =
     "transition duration-500 ease-out will-change-transform will-change-opacity";
-  const enterCls = enter ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2";
+  const enterCls = enter ?"opacity-100 translate-y-0" : "opacity-0 translate-y-2";
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -263,7 +264,7 @@ export default function StaffRequestDetailsScreen() {
 
   const typeLabel =
     String(req?.requestType || "").toLowerCase() === "full"
-      ? "Full package"
+      ?"Full package"
       : `Single: ${req?.serviceName || "-"}`;
 
   const canWork = status !== "closed" && status !== "rejected";
@@ -275,7 +276,7 @@ export default function StaffRequestDetailsScreen() {
     try {
       const snap = await getDoc(doc(db, "serviceRequests", requestId));
       if (!snap.exists()) throw new Error("Request not found");
-      const data = { id: snap.id, ...snap.data() };
+      const data = normalizeTextDeep({ id: snap.id, ...snap.data() });
 
       setReq(data);
       setNote(String(data.staffNote || ""));
@@ -304,7 +305,7 @@ export default function StaffRequestDetailsScreen() {
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        setDrafts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setDrafts(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
         setDraftErr("");
       },
       (e) => {
@@ -418,7 +419,7 @@ export default function StaffRequestDetailsScreen() {
       const workMinutes = safeMinutesBetween(startTs, nowMs);
 
       await updateRequest({
-        status: status === "new" ? "contacted" : status,
+        status: status === "new" ?"contacted" : status,
         staffStatus: "done",
         staffDecision: dec,
 
@@ -560,7 +561,7 @@ export default function StaffRequestDetailsScreen() {
                   Staff review
                 </span>
 
-                {req ? (
+                {req ?(
                   <>
                     <span className={`rounded-full px-2.5 py-1 text-xs ${statusPill.cls}`}>
                       {statusPill.label}
@@ -582,17 +583,17 @@ export default function StaffRequestDetailsScreen() {
           <StaffRequestChatPanel requestId={requestId} />
         </div>
 
-        {err ? (
+        {err ?(
           <div className="mt-4 rounded-3xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 shadow-sm dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
             {err}
           </div>
         ) : null}
 
-        {loading ? (
+        {loading ?(
           <div className={`mt-4 ${card} p-4`}>
             <p className="text-sm text-zinc-600 dark:text-zinc-300">Loading request…</p>
           </div>
-        ) : !req ? (
+        ) : !req ?(
           <div className={`mt-4 ${card} p-4`}>
             <p className="text-sm text-zinc-600 dark:text-zinc-300">Request not found.</p>
           </div>
@@ -607,7 +608,7 @@ export default function StaffRequestDetailsScreen() {
                   </div>
                   <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{typeLabel}</div>
 
-                  {createdLabel ? (
+                  {createdLabel ?(
                     <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
                       Submitted: <span className="font-medium">{createdLabel}</span>
                     </div>
@@ -621,11 +622,11 @@ export default function StaffRequestDetailsScreen() {
                 </div>
               </div>
 
-              {!canWork ? (
+              {!canWork ?(
                 <div className="mt-4 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
                   Admin already finalized this request. You can view only.
                 </div>
-              ) : staffStatus !== "in_progress" && staffStatus !== "done" ? (
+              ) : staffStatus !== "in_progress" && staffStatus !== "done" ?(
                 <div className={`mt-4 ${warnAmber}`}>
                   Work not started. Go back to tasks and tap the request to start.
                 </div>
@@ -664,7 +665,7 @@ export default function StaffRequestDetailsScreen() {
                   </div>
                 </div>
 
-                {req?.note ? (
+                {req?.note ?(
                   <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
                     <div className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
                       Applicant note
@@ -697,13 +698,13 @@ export default function StaffRequestDetailsScreen() {
                 </span>
               </div>
 
-              {draftErr ? (
+              {draftErr ?(
                 <div className="mt-4 rounded-3xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 shadow-sm dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
                   {draftErr}
                 </div>
               ) : null}
 
-              {!canWork || isDone ? (
+              {!canWork || isDone ?(
                 <div className="mt-4 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
                   Attachments are locked after you submit.
                 </div>
@@ -737,7 +738,7 @@ export default function StaffRequestDetailsScreen() {
                       disabled={addingDraft || busy}
                       className={btnPrimary}
                     >
-                      {addingDraft ? "Adding…" : "Add"}
+                      {addingDraft ?"Adding…" : "Add"}
                     </button>
                   </div>
 
@@ -748,7 +749,7 @@ export default function StaffRequestDetailsScreen() {
               )}
 
               <div className="mt-4 grid gap-2">
-                {drafts.length === 0 ? (
+                {drafts.length === 0 ?(
                   <div className={warnBox}>No files added yet.</div>
                 ) : (
                   drafts.map((d) => (
@@ -762,7 +763,7 @@ export default function StaffRequestDetailsScreen() {
                             {d.name || "File"}
                           </div>
 
-                          {d.url ? (
+                          {d.url ?(
                             <a
                               href={d.url}
                               target="_blank"
@@ -777,7 +778,7 @@ export default function StaffRequestDetailsScreen() {
                           )}
                         </div>
 
-                        {!canWork || isDone ? null : (
+                        {!canWork || isDone ?null : (
                           <button
                             type="button"
                             onClick={() => removeDraft(d)}
@@ -811,7 +812,7 @@ export default function StaffRequestDetailsScreen() {
                   disabled={!canWork || busy}
                   className={btnGhost}
                 >
-                  {busy === "save" ? "Saving…" : "Save note"}
+                  {busy === "save" ?"Saving…" : "Save note"}
                 </button>
               </div>
 
@@ -819,7 +820,7 @@ export default function StaffRequestDetailsScreen() {
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 rows={5}
-                placeholder="What did you find? What’s missing? Next steps?"
+                placeholder="What did you find?What’s missing?Next steps?"
                 disabled={!canWork || isDone}
                 className="mt-4 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-3 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 min-h-[120px] disabled:opacity-70 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-emerald-300/20"
               />
@@ -846,7 +847,7 @@ export default function StaffRequestDetailsScreen() {
                       className={[
                         "rounded-2xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60",
                         decision === "recommend_accept"
-                          ? "border-emerald-200 bg-emerald-50/70 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+                          ?"border-emerald-200 bg-emerald-50/70 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
                           : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900",
                       ].join(" ")}
                     >
@@ -866,7 +867,7 @@ export default function StaffRequestDetailsScreen() {
                       className={[
                         "rounded-2xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60",
                         decision === "recommend_reject"
-                          ? "border-rose-200 bg-rose-50/70 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200"
+                          ?"border-rose-200 bg-rose-50/70 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200"
                           : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900",
                       ].join(" ")}
                     >
@@ -886,9 +887,9 @@ export default function StaffRequestDetailsScreen() {
                   onClick={markDone}
                   disabled={!canWork || isDone || busy || staffStatus !== "in_progress"}
                   className="w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
-                  title={staffStatus !== "in_progress" ? "Start work from the modal first" : ""}
+                  title={staffStatus !== "in_progress" ?"Start work from the modal first" : ""}
                 >
-                  {busy === "done" ? "Submitting…" : "Mark done (send to admin)"}
+                  {busy === "done" ?"Submitting…" : "Mark done (send to admin)"}
                 </button>
 
                 <div className="text-xs text-zinc-500 dark:text-zinc-400">

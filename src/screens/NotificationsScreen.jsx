@@ -4,6 +4,7 @@ import { Bell, ChevronLeft, ChevronRight, CheckCheck } from "lucide-react";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
 import { motion } from "../utils/motionProxy";
+import { safeText } from "../utils/safeText";
 
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 import { navigateFromPayload } from "../services/pushBridge";
@@ -17,7 +18,7 @@ function tsToMs(value) {
   if (typeof value === "number") return value || 0;
   if (typeof value === "string") {
     const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+    return Number.isNaN(d.getTime()) ?0 : d.getTime();
   }
   return 0;
 }
@@ -36,7 +37,7 @@ function formatAt(value) {
     hour: "2-digit",
     minute: "2-digit",
   });
-  return `${date} • ${time}`;
+  return `${date} � ${time}`;
 }
 
 const page = {
@@ -58,7 +59,7 @@ export default function NotificationsScreen() {
     return "/app/progress";
   }, [role]);
 
-  const headingLabel = role === "staff" ? "Staff notifications" : "Notifications";
+  const headingLabel = role === "staff" ?"Staff notifications" : "Notifications";
 
   const pageBg =
     "min-h-screen bg-gradient-to-b from-emerald-50/45 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
@@ -140,7 +141,7 @@ export default function NotificationsScreen() {
                 Inbox
               </div>
               <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                {items.length} {items.length === 1 ? "notification" : "notifications"} • {unreadCount} unread
+                {items.length} {items.length === 1 ?"notification" : "notifications"} � {unreadCount} unread
               </div>
             </div>
             <button
@@ -150,12 +151,12 @@ export default function NotificationsScreen() {
               className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100 active:scale-[0.99] disabled:opacity-60 dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-200"
             >
               <AppIcon size={ICON_SM} icon={CheckCheck} />
-              {busy === "all" ? "Marking..." : "Mark all as read"}
+              {busy === "all" ?"Marking..." : "Mark all as read"}
             </button>
           </div>
         </div>
 
-        {items.length === 0 ? (
+        {items.length === 0 ?(
           <div className={`mt-4 ${card} p-6 text-center`}>
             <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60">
               <AppIcon size={ICON_LG} className="text-emerald-700 dark:text-emerald-200" icon={Bell} />
@@ -185,37 +186,37 @@ export default function NotificationsScreen() {
                       <div className="flex items-center gap-2">
                         <span
                           className={`h-2.5 w-2.5 rounded-full ${
-                            unread ? "bg-rose-500" : "bg-zinc-300 dark:bg-zinc-600"
+                            unread ?"bg-rose-500" : "bg-zinc-300 dark:bg-zinc-600"
                           }`}
                         />
                         <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                          {item.title || "Notification"}
+                          {safeText(item.title) || "Notification"}
                         </div>
                         <span
                           className={`rounded-full px-2 py-0.5 text-[11px] font-semibold border ${
                             unread
-                              ? "border-rose-200 bg-rose-50/70 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200"
+                              ?"border-rose-200 bg-rose-50/70 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200"
                               : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-600 dark:text-zinc-300"
                           }`}
                         >
-                          {unread ? "Unread" : "Read"}
+                          {unread ?"Unread" : "Read"}
                         </span>
                       </div>
 
-                      {item.body ? (
+                      {item.body ?(
                         <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-                          {item.body}
+                          {safeText(item.body)}
                         </div>
                       ) : null}
 
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-                        {item.type ? (
+                        {item.type ?(
                           <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2 py-0.5">
-                            {item.type}
+                            {safeText(item.type)}
                           </span>
                         ) : null}
-                        {item.requestId ? <span className="font-mono">{item.requestId}</span> : null}
-                        {item.createdAt ? <span>{formatAt(item.createdAt)}</span> : null}
+                        {item.requestId ?<span className="font-mono">{item.requestId}</span> : null}
+                        {item.createdAt ?<span>{formatAt(item.createdAt)}</span> : null}
                       </div>
                     </div>
 
@@ -233,3 +234,4 @@ export default function NotificationsScreen() {
     </div>
   );
 }
+

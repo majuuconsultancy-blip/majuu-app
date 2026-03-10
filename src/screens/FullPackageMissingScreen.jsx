@@ -17,18 +17,19 @@ import {
 } from "../services/userservice";
 import { getMissingProfileFields } from "../utils/profileGuard";
 import { setSnapshot } from "../resume/resumeEngine";
+import { normalizeTextDeep } from "../utils/textNormalizer";
 
 function toMillis(value) {
   if (!value) return 0;
   if (typeof value?.toDate === "function") {
     const d = value.toDate();
-    return d instanceof Date ? d.getTime() : 0;
+    return d instanceof Date ?d.getTime() : 0;
   }
   if (typeof value?.seconds === "number") return value.seconds * 1000;
   if (value instanceof Date) return value.getTime();
   if (typeof value === "number") return value;
   const parsed = Date.parse(String(value || ""));
-  return Number.isFinite(parsed) ? parsed : 0;
+  return Number.isFinite(parsed) ?parsed : 0;
 }
 
 function normalizeRequestOutcome(req) {
@@ -41,7 +42,7 @@ function normalizeRequestOutcome(req) {
 
 function mapTrack(input) {
   const t = String(input || "").trim().toLowerCase();
-  return t === "study" || t === "work" || t === "travel" ? t : "study";
+  return t === "study" || t === "work" || t === "travel" ?t : "study";
 }
 
 function titleForTrack(track) {
@@ -174,7 +175,7 @@ export default function FullPackageMissingScreen() {
           setFullPackageErr("Full package not found. Please start again from We-Help.");
           return;
         }
-        const data = { id: snap.id, ...snap.data() };
+        const data = normalizeTextDeep({ id: snap.id, ...snap.data() });
         if (String(data.uid || "") !== String(uid || "")) {
           setFullPackageDoc(null);
           setFullPackageErr("This full package belongs to a different account.");
@@ -198,7 +199,7 @@ export default function FullPackageMissingScreen() {
       reqQ,
       (snap) => {
         const rows = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
+          .map((d) => normalizeTextDeep({ id: d.id, ...d.data() }))
           .filter((row) => String(row.uid || "") === uid && Boolean(row.isFullPackage));
         setLinkedRequests(rows);
       },
@@ -249,7 +250,7 @@ export default function FullPackageMissingScreen() {
     return selectedItems.map((item) => {
       const key = toFullPackageItemKey(item);
       const latestRequest = latestByItemKey.get(key) || null;
-      const outcome = latestRequest ? normalizeRequestOutcome(latestRequest) : "not_started";
+      const outcome = latestRequest ?normalizeRequestOutcome(latestRequest) : "not_started";
 
       let state = "NOT_STARTED";
       if (outcome === "accepted") state = "DONE";
@@ -322,9 +323,9 @@ export default function FullPackageMissingScreen() {
     const fallbackItem = String(queryParams.get("item") || "").trim();
     if (!shouldAutoOpen && !retryItemKey && !fallbackItem) return;
 
-    const byRetryKey = retryItemKey ? itemRows.find((row) => row.key === retryItemKey) : null;
+    const byRetryKey = retryItemKey ?itemRows.find((row) => row.key === retryItemKey) : null;
     const byFallbackItem = fallbackItem
-      ? itemRows.find((row) => row.item === fallbackItem || row.key === toFullPackageItemKey(fallbackItem))
+      ?itemRows.find((row) => row.item === fallbackItem || row.key === toFullPackageItemKey(fallbackItem))
       : null;
     const firstClickable = itemRows.find((row) => row.clickable);
     const picked = byRetryKey || byFallbackItem || firstClickable || null;
@@ -410,7 +411,7 @@ export default function FullPackageMissingScreen() {
       fullPackageSelectedItems: selectedItems,
     });
 
-    const files = Array.isArray(dummyFiles) ? dummyFiles : [];
+    const files = Array.isArray(dummyFiles) ?dummyFiles : [];
     for (const file of files) {
       await createPendingAttachment({ requestId, file });
     }
@@ -444,7 +445,7 @@ export default function FullPackageMissingScreen() {
           selectedItem: pickedNeed || "",
           requestModal: {
             open: modalOpen,
-            step: requestModalResumeState?.step || (modalOpen ? "form" : "closed"),
+            step: requestModalResumeState?.step || (modalOpen ?"form" : "closed"),
             formState: requestModalResumeState?.formState || null,
             selectedItem: pickedNeed || "",
           },
@@ -517,15 +518,15 @@ export default function FullPackageMissingScreen() {
             <h1 className="mt-2 text-lg font-semibold text-zinc-900">{trackTitle} - Continue your full package</h1>
             <p className="mt-1 text-sm text-zinc-600">Country: <span className="font-semibold text-zinc-900">{country}</span></p>
           </div>
-          <span className={["rounded-full border px-2.5 py-1 text-xs font-semibold", depositPaid ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"].join(" ")}>
-            {depositPaid ? "Deposit paid" : "Deposit required"}
+          <span className={["rounded-full border px-2.5 py-1 text-xs font-semibold", depositPaid ?"border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"].join(" ")}>
+            {depositPaid ?"Deposit paid" : "Deposit required"}
           </span>
         </div>
       </div>
 
-      {fullPackageErr ? <div className="mt-4 rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{fullPackageErr}</div> : null}
+      {fullPackageErr ?<div className="mt-4 rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{fullPackageErr}</div> : null}
 
-      {!depositPaid ? (
+      {!depositPaid ?(
         <div className="mt-4 rounded-3xl border border-amber-200 bg-amber-50/70 p-4">
           <div className="flex items-start gap-3">
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-200 bg-white text-amber-900">
@@ -542,7 +543,7 @@ export default function FullPackageMissingScreen() {
         </div>
       ) : null}
 
-      {profileMissing.length > 0 ? (
+      {profileMissing.length > 0 ?(
         <div className="mt-4 rounded-3xl border border-amber-200 bg-amber-50/70 p-4">
           <div className="text-sm font-semibold text-zinc-900">Complete your profile to continue</div>
           <div className="mt-1 text-sm text-zinc-700">Missing: <span className="font-semibold">{profileMissing.join(", ")}</span></div>
@@ -553,7 +554,7 @@ export default function FullPackageMissingScreen() {
       ) : null}
 
       <div className="mt-5 grid gap-3">
-        {itemRows.length === 0 ? (
+        {itemRows.length === 0 ?(
           <div className="rounded-3xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600">No selected items found for this full package.</div>
         ) : (
           itemRows.map((row) => {
@@ -562,26 +563,26 @@ export default function FullPackageMissingScreen() {
             const isRetry = row.state === "RETRY";
             const disabled = !canUseRequestFlow || !row.clickable;
 
-            const badgeLabel = isDone ? "Done" : isSubmitted ? "Already applied" : isRetry ? "Try again" : "Open";
+            const badgeLabel = isDone ?"Done" : isSubmitted ?"Already applied" : isRetry ?"Try again" : "Open";
             const subLabel = isDone
-              ? "Done"
+              ?"Done"
               : isSubmitted
-                ? "Already applied"
+                ?"Already applied"
                 : isRetry
-                  ? "Last request was rejected. Try again."
+                  ?"Last request was rejected. Try again."
                   : "Start this step.";
 
             return (
-              <button key={row.key} type="button" disabled={disabled} onClick={() => openNeed(row)} className={["w-full rounded-3xl border p-4 text-left shadow-sm transition", disabled ? "cursor-not-allowed border-zinc-200 bg-zinc-50/70 text-zinc-500" : isRetry ? "border-rose-200 bg-rose-50/70 hover:bg-rose-50" : "border-zinc-200 bg-white/75 hover:border-emerald-200 hover:bg-white"].join(" ")}>
+              <button key={row.key} type="button" disabled={disabled} onClick={() => openNeed(row)} className={["w-full rounded-3xl border p-4 text-left shadow-sm transition", disabled ?"cursor-not-allowed border-zinc-200 bg-zinc-50/70 text-zinc-500" : isRetry ?"border-rose-200 bg-rose-50/70 hover:bg-rose-50" : "border-zinc-200 bg-white/75 hover:border-emerald-200 hover:bg-white"].join(" ")}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-[15px] font-semibold text-zinc-900">{row.item}</div>
                     <div className="mt-1 text-sm text-zinc-600">{subLabel}</div>
                   </div>
-                  <span className={["inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold", isDone ? "border-emerald-200 bg-emerald-50 text-emerald-900" : isSubmitted ? "border-zinc-200 bg-white text-zinc-700" : isRetry ? "border-rose-200 bg-white text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-900"].join(" ")}>
-                    {isDone ? <IconCheck className="h-3.5 w-3.5" /> : null}
-                    {isRetry ? <IconRetry className="h-3.5 w-3.5" /> : null}
-                    {!isDone && !isRetry ? <IconSend className="h-3.5 w-3.5" /> : null}
+                  <span className={["inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold", isDone ?"border-emerald-200 bg-emerald-50 text-emerald-900" : isSubmitted ?"border-zinc-200 bg-white text-zinc-700" : isRetry ?"border-rose-200 bg-white text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-900"].join(" ")}>
+                    {isDone ?<IconCheck className="h-3.5 w-3.5" /> : null}
+                    {isRetry ?<IconRetry className="h-3.5 w-3.5" /> : null}
+                    {!isDone && !isRetry ?<IconSend className="h-3.5 w-3.5" /> : null}
                     {badgeLabel}
                   </span>
                 </div>
@@ -595,7 +596,7 @@ export default function FullPackageMissingScreen() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         onSubmit={submitFullPackage}
-        title={pickedNeed ? `Continue: ${pickedNeed}` : "Continue Full Package"}
+        title={pickedNeed ?`Continue: ${pickedNeed}` : "Continue Full Package"}
         subtitle={`${trackTitle} - ${country}`}
         defaultName={defaultName}
         defaultPhone={defaultPhone}

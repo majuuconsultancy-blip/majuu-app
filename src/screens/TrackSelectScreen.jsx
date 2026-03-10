@@ -450,7 +450,7 @@ export default function TrackSelectScreen() {
 
       {bioPromptOpen ? (
         <div className="fixed inset-0 z-50 bg-zinc-950/45 backdrop-blur-[1px]">
-          <div className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-end px-5 pb-6 sm:items-center sm:pb-0">
+          <div className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-5 py-6">
             <div className="w-full rounded-3xl border border-zinc-200 bg-white p-5 shadow-lg">
               <h2 className="text-base font-semibold tracking-tight text-zinc-900">
                 Turn on biometric unlock?

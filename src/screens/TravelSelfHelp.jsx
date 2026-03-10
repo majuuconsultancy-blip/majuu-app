@@ -189,12 +189,12 @@ export default function TravelSelfHelp() {
         subtitle: "Always confirm from official sources.",
         links: [
           {
-            title: `Search: â€œ${country || "your destination"} tourist visa official government siteâ€`,
+            title: `Search: “${country || "your destination"} tourist visa official government site”`,
             url: `https://www.google.com/search?q=${qs}+tourist+visa+official+government+site`,
             note: "Use the top government result",
           },
           {
-            title: "EmbassyPages â€” embassies & consulates directory",
+            title: "EmbassyPages — embassies & consulates directory",
             url: "https://www.embassypages.com/",
             note: "Find the correct embassy/consulate",
           },
@@ -232,7 +232,7 @@ export default function TravelSelfHelp() {
         subtitle: "Useful for medical coverage + visa requirements (varies).",
         links: [
           {
-            title: "Search: â€œtravel insurance for Kenya citizensâ€",
+            title: "Search: “travel insurance for Kenya citizens”",
             url: "https://www.google.com/search?q=travel+insurance+for+Kenya+citizens"            
           },
         ],
@@ -339,6 +339,5 @@ export default function TravelSelfHelp() {
     </div>
   );
 }
-
 
 

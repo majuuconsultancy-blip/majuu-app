@@ -10,6 +10,8 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { getReadStateDocRef } from "../utils/unreadChat";
+import { normalizeTextDeep } from "../utils/textNormalizer";
+import { safeText } from "../utils/safeText";
 import { notifsV2Store } from "./notifsV2Store";
 import { clearPushBridgeDedupe, scheduleForegroundLocalNotification } from "./pushBridge";
 
@@ -51,10 +53,12 @@ function notificationCollectionForRole(role, uid) {
 }
 
 function normalizeNotificationDoc(docSnap) {
-  const data = docSnap.data() || {};
+  const data = normalizeTextDeep(docSnap.data() || {});
   return {
     id: docSnap.id,
     ...data,
+    title: safeText(data?.title),
+    body: safeText(data?.body),
     createdAtMs: tsToMs(data?.createdAt) || Number(data?.createdAtMs || 0) || 0,
   };
 }
@@ -98,7 +102,7 @@ function createChatUnreadTracker({ requestId, role, uid }) {
       limit(80)
     ),
     (snap) => {
-      messageRows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      messageRows = snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
       recompute();
     },
     (error) => {

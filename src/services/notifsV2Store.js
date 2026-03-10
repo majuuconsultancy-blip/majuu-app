@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import { collection, doc, serverTimestamp, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "../firebase";
 import { markChatRead as writeChatRead } from "../utils/unreadChat";
+import { safeText } from "../utils/safeText";
 
 function safeStr(value) {
   return String(value || "").trim();
@@ -97,8 +98,8 @@ function normalizeNotification(item) {
   return {
     id,
     type: safeStr(item?.type),
-    title: safeStr(item?.title),
-    body: safeStr(item?.body),
+    title: safeText(item?.title),
+    body: safeText(item?.body),
     requestId: safeStr(item?.requestId),
     route: safeStr(item?.route),
     role: safeStr(item?.role).toLowerCase(),

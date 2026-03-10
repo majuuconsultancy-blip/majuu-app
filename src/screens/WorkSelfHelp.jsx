@@ -192,7 +192,7 @@ export default function WorkSelfHelp() {
           { title: "Indeed", url: "https://www.indeed.com/", note: "Big job board (varies by country)" },
           { title: "Glassdoor", url: "https://www.glassdoor.com/Job/index.htm", note: "Jobs + company reviews" },
           {
-            title: `Search: â€œgovernment job portal ${country || "your destination"}â€`,
+            title: `Search: “government job portal ${country || "your destination"}”`,
             url: `https://www.google.com/search?q=government+job+portal+${qs}`,
             note: "Try to use the official government portal if available",
           },
@@ -203,11 +203,11 @@ export default function WorkSelfHelp() {
         subtitle: "Always confirm requirements on official sites.",
         links: [
           {
-            title: `Search: â€œ${country || "destination"} work visa official government siteâ€`,
+            title: `Search: “${country || "destination"} work visa official government site”`,
             url: `https://www.google.com/search?q=${qs}+work+visa+official+government+site`,
             note: "Use the top government result",
           },
-          { title: "EmbassyPages â€” embassies & consulates directory", url: "https://www.embassypages.com/", note: "Find your destination embassy in Kenya" },
+          { title: "EmbassyPages — embassies & consulates directory", url: "https://www.embassypages.com/", note: "Find your destination embassy in Kenya" },
           { title: "VFS Global (if destination uses it)", url: "https://www.vfsglobal.com/", note: "Visa application center (varies)" },
         ],
       },
@@ -224,7 +224,7 @@ export default function WorkSelfHelp() {
         title: "Relocation basics",
         subtitle: "Budgeting, housing, and cost of living.",
         links: [
-          { title: "Numbeo â€” cost of living", url: "https://www.numbeo.com/cost-of-living/", note: "Compare cities and costs" },
+          { title: "Numbeo — cost of living", url: "https://www.numbeo.com/cost-of-living/", note: "Compare cities and costs" },
           { title: "Booking.com", url: "https://www.booking.com/", note: "Short stays for arrival week" },
           { title: "Airbnb", url: "https://www.airbnb.com/", note: "Short/medium stays" },
         ],
@@ -322,6 +322,5 @@ export default function WorkSelfHelp() {
     </div>
   );
 }
-
 
 

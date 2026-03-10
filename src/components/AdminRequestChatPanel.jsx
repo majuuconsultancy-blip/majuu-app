@@ -21,6 +21,8 @@ import {
   adminSendPdfMetaDirect,
 } from "../services/chatservice";
 import useKeyboardInset from "../hooks/useKeyboardInset";
+import { normalizeTextDeep } from "../utils/textNormalizer";
+import { safeText } from "../utils/safeText";
 
 /* ---------------- helpers ---------------- */
 function safeStr(x) {
@@ -76,15 +78,15 @@ function roleLabel(role) {
 
 function msgPreview(m) {
   const type = String(m?.type || "text").toLowerCase();
-  if (type === "pdf") return `PDF: ${m?.pdfMeta?.name || "document.pdf"}`;
+  if (type === "pdf") return `PDF: ${safeText(m?.pdfMeta?.name) || "document.pdf"}`;
   if (type === "bundle") {
-    const text = safeStr(m?.text);
-    const pdf = safeStr(m?.pdfMeta?.name);
+    const text = safeText(m?.text);
+    const pdf = safeText(m?.pdfMeta?.name);
     if (text && pdf) return `${text}\nPDF: ${pdf}`;
     if (pdf) return `PDF: ${pdf}`;
     return text;
   }
-  return safeStr(m?.text || "");
+  return safeText(m?.text || "");
 }
 
 /* âœ… autosize textarea like ChatGPT */
@@ -102,7 +104,7 @@ function useAutosizeTextArea(textareaRef, value, { maxRows = 6 } = {}) {
     el.style.height = "auto";
     const next = Math.min(el.scrollHeight, maxHeight);
     el.style.height = `${next}px`;
-    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+    el.style.overflowY = el.scrollHeight > maxHeight ?"auto" : "hidden";
   }, [textareaRef, value, maxRows]);
 }
 
@@ -115,8 +117,8 @@ function shouldMergePair(a, b, WINDOW_MS) {
 
 function makeBundleView(first, second) {
   const aType = String(first?.type || "text").toLowerCase();
-  const textMsg = aType === "text" ? first : second;
-  const pdfMsg = aType === "pdf" ? first : second;
+  const textMsg = aType === "text" ?first : second;
+  const pdfMsg = aType === "pdf" ?first : second;
 
   const st1 = String(first?.status || "").toLowerCase();
   const st2 = String(second?.status || "").toLowerCase();
@@ -179,7 +181,7 @@ function IconSend(props) {
 
 function StatusTicks({ status }) {
   const s = String(status || "").toLowerCase();
-  const tone = s === "delivered" || s === "approved" ? "text-emerald-300" : "text-zinc-300";
+  const tone = s === "delivered" || s === "approved" ?"text-emerald-300" : "text-zinc-300";
   return (
     <span className={`inline-flex items-center ${tone}`} title={s}>
       <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="-mr-1 h-3.5 w-3.5">
@@ -240,7 +242,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   useAutosizeTextArea(taRef, text, { maxRows: 6 });
 
   /* ---------- persist no-actions so buttons never return on remount ---------- */
-  const noActionsKey = useMemo(() => (rid ? `adminChat_noActions_${rid}` : ""), [rid]);
+  const noActionsKey = useMemo(() => (rid ?`adminChat_noActions_${rid}` : ""), [rid]);
 
   useEffect(() => {
     if (!noActionsKey) return;
@@ -280,7 +282,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     const unsub = onSnapshot(
       reqRef,
       (snap) => {
-        const d = snap.exists() ? snap.data() : null;
+        const d = snap.exists() ?snap.data() : null;
 
         // support a few possible field names (use whichever you have)
         const uid =
@@ -310,7 +312,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        setPending(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setPending(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
         setErr("");
       },
       (e) => {
@@ -331,7 +333,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        setPublished(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setPublished(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
         setErr("");
       },
       (e) => {
@@ -633,9 +635,9 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   const smallBtn =
     "inline-flex items-center justify-center rounded-xl border px-2.5 py-1 text-[12px] font-semibold transition disabled:opacity-60";
   const sendBtnTone = canSend
-    ? "bg-emerald-600 text-white shadow-[0_0_0_3px_rgba(16,185,129,0.22)] hover:bg-emerald-700"
+    ?"bg-emerald-600 text-white shadow-[0_0_0_3px_rgba(16,185,129,0.22)] hover:bg-emerald-700"
     : "bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
-  const navLiftPad = keyboardInset > 0 ? "0px" : "var(--app-bottom-nav-lift, 0px)";
+  const navLiftPad = keyboardInset > 0 ?"0px" : "var(--app-bottom-nav-lift, 0px)";
 
   return (
     <div className="fixed inset-0 z-[999999] flex flex-col bg-white dark:bg-zinc-950">
@@ -648,7 +650,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             <div className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">Request Chat</div>
             <div className="text-xs text-zinc-500">
               Moderation thread
-              {assignedStaffUid ? (
+              {assignedStaffUid ?(
                 <span className="ml-2 font-semibold text-emerald-700">• Staff assigned</span>
               ) : (
                 <span className="ml-2 font-semibold text-amber-700">• No staff assigned</span>
@@ -661,7 +663,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
           <span className="rounded-full border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
             Pending: {pending.length}
           </span>
-          {onClose ? (
+          {onClose ?(
             <button
               type="button"
               onClick={onClose}
@@ -674,7 +676,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
         </div>
       </div>
 
-      {err ? (
+      {err ?(
         <div className="px-3 pt-2">
           <div className="rounded-xl border border-rose-100 bg-rose-50/80 px-3 py-2 text-xs text-rose-700">
             {err}
@@ -683,7 +685,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
       ) : null}
 
       <div ref={threadRef} className="flex-1 overflow-y-auto px-3 py-2">
-        {timelineRows.length === 0 ? (
+        {timelineRows.length === 0 ?(
           <div className="px-1 py-2 text-sm text-zinc-600 dark:text-zinc-300">No messages yet.</div>
         ) : (
           <div className="grid gap-2">
@@ -702,7 +704,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
               const m = item.data || {};
               const fromRole = String(m.fromRole || "").toLowerCase();
               const isLeft = fromRole === "user";
-              const bubbleCls = isLeft ? bubbleLeft : bubbleRight;
+              const bubbleCls = isLeft ?bubbleLeft : bubbleRight;
               const time = formatTime(pickCreatedAt(m));
 
               const isBundleView =
@@ -710,7 +712,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                 String(m.type || "").toLowerCase() === "bundle_view" ||
                 String(m.type || "").toLowerCase() === "bundle";
 
-              const pendingChildren = isBundleView ? item._pendingChildren || [] : [];
+              const pendingChildren = isBundleView ?item._pendingChildren || [] : [];
               const isPending = item._kind === "pending" || (isBundleView && pendingChildren.length > 0);
 
               const originOk = fromRole === "user" || fromRole === "staff";
@@ -723,27 +725,27 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                   (isBundleView && bundleHasActionable));
 
               const busy = busyKey === m.id || busyKey === item.id;
-              const status = item._kind === "published" ? "delivered" : String(m.status || "pending").toLowerCase();
+              const status = item._kind === "published" ?"delivered" : String(m.status || "pending").toLowerCase();
 
               return (
-                <div key={item.id} className={`chat-bubble-in flex ${isLeft ? "justify-start" : "justify-end"}`}>
+                <div key={item.id} className={`chat-bubble-in flex ${isLeft ?"justify-start" : "justify-end"}`}>
                   <div className={`${bubbleBase} ${bubbleCls}`}>
-                    {isBundleView ? (
+                    {isBundleView ?(
                       <div className="mt-1 grid gap-2">
-                        {safeStr(m.text) ? <div className="break-words">{m.text}</div> : null}
+                        {safeStr(m.text) ?<div className="break-words">{safeText(m.text)}</div> : null}
 
-                        {m?.pdfMeta?.name ? (
+                        {m?.pdfMeta?.name ?(
                           <div
                             className={`${
                               isLeft
-                                ? "bg-zinc-50 dark:bg-zinc-950"
+                                ?"bg-zinc-50 dark:bg-zinc-950"
                                 : "bg-white/10 dark:bg-zinc-900/60"
                             } rounded-xl p-2`}
                           >
                             <div className="text-xs font-semibold opacity-90">PDF</div>
                             <div className="text-xs opacity-90">
-                              {m?.pdfMeta?.name || "document.pdf"}
-                              {m?.pdfMeta?.size ? ` • ${m.pdfMeta.size} bytes` : ""}
+                              {safeText(m?.pdfMeta?.name) || "document.pdf"}
+                              {m?.pdfMeta?.size ?` • ${m.pdfMeta.size} bytes` : ""}
                             </div>
                           </div>
                         ) : null}
@@ -754,21 +756,21 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
                     <div
                       className={`mt-1.5 flex items-center justify-end gap-2 text-[10px] ${
-                        isLeft ? "text-zinc-500" : "text-white/80"
+                        isLeft ?"text-zinc-500" : "text-white/80"
                       }`}
                     >
-                      {!isLeft ? <StatusTicks status={status} /> : null}
+                      {!isLeft ?<StatusTicks status={status} /> : null}
                       <span>{time}</span>
                     </div>
 
-                    {isPending ? (
-                      <div className={`mt-1 text-[10px] font-semibold ${isLeft ? "text-amber-700" : "text-white/85"}`}>
+                    {isPending ?(
+                      <div className={`mt-1 text-[10px] font-semibold ${isLeft ?"text-amber-700" : "text-white/85"}`}>
                         Pending moderation
                       </div>
                     ) : null}
 
-                    {showActions ? (
-                      <div className={`mt-2 flex gap-2 ${isLeft ? "" : "justify-end"}`}>
+                    {showActions ?(
+                      <div className={`mt-2 flex gap-2 ${isLeft ?"" : "justify-end"}`}>
                         <button
                           type="button"
                           onClick={() => {
@@ -778,7 +780,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                           disabled={busy}
                           className={`${smallBtn} border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700`}
                         >
-                          {busy ? "…" : "Accept"}
+                          {busy ?"…" : "Accept"}
                         </button>
 
                         <button
@@ -790,7 +792,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                           disabled={busy}
                           className={`${smallBtn} border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-800 hover:bg-zinc-50`}
                         >
-                          {busy ? "…" : "Hide"}
+                          {busy ?"…" : "Hide"}
                         </button>
                       </div>
                     ) : null}
@@ -829,9 +831,9 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
           </select>
         </div>
 
-        {pickedPdf ? (
+        {pickedPdf ?(
           <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs">
-            <span className="font-semibold text-zinc-900 dark:text-zinc-100">{pickedPdf.name}</span>
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">{safeText(pickedPdf.name)}</span>
             <button
               type="button"
               onClick={() => setPickedPdf(null)}

@@ -28,6 +28,7 @@ import {
   normalizeFullPackageItems,
   toFullPackageItemKey,
 } from "../services/fullpackageservice";
+import { normalizeTextDeep } from "../utils/textNormalizer";
 
 /* ---------------- Minimal icons ---------------- */
 function IconReceipt(props) {
@@ -164,13 +165,13 @@ function toMillis(value) {
   if (!value) return 0;
   if (typeof value?.toDate === "function") {
     const d = value.toDate();
-    return d instanceof Date ? d.getTime() : 0;
+    return d instanceof Date ?d.getTime() : 0;
   }
   if (typeof value?.seconds === "number") return value.seconds * 1000;
   if (value instanceof Date) return value.getTime();
   if (typeof value === "number") return value;
   const parsed = Date.parse(String(value || ""));
-  return Number.isFinite(parsed) ? parsed : 0;
+  return Number.isFinite(parsed) ?parsed : 0;
 }
 
 function normalizeRequestOutcome(req) {
@@ -247,7 +248,7 @@ export default function RequestStatusScreen() {
 
   const validRequestId = useMemo(() => {
     const id = String(requestId || "").trim();
-    return id.length > 0 ? id : null;
+    return id.length > 0 ?id : null;
   }, [requestId]);
 
   const isFullRequest =
@@ -304,7 +305,7 @@ export default function RequestStatusScreen() {
             return;
           }
 
-          const data = { id: snap.id, ...snap.data() };
+          const data = normalizeTextDeep({ id: snap.id, ...snap.data() });
           setReq(data);
           setLoading(false);
 
@@ -329,7 +330,7 @@ export default function RequestStatusScreen() {
       unsubAtt = onSnapshot(
         attQ,
         (snap) => {
-          setAttachments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+          setAttachments(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
           setFileErr("");
         },
         (e) => {
@@ -343,7 +344,7 @@ export default function RequestStatusScreen() {
       unsubAdminFiles = onSnapshot(
         afQ,
         (snap) => {
-          setAdminFiles(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+          setAdminFiles(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
           setAdminFilesErr("");
         },
         (e) => {
@@ -374,8 +375,8 @@ export default function RequestStatusScreen() {
           setFullPackageItems(fallbackFullPackageItems);
           return;
         }
-        const items = normalizeFullPackageItems(snap.data()?.selectedItems);
-        setFullPackageItems(items.length ? items : fallbackFullPackageItems);
+        const items = normalizeFullPackageItems(normalizeTextDeep(snap.data()?.selectedItems));
+        setFullPackageItems(items.length ?items : fallbackFullPackageItems);
       })
     );
 
@@ -388,7 +389,7 @@ export default function RequestStatusScreen() {
         linkedQ,
         (snap) => {
           const rows = snap.docs
-            .map((d) => ({ id: d.id, ...d.data() }))
+            .map((d) => normalizeTextDeep({ id: d.id, ...d.data() }))
             .filter((row) => {
               const sameOwner = !ownerUid || String(row.uid || "") === ownerUid;
               const isFullRow =
@@ -440,11 +441,11 @@ export default function RequestStatusScreen() {
 
   const fullPackageStatusRows = useMemo(() => {
     if (!isFullRequest) return [];
-    const sourceItems = fullPackageItems.length ? fullPackageItems : fallbackFullPackageItems;
+    const sourceItems = fullPackageItems.length ?fullPackageItems : fallbackFullPackageItems;
     return sourceItems.map((item) => {
       const key = toFullPackageItemKey(item);
       const latest = latestFullPackageByItemKey.get(key);
-      const outcome = latest ? normalizeRequestOutcome(latest) : "not_started";
+      const outcome = latest ?normalizeRequestOutcome(latest) : "not_started";
 
       let toneClass = "text-zinc-900";
       if (outcome === "accepted") toneClass = "text-emerald-700";
@@ -468,7 +469,7 @@ export default function RequestStatusScreen() {
 
   const enterWrap =
     "transition duration-500 ease-out will-change-transform will-change-opacity";
-  const enterCls = enter ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2";
+  const enterCls = enter ?"opacity-100 translate-y-0" : "opacity-0 translate-y-2";
 
   if (loading) {
     return (
@@ -504,7 +505,7 @@ export default function RequestStatusScreen() {
 
   const ui = statusUI(req?.status);
   const track = String(req?.track || "").toLowerCase();
-  const safeTrack = track === "work" || track === "travel" ? track : "study";
+  const safeTrack = track === "work" || track === "travel" ?track : "study";
   const st = String(req?.status || "new").toLowerCase();
   const country = String(req?.country || "Not selected");
 
@@ -530,10 +531,10 @@ export default function RequestStatusScreen() {
     if (item) qs.set("item", item);
 
     const missingItems =
-      fullPackageItems.length > 0 ? fullPackageItems : fallbackFullPackageItems;
+      fullPackageItems.length > 0 ?fullPackageItems : fallbackFullPackageItems;
     const suffix = qs.toString();
 
-    navigate(suffix ? `${fullPackageHubPath}&${suffix}` : fullPackageHubPath, {
+    navigate(suffix ?`${fullPackageHubPath}&${suffix}` : fullPackageHubPath, {
       state: {
         fullPackageId: fullPackageIdValue,
         missingItems,
@@ -559,7 +560,7 @@ export default function RequestStatusScreen() {
         return;
       }
 
-      let missingItems = Array.isArray(req?.missingItems) ? req.missingItems : [];
+      let missingItems = Array.isArray(req?.missingItems) ?req.missingItems : [];
       if (!missingItems.length) missingItems = parseMissingItemsFromNote(req?.note);
       navigate(
         `/app/full-package/${safeTrack}?country=${countryQS2}&autoOpen=1&item=${encodeURIComponent(
@@ -579,7 +580,7 @@ export default function RequestStatusScreen() {
   };
 
   const serviceTitle = `${String(req?.track || "").toUpperCase()} • ${req?.country || "-"}`;
-  const serviceSub = isFull ? "Full package" : `Single service: ${req?.serviceName || "-"}`;
+  const serviceSub = isFull ?"Full package" : `Single service: ${req?.serviceName || "-"}`;
 
   return (
     <div className={`min-h-screen ${softBg} ${TOP_LAYER_CLS}`}>
@@ -615,7 +616,7 @@ export default function RequestStatusScreen() {
           </span>
         </div>
 
-        {isFull && fullPackageStatusRows.length > 0 ? (
+        {isFull && fullPackageStatusRows.length > 0 ?(
           <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4">
             <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
               Full package items
@@ -662,7 +663,7 @@ export default function RequestStatusScreen() {
                   <span className="font-medium text-zinc-900 dark:text-zinc-100">{req?.email || "-"}</span>
                 </div>
 
-                {req?.note ? (
+                {req?.note ?(
                   <div className="mt-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 transition hover:bg-white/70">
                     <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
                       <IconNote className="h-4 w-4 text-zinc-500" />
@@ -673,7 +674,7 @@ export default function RequestStatusScreen() {
                 ) : null}
               </div>
 
-              {(st === "rejected" || st === "closed" || st === "contacted") && adminNote ? (
+              {(st === "rejected" || st === "closed" || st === "contacted") && adminNote ?(
                 <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 transition hover:bg-amber-50/80">
                   <div className="flex items-center gap-2 text-xs font-semibold text-amber-900">
                     <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-amber-200 bg-white/70 dark:bg-zinc-900/60">
@@ -685,25 +686,25 @@ export default function RequestStatusScreen() {
                 </div>
               ) : null}
 
-              {st === "new" ? (
+              {st === "new" ?(
                 <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-700 dark:text-zinc-300">
                   Received. We’ll review and update you here.
                 </div>
               ) : null}
 
-              {st === "contacted" ? (
+              {st === "contacted" ?(
                 <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 text-sm text-emerald-900">
                   In progress. Please check back later.
                 </div>
               ) : null}
 
-              {st === "closed" ? (
+              {st === "closed" ?(
                 <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-900">
-                  {isFull ? "Approved. Continue with the next steps." : "Completed successfully."}
+                  {isFull ?"Approved. Continue with the next steps." : "Completed successfully."}
                 </div>
               ) : null}
 
-              {st === "rejected" ? (
+              {st === "rejected" ?(
                 <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-800">
                   Needs correction. Follow the note above.
                 </div>
@@ -727,14 +728,14 @@ export default function RequestStatusScreen() {
                 <span className="text-xs text-zinc-500 shrink-0">{attachments.length} files</span>
               </div>
 
-              {fileErr ? (
+              {fileErr ?(
                 <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
                   {fileErr}
                 </div>
               ) : null}
 
               <div className="mt-4 grid gap-2">
-                {attachments.length === 0 ? (
+                {attachments.length === 0 ?(
                   <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
                     No documents submitted yet.
                   </div>
@@ -788,14 +789,14 @@ export default function RequestStatusScreen() {
                 <span className="text-xs text-zinc-500 shrink-0">{adminFiles.length} files</span>
               </div>
 
-              {adminFilesErr ? (
+              {adminFilesErr ?(
                 <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
                   {adminFilesErr}
                 </div>
               ) : null}
 
               <div className="mt-4 grid gap-2">
-                {adminFiles.length === 0 ? (
+                {adminFiles.length === 0 ?(
                   <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
                     No documents sent yet.
                   </div>
@@ -826,7 +827,7 @@ export default function RequestStatusScreen() {
                             rel="noreferrer"
                             className={`shrink-0 inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] ${
                               url
-                                ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
+                                ?"border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
                                 : "border-zinc-200 dark:border-zinc-800 bg-zinc-100 text-zinc-400 cursor-not-allowed pointer-events-none"
                             }`}
                           >
@@ -843,9 +844,9 @@ export default function RequestStatusScreen() {
         </motion.div>
 
         {/* Bottom action buttons */}
-        {canBackToFullPackage || canStartNew || canTryAgain ? (
+        {canBackToFullPackage || canStartNew || canTryAgain ?(
           <div className="mt-5 grid gap-2">
-            {canBackToFullPackage ? (
+            {canBackToFullPackage ?(
               <button
                 className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
                 onClick={() => goToFullPackageHub()}
@@ -854,7 +855,7 @@ export default function RequestStatusScreen() {
               </button>
             ) : null}
 
-            {canStartNew ? (
+            {canStartNew ?(
               <button
                 className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
                 onClick={() => navigate("/dashboard", { replace: true })}
@@ -863,7 +864,7 @@ export default function RequestStatusScreen() {
               </button>
             ) : null}
 
-            {canTryAgain ? (
+            {canTryAgain ?(
               <button
                 className="w-full rounded-xl border border-rose-200 bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700 active:scale-[0.99]"
                 onClick={handleTryAgain}

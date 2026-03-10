@@ -189,11 +189,11 @@ export default function StudySelfHelp() {
         title: "Universities & programs",
         subtitle: "Find schools, compare programs, and shortlist options.",
         links: [
-          { title: "Studyportals â€” Bachelor & Master programs", url: "https://www.studyportals.com/", note: "Search programs by country & subject" },
+          { title: "Studyportals — Bachelor & Master programs", url: "https://www.studyportals.com/", note: "Search programs by country & subject" },
           { title: "QS Top Universities", url: "https://www.topuniversities.com/", note: "Rankings + university profiles" },
           { title: "Times Higher Education (THE) Rankings", url: "https://www.timeshighereducation.com/world-university-rankings", note: "Rankings and insights" },
           {
-            title: `Search: â€œuniversities in ${country || "your country"} admissionsâ€`,
+            title: `Search: “universities in ${country || "your country"} admissions”`,
             url: `https://www.google.com/search?q=universities+in+${qs}+admissions`,
             note: "Quick way to find official university admissions pages",
           },
@@ -213,9 +213,9 @@ export default function StudySelfHelp() {
         title: "Visa, embassy & official guidance",
         subtitle: "Always prioritize official government/embassy pages for requirements.",
         links: [
-          { title: "EmbassyPages â€” embassies & consulates directory", url: "https://www.embassypages.com/", note: "Find the correct embassy/consulate" },
+          { title: "EmbassyPages — embassies & consulates directory", url: "https://www.embassypages.com/", note: "Find the correct embassy/consulate" },
           {
-            title: `Search: â€œ${country || "your destination"} student visa official siteâ€`,
+            title: `Search: “${country || "your destination"} student visa official site”`,
             url: `https://www.google.com/search?q=${qs}+student+visa+official+government+site`,
             note: "Use the top government result",
           },
@@ -334,6 +334,5 @@ export default function StudySelfHelp() {
     </div>
   );
 }
-
 
 

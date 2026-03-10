@@ -1,5 +1,6 @@
 import { collection, getDocs, query, where, limit } from "firebase/firestore";
 import { db } from "../firebase";
+import { normalizeTextDeep } from "../utils/textNormalizer";
 
 // No orderBy to avoid extra index needs; we sort in JS.
 function sortByCreatedAtDesc(items) {
@@ -15,7 +16,7 @@ export async function getMyServiceRequests(uid, max = 20) {
   const q = query(ref, where("uid", "==", uid), limit(max));
   const snap = await getDocs(q);
 
-  const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const items = snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
   return sortByCreatedAtDesc(items);
 }
 
@@ -24,6 +25,6 @@ export async function getMyApplications(uid, max = 20) {
   const q = query(ref, where("uid", "==", uid), limit(max));
   const snap = await getDocs(q);
 
-  const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const items = snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
   return sortByCreatedAtDesc(items);
 }

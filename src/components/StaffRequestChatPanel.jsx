@@ -19,6 +19,8 @@ import {
 } from "../services/chatservice";
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 import useKeyboardInset from "../hooks/useKeyboardInset";
+import { normalizeTextDeep } from "../utils/textNormalizer";
+import { safeText } from "../utils/safeText";
 
 /* ---------------- helpers ---------------- */
 function safeStr(x) {
@@ -75,13 +77,13 @@ function useAutosizeTextArea(textareaRef, value, { maxRows = 6 } = {}) {
     el.style.height = "auto";
     const next = Math.min(el.scrollHeight, maxHeight);
     el.style.height = `${next}px`;
-    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+    el.style.overflowY = el.scrollHeight > maxHeight ?"auto" : "hidden";
   }, [textareaRef, value, maxRows]);
 }
 
 function StatusTicks({ status }) {
   const s = String(status || "").toLowerCase();
-  const tone = s === "delivered" || s === "approved" ? "text-emerald-300" : "text-zinc-300";
+  const tone = s === "delivered" || s === "approved" ?"text-emerald-300" : "text-zinc-300";
   return (
     <span className={`inline-flex items-center ${tone}`} title={s}>
       <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="-mr-1 h-3.5 w-3.5">
@@ -122,9 +124,9 @@ function RenderMessageBody({ m, mine }) {
       <div className="grid gap-1">
         <div className="text-xs font-semibold opacity-90">PDF</div>
         <div className="text-sm">
-          ðŸ“Ž {m?.pdfMeta?.name || "document.pdf"}
-          {m?.pdfMeta?.size ? (
-            <span className="text-xs opacity-80"> â€¢ {m.pdfMeta.size} bytes</span>
+          {safeText(m?.pdfMeta?.name) || "document.pdf"}
+          {m?.pdfMeta?.size ?(
+            <span className="text-xs opacity-80"> • {m.pdfMeta.size} bytes</span>
           ) : null}
         </div>
       </div>
@@ -138,25 +140,25 @@ function RenderMessageBody({ m, mine }) {
 
     return (
       <div className="grid gap-2">
-        {txt ? <div className="break-words whitespace-pre-wrap">{txt}</div> : null}
+        {txt ?<div className="break-words whitespace-pre-wrap">{safeText(txt)}</div> : null}
 
-        {hasPdf ? (
-          <div className={`${mine ? "bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
+        {hasPdf ?(
+          <div className={`${mine ?"bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
             <div className="text-xs font-semibold opacity-90">PDF</div>
             <div className="text-xs opacity-90">
-              ðŸ“Ž {m?.pdfMeta?.name || "document.pdf"}
-              {m?.pdfMeta?.size ? ` â€¢ ${m.pdfMeta.size} bytes` : ""}
+              {safeText(m?.pdfMeta?.name) || "document.pdf"}
+              {m?.pdfMeta?.size ?` • ${m.pdfMeta.size} bytes` : ""}
             </div>
           </div>
         ) : null}
 
-        {!txt && !hasPdf ? <div className="opacity-70">[Empty bundle]</div> : null}
+        {!txt && !hasPdf ?<div className="opacity-70">[Empty bundle]</div> : null}
       </div>
     );
   }
 
   // text default
-  return <div className="break-words whitespace-pre-wrap">{safeStr(m?.text || "")}</div>;
+  return <div className="break-words whitespace-pre-wrap">{safeText(m?.text || "")}</div>;
 }
 
 /* ---------------- icons ---------------- */
@@ -267,7 +269,7 @@ export default function StaffRequestChatPanel({ requestId }) {
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        setPublished(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setPublished(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
         setErr("");
       },
       (e) => {
@@ -289,7 +291,7 @@ export default function StaffRequestChatPanel({ requestId }) {
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        setPendingMine(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setPendingMine(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
         setErr("");
       },
       (e) => {
@@ -511,9 +513,9 @@ export default function StaffRequestChatPanel({ requestId }) {
   const badge =
     "rounded-full border border-white/30 bg-white/15 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-white";
   const sendBtnTone = canSend
-    ? "bg-emerald-600 text-white shadow-[0_0_0_3px_rgba(16,185,129,0.22)] hover:bg-emerald-700"
+    ?"bg-emerald-600 text-white shadow-[0_0_0_3px_rgba(16,185,129,0.22)] hover:bg-emerald-700"
     : "bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
-  const navLiftPad = keyboardInset > 0 ? "0px" : "var(--app-bottom-nav-lift, 0px)";
+  const navLiftPad = keyboardInset > 0 ?"0px" : "var(--app-bottom-nav-lift, 0px)";
 
   const modal = (
     <div className="fixed inset-0 z-[9999] flex flex-col bg-white dark:bg-zinc-950">
@@ -533,7 +535,7 @@ export default function StaffRequestChatPanel({ requestId }) {
         </button>
       </div>
 
-      {err ? (
+      {err ?(
         <div className="px-3 pt-2">
           <div className="rounded-xl border border-rose-100 bg-rose-50/80 px-3 py-2 text-xs text-rose-700">
             {err}
@@ -542,7 +544,7 @@ export default function StaffRequestChatPanel({ requestId }) {
       ) : null}
 
       <div ref={threadRef} className="flex-1 overflow-y-auto px-3 py-2">
-        {timelineRows.length === 0 ? (
+        {timelineRows.length === 0 ?(
           <div className="px-1 py-2 text-sm text-zinc-600 dark:text-zinc-300">No messages yet.</div>
         ) : (
           <div className="grid gap-2">
@@ -575,26 +577,26 @@ export default function StaffRequestChatPanel({ requestId }) {
 
               const bubbleCls =
                 kind === "pending" && mine && isRejectedLike
-                  ? bubbleRejected
+                  ?bubbleRejected
                   : mine
-                  ? bubbleMine
+                  ?bubbleMine
                   : bubbleOther;
 
               const msgType = String(m?.type || "text").toLowerCase();
-              const status = kind === "published" ? "delivered" : pendingStatus;
+              const status = kind === "published" ?"delivered" : pendingStatus;
 
               return (
-                <div key={item.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                <div key={item.id} className={`flex ${mine ?"justify-end" : "justify-start"}`}>
                   <div className={`${bubbleBase} ${bubbleCls}`}>
                     <RenderMessageBody m={m} mine={mine} />
 
                     <div
                       className={[
                         "mt-1.5 flex items-center justify-end gap-2 text-[10px]",
-                        mine ? "text-white/80" : "text-zinc-500",
+                        mine ?"text-white/80" : "text-zinc-500",
                       ].join(" ")}
                     >
-                      {mine && (msgType === "text" || msgType === "bundle" || msgType === "pdf") ? <StatusTicks status={status} /> : null}
+                      {mine && (msgType === "text" || msgType === "bundle" || msgType === "pdf") ?<StatusTicks status={status} /> : null}
                       <span>{time}</span>
                     </div>
                   </div>
@@ -619,9 +621,9 @@ export default function StaffRequestChatPanel({ requestId }) {
           onChange={onPickFile}
         />
 
-        {pickedPdf ? (
+        {pickedPdf ?(
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs">
-            <span className="font-semibold text-zinc-900 dark:text-zinc-100">{pickedPdf.name}</span>
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">{safeText(pickedPdf.name)}</span>
             <button
               type="button"
               onClick={() => setPickedPdf(null)}
@@ -698,7 +700,7 @@ export default function StaffRequestChatPanel({ requestId }) {
 
     params.delete("openChat");
     const qs = params.toString();
-    const nextUrl = `${location.pathname}${qs ? `?${qs}` : ""}`;
+    const nextUrl = `${location.pathname}${qs ?`?${qs}` : ""}`;
     if (nextUrl !== `${location.pathname}${location.search || ""}`) {
       navigate(nextUrl, { replace: true });
     }
@@ -708,10 +710,10 @@ export default function StaffRequestChatPanel({ requestId }) {
     <>
       <button type="button" onClick={openChat} className={openBtn}>
         <IconChat className="h-5 w-5" />
-        Chat {hasUnreadChat ? <span className={badge}>New</span> : null}
+        Chat {hasUnreadChat ?<span className={badge}>New</span> : null}
       </button>
 
-      {open ? createPortal(modal, document.body) : null}
+      {open ?createPortal(modal, document.body) : null}
     </>
   );
 }

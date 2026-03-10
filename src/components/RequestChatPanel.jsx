@@ -13,6 +13,8 @@ import { useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { sendPendingText, sendPendingPdf, sendPendingBundle } from "../services/chatservice";
 import useKeyboardInset from "../hooks/useKeyboardInset";
+import { normalizeTextDeep } from "../utils/textNormalizer";
+import { safeText } from "../utils/safeText";
 
 /* ---------------- helpers ---------------- */
 function safeStr(x) {
@@ -132,9 +134,9 @@ function StatusDots({ status }) {
   }
 
   const delivered = s === "approved" || s === "delivered";
-  const tone = delivered ? "text-emerald-300" : "text-zinc-300";
+  const tone = delivered ?"text-emerald-300" : "text-zinc-300";
   return (
-    <span className={`inline-flex items-center ${tone}`} title={delivered ? "Read" : "Pending"}>
+    <span className={`inline-flex items-center ${tone}`} title={delivered ?"Read" : "Pending"}>
       <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="-mr-1 h-3.5 w-3.5">
         <path
           d="M2.5 8.5 5.7 11.3 13.2 4.8"
@@ -172,7 +174,7 @@ function useAutosizeTextArea(textareaRef, value, { maxRows = 6 } = {}) {
     el.style.height = "auto";
     const next = Math.min(el.scrollHeight, maxHeight);
     el.style.height = `${next}px`;
-    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+    el.style.overflowY = el.scrollHeight > maxHeight ?"auto" : "hidden";
   }, [textareaRef, value, maxRows]);
 }
 
@@ -186,8 +188,8 @@ function shouldMergePair(a, b, WINDOW_MS) {
 function makeBundleView(first, second) {
   const aType = String(first?.type || "text").toLowerCase();
 
-  const textMsg = aType === "text" ? first : second;
-  const pdfMsg = aType === "pdf" ? first : second;
+  const textMsg = aType === "text" ?first : second;
+  const pdfMsg = aType === "pdf" ?first : second;
 
   const st1 = String(first?.status || "pending").toLowerCase();
   const st2 = String(second?.status || "pending").toLowerCase();
@@ -387,7 +389,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        setPublished(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setPublished(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
         setLoading(false);
       },
       (e) => {
@@ -412,7 +414,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const rows = snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
         rows.sort((a, b) => tsToMillis(a.createdAt) - tsToMillis(b.createdAt));
         setPendingMine(rows);
       },
@@ -564,7 +566,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     return () => window.clearTimeout(timer);
   }, [composerFocused, keyboardInset, timeline.length]);
 
-  const toRole = myRole === "user" ? "staff" : "user";
+  const toRole = myRole === "user" ?"staff" : "user";
 
   const openPicker = () => fileInputRef.current?.click();
 
@@ -714,66 +716,67 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     const isComboOptimistic = type === "combo" && item._kind === "optimistic";
 
     const status =
-      item._kind === "published" ? "delivered" : String(m.status || "pending").toLowerCase();
+      item._kind === "published" ?"delivered" : String(m.status || "pending").toLowerCase();
 
     return (
-      <div key={item.id} className={`chat-bubble-in flex ${mine ? "justify-end" : "justify-start"}`}>
+      <div key={item.id} className={`chat-bubble-in flex ${mine ?"justify-end" : "justify-start"}`}>
         <div
           className={`${bubbleBase} ${
             mine
-              ? "bg-emerald-600 text-white shadow-[0_10px_18px_rgba(5,150,105,0.2)]"
+              ?"bg-emerald-600 text-white shadow-[0_10px_18px_rgba(5,150,105,0.2)]"
               : "bg-white dark:bg-zinc-900/70 text-zinc-900 dark:text-zinc-100 border border-zinc-200/90 dark:border-zinc-800"
           }`}
         >
-          {isBundleView ? (
+          {isBundleView ?(
             <div className="mt-1 grid gap-2">
-              {safeStr(m.text) ? <div>{m.text}</div> : null}
+              {safeStr(m.text) ?<div>{safeText(m.text)}</div> : null}
+              
 
-              {m?.pdfMeta?.name ? (
-                <div className={`${mine ? "bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
+              {m?.pdfMeta?.name ?(
+                <div className={`${mine ?"bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
                   <div className="text-xs font-semibold opacity-90">PDF</div>
                   <div className="text-xs opacity-90">
-                    {m?.pdfMeta?.name || "document.pdf"}
-                    {m?.pdfMeta?.size ? ` â€¢ ${m.pdfMeta.size} bytes` : ""}
+                    {safeText(m?.pdfMeta?.name) || "document.pdf"}
+                    {m?.pdfMeta?.size ?` • ${m.pdfMeta.size} bytes` : ""}
                   </div>
                 </div>
               ) : null}
             </div>
-          ) : isComboOptimistic ? (
+          ) : isComboOptimistic ?(
             <div className="mt-1 grid gap-2">
-              {safeStr(m.text) ? <div>{m.text}</div> : null}
-              {m?.pdfMeta?.name ? (
-                <div className={`${mine ? "bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
+              {safeStr(m.text) ?<div>{safeText(m.text)}</div> : null}
+              {m?.pdfMeta?.name ?(
+                <div className={`${mine ?"bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
                   <div className="text-xs font-semibold opacity-90">PDF</div>
                   <div className="text-xs opacity-90">
-                    {m?.pdfMeta?.name || "document.pdf"}
-                    {m?.pdfMeta?.size ? ` â€¢ ${m.pdfMeta.size} bytes` : ""}
+                    {safeText(m?.pdfMeta?.name) || "document.pdf"}
+                    {m?.pdfMeta?.size ?` • ${m.pdfMeta.size} bytes` : ""}
                   </div>
                 </div>
               ) : null}
             </div>
-          ) : isPdf ? (
+          ) : isPdf ?(
             <div className="mt-1">
               <div className="font-semibold">PDF</div>
               <div className="text-xs opacity-90">
-                {m?.pdfMeta?.name || "document.pdf"}
-                {m?.pdfMeta?.size ? ` â€¢ ${m.pdfMeta.size} bytes` : ""}
+                {safeText(m?.pdfMeta?.name) || "document.pdf"}
+                {m?.pdfMeta?.size ?` • ${m.pdfMeta.size} bytes` : ""}
               </div>
             </div>
           ) : (
-            <div className="mt-1">{m.text}</div>
+            <div className="mt-1">{safeText(m.text)}</div>
           )}
 
           <div
             className={`mt-1.5 flex items-center justify-end gap-2 text-[10px] ${
-              mine ? "text-white/80" : "text-zinc-500"
+              mine ?"text-white/80" : "text-zinc-500"
             }`}
           >
-            {mine ? <StatusDots status={status} /> : null}
+            {mine ?<StatusDots status={status} /> : null}
             <span>{time}</span>
           </div>
 
-          {status === "rejected" ? (
+          {status === "rejected" ?(
             <div className="mt-2 rounded-xl bg-white/10 dark:bg-zinc-900/60 px-2 py-1 text-[11px] text-white/90">
               Rejected by admin.
             </div>
@@ -791,9 +794,9 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
   };
 
   const sendBtnTone = canSend
-    ? "bg-emerald-600 text-white shadow-[0_0_0_3px_rgba(16,185,129,0.22)] hover:bg-emerald-700"
+    ?"bg-emerald-600 text-white shadow-[0_0_0_3px_rgba(16,185,129,0.22)] hover:bg-emerald-700"
     : "bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
-  const navLiftPad = keyboardInset > 0 ? "0px" : "var(--app-bottom-nav-lift, 0px)";
+  const navLiftPad = keyboardInset > 0 ?"0px" : "var(--app-bottom-nav-lift, 0px)";
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-white dark:bg-zinc-950">
@@ -813,7 +816,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
         </button>
       </div>
 
-      {err ? (
+      {err ?(
         <div className="px-3 pt-2">
           <div className="rounded-xl border border-rose-100 bg-rose-50/80 px-3 py-2 text-xs text-rose-700">
             {err}
@@ -822,9 +825,9 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
       ) : null}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2">
-        {loading ? (
+        {loading ?(
           <div className="px-1 py-2 text-sm text-zinc-600 dark:text-zinc-300">Loading chat…</div>
-        ) : timelineRows.length === 0 ? (
+        ) : timelineRows.length === 0 ?(
           <div className="px-1 py-2 text-sm text-zinc-600 dark:text-zinc-300">No messages yet.</div>
         ) : (
           <div className="grid gap-2">
@@ -858,9 +861,9 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
           onChange={onPickFile}
         />
 
-        {pickedPdf ? (
+        {pickedPdf ?(
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs">
-            <span className="font-semibold text-zinc-900 dark:text-zinc-100">{pickedPdf.name}</span>
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">{safeText(pickedPdf.name)}</span>
             <button
               type="button"
               onClick={() => setPickedPdf(null)}

@@ -16,6 +16,7 @@ import {
 import { db, auth } from "../firebase";
 import { createStaffNotification, createUserNotification } from "./notificationDocs";
 import { getCurrentUserRoleContext } from "./adminroleservice";
+import { normalizeTextDeep } from "../utils/textNormalizer";
 
 const ACTIVE_REQUEST_STATUSES = ["new", "contacted"];
 const STALE_ASSIGNMENT_HOURS = 24;
@@ -93,16 +94,44 @@ export async function getRequests({
   if (s) clauses.push(where("status", "==", s));
   if (t) clauses.push(where("track", "==", t));
   if (u) clauses.push(where("uid", "==", u));
-  if (roleCtx?.isAssignedAdmin) {
-    clauses.push(where("currentAdminUid", "==", actorUid));
-  }
 
   const take = Number.isFinite(Number(max)) ? Number(max) : Number(limit) || 50;
+  const mapRows = (snap) =>
+    snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
+
+  if (roleCtx?.isAssignedAdmin) {
+    const scopedQueries = [
+      query(ref, ...clauses, where("currentAdminUid", "==", actorUid), qLimit(take)),
+      query(ref, ...clauses, where("ownerLockedAdminUid", "==", actorUid), qLimit(take)),
+    ];
+
+    const snaps = await Promise.all(
+      scopedQueries.map((qy, idx) =>
+        getDocs(qy).catch((error) => {
+          // Keep currentAdminUid query authoritative; ownerLocked fallback is best-effort.
+          if (idx === 1) {
+            console.warn("assigned-admin owner lock fallback query failed:", error?.message || error);
+            return null;
+          }
+          throw error;
+        })
+      )
+    );
+
+    const deduped = new Map();
+    snaps.forEach((snap) => {
+      if (!snap) return;
+      mapRows(snap).forEach((row) => {
+        if (!row?.id) return;
+        deduped.set(String(row.id), row);
+      });
+    });
+    return sortByCreatedAtDesc(Array.from(deduped.values()));
+  }
+
   const qy = query(ref, ...clauses, qLimit(take));
   const snap = await getDocs(qy);
-
-  const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  return sortByCreatedAtDesc(rows);
+  return sortByCreatedAtDesc(mapRows(snap));
 }
 
 export async function sweepStaleAssignments({

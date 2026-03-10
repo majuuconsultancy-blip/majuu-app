@@ -29,6 +29,7 @@ import AdminRequestChatLauncher from "../components/AdminRequestChatLauncher";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { smartBack } from "../utils/navBack";
+import { normalizeTextDeep } from "../utils/textNormalizer";
 
 /* ---------- UI helpers ---------- */
 function pill(status) {
@@ -120,10 +121,10 @@ export default function AdminRequestDetailsScreen() {
 
   const decisionLocked = status === "closed" || status === "rejected";
   const lockedLabel =
-    status === "closed" ? "Accepted" : status === "rejected" ? "Rejected" : "";
+    status === "closed" ?"Accepted" : status === "rejected" ?"Rejected" : "";
   const lockedCls =
     status === "closed"
-      ? "border-emerald-200 bg-emerald-600 text-white"
+      ?"border-emerald-200 bg-emerald-600 text-white"
       : "border-rose-200 bg-rose-600 text-white";
 
   const card =
@@ -140,14 +141,14 @@ export default function AdminRequestDetailsScreen() {
         setErr("Request not found.");
         setReq(null);
       } else {
-        const data = { id: snap.id, ...snap.data() };
+        const data = normalizeTextDeep({ id: snap.id, ...snap.data() });
         setReq(data);
 
         const existing = safeStr(
           data?.adminDecisionNote || data?.decisionNote || data?.adminNote || ""
         );
 
-        setNote((prev) => (prev.trim().length ? prev : existing));
+        setNote((prev) => (prev.trim().length ?prev : existing));
       }
     } catch (e) {
       console.error(e);
@@ -184,7 +185,7 @@ export default function AdminRequestDetailsScreen() {
       try {
         const rows = await listAssignedAdmins({ max: 200 });
         if (cancelled) return;
-        setAssignedAdminRows(Array.isArray(rows) ? rows : []);
+        setAssignedAdminRows(Array.isArray(rows) ?rows : []);
       } catch (error) {
         if (!cancelled) {
           setAssignedAdminRows([]);
@@ -239,7 +240,7 @@ export default function AdminRequestDetailsScreen() {
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const rows = snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
         rows.sort((a, b) => (b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0));
         setDrafts(rows);
         setDraftErr("");
@@ -263,7 +264,7 @@ export default function AdminRequestDetailsScreen() {
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const rows = snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
         rows.sort((a, b) => (b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0));
         setStaffDrafts(rows);
         setStaffDraftErr("");
@@ -381,7 +382,7 @@ export default function AdminRequestDetailsScreen() {
         const mode = String(result?.mode || "manual");
         setOverrideMsg(
           mode === "auto"
-            ? "Routing override applied (auto best route)."
+            ?"Routing override applied (auto best route)."
             : "Routing override applied."
         );
       } else {
@@ -398,7 +399,7 @@ export default function AdminRequestDetailsScreen() {
       setOverrideErr(
         details ||
           message ||
-          (code ? `Failed to override routing (${code}).` : "Failed to override routing.")
+          (code ?`Failed to override routing (${code}).` : "Failed to override routing.")
       );
     } finally {
       setOverrideBusy(false);
@@ -460,7 +461,7 @@ export default function AdminRequestDetailsScreen() {
     ).trim();
     const nowMs = Date.now();
     const existingRoutingMeta = req?.routingMeta && typeof req.routingMeta === "object"
-      ? req.routingMeta
+      ?req.routingMeta
       : {};
 
     try {
@@ -525,21 +526,21 @@ export default function AdminRequestDetailsScreen() {
   const headerLeft = `${String(req?.track || "").toUpperCase()} • ${req?.country || "-"}`;
   const headerRight =
     req?.requestType === "full"
-      ? "Full Package"
+      ?"Full Package"
       : `Single Service • ${req?.serviceName || "-"}`;
 
   const createdLabel = formatDT(req?.createdAt);
 
   const actionHint =
     status === "closed"
-      ? "Decision complete. This request was accepted."
+      ?"Decision complete. This request was accepted."
       : status === "rejected"
-      ? "Decision complete. This request was rejected."
+      ?"Decision complete. This request was rejected."
       : "Review the applicant details and documents, then make a decision.";
 
-  const badgeText = chatPendingCount > 99 ? "99+" : String(chatPendingCount);
+  const badgeText = chatPendingCount > 99 ?"99+" : String(chatPendingCount);
   const reassignmentCount = Array.isArray(req?.routingMeta?.reassignmentHistory)
-    ? req.routingMeta.reassignmentHistory.length
+    ?req.routingMeta.reassignmentHistory.length
     : 0;
 
   return (
@@ -565,7 +566,7 @@ export default function AdminRequestDetailsScreen() {
             {/* ✅ Chat launcher with badge */}
             <span className="relative inline-flex">
               <AdminRequestChatLauncher requestId={requestId} />
-              {chatPendingCount > 0 ? (
+              {chatPendingCount > 0 ?(
                 <span
                   className={[
                     "absolute -top-1 -right-1 z-10",
@@ -604,7 +605,7 @@ export default function AdminRequestDetailsScreen() {
                 <div className="mt-1 font-mono text-sm text-zinc-900 dark:text-zinc-100 break-words">
                   {req?.id}
                 </div>
-                {createdLabel ? (
+                {createdLabel ?(
                   <div className="mt-2 text-xs text-zinc-500">
                     Submitted:{" "}
                     <span className="font-medium text-zinc-700 dark:text-zinc-300">
@@ -627,7 +628,7 @@ export default function AdminRequestDetailsScreen() {
             </div>
             <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{actionHint}</div>
 
-            {!decisionLocked && status === "new" ? (
+            {!decisionLocked && status === "new" ?(
               <button
                 type="button"
                 onClick={setContacted}
@@ -650,7 +651,7 @@ export default function AdminRequestDetailsScreen() {
             </div>
           </div>
 
-          {roleCtx?.isSuperAdmin ? (
+          {roleCtx?.isSuperAdmin ?(
             <div className="mt-4 rounded-2xl border border-emerald-200/70 bg-emerald-50/40 p-3">
               <div className="text-xs font-semibold text-emerald-800">Super admin override</div>
               <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
@@ -673,15 +674,15 @@ export default function AdminRequestDetailsScreen() {
                   disabled={overrideBusy}
                   className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                 >
-                  {overrideBusy ? "Applying..." : "Apply override"}
+                  {overrideBusy ?"Applying..." : "Apply override"}
                 </button>
               </div>
-              {overrideErr ? (
+              {overrideErr ?(
                 <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs text-rose-700">
                   {overrideErr}
                 </div>
               ) : null}
-              {overrideMsg ? (
+              {overrideMsg ?(
                 <div className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-800">
                   {overrideMsg}
                 </div>
@@ -691,7 +692,7 @@ export default function AdminRequestDetailsScreen() {
         </div>
 
         {/* ✅ STAFF ASSIGNMENT */}
-        {req && !decisionLocked ? (
+        {req && !decisionLocked ?(
           <AssignStaffPanel request={req} />
         ) : (
           <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
@@ -752,7 +753,7 @@ export default function AdminRequestDetailsScreen() {
               </div>
             </div>
 
-            {req?.note ? (
+            {req?.note ?(
               <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4">
                 <div className="text-xs font-semibold text-zinc-500">
                   Applicant note
@@ -806,7 +807,7 @@ export default function AdminRequestDetailsScreen() {
               </p>
             </div>
 
-            {stagingStaffDrafts ? (
+            {stagingStaffDrafts ?(
               <span className="rounded-full border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
                 Autofilling…
               </span>
@@ -817,13 +818,13 @@ export default function AdminRequestDetailsScreen() {
             )}
           </div>
 
-          {staffDraftErr ? (
+          {staffDraftErr ?(
             <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
               {staffDraftErr}
             </div>
           ) : null}
 
-          {staffDrafts.length === 0 ? (
+          {staffDrafts.length === 0 ?(
             <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
               No staff file links yet.
             </div>
@@ -842,7 +843,7 @@ export default function AdminRequestDetailsScreen() {
                           {safeStr(d?.name) || "Staff file"}
                         </div>
 
-                        {hasLink ? (
+                        {hasLink ?(
                           <a
                             href={url}
                             target="_blank"
@@ -857,7 +858,7 @@ export default function AdminRequestDetailsScreen() {
                           </div>
                         )}
 
-                        {staged ? (
+                        {staged ?(
                           <div className="mt-2 text-xs font-semibold text-emerald-800">
                             ✅ Already staged to applicant
                           </div>
@@ -868,7 +869,7 @@ export default function AdminRequestDetailsScreen() {
                         )}
                       </div>
 
-                      {!decisionLocked && hasLink && !staged ? (
+                      {!decisionLocked && hasLink && !staged ?(
                         <button
                           type="button"
                           onClick={() => stageOneStaffDraftNow(d)}
@@ -903,13 +904,13 @@ export default function AdminRequestDetailsScreen() {
             </span>
           </div>
 
-          {draftErr ? (
+          {draftErr ?(
             <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
               {draftErr}
             </div>
           ) : null}
 
-          {!decisionLocked ? (
+          {!decisionLocked ?(
             <div className="mt-4 grid gap-3">
               <input
                 value={draftName}
@@ -939,7 +940,7 @@ export default function AdminRequestDetailsScreen() {
                   disabled={saving || addingDraft}
                   className="shrink-0 inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                 >
-                  {addingDraft ? "Adding…" : "Add"}
+                  {addingDraft ?"Adding…" : "Add"}
                 </button>
               </div>
 
@@ -955,7 +956,7 @@ export default function AdminRequestDetailsScreen() {
           )}
 
           <div className="mt-4 grid gap-2">
-            {drafts.length === 0 ? (
+            {drafts.length === 0 ?(
               <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
                 No files staged yet.
               </div>
@@ -971,7 +972,7 @@ export default function AdminRequestDetailsScreen() {
                         {d.name || "File"}
                       </div>
 
-                      {d.url ? (
+                      {d.url ?(
                         <a
                           href={d.url}
                           target="_blank"
@@ -986,7 +987,7 @@ export default function AdminRequestDetailsScreen() {
                       )}
                     </div>
 
-                    {!decisionLocked ? (
+                    {!decisionLocked ?(
                       <button
                         type="button"
                         onClick={() => removeDraft(d)}
@@ -1011,7 +1012,7 @@ export default function AdminRequestDetailsScreen() {
             Once you accept or reject, the decision is locked.
           </p>
 
-          {decisionLocked ? (
+          {decisionLocked ?(
             <button
               type="button"
               disabled
@@ -1026,10 +1027,10 @@ export default function AdminRequestDetailsScreen() {
                 disabled={saving || !note.trim()}
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-4 py-3 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60"
                 type="button"
-                title={!note.trim() ? "Note is required for rejection." : ""}
+                title={!note.trim() ?"Note is required for rejection." : ""}
               >
                 <AppIcon icon={X} size={ICON_MD} />
-                {saving ? "Saving…" : "Reject"}
+                {saving ?"Saving…" : "Reject"}
               </button>
 
               <button
@@ -1039,7 +1040,7 @@ export default function AdminRequestDetailsScreen() {
                 type="button"
               >
                 <AppIcon icon={Check} size={ICON_MD} className="text-white" />
-                {saving ? "Saving…" : "Accept"}
+                {saving ?"Saving…" : "Accept"}
               </button>
             </div>
           )}

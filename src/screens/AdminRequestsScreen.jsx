@@ -62,6 +62,7 @@ const TABS = [
   { key: "rejected", label: "Rejected" },
   { key: "assigned", label: "Assigned" },
 ];
+const ACTIVE_REQUEST_STATUSES = ["new", "contacted", "active", "in_progress", "assigned"];
 
 const LIMIT_PENDING = 1000;
 const ADMIN_TAB_PINS_KEY = "majuu_admin_requests_pins_by_tab_v1";
@@ -103,7 +104,7 @@ function readAdminTabPins() {
     if (!parsed || typeof parsed !== "object") return {};
     const next = {};
     TABS.forEach((t) => {
-      const arr = Array.isArray(parsed?.[t.key]) ? parsed[t.key] : [];
+      const arr = Array.isArray(parsed?.[t.key]) ?parsed[t.key] : [];
       next[t.key] = arr.map((v) => String(v || "").trim()).filter(Boolean);
     });
     return next;
@@ -117,7 +118,7 @@ function pill(status) {
   const s = String(status || "new").toLowerCase();
   if (s === "new")
     return { label: "New", cls: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800" };
-  if (s === "contacted")
+  if (s === "contacted" || s === "active" || s === "in_progress")
     return {
       label: "In Progress",
       cls: "bg-emerald-50 text-emerald-800 border border-emerald-100",
@@ -180,7 +181,7 @@ function isValidTabKey(key) {
 function formatShortTS(ts) {
   const sec = ts?.seconds;
   const ms = ts?.toMillis?.();
-  const d = ms ? new Date(ms) : sec ? new Date(sec * 1000) : null;
+  const d = ms ?new Date(ms) : sec ?new Date(sec * 1000) : null;
   if (!d) return "";
   if (Number.isNaN(d.getTime())) return "";
   const dd = String(d.getDate()).padStart(2, "0");
@@ -216,13 +217,13 @@ function classifyTabFromRequestDoc(data) {
   const st = String(data?.status || "new").toLowerCase();
   const assignedTo = String(data?.assignedTo || "").trim();
 
-  if (st === "closed") return "closed";
+  if (st === "closed" || st === "accepted") return "closed";
   if (st === "rejected") return "rejected";
 
-  // conceptually Assigned tab = assignedTo + status still active
-  if ((st === "new" || st === "contacted") && assignedTo) return "assigned";
+  // Any non-final request with a staff assignee belongs in Assigned.
+  if (assignedTo) return "assigned";
 
-  // active but unassigned -> New tab
+  // Remaining non-final requests are treated as New.
   return "new";
 }
 
@@ -262,7 +263,7 @@ function AssignedAdminAccessPanel() {
             </span>
             <span
               className={`inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-200 ${
-                open ? "rotate-180" : "rotate-0"
+                open ?"rotate-180" : "rotate-0"
               }`}
             >
               <AppIcon size={ICON_MD} icon={ChevronDown} />
@@ -270,7 +271,7 @@ function AssignedAdminAccessPanel() {
           </div>
         </button>
 
-        <div className={`grid transition-all duration-300 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+        <div className={`grid transition-all duration-300 ease-out ${open ?"grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
           <div className="overflow-hidden">
             <div className="px-4 pb-4">
               <div className="grid grid-cols-2 gap-3">
@@ -328,7 +329,7 @@ function StaffAccessPanel() {
 
   const selectedSpecialityLabels = useMemo(() => {
     const selectedSet = new Set(
-      (Array.isArray(selectedSpecialities) ? selectedSpecialities : [])
+      (Array.isArray(selectedSpecialities) ?selectedSpecialities : [])
         .map((key) => String(key || "").trim().toLowerCase())
         .filter(Boolean)
     );
@@ -359,7 +360,7 @@ function StaffAccessPanel() {
     const safeKey = String(key || "").trim().toLowerCase();
     if (!safeKey) return;
     setSelectedSpecialities((prev) => {
-      const current = Array.isArray(prev) ? prev : [];
+      const current = Array.isArray(prev) ?prev : [];
       if (current.includes(safeKey)) {
         return current.filter((item) => item !== safeKey);
       }
@@ -387,7 +388,7 @@ function StaffAccessPanel() {
         specialities: selectedSpecialities,
       });
 
-      setMsg(action === "grant" ? `✅ Staff enabled: ${res.email}` : `✅ Staff revoked: ${res.email}`);
+      setMsg(action === "grant" ?`✅ Staff enabled: ${res.email}` : `✅ Staff revoked: ${res.email}`);
       if (action === "grant") {
         setSpecialityOpen(false);
       }
@@ -401,11 +402,11 @@ function StaffAccessPanel() {
 
   return (
     <div className="mt-5">
-      <div className={`${shell} relative overflow-visible ${specialityOpen ? "z-[10010]" : "z-20"}`}>
+      <div className={`${shell} relative overflow-visible ${specialityOpen ?"z-[10010]" : "z-20"}`}>
         <button type="button" onClick={() => setOpen((v) => !v)} className={headerBtn}>
           <div className="min-w-0">
             <div className={smallTitle}>Staff Hire System</div>
-            <div className={smallSub}>{open ? "Add/remove staff access." : "Tap to expand"}</div>
+            <div className={smallSub}>{open ?"Add/remove staff access." : "Tap to expand"}</div>
           </div>
 
           <div className="shrink-0 inline-flex items-center gap-2">
@@ -415,7 +416,7 @@ function StaffAccessPanel() {
 
             <span
               className={`inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-200 ${
-                open ? "rotate-180" : "rotate-0"
+                open ?"rotate-180" : "rotate-0"
               }`}
             >
               <AppIcon size={ICON_MD} icon={ChevronDown} />
@@ -423,21 +424,21 @@ function StaffAccessPanel() {
           </div>
         </button>
 
-        <div className={`grid transition-all duration-300 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
-          <div className={open ? "overflow-visible" : "overflow-hidden"}>
+        <div className={`grid transition-all duration-300 ease-out ${open ?"grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+          <div className={open ?"overflow-visible" : "overflow-hidden"}>
             <div className="px-4 pb-4">
               <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/45">
                 <div className="text-xs text-zinc-500 dark:text-zinc-400">
                   The staff member must already be signed up in the app to be activated.
                 </div>
 
-                {err ? (
+                {err ?(
                   <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/35 dark:text-rose-200">
                     {err}
                   </div>
                 ) : null}
 
-                {msg ? (
+                {msg ?(
                   <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
                     {msg}
                   </div>
@@ -469,7 +470,7 @@ function StaffAccessPanel() {
 
                     <div
                       ref={specialityMenuRef}
-                      className={`relative col-span-2 ${specialityOpen ? "z-[10020]" : "z-20"}`}
+                      className={`relative col-span-2 ${specialityOpen ?"z-[10020]" : "z-20"}`}
                     >
                       <div className="mb-1.5 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">
                         Select specialities
@@ -481,17 +482,17 @@ function StaffAccessPanel() {
                       >
                         <span className="min-w-0 truncate">
                           {selectedSpecialityLabels.length
-                            ? selectedSpecialityLabels.join(", ")
+                            ?selectedSpecialityLabels.join(", ")
                             : "Select speciality"}
                         </span>
                         <AppIcon
                           size={ICON_SM}
                           icon={ChevronDown}
-                          className={`shrink-0 transition ${specialityOpen ? "rotate-180" : ""}`}
+                          className={`shrink-0 transition ${specialityOpen ?"rotate-180" : ""}`}
                         />
                       </button>
 
-                      {specialityOpen ? (
+                      {specialityOpen ?(
                         <div className="absolute left-0 right-0 z-[10030] mt-2 max-h-56 overflow-y-auto rounded-2xl border border-zinc-200 bg-white/96 p-2 shadow-xl backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/96">
                           {STAFF_SPECIALITY_OPTIONS.map((opt) => {
                             const checked = selectedSpecialities.includes(opt.key);
@@ -503,7 +504,7 @@ function StaffAccessPanel() {
                                 className={[
                                   "mb-1 inline-flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-semibold transition",
                                   checked
-                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+                                    ?"border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
                                     : "border-zinc-200 bg-white/80 text-zinc-800 hover:border-emerald-200 dark:border-zinc-700 dark:bg-zinc-900/75 dark:text-zinc-100",
                                 ].join(" ")}
                               >
@@ -511,7 +512,7 @@ function StaffAccessPanel() {
                                 <span
                                   className={`ml-2 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[10px] ${
                                     checked
-                                      ? "border-emerald-500 bg-emerald-500 text-white"
+                                      ?"border-emerald-500 bg-emerald-500 text-white"
                                       : "border-zinc-300 text-transparent dark:border-zinc-600"
                                   }`}
                                 >
@@ -533,7 +534,7 @@ function StaffAccessPanel() {
                       className={`${btnBase} ${grantBtn}`}
                     >
                       <AppIcon size={ICON_MD} icon={UserPlus} />
-                      {busy === "grant" ? "Granting…" : "Grant"}
+                      {busy === "grant" ?"Granting…" : "Grant"}
                     </button>
 
                     <button
@@ -543,7 +544,7 @@ function StaffAccessPanel() {
                       className={`${btnBase} ${revokeBtn}`}
                     >
                       <AppIcon size={ICON_MD} icon={UserX} />
-                      {busy === "revoke" ? "Revoking…" : "Revoke"}
+                      {busy === "revoke" ?"Revoking…" : "Revoke"}
                     </button>
 
                     <button
@@ -591,13 +592,13 @@ export default function AdminRequestsScreen() {
   void motion;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const mountAtRef = useRef(typeof performance !== "undefined" ? performance.now() : 0);
+  const mountAtRef = useRef(typeof performance !== "undefined" ?performance.now() : 0);
   const firstPaintLoggedRef = useRef(false);
 
   const tabFromUrl = searchParams.get("tab");
   const qFromUrl = searchParams.get("q") || "";
 
-  const [status, setStatus] = useState(isValidTabKey(tabFromUrl) ? tabFromUrl : "new");
+  const [status, setStatus] = useState(isValidTabKey(tabFromUrl) ?tabFromUrl : "new");
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -639,7 +640,7 @@ export default function AdminRequestsScreen() {
     if (firstPaintLoggedRef.current) return;
     firstPaintLoggedRef.current = true;
     const raf = window.requestAnimationFrame(() => {
-      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      const now = typeof performance !== "undefined" ?performance.now() : 0;
       const delta = Math.max(0, now - (mountAtRef.current || 0));
       console.log(`${PERF_TAG} mount->first-paint: ${delta.toFixed(1)}ms`);
     });
@@ -765,35 +766,41 @@ export default function AdminRequestsScreen() {
         }
       }
 
-      if (status === "assigned") {
-        const assignedTimer = `${PERF_TAG} transform:assigned merge/filter`;
-        startPerf(assignedTimer);
-        const [newOnes, contactedOnes] = await Promise.all([
-          getRequests({ status: "new", max: 200 }).catch(() => []),
-          getRequests({ status: "contacted", max: 200 }).catch(() => []),
-        ]);
+      if (status === "new" || status === "assigned") {
+        const activeTabTimer = `${PERF_TAG} transform:${status} active merge/filter`;
+        startPerf(activeTabTimer);
 
-        const merged = [
-          ...(Array.isArray(newOnes) ? newOnes : []),
-          ...(Array.isArray(contactedOnes) ? contactedOnes : []),
-        ];
+        const buckets = await Promise.all(
+          ACTIVE_REQUEST_STATUSES.map((activeStatus) =>
+            getRequests({ status: activeStatus, max: 200 }).catch(() => [])
+          )
+        );
 
-        const assigned = merged.filter((r) => {
-          if (isAdminSoftDeletedRequest(r)) return false;
-          const assignedTo = String(r?.assignedTo || "").trim();
-          const st = String(r?.status || "").toLowerCase();
-          return assignedTo && st !== "closed" && st !== "rejected";
+        const dedupedById = new Map();
+        buckets.forEach((rows) => {
+          (Array.isArray(rows) ?rows : []).forEach((row) => {
+            if (!row?.id) return;
+            dedupedById.set(String(row.id), row);
+          });
         });
 
-        const map = new Map();
-        assigned.forEach((r) => map.set(r.id, r));
-        setItems(Array.from(map.values()));
-        endPerf(assignedTimer);
+        const merged = Array.from(dedupedById.values())
+          .filter((r) => !isAdminSoftDeletedRequest(r))
+          .filter((r) => {
+            const st = String(r?.status || "").toLowerCase();
+            if (st === "closed" || st === "rejected") return false;
+            const assignedTo = String(r?.assignedTo || "").trim();
+            return status === "assigned" ?Boolean(assignedTo) : !assignedTo;
+          })
+          .sort((a, b) => getCreatedAtMs(b) - getCreatedAtMs(a));
+
+        setItems(merged);
+        endPerf(activeTabTimer);
         return;
       }
 
       const data = await getRequests({ status, max: 120 });
-      setItems((Array.isArray(data) ? data : []).filter((r) => !isAdminSoftDeletedRequest(r)));
+      setItems((Array.isArray(data) ?data : []).filter((r) => !isAdminSoftDeletedRequest(r)));
     } catch (e) {
       console.error(e);
       logIndexHint(`getRequests(${status})`, e);
@@ -855,7 +862,7 @@ export default function AdminRequestsScreen() {
         uids.map(async (uid) => {
           try {
             const snap = await getDoc(doc(db, "staff", uid));
-            const email = snap.exists() ? String(snap.data()?.email || "").trim() : "";
+            const email = snap.exists() ?String(snap.data()?.email || "").trim() : "";
             return [uid, email];
           } catch {
             return [uid, ""];
@@ -901,7 +908,7 @@ export default function AdminRequestsScreen() {
           // path: serviceRequests/<rid>/pendingMessages/<mid>
           const parts = d.ref.path.split("/");
           const i = parts.indexOf("serviceRequests");
-          const rid = i >= 0 ? String(parts[i + 1] || "") : "";
+          const rid = i >= 0 ?String(parts[i + 1] || "") : "";
           if (rid) next.add(rid);
         });
 
@@ -968,7 +975,7 @@ export default function AdminRequestsScreen() {
 
   const tabHasDot = useMemo(() => {
     const out = { new: false, closed: false, rejected: false, assigned: false };
-    (pendingSet ? Array.from(pendingSet) : []).forEach((rid) => {
+    (pendingSet ?Array.from(pendingSet) : []).forEach((rid) => {
       const tk = reqMetaById?.[rid]?.tabKey;
       if (tk && out[tk] !== undefined) out[tk] = true;
     });
@@ -999,7 +1006,7 @@ export default function AdminRequestsScreen() {
         r.staffStatus,
         r.staffDecision,
         r.assignedTo,
-        r.needsReassignment ? "reassignment needed" : "",
+        r.needsReassignment ?"reassignment needed" : "",
         r.reassignReason,
         r.id,
       ]
@@ -1051,7 +1058,7 @@ export default function AdminRequestsScreen() {
       return true;
     });
 
-    const pinList = Array.isArray(pinsByTab?.[status]) ? pinsByTab[status] : [];
+    const pinList = Array.isArray(pinsByTab?.[status]) ?pinsByTab[status] : [];
     if (pinList.length === 0) {
       endPerf(timer);
       return base;
@@ -1186,13 +1193,13 @@ export default function AdminRequestsScreen() {
 
   const togglePinnedForTab = ({ requestId, tabKey }) => {
     const rid = String(requestId || "").trim();
-    const tk = isValidTabKey(tabKey) ? String(tabKey) : status;
+    const tk = isValidTabKey(tabKey) ?String(tabKey) : status;
     if (!rid) return;
 
     setPinsByTab((prev) => {
-      const current = Array.isArray(prev?.[tk]) ? prev[tk] : [];
+      const current = Array.isArray(prev?.[tk]) ?prev[tk] : [];
       const exists = current.includes(rid);
-      const nextList = exists ? current.filter((x) => x !== rid) : [rid, ...current.filter((x) => x !== rid)];
+      const nextList = exists ?current.filter((x) => x !== rid) : [rid, ...current.filter((x) => x !== rid)];
       return { ...(prev || {}), [tk]: nextList };
     });
   };
@@ -1201,7 +1208,7 @@ export default function AdminRequestsScreen() {
     const rid = String(r?.id || "").trim();
     if (!rid || deletingId) return;
 
-    const label = r?.requestType === "full" ? "Full Package" : (r?.serviceName || "request");
+    const label = r?.requestType === "full" ?"Full Package" : (r?.serviceName || "request");
     const ok = window.confirm(`Delete this request?\n\n${label}\nID: ${rid}\n\nScreenshot for easier retrieval later.`);
     if (!ok) return;
 
@@ -1225,7 +1232,7 @@ export default function AdminRequestsScreen() {
       setPinsByTab((prev) => {
         const next = { ...(prev || {}) };
         TABS.forEach((t) => {
-          const cur = Array.isArray(next?.[t.key]) ? next[t.key] : [];
+          const cur = Array.isArray(next?.[t.key]) ?next[t.key] : [];
           next[t.key] = cur.filter((x) => x !== rid);
         });
         return next;
@@ -1242,7 +1249,7 @@ export default function AdminRequestsScreen() {
   const softBg =
     "bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
   const enterWrap = "transition duration-500 ease-out will-change-transform will-change-opacity";
-  const enterCls = enter ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2";
+  const enterCls = enter ?"opacity-100 translate-y-0" : "opacity-0 translate-y-2";
 
   const card =
     "rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur transition duration-300 ease-out dark:border-zinc-800 dark:bg-zinc-900/45";
@@ -1284,14 +1291,14 @@ export default function AdminRequestsScreen() {
   );
 
   const adminLabel = roleCtx?.isSuperAdmin
-    ? "Super Admin"
+    ?"Super Admin"
     : roleCtx?.isAssignedAdmin
-    ? "Assigned Admin"
+    ?"Assigned Admin"
     : "Admin";
   const adminLabelTone = roleCtx?.isSuperAdmin
-    ? "text-rose-700 dark:text-rose-300 [text-shadow:0_0_10px_rgba(244,63,94,0.45)]"
+    ?"text-rose-700 dark:text-rose-300 [text-shadow:0_0_10px_rgba(244,63,94,0.45)]"
     : roleCtx?.isAssignedAdmin
-    ? "text-emerald-700 dark:text-emerald-300"
+    ?"text-emerald-700 dark:text-emerald-300"
     : "text-zinc-700 dark:text-zinc-300";
 
   return (
@@ -1326,8 +1333,8 @@ export default function AdminRequestsScreen() {
           <div className="mt-3 h-px w-full bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent dark:via-emerald-500/20" />
         </div>
 
-        {roleCtx?.isSuperAdmin ? <AssignedAdminAccessPanel /> : null}
-        {roleCtx?.isSuperAdmin ? (
+        {roleCtx?.isSuperAdmin ?<AssignedAdminAccessPanel /> : null}
+        {roleCtx?.isSuperAdmin ?(
           <div className="mt-5 rounded-3xl border border-emerald-200 bg-emerald-50/45 p-4 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -1345,22 +1352,22 @@ export default function AdminRequestsScreen() {
                 className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
               >
                 <AppIcon size={ICON_MD} icon={RefreshCw} />
-                {routingBusy ? "Routing..." : "Route Unrouted New"}
+                {routingBusy ?"Routing..." : "Route Unrouted New"}
               </button>
             </div>
-            {routingErr ? (
+            {routingErr ?(
               <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/35 dark:text-rose-200">
                 {routingErr}
               </div>
             ) : null}
-            {routingMsg ? (
+            {routingMsg ?(
               <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-200">
                 {routingMsg}
               </div>
             ) : null}
           </div>
         ) : null}
-        {roleCtx?.isAssignedAdmin ? <StaffAccessPanel /> : null}
+        {roleCtx?.isAssignedAdmin ?<StaffAccessPanel /> : null}
 
         {/* Tabs */}
         <div className="mt-6 flex flex-wrap gap-2">
@@ -1370,12 +1377,12 @@ export default function AdminRequestsScreen() {
               <button
                 key={t.key}
                 onClick={() => setStatus(t.key)}
-                className={`${tabBtnBase} ${status === t.key ? tabBtnOn : tabBtnOff}`}
+                className={`${tabBtnBase} ${status === t.key ?tabBtnOn : tabBtnOff}`}
                 type="button"
               >
                 <span className="inline-flex items-center gap-2">
                   {t.label}
-                  {showDot ? <RedDot className="translate-y-[1px]" /> : null}
+                  {showDot ?<RedDot className="translate-y-[1px]" /> : null}
                 </span>
               </button>
             );
@@ -1403,14 +1410,14 @@ export default function AdminRequestsScreen() {
               className={`relative inline-flex items-center gap-2 rounded-2xl border px-3.5 py-2.5 text-sm font-semibold shadow-sm backdrop-blur transition active:scale-[0.99]
                 ${
                   anyFiltersActive
-                    ? "border-rose-200 bg-rose-50/70 text-rose-700 hover:bg-rose-100 dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-200 dark:hover:bg-rose-950/35"
+                    ?"border-rose-200 bg-rose-50/70 text-rose-700 hover:bg-rose-100 dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-200 dark:hover:bg-rose-950/35"
                     : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-800 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-800 dark:bg-zinc-900/45 dark:text-zinc-100 dark:hover:bg-zinc-900"
                 }`}
               title="Filters"
             >
               <AppIcon size={ICON_MD} icon={SlidersHorizontal} />
               Filter
-              {anyFiltersActive ? (
+              {anyFiltersActive ?(
                 <span className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-600 px-1.5 text-[11px] font-bold text-white">
                   !
                 </span>
@@ -1433,7 +1440,7 @@ export default function AdminRequestsScreen() {
 
           {/* Filters popover */}
           <AnimatePresence>
-            {filtersOpen ? (
+            {filtersOpen ?(
               <motion.div
                 initial={{ opacity: 0, y: 8, scale: 0.99 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1445,7 +1452,7 @@ export default function AdminRequestsScreen() {
                   <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Filters</div>
 
                   <div className="flex items-center gap-2">
-                    {anyFiltersActive ? (
+                    {anyFiltersActive ?(
                       <button
                         type="button"
                         onClick={resetFilters}
@@ -1555,24 +1562,24 @@ export default function AdminRequestsScreen() {
         </div>
 
         {/* States */}
-        {loading ? (
+        {loading ?(
           <div className={`mt-6 ${card} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>Loading…</div>
-        ) : msg ? (
+        ) : msg ?(
           <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-4 text-sm text-rose-700 shadow-sm dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-200">
             {msg}
           </div>
-        ) : filtered.length === 0 ? (
+        ) : filtered.length === 0 ?(
           <div className={`mt-6 ${card} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>No requests found.</div>
         ) : (
           <motion.div variants={listWrap} initial="hidden" animate="show" className="mt-6 grid gap-3">
             {visibleRenderRows.map((r) => {
               const p = pill(r.status);
               const left = `${String(r.track || "").toUpperCase()} • ${r.country || "-"}`;
-              const right = r.requestType === "full" ? "Full Package" : `Single: ${r.serviceName || "-"}`;
+              const right = r.requestType === "full" ?"Full Package" : `Single: ${r.serviceName || "-"}`;
 
               const rid = String(r.id || "");
               const assignedTo = String(r?.assignedTo || "").trim();
-              const assignedEmail = assignedTo ? String(staffEmailByUid?.[assignedTo] || "").trim() : "";
+              const assignedEmail = assignedTo ?String(staffEmailByUid?.[assignedTo] || "").trim() : "";
               const staffStatus = String(r?.staffStatus || "").trim();
               const staffDecision = String(r?.staffDecision || "").trim();
               const staffUpdatedAt = formatShortTS(r?.staffUpdatedAt);
@@ -1582,22 +1589,22 @@ export default function AdminRequestsScreen() {
                 Boolean(r?.needsReassignment) || String(r?.staffStatus || "").toLowerCase() === "reassignment_needed";
               const urgentReassign = needsReassignment || Boolean(r?.reassignUrgent);
 
-              const sp = assignedTo ? staffPill(staffStatus || "assigned") : null;
-              const rp = assignedTo ? staffRecPill(staffDecision) : null;
+              const sp = assignedTo ?staffPill(staffStatus || "assigned") : null;
+              const rp = assignedTo ?staffRecPill(staffDecision) : null;
 
               const hasNew = pendingSet?.has(rid);
               const fullAccent = isFull
-                ? "border-emerald-300/80 bg-emerald-50/35 dark:border-emerald-800/60 dark:bg-emerald-950/15"
+                ?"border-emerald-300/80 bg-emerald-50/35 dark:border-emerald-800/60 dark:bg-emerald-950/15"
                 : "";
               const urgentAccent = urgentReassign
-                ? "border-rose-300/80 bg-rose-50/45 dark:border-rose-800/60 dark:bg-rose-950/20"
+                ?"border-rose-300/80 bg-rose-50/45 dark:border-rose-800/60 dark:bg-rose-950/20"
                 : "";
               const sideAccentClass = urgentReassign
-                ? "bg-rose-600/80"
+                ?"bg-rose-600/80"
                 : isFull
-                  ? "bg-emerald-500/80 dark:bg-emerald-400/70"
+                  ?"bg-emerald-500/80 dark:bg-emerald-400/70"
                   : hasNew
-                    ? "bg-rose-600/80"
+                    ?"bg-rose-600/80"
                     : "";
 
               return (
@@ -1621,7 +1628,7 @@ export default function AdminRequestsScreen() {
                   }}
                   className={`${tile} ${fullAccent} ${urgentAccent} relative overflow-hidden`}
                 >
-                  {sideAccentClass ? (
+                  {sideAccentClass ?(
                     <span className={`pointer-events-none absolute inset-y-0 left-0 w-1.5 ${sideAccentClass}`} />
                   ) : null}
 
@@ -1629,13 +1636,13 @@ export default function AdminRequestsScreen() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <div className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">{left}</div>
-                        {hasNew ? <RedDot /> : null}
-                        {urgentReassign ? (
+                        {hasNew ?<RedDot /> : null}
+                        {urgentReassign ?(
                           <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-100/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-800 dark:border-rose-800/60 dark:bg-rose-900/35 dark:text-rose-200">
                             Re-assignment needed
                           </span>
                         ) : null}
-                        {(pinsByTab?.[status] || []).includes(rid) ? (
+                        {(pinsByTab?.[status] || []).includes(rid) ?(
                           <span
                             className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50/80 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200"
                             title="Pinned to top in this tab"
@@ -1648,7 +1655,7 @@ export default function AdminRequestsScreen() {
 
                       <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{right}</div>
 
-                      {isFull ? (
+                      {isFull ?(
                         <div className="mt-2">
                           <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-100/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-900/35 dark:text-emerald-200">
                             Full package
@@ -1656,17 +1663,17 @@ export default function AdminRequestsScreen() {
                         </div>
                       ) : null}
 
-                      {assignedTo ? (
+                      {assignedTo ?(
                         <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
                           Assigned to:{" "}
                           <span className="text-zinc-800 dark:text-zinc-100">{assignedEmail || assignedTo}</span>
-                          {staffUpdatedAt ? (
+                          {staffUpdatedAt ?(
                             <span className="ml-2 text-zinc-500 dark:text-zinc-400">• Updated: {staffUpdatedAt}</span>
                           ) : null}
                         </div>
                       ) : null}
 
-                      {urgentReassign ? (
+                      {urgentReassign ?(
                         <div className="mt-2 text-xs text-rose-700 dark:text-rose-300">
                           {String(r?.reassignReason || "Urgent: this request needs reassignment.")}
                         </div>
@@ -1680,13 +1687,13 @@ export default function AdminRequestsScreen() {
                     <div className="flex flex-wrap items-center justify-end gap-2 max-w-[190px]">
                       <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${p.cls}`}>{p.label}</span>
 
-                      {sp ? (
+                      {sp ?(
                         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${sp.cls}`}>
                           {sp.label}
                         </span>
                       ) : null}
 
-                      {rp ? (
+                      {rp ?(
                         <span
                           className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${rp.cls}`}
                           title="Staff recommendation"
@@ -1703,7 +1710,7 @@ export default function AdminRequestsScreen() {
                 </motion.div>
               );
             })}
-            {visibleCount < filtered.length ? (
+            {visibleCount < filtered.length ?(
               <button
                 type="button"
                 onClick={() => setVisibleCount((prev) => prev + INITIAL_RENDER_COUNT)}
@@ -1719,7 +1726,7 @@ export default function AdminRequestsScreen() {
       </motion.div>
 
       <AnimatePresence>
-        {requestActions?.request ? (
+        {requestActions?.request ?(
           <motion.div
             className="fixed inset-0 z-50"
             initial={{ opacity: 0 }}
@@ -1730,22 +1737,22 @@ export default function AdminRequestsScreen() {
             <div className="absolute inset-0 bg-black/18" />
             {(() => {
               const actionReq = requestActions.request;
-              const actionTabKey = isValidTabKey(requestActions.tabKey) ? requestActions.tabKey : status;
+              const actionTabKey = isValidTabKey(requestActions.tabKey) ?requestActions.tabKey : status;
               const actionRid = String(actionReq?.id || "").trim();
               const isPinned = (pinsByTab?.[actionTabKey] || []).includes(actionRid);
               const shortLabel =
                 actionReq?.requestType === "full"
-                  ? "Full Package"
+                  ?"Full Package"
                   : String(actionReq?.serviceName || "Request");
 
-              const vw = typeof window !== "undefined" ? window.innerWidth : 360;
-              const vh = typeof window !== "undefined" ? window.innerHeight : 640;
+              const vw = typeof window !== "undefined" ?window.innerWidth : 360;
+              const vh = typeof window !== "undefined" ?window.innerHeight : 640;
               const menuW = Math.max(216, Math.min(272, vw - 20));
               const menuH = 168;
               const rawX = Number(requestActions?.x || 0);
               const rawY = Number(requestActions?.y || 0);
-              const anchorX = rawX > 0 ? rawX : Math.round(vw / 2);
-              const anchorY = rawY > 0 ? rawY : Math.round(vh / 2);
+              const anchorX = rawX > 0 ?rawX : Math.round(vw / 2);
+              const anchorY = rawY > 0 ?rawY : Math.round(vh / 2);
               const left = Math.max(10, Math.min(anchorX - 10, vw - menuW - 10));
               const top = Math.max(10, Math.min(anchorY - 10, vh - menuH - 10));
               const originX = Math.max(10, Math.min(anchorX - left, menuW - 10));
@@ -1793,8 +1800,8 @@ export default function AdminRequestsScreen() {
                       }}
                       className="inline-flex w-full items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2.5 text-sm font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100 active:scale-[0.99] dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200 dark:hover:bg-emerald-950/30"
                     >
-                      <span>{isPinned ? "Unpin from top" : "Pin to top"}</span>
-                      <AppIcon icon={isPinned ? PinOff : Pin} size={ICON_SM} className="text-emerald-700 dark:text-emerald-200" />
+                      <span>{isPinned ?"Unpin from top" : "Pin to top"}</span>
+                      <AppIcon icon={isPinned ?PinOff : Pin} size={ICON_SM} className="text-emerald-700 dark:text-emerald-200" />
                     </button>
 
                     <button
@@ -1803,7 +1810,7 @@ export default function AdminRequestsScreen() {
                       disabled={deletingId === actionRid}
                       className="inline-flex w-full items-center justify-between rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2.5 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200 dark:hover:bg-rose-950/30"
                     >
-                      <span>{deletingId === actionRid ? "Deleting..." : "Delete request"}</span>
+                      <span>{deletingId === actionRid ?"Deleting..." : "Delete request"}</span>
                       <AppIcon icon={Trash2} size={ICON_SM} />
                     </button>
 
