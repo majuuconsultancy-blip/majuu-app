@@ -770,21 +770,27 @@ export default function AdminRequestsScreen() {
         const activeTabTimer = `${PERF_TAG} transform:${status} active merge/filter`;
         startPerf(activeTabTimer);
 
-        const buckets = await Promise.all(
-          ACTIVE_REQUEST_STATUSES.map((activeStatus) =>
-            getRequests({ status: activeStatus, max: 200 }).catch(() => [])
-          )
-        );
-
-        const dedupedById = new Map();
-        buckets.forEach((rows) => {
-          (Array.isArray(rows) ?rows : []).forEach((row) => {
-            if (!row?.id) return;
-            dedupedById.set(String(row.id), row);
+        let baseRows = [];
+        if (roleCtx?.isAssignedAdmin) {
+          // Assigned-admin loading is already scope-filtered in service; fetch once and classify locally.
+          baseRows = await getRequests({ max: 420 }).catch(() => []);
+        } else {
+          const buckets = await Promise.all(
+            ACTIVE_REQUEST_STATUSES.map((activeStatus) =>
+              getRequests({ status: activeStatus, max: 200 }).catch(() => [])
+            )
+          );
+          const dedupedById = new Map();
+          buckets.forEach((rows) => {
+            (Array.isArray(rows) ?rows : []).forEach((row) => {
+              if (!row?.id) return;
+              dedupedById.set(String(row.id), row);
+            });
           });
-        });
+          baseRows = Array.from(dedupedById.values());
+        }
 
-        const merged = Array.from(dedupedById.values())
+        const merged = (Array.isArray(baseRows) ?baseRows : [])
           .filter((r) => !isAdminSoftDeletedRequest(r))
           .filter((r) => {
             const st = String(r?.status || "").toLowerCase();
@@ -814,7 +820,7 @@ export default function AdminRequestsScreen() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
+  }, [status, roleCtx?.isAssignedAdmin]);
 
   const runBulkRouteUnrouted = async () => {
     setRoutingErr("");
@@ -1747,14 +1753,27 @@ export default function AdminRequestsScreen() {
 
               const vw = typeof window !== "undefined" ?window.innerWidth : 360;
               const vh = typeof window !== "undefined" ?window.innerHeight : 640;
+              const docStyle =
+                typeof window !== "undefined" && typeof document !== "undefined"
+                  ? window.getComputedStyle(document.documentElement)
+                  : null;
+              const safeTop = Math.max(0, parseFloat(docStyle?.getPropertyValue("--app-safe-top") || "0") || 0);
+              const safeRight = Math.max(0, parseFloat(docStyle?.getPropertyValue("--app-safe-right") || "0") || 0);
+              const safeBottom = Math.max(0, parseFloat(docStyle?.getPropertyValue("--app-safe-bottom") || "0") || 0);
+              const safeLeft = Math.max(0, parseFloat(docStyle?.getPropertyValue("--app-safe-left") || "0") || 0);
               const menuW = Math.max(216, Math.min(272, vw - 20));
               const menuH = 168;
               const rawX = Number(requestActions?.x || 0);
               const rawY = Number(requestActions?.y || 0);
               const anchorX = rawX > 0 ?rawX : Math.round(vw / 2);
               const anchorY = rawY > 0 ?rawY : Math.round(vh / 2);
-              const left = Math.max(10, Math.min(anchorX - 10, vw - menuW - 10));
-              const top = Math.max(10, Math.min(anchorY - 10, vh - menuH - 10));
+              const edgePad = 10;
+              const leftMin = safeLeft + edgePad;
+              const leftMax = Math.max(leftMin, vw - menuW - safeRight - edgePad);
+              const topMin = safeTop + edgePad;
+              const topMax = Math.max(topMin, vh - menuH - safeBottom - edgePad);
+              const left = Math.max(leftMin, Math.min(anchorX - edgePad, leftMax));
+              const top = Math.max(topMin, Math.min(anchorY - edgePad, topMax));
               const originX = Math.max(10, Math.min(anchorX - left, menuW - 10));
               const originY = Math.max(10, Math.min(anchorY - top, menuH - 10));
 

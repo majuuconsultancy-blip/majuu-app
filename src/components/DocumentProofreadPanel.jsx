@@ -206,7 +206,7 @@ export default function DocumentProofreadPanel({
 
       {canPortal && modalOpen
         ? createPortal(
-            <div className="fixed inset-0 z-[85] p-3 sm:p-5">
+            <div className="fixed inset-0 z-[85] app-overlay-safe">
               <button
                 type="button"
                 aria-label="Close proofread modal"
@@ -214,7 +214,13 @@ export default function DocumentProofreadPanel({
                 className="absolute inset-0 bg-black/45 backdrop-blur-[2px] t-fade"
               />
 
-              <div className="relative mx-auto flex h-[min(92vh,820px)] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 shadow-2xl t-pop">
+              <div
+                className="relative mx-auto flex w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 shadow-2xl t-pop"
+                style={{
+                  height: "min(92vh, 820px, calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 1.5rem))",
+                  maxHeight: "min(92vh, 820px, calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 1.5rem))",
+                }}
+              >
                 <div className="flex items-center justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 px-4 py-3 sm:px-5">
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -334,4 +340,3 @@ export default function DocumentProofreadPanel({
     </>
   );
 }
-

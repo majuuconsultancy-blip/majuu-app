@@ -39,6 +39,7 @@ import RequestModal from "../components/RequestModal";
 import FullPackageDiagnosticModal from "../components/FullPackageDiagnosticModal";
 
 import { createServiceRequest } from "../services/requestservice";
+import { createUnlockPaymentForRequest } from "../services/paymentservice";
 import {
   getUserState,
   setActiveProcessDetails,
@@ -384,6 +385,7 @@ export default function StudyWeHelp() {
     town,
     paid,
     paymentMeta,
+    unlockPaymentReceipt,
   }) => {
     if (!uid || !requestMeta) return;
 
@@ -433,6 +435,33 @@ export default function StudyWeHelp() {
         paymentMeta: paymentMeta || null,
         requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
       });
+
+      try {
+        await createUnlockPaymentForRequest({
+          requestId,
+          requestUid: uid,
+          amount: unlockPaymentReceipt?.amount || 10000,
+          currency: String(unlockPaymentReceipt?.currency || "KES"),
+          paymentLabel: "Unlock request payment",
+          note: String(requestMeta?.serviceName || "").trim(),
+          paidAtMs:
+            Number(unlockPaymentReceipt?.paidAtMs || unlockPaymentReceipt?.paidAt || Date.now()) ||
+            Date.now(),
+          transactionReference: String(
+            unlockPaymentReceipt?.transactionReference ||
+              unlockPaymentReceipt?.ref ||
+              paymentMeta?.ref ||
+              ""
+          ),
+          context: {
+            flow: "wehelp",
+            track: "study",
+            serviceName: String(requestMeta?.serviceName || ""),
+          },
+        });
+      } catch (paymentError) {
+        console.warn("Failed to persist unlock payment record:", paymentError);
+      }
 
       const picked = Array.isArray(dummyFiles) ? dummyFiles : [];
       if (picked.length > 0) {

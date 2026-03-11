@@ -1,5 +1,5 @@
-// ✅ RequestModal.jsx (FINAL COPY-PASTE — ANDROID KEYBOARD WARM-UP + TOUCH + SCROLL FIX)
-// ✅ UPDATE (Back routing support):
+﻿// âœ… RequestModal.jsx (FINAL COPY-PASTE â€” ANDROID KEYBOARD WARM-UP + TOUCH + SCROLL FIX)
+// âœ… UPDATE (Back routing support):
 // - Add optional prop: returnTo (string path)
 // - If returnTo is set, closing the modal (X / Cancel / overlay) will navigate there.
 // - If not set, it behaves exactly like before.
@@ -170,7 +170,34 @@ function normalizeFileMeta(input) {
   };
 }
 
-// ✅ Best-practice body lock for Android PWA keyboard stability
+function normalizeUnlockPaymentReceipt(input) {
+  if (!input || typeof input !== "object") return null;
+  const status = String(input?.status || "").trim().toLowerCase();
+  if (status && status !== "paid" && status !== "confirmed") return null;
+
+  const paidAtRaw = Number(
+    input?.paidAt ||
+      input?.paidAtMs ||
+      input?.confirmedAt ||
+      input?.createdAt ||
+      0
+  );
+  const paidAtMs = Number.isFinite(paidAtRaw) && paidAtRaw > 0 ? paidAtRaw : Date.now();
+
+  return {
+    status: "paid",
+    method: String(input?.method || "dummy").trim().toLowerCase() || "dummy",
+    amount: String(input?.amount || "").trim(),
+    paidAtMs,
+    transactionReference: String(
+      input?.transactionReference || input?.reference || input?.ref || ""
+    )
+      .trim()
+      .slice(0, 120),
+  };
+}
+
+// âœ… Best-practice body lock for Android PWA keyboard stability
 function lockBodyScrollFixed() {
   const y = window.scrollY || 0;
 
@@ -221,7 +248,7 @@ function scrollFieldIntoView(el, scrollContainer) {
 }
 
 /**
- * ✅ Android WebView IME warm-up (one-time per session)
+ * âœ… Android WebView IME warm-up (one-time per session)
  * Runs only on a real user gesture (we call it from onPointerDownCapture on inputs).
  * Then refocuses the target input.
  */
@@ -287,10 +314,11 @@ export default function RequestModal({
   onPay,
   paymentContext = null,
   paymentAmount = "",
+  paymentRequired = true,
   maxPdfMb = 10,
   enableAttachments = true,
 
-  // ✅ NEW: optional "where to go back to when closing"
+  // âœ… NEW: optional "where to go back to when closing"
   // Example:
   //   returnTo={`/app/work/we-help?country=${encodeURIComponent(country)}`}
   returnTo,
@@ -307,10 +335,10 @@ export default function RequestModal({
   const wasOpenRef = useRef(false);
   const lastStateEmitRef = useRef("");
 
-  // ✅ prevents "tap causes close + blur" on Android
+  // âœ… prevents "tap causes close + blur" on Android
   const startedInsidePanelRef = useRef(false);
 
-  // ✅ fallback: allow returnTo via query param (?returnTo=/app/...)
+  // âœ… fallback: allow returnTo via query param (?returnTo=/app/...)
   const effectiveReturnTo = useMemo(() => {
     if (returnTo) return String(returnTo);
     try {
@@ -355,6 +383,13 @@ export default function RequestModal({
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+
+  const forcePaid = useMemo(() => {
+    if (!paymentRequired) return true;
+    const flow = String(paymentContext?.flow || "").trim().toLowerCase();
+    if (flow !== "fullpackage") return false;
+    return Boolean(paymentContext?.unlockPaid || paymentContext?.unlockPaymentMeta);
+  }, [paymentRequired, paymentContext]);
 
   const resolvedPaymentAmount = useMemo(() => {
     const clean = String(paymentAmount || "").trim();
@@ -402,14 +437,14 @@ export default function RequestModal({
     setNote(seeded?.note ?? storedForm?.note ?? "");
     setPickedFiles([]);
     setPickedFileMetas(restoredMetas);
-    setPaid(Boolean(seeded?.paid || storedForm?.paid || paidFromStorage));
+    setPaid(Boolean(forcePaid || seeded?.paid || storedForm?.paid || paidFromStorage));
     setErr("");
     setLoading(false);
 
     requestAnimationFrame(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = 0;
     });
-  }, [open, defaultName, defaultPhone, defaultEmail, defaultCounty, defaultTown, initialState, queryDraftId]);
+  }, [open, defaultName, defaultPhone, defaultEmail, defaultCounty, defaultTown, initialState, queryDraftId, forcePaid]);
 
   useEffect(() => {
     if (!open) {
@@ -420,7 +455,7 @@ export default function RequestModal({
 
     const payload = {
       open: Boolean(open),
-      step: paid ? "submit" : "form",
+      step: forcePaid || paid ? "submit" : "form",
       formState: {
         name: String(name || ""),
         phone: String(phone || ""),
@@ -430,7 +465,7 @@ export default function RequestModal({
         city: String(town || ""),
         note: String(note || ""),
         fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
-        paid: Boolean(paid),
+        paid: Boolean(forcePaid || paid),
         requestDraftId: String(requestDraftId || ""),
       },
     };
@@ -445,7 +480,7 @@ export default function RequestModal({
     }, 90);
 
     return () => clearTimeout(timer);
-  }, [onStateChange, open, paid, name, phone, email, county, town, note, pickedFileMetas, requestDraftId]);
+  }, [onStateChange, open, paid, forcePaid, name, phone, email, county, town, note, pickedFileMetas, requestDraftId]);
 
   useEffect(() => {
     if (!open) return;
@@ -462,7 +497,7 @@ export default function RequestModal({
         city: String(town || ""),
         note: String(note || ""),
         fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
-        paid: Boolean(paid),
+        paid: Boolean(forcePaid || paid),
         requestDraftId: String(requestDraftId || ""),
       },
       paymentContext: paymentContext && typeof paymentContext === "object" ? paymentContext : null,
@@ -480,11 +515,12 @@ export default function RequestModal({
     note,
     pickedFileMetas,
     paid,
+    forcePaid,
     paymentContext,
     resolvedPaymentAmount,
   ]);
 
-  // ✅ lock body scroll (ANDROID SAFE)
+  // âœ… lock body scroll (ANDROID SAFE)
   useEffect(() => {
     if (!open) return;
     const unlock = lockBodyScrollFixed();
@@ -515,19 +551,21 @@ export default function RequestModal({
   }, [name, phone, email, loading]);
 
   const canSubmit = useMemo(() => {
+    const hasPaymentGatePassed = paymentRequired ? paid : true;
     return (
       name.trim().length > 0 &&
       phone.trim().length > 0 &&
       isValidEmail(email) &&
       String(county || "").trim().length > 0 &&
-      paid &&
+      hasPaymentGatePassed &&
       !loading
     );
-  }, [name, phone, email, county, paid, loading]);
+  }, [name, phone, email, county, paid, paymentRequired, loading]);
 
   if (!open) return null;
 
   const doPay = () => {
+    if (!paymentRequired) return;
     if (!name.trim() || !phone.trim() || !String(email || "").trim()) {
       setErr("Please fill in name, phone and email first.");
       return;
@@ -573,7 +611,7 @@ export default function RequestModal({
         city: String(town || ""),
         note: String(note || ""),
         fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
-        paid: Boolean(paid),
+        paid: Boolean(forcePaid || paid),
         requestDraftId: draftId,
       },
       paymentContext: paymentContext && typeof paymentContext === "object" ? paymentContext : null,
@@ -627,7 +665,7 @@ export default function RequestModal({
     if (!cleanEmail) return setErr("Please enter your email address.");
     if (!isValidEmail(cleanEmail)) return setErr("Please enter a valid email address.");
     if (!cleanCounty) return setErr("Please select your county.");
-    if (!paid) return setErr("Please press Pay first to unlock sending.");
+    if (paymentRequired && !paid) return setErr("Please press Pay first to unlock sending.");
 
     let fileMetas = [];
     if (enableAttachments) {
@@ -648,6 +686,11 @@ export default function RequestModal({
 
     setLoading(true);
     try {
+      const draftPayment = requestDraftId ? getDummyPaymentState(requestDraftId) : null;
+      const fromDraft = normalizeUnlockPaymentReceipt(draftPayment);
+      const fromContext = normalizeUnlockPaymentReceipt(paymentContext?.unlockPaymentMeta);
+      const unlockPaymentReceipt = fromDraft || fromContext;
+
       await onSubmit({
         name: cleanName,
         phone: cleanPhone,
@@ -668,8 +711,16 @@ export default function RequestModal({
               }
             : null,
 
-        paid: true,
-        paymentMeta: { status: "paid_gate_passed", method: "dummy", paidAt: Date.now() },
+        paid: Boolean(paymentRequired ? paid : true),
+        paymentMeta: unlockPaymentReceipt
+          ? {
+              status: unlockPaymentReceipt.status,
+              method: unlockPaymentReceipt.method,
+              paidAt: unlockPaymentReceipt.paidAtMs,
+              ref: unlockPaymentReceipt.transactionReference,
+            }
+          : { status: "paid_gate_passed", method: "dummy", paidAt: Date.now() },
+        unlockPaymentReceipt: unlockPaymentReceipt || null,
       });
 
       if (requestDraftId) {
@@ -683,7 +734,7 @@ export default function RequestModal({
     }
   };
 
-  // ✅ lighter styles in standalone (no blur, no heavy shadows)
+  // âœ… lighter styles in standalone (no blur, no heavy shadows)
   const overlayCls = STANDALONE ? "bg-black/40" : "bg-black/35 backdrop-blur-[2px]";
   const panelCls = STANDALONE
     ? "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 dark:border-zinc-800 dark:bg-zinc-950 flex flex-col motion-modal-panel anim-in-pop"
@@ -710,6 +761,7 @@ export default function RequestModal({
     onFocus: (e) => scrollFieldIntoView(e.currentTarget, scrollRef.current),
     onPointerDownCapture: (e) => warmUpKeyboardOnceAndRefocus(e.currentTarget),
   };
+  const panelHeight = "min(79vh, calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 2rem))";
 
   return (
     <div
@@ -718,7 +770,7 @@ export default function RequestModal({
       role="dialog"
       style={{ overscrollBehavior: "contain" }}
     >
-      {/* ✅ Overlay: close ONLY if pointer started on overlay (not inside modal) */}
+      {/* âœ… Overlay: close ONLY if pointer started on overlay (not inside modal) */}
       <div
         className={`absolute inset-0 ${overlayCls} motion-modal-backdrop anim-in-fade`}
         aria-hidden="true"
@@ -730,11 +782,19 @@ export default function RequestModal({
       />
 
       {/* panel wrapper */}
-      <div className="relative min-h-screen flex items-center justify-center p-4">
+      <div
+        className="relative min-h-screen flex items-center justify-center p-4"
+        style={{
+          paddingTop: "max(1rem, calc(var(--app-safe-top) + 0.4rem))",
+          paddingBottom: "max(1rem, calc(var(--app-safe-bottom) + 0.4rem))",
+          paddingLeft: "calc(var(--app-safe-left) + 1rem)",
+          paddingRight: "calc(var(--app-safe-right) + 1rem)",
+        }}
+      >
         <div
           ref={panelRef}
           className={panelCls}
-          style={{ height: "79vh", maxHeight: "79vh", overflow: "hidden" }}
+          style={{ height: panelHeight, maxHeight: panelHeight, overflow: "hidden" }}
           onPointerDown={(e) => {
             startedInsidePanelRef.current = true;
             e.stopPropagation();
@@ -932,7 +992,7 @@ export default function RequestModal({
                               key={`${f.name}-${idx}`}
                               className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
                             >
-                              {f.name} • {Math.round((f.size || 0) / 1024)} KB
+                              {f.name} â€¢ {Math.round((f.size || 0) / 1024)} KB
                             </div>
                           ))}
                         </div>
@@ -969,20 +1029,31 @@ export default function RequestModal({
                 <div className="pt-2">
                   <div className={ctaWrapCls}>
                     <div className="grid gap-2">
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={doPay}
-                          disabled={!canPay || loading || paid}
-                          className={`w-full rounded-xl border px-4 py-3 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60 ${
-                            paid
-                              ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                              : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
-                          }`}
-                        >
-                          {paid ? "Paid ✓" : "Pay"}
-                        </button>
+                      {paymentRequired ? (
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={doPay}
+                            disabled={!canPay || loading || paid}
+                            className={`w-full rounded-xl border px-4 py-3 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-60 ${
+                              paid
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                                : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                            }`}
+                          >
+                            {paid ? "Paid" : "Pay"}
+                          </button>
 
+                          <button
+                            type="button"
+                            onClick={submit}
+                            disabled={!canSubmit}
+                            className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                          >
+                            {loading ? "Sending..." : "Send request"}
+                          </button>
+                        </div>
+                      ) : (
                         <button
                           type="button"
                           onClick={submit}
@@ -991,7 +1062,7 @@ export default function RequestModal({
                         >
                           {loading ? "Sending..." : "Send request"}
                         </button>
-                      </div>
+                      )}
 
                       <button
                         type="button"
@@ -1002,9 +1073,15 @@ export default function RequestModal({
                         Cancel
                       </button>
 
-                      <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
-                        You must <span className="font-semibold">Pay</span> before sending an application.
-                      </p>
+                      {paymentRequired ? (
+                        <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
+                          You must <span className="font-semibold">Pay</span> before sending an application.
+                        </p>
+                      ) : (
+                        <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
+                          Unlock payment was already completed for this request flow.
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1015,4 +1092,3 @@ export default function RequestModal({
     </div>
   );
 }
-

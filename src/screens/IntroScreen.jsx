@@ -207,7 +207,7 @@ export default function IntroScreen() {
   return (
     <div
       className={cx(
-        "h-[calc(100dvh-var(--app-safe-top))] overflow-hidden overscroll-none bg-white transition-[opacity,transform,filter] duration-200",
+        "h-[calc(var(--app-viewport-height)-var(--app-safe-top))] overflow-hidden overscroll-none bg-white transition-[opacity,transform,filter] duration-200",
         isExiting &&
           (exitDirection === "left"
             ? "pointer-events-none -translate-x-6 opacity-0 blur-[2px]"

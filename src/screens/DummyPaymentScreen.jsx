@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { smartBack } from "../utils/navBack";
 import {
+  buildDummyTransactionReference,
+  userPayAwaitingPayment,
+} from "../services/paymentservice";
+import {
   getDummyPaymentDraft,
   getDummyPaymentState,
   markDummyPaymentPaid,
@@ -118,13 +122,13 @@ function buildReturnState({ paymentContext, formState, requestDraftId }) {
     };
   }
 
-  if (flow === "fullpackagedeposit") {
+  if (flow === "fullpackageunlock" || flow === "fullpackagedeposit") {
     const track = String(context.track || "").trim().toLowerCase();
     const fullPackageId = String(context.fullPackageId || "").trim();
     const selectedItems = Array.isArray(context.selectedItems)
       ? context.selectedItems.map((x) => String(x || "").trim()).filter(Boolean)
       : [];
-    const depositAmount = Number(context.depositAmount || 0);
+    const unlockAmount = Number(context.unlockAmount || context.depositAmount || 0);
     if (!track || !fullPackageId) return null;
 
     return {
@@ -133,11 +137,11 @@ function buildReturnState({ paymentContext, formState, requestDraftId }) {
         fullPackage: {
           detailsOpen: true,
           diagnosticOpen: true,
-          deposit: {
+          unlock: {
             requestDraftId: String(requestDraftId || ""),
             fullPackageId,
             selectedItems,
-            depositAmount,
+            unlockAmount,
           },
         },
       },
@@ -175,6 +179,12 @@ export default function DummyPaymentScreen() {
     return normalizeContext(location.state?.paymentContext) || normalizeContext(storedDraft?.paymentContext);
   }, [location.state, storedDraft]);
 
+  const paymentFlow = useMemo(() => {
+    return String(paymentContext?.flow || "").trim().toLowerCase();
+  }, [paymentContext]);
+
+  const isInProgressFlow = paymentFlow === "inprogresspayment";
+
   const seedFormState = useMemo(() => {
     const fromState = normalizeContext(location.state?.draftForm);
     if (fromState) return fromState;
@@ -191,10 +201,11 @@ export default function DummyPaymentScreen() {
   }, [location.state, query, storedDraft]);
 
   const storedPayment = useMemo(() => {
+    if (isInProgressFlow) return null;
     if (!requestDraftId) return null;
     const raw = getDummyPaymentState(requestDraftId);
     return raw && typeof raw === "object" ? raw : null;
-  }, [requestDraftId]);
+  }, [isInProgressFlow, requestDraftId]);
 
   const initialMethod = useMemo(() => {
     const savedMethod = String(storedPayment?.method || "").toLowerCase();
@@ -216,6 +227,9 @@ export default function DummyPaymentScreen() {
   const [processing, setProcessing] = useState(false);
   const [success, setSuccess] = useState(initialSuccess);
   const [error, setError] = useState("");
+  const [transactionReference, setTransactionReference] = useState(() =>
+    String(storedPayment?.transactionReference || storedPayment?.ref || "").trim()
+  );
 
   useEffect(() => {
     return () => {
@@ -228,7 +242,15 @@ export default function DummyPaymentScreen() {
   const controlsDisabled = processing || success;
 
   const validate = () => {
-    if (!requestDraftId) return "Unable to identify this request draft. Go back and try again.";
+    if (!isInProgressFlow && !requestDraftId) {
+      return "Unable to identify this request draft. Go back and try again.";
+    }
+
+    if (isInProgressFlow) {
+      const reqId = String(paymentContext?.requestId || "").trim();
+      const payId = String(paymentContext?.paymentId || "").trim();
+      if (!reqId || !payId) return "Missing payment request details. Go back and retry.";
+    }
 
     if (method === "mpesa") {
       const digits = safeDigits(phone);
@@ -261,6 +283,11 @@ export default function DummyPaymentScreen() {
     smartBack(navigate, "/app/home");
   };
 
+  const checkoutTitle = isInProgressFlow ? "Request Payment" : "Secure Payment";
+  const checkoutSubtitle = isInProgressFlow
+    ? "Complete this demo checkout to continue your in-progress request."
+    : "Complete this demo checkout to unlock request submission.";
+
   const handlePayNow = () => {
     const validationError = validate();
     if (validationError) {
@@ -271,12 +298,14 @@ export default function DummyPaymentScreen() {
     setError("");
     setProcessing(true);
 
-    setDummyPaymentState(requestDraftId, {
-      status: "processing",
-      method,
-      amount,
-      startedAt: Date.now(),
-    });
+    if (!isInProgressFlow) {
+      setDummyPaymentState(requestDraftId, {
+        status: "processing",
+        method,
+        amount,
+        startedAt: Date.now(),
+      });
+    }
 
     if (timerRef.current) {
       window.clearTimeout(timerRef.current);
@@ -286,17 +315,50 @@ export default function DummyPaymentScreen() {
     timerRef.current = window.setTimeout(() => {
       setProcessing(false);
       setSuccess(true);
-      setDummyPaymentState(requestDraftId, {
-        status: "confirmed",
-        method,
-        amount,
-        confirmedAt: Date.now(),
-      });
+      const reference = buildDummyTransactionReference(Date.now());
+      setTransactionReference(reference);
+      if (!isInProgressFlow) {
+        setDummyPaymentState(requestDraftId, {
+          status: "confirmed",
+          method,
+          amount,
+          confirmedAt: Date.now(),
+          transactionReference: reference,
+        });
+      }
       timerRef.current = null;
     }, PROCESSING_DELAY_MS);
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
+    if (isInProgressFlow) {
+      const reqId = String(paymentContext?.requestId || "").trim();
+      const payId = String(paymentContext?.paymentId || "").trim();
+      if (!reqId || !payId) {
+        setError("Missing payment request details. Please go back and retry.");
+        return;
+      }
+
+      try {
+        await userPayAwaitingPayment({
+          requestId: reqId,
+          paymentId: payId,
+          method,
+          paidAtMs: Date.now(),
+        });
+      } catch (payErr) {
+        setError(payErr?.message || "Unable to confirm payment right now.");
+        return;
+      }
+
+      if (returnTo) {
+        navigate(returnTo, { replace: true });
+        return;
+      }
+      navigate(`/app/request/${encodeURIComponent(reqId)}`, { replace: true });
+      return;
+    }
+
     if (!requestDraftId) {
       setError("Unable to continue. Please go back and retry payment.");
       return;
@@ -306,6 +368,7 @@ export default function DummyPaymentScreen() {
       method,
       amount,
       confirmedAt: Date.now(),
+      transactionReference: transactionReference || buildDummyTransactionReference(Date.now()),
     });
 
     const returnState = buildReturnState({
@@ -338,10 +401,8 @@ export default function DummyPaymentScreen() {
         </button>
 
         <div className="rounded-3xl border border-zinc-200/80 dark:border-zinc-800 bg-white/85 dark:bg-zinc-900/70 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.10)] backdrop-blur">
-          <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Secure Payment</h1>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-            Complete this demo checkout to unlock request submission.
-          </p>
+          <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{checkoutTitle}</h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{checkoutSubtitle}</p>
 
           {amount ? (
             <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-sm text-emerald-900">
@@ -462,6 +523,11 @@ export default function DummyPaymentScreen() {
                 Payment Confirmed
               </div>
               <p className="mt-1 text-sm">We have received your payment.</p>
+              {transactionReference ? (
+                <p className="mt-1 text-xs text-emerald-900/80">
+                  Ref: <span className="font-semibold">{transactionReference}</span>
+                </p>
+              ) : null}
             </div>
           ) : null}
 

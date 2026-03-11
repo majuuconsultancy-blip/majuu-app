@@ -39,6 +39,12 @@ import { auth, db } from "../firebase";
 import StaffRequestChatPanel from "../components/StaffRequestChatPanel";
 import { smartBack } from "../utils/navBack";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import {
+  createInProgressPaymentProposal,
+  normalizePaymentDoc,
+  PAYMENT_TYPES,
+  paymentStatusUi,
+} from "../services/paymentservice";
 
 /* ---------- Minimal icons ---------- */
 function IconChevronLeft(props) {
@@ -218,6 +224,13 @@ export default function StaffRequestDetailsScreen() {
   const [draftName, setDraftName] = useState("");
   const [draftUrl, setDraftUrl] = useState("");
 
+  const [payments, setPayments] = useState([]);
+  const [paymentsErr, setPaymentsErr] = useState("");
+  const [paymentLabel, setPaymentLabel] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentNote, setPaymentNote] = useState("");
+  const [paymentBusy, setPaymentBusy] = useState(false);
+
   // ✅ polish tokens
   const softBg = "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
   const card =
@@ -269,6 +282,14 @@ export default function StaffRequestDetailsScreen() {
 
   const canWork = status !== "closed" && status !== "rejected";
   const isDone = staffStatus === "done";
+  const inProgressPayments = useMemo(
+    () => payments.filter((p) => String(p.paymentType || "").toLowerCase() === PAYMENT_TYPES.IN_PROGRESS),
+    [payments]
+  );
+  const unlockPayment = useMemo(
+    () => payments.find((p) => String(p.paymentType || "").toLowerCase() === PAYMENT_TYPES.UNLOCK_REQUEST) || null,
+    [payments]
+  );
 
   const load = async () => {
     setLoading(true);
@@ -317,6 +338,30 @@ export default function StaffRequestDetailsScreen() {
     return () => unsub();
   }, [requestId]);
 
+  useEffect(() => {
+    if (!requestId) return;
+
+    const ref = collection(db, "serviceRequests", requestId, "payments");
+    const qy = query(ref, orderBy("createdAtMs", "desc"));
+
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        const rows = snap.docs
+          .map((d) => normalizePaymentDoc(normalizeTextDeep({ id: d.id, ...d.data() })))
+          .sort((a, b) => Number(b.createdAtMs || 0) - Number(a.createdAtMs || 0));
+        setPayments(rows);
+        setPaymentsErr("");
+      },
+      (e) => {
+        console.error("staff payments snapshot error:", e);
+        setPaymentsErr(e?.message || "Failed to load payment history.");
+      }
+    );
+
+    return () => unsub();
+  }, [requestId]);
+
   const updateRequest = async (patch) => {
     if (!uid) throw new Error("Not signed in");
     await updateDoc(doc(db, "serviceRequests", requestId), {
@@ -346,6 +391,33 @@ export default function StaffRequestDetailsScreen() {
       alert(e?.message || "Failed to add file link.");
     } finally {
       setAddingDraft(false);
+    }
+  };
+
+  const submitInProgressPaymentProposal = async () => {
+    const label = String(paymentLabel || "").trim();
+    const amountNum = Number(String(paymentAmount || "").replace(/[^0-9.]+/g, ""));
+    const noteText = String(paymentNote || "").trim();
+
+    if (!label) return alert("Enter a payment label.");
+    if (!Number.isFinite(amountNum) || amountNum <= 0) return alert("Enter a valid amount.");
+    if (!noteText) return alert("Enter a reason for the applicant.");
+
+    try {
+      setPaymentBusy(true);
+      await createInProgressPaymentProposal({
+        requestId,
+        paymentLabel: label,
+        amount: amountNum,
+        note: noteText,
+      });
+      setPaymentLabel("");
+      setPaymentAmount("");
+      setPaymentNote("");
+    } catch (proposalErr) {
+      alert(proposalErr?.message || "Failed to submit payment proposal.");
+    } finally {
+      setPaymentBusy(false);
     }
   };
 
@@ -676,6 +748,115 @@ export default function StaffRequestDetailsScreen() {
                   </div>
                 ) : (
                   <div className={warnBox}>No note provided.</div>
+                )}
+              </div>
+            </div>
+
+            {/* In-progress payments */}
+            <div className={`mt-6 ${floatCard} p-5`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    In-progress payments
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                    Propose payment requests. Admin must approve before user can pay.
+                  </div>
+                </div>
+                <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+                  {inProgressPayments.length} proposals
+                </span>
+              </div>
+
+              {unlockPayment ? (
+                <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3 text-xs text-emerald-900">
+                  Unlock payment:{" "}
+                  <span className="font-semibold">
+                    {unlockPayment.currency} {Number(unlockPayment.amount || 0).toLocaleString()}
+                  </span>{" "}
+                  ({paymentStatusUi(unlockPayment.status).label})
+                </div>
+              ) : null}
+
+              {paymentsErr ? (
+                <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+                  {paymentsErr}
+                </div>
+              ) : null}
+
+              {canWork && !isDone ? (
+                <div className="mt-4 grid gap-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4">
+                  <input
+                    value={paymentLabel}
+                    onChange={(e) => setPaymentLabel(e.target.value)}
+                    placeholder="Payment label (e.g. Document verification fee)"
+                    className={inputBase}
+                    disabled={paymentBusy || busy}
+                  />
+                  <input
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    placeholder="Amount in KES (e.g. 2500)"
+                    inputMode="decimal"
+                    className={inputBase}
+                    disabled={paymentBusy || busy}
+                  />
+                  <textarea
+                    value={paymentNote}
+                    onChange={(e) => setPaymentNote(e.target.value)}
+                    rows={3}
+                    placeholder="Reason shown to applicant"
+                    className={inputBase}
+                    disabled={paymentBusy || busy}
+                  />
+                  <button
+                    type="button"
+                    onClick={submitInProgressPaymentProposal}
+                    disabled={paymentBusy || busy}
+                    className={btnPrimary}
+                  >
+                    {paymentBusy ? "Submitting..." : "Submit for admin approval"}
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="mt-4 grid gap-2">
+                {inProgressPayments.length === 0 ? (
+                  <div className={warnBox}>No in-progress payment proposals yet.</div>
+                ) : (
+                  inProgressPayments.map((p) => {
+                    const ui = paymentStatusUi(p.status);
+                    return (
+                      <div
+                        key={p.id}
+                        className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 break-words">
+                              {p.paymentLabel || "In-progress payment"}
+                            </div>
+                            <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                              {p.currency} {Number(p.amount || 0).toLocaleString()}
+                            </div>
+                            {p.note ? (
+                              <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
+                                {p.note}
+                              </div>
+                            ) : null}
+                            {p.rejectionReason ? (
+                              <div className="mt-1 text-xs text-rose-700 whitespace-pre-wrap">
+                                Rejection reason: {p.rejectionReason}
+                              </div>
+                            ) : null}
+                          </div>
+                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${ui.cls}`}>
+                            {ui.label}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>

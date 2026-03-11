@@ -62,6 +62,7 @@ export async function createFullPackageDraft({
   track,
   country,
   selectedItems,
+  unlockAmount,
   depositAmount,
 }) {
   const cleanUid = cleanStr(uid, 120);
@@ -70,13 +71,19 @@ export async function createFullPackageDraft({
   const ref = doc(collection(db, "fullPackages"));
   const normalizedItems = normalizeFullPackageItems(selectedItems);
 
+  const resolvedUnlockAmount = Number(unlockAmount || depositAmount || 0);
+
   await setDoc(ref, {
     uid: cleanUid,
     email: cleanStr(email, 140),
     track: cleanTrack(track),
     country: cleanStr(country, 120),
     selectedItems: normalizedItems,
-    depositAmount: Number(depositAmount || 0),
+    unlockAmount: resolvedUnlockAmount,
+    unlockPaid: false,
+    unlockPaymentMeta: null,
+    // legacy compatibility
+    depositAmount: resolvedUnlockAmount,
     depositPaid: false,
     depositPaymentMeta: null,
     itemStates: {},
@@ -87,24 +94,39 @@ export async function createFullPackageDraft({
   return ref.id;
 }
 
-export async function markFullPackageDepositPaid({
+export async function markFullPackageUnlockPaid({
   fullPackageId,
   selectedItems,
-  depositAmount,
-  depositPaymentMeta,
+  unlockAmount,
+  unlockPaymentMeta,
 }) {
   const id = cleanStr(fullPackageId, 120);
   if (!id) throw new Error("Missing full package ID.");
 
+  const resolvedUnlockAmount = Number(unlockAmount || 0);
+  const meta =
+    unlockPaymentMeta && typeof unlockPaymentMeta === "object"
+      ? unlockPaymentMeta
+      : null;
+
   await updateDoc(doc(db, "fullPackages", id), {
     selectedItems: normalizeFullPackageItems(selectedItems),
-    depositAmount: Number(depositAmount || 0),
+    unlockAmount: resolvedUnlockAmount,
+    unlockPaid: true,
+    unlockPaymentMeta: meta,
+    // legacy compatibility
+    depositAmount: resolvedUnlockAmount,
     depositPaid: true,
-    depositPaymentMeta:
-      depositPaymentMeta && typeof depositPaymentMeta === "object"
-        ? depositPaymentMeta
-        : null,
+    depositPaymentMeta: meta,
     updatedAt: serverTimestamp(),
+  });
+}
+
+export async function markFullPackageDepositPaid(input) {
+  return markFullPackageUnlockPaid({
+    ...input,
+    unlockAmount: input?.unlockAmount ?? input?.depositAmount,
+    unlockPaymentMeta: input?.unlockPaymentMeta ?? input?.depositPaymentMeta,
   });
 }
 
@@ -128,4 +150,3 @@ export async function syncFullPackageItemStates({ fullPackageId, itemStates }) {
     updatedAt: serverTimestamp(),
   });
 }
-

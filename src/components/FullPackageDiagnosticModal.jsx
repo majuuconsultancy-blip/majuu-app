@@ -4,7 +4,7 @@ import { auth } from "../firebase";
 import {
   buildFullPackageHubPath,
   createFullPackageDraft,
-  markFullPackageDepositPaid,
+  markFullPackageUnlockPaid,
   normalizeFullPackageItems,
   syncFullPackageSelection,
 } from "../services/fullpackageservice";
@@ -231,7 +231,9 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
   useEffect(() => {
     if (!open) return;
 
-    const resumeDeposit = location.state?.resumeWeHelp?.fullPackage?.deposit;
+    const resumeDeposit =
+      location.state?.resumeWeHelp?.fullPackage?.unlock ||
+      location.state?.resumeWeHelp?.fullPackage?.deposit;
     const queryDraftId = String(
       new URLSearchParams(location.search || "").get("fpDraft") || ""
     ).trim();
@@ -268,18 +270,18 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
       status: "paid",
       method: String(storedPayment?.method || "dummy"),
       paidAt: Number(storedPayment?.paidAt || storedPayment?.confirmedAt || Date.now()),
-      amount: Number(context?.depositAmount || depositAmount),
+      amount: Number(context?.unlockAmount || context?.depositAmount || depositAmount),
       currency: "KES",
       ref: String(storedPayment?.ref || storedPayment?.reference || ""),
     };
 
     setDepositLoading(true);
     setDepositError("");
-    markFullPackageDepositPaid({
+    markFullPackageUnlockPaid({
       fullPackageId: ctxFullPackageId,
       selectedItems: selectedItems.length ? selectedItems : missingItems,
-      depositAmount: Number(context?.depositAmount || depositAmount),
-      depositPaymentMeta: paymentMeta,
+      unlockAmount: Number(context?.unlockAmount || context?.depositAmount || depositAmount),
+      unlockPaymentMeta: paymentMeta,
     })
       .then(() => {
         setDepositPaid(true);
@@ -291,7 +293,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
             "Firestore rules are blocking full package updates. Please allow fullPackages create/update for the signed-in owner."
           );
         } else {
-          setDepositError(error?.message || "Failed to confirm deposit payment.");
+          setDepositError(error?.message || "Failed to confirm unlock payment.");
         }
       })
       .finally(() => setDepositLoading(false));
@@ -301,7 +303,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     if (!canPayDeposit) return;
     const user = auth.currentUser;
     if (!user?.uid) {
-      setDepositError("Please sign in again before paying deposit.");
+      setDepositError("Please sign in again before paying unlock payment.");
       return;
     }
 
@@ -316,7 +318,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
           track,
           country,
           selectedItems: missingItems,
-          depositAmount,
+          unlockAmount: depositAmount,
         });
         setFullPackageId(id);
       } else {
@@ -325,12 +327,12 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
       const draftId = createRequestDraftId();
       const paymentContext = {
-        flow: "fullPackageDeposit",
+        flow: "fullPackageUnlock",
         track: String(track || "").trim().toLowerCase(),
         country: String(country || "").trim(),
         fullPackageId: id,
         selectedItems: missingItems,
-        depositAmount,
+        unlockAmount: depositAmount,
       };
       const amountText = formatKES(depositAmount);
 
@@ -360,7 +362,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
           "Firestore rules are blocking full package creation. Please allow fullPackages create for signed-in users."
         );
       } else {
-        setDepositError(error?.message || "Failed to start deposit payment.");
+        setDepositError(error?.message || "Failed to start unlock payment.");
       }
     } finally {
       setDepositLoading(false);
@@ -384,14 +386,16 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     qs.set("country", String(country || "").trim());
     qs.set("fullPackageId", fullPackageId);
 
-    navigate(`${hubPath}&${qs.toString()}`, {
-      state: {
-        fullPackageId,
-        missingItems,
-        depositPaid: true,
-        depositPaymentMeta: depositPaymentMeta || null,
-      },
-    });
+      navigate(`${hubPath}&${qs.toString()}`, {
+        state: {
+          fullPackageId,
+          missingItems,
+          unlockPaid: true,
+          unlockPaymentMeta: depositPaymentMeta || null,
+          depositPaid: true,
+          depositPaymentMeta: depositPaymentMeta || null,
+        },
+      });
 
     if (depositDraftId) {
       clearDummyPaymentState(depositDraftId);
@@ -418,9 +422,15 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-5" onClick={(e) => e.target === e.currentTarget && onClose?.()} role="presentation">
+    <div className="fixed inset-0 z-50 flex items-center justify-center app-overlay-safe" onClick={(e) => e.target === e.currentTarget && onClose?.()} role="presentation">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" />
-      <div className="relative w-full max-w-md h-[82vh] max-h-[82vh] rounded-[22px] border border-white/40 bg-white/55 shadow-[0_12px_30px_rgba(0,0,0,0.14)] backdrop-blur-xl ring-1 ring-white/20 flex flex-col overflow-hidden">
+      <div
+        className="relative w-full max-w-md rounded-[22px] border border-white/40 bg-white/55 shadow-[0_12px_30px_rgba(0,0,0,0.14)] backdrop-blur-xl ring-1 ring-white/20 flex flex-col overflow-hidden"
+        style={{
+          height: "min(82vh, calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 1.5rem))",
+          maxHeight: "min(82vh, calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 1.5rem))",
+        }}
+      >
         <div className="shrink-0 border-b border-white/25 bg-white/45 px-5 py-2">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -494,11 +504,11 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
             <div className="mt-4 rounded-3xl border border-white/35 bg-white/45 p-4">
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 px-3 py-3">
-                <div className="text-sm font-semibold text-emerald-900">Deposit required to unlock your Full Package</div>
-                <div className="mt-1 text-xs text-emerald-800">Pay a refundable onboarding deposit before entering your full package hub.</div>
-                <div className="mt-2 text-sm font-semibold text-zinc-900">Deposit: {formatKES(depositAmount)}</div>
+                <div className="text-sm font-semibold text-emerald-900">Unlock payment required for your Full Package</div>
+                <div className="mt-1 text-xs text-emerald-800">Pay this unlock request fee before entering your full package hub.</div>
+                <div className="mt-2 text-sm font-semibold text-zinc-900">Unlock amount: {formatKES(depositAmount)}</div>
                 <button type="button" onClick={handlePayDeposit} disabled={!canPayDeposit || depositPaid || depositLoading} className={["mt-3 w-full rounded-xl border px-3 py-2.5 text-sm font-semibold transition active:scale-[0.99]", depositPaid ? "border-emerald-200 bg-emerald-600 text-white cursor-default" : canPayDeposit ? "border-emerald-200 bg-white text-emerald-900 hover:bg-emerald-100" : "border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed"].join(" ")}>
-                  {depositPaid ? "Deposit Paid" : depositLoading ? "Processing..." : "Pay Deposit"}
+                  {depositPaid ? "Unlock Paid" : depositLoading ? "Processing..." : "Pay Unlock"}
                 </button>
                 {depositError ? <div className="mt-2 rounded-xl border border-rose-100 bg-rose-50 px-2.5 py-2 text-xs text-rose-700">{depositError}</div> : null}
               </div>
@@ -517,4 +527,3 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     </div>
   );
 }
-

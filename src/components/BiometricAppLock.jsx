@@ -160,8 +160,8 @@ export default function BiometricAppLock() {
   if (!locked || shouldSkipLock(location.pathname)) return null;
 
   return (
-    <div className="fixed inset-0 z-[1200] bg-zinc-950/70 backdrop-blur-sm">
-      <div className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center justify-center px-5">
+    <div className="fixed inset-0 z-[1200] bg-zinc-950/70 backdrop-blur-sm app-overlay-safe-tight">
+      <div className="mx-auto flex min-h-screen w-full max-w-xl items-center justify-center px-5">
         <div className="w-full rounded-3xl border border-zinc-200 bg-white p-5 shadow-xl">
           <h2 className="text-base font-semibold tracking-tight text-zinc-900">Unlock required</h2>
           <p className="mt-1 text-sm text-zinc-600">

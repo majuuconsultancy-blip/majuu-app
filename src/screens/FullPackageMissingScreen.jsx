@@ -10,6 +10,7 @@ import {
   toFullPackageItemKey,
 } from "../services/fullpackageservice";
 import { createServiceRequest } from "../services/requestservice";
+import { createUnlockPaymentForRequest } from "../services/paymentservice";
 import {
   getUserState,
   setActiveProcessDetails,
@@ -43,6 +44,15 @@ function normalizeRequestOutcome(req) {
 function mapTrack(input) {
   const t = String(input || "").trim().toLowerCase();
   return t === "study" || t === "work" || t === "travel" ?t : "study";
+}
+
+function toAmountNumber(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return 0;
+  const digits = raw.replace(/[^0-9.]+/g, "");
+  const n = Number(digits || 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.round(n);
 }
 
 function titleForTrack(track) {
@@ -226,8 +236,9 @@ export default function FullPackageMissingScreen() {
     return normalizeFullPackageItems(location.state?.missingItems);
   }, [fullPackageDoc?.selectedItems, location.state]);
 
-  const depositPaid = Boolean(fullPackageDoc?.depositPaid);
-  const canUseRequestFlow = Boolean(uid) && profileMissing.length === 0 && depositPaid;
+  const unlockPaid = Boolean(fullPackageDoc?.unlockPaid || fullPackageDoc?.depositPaid);
+  const unlockPaymentMeta = fullPackageDoc?.unlockPaymentMeta || fullPackageDoc?.depositPaymentMeta || null;
+  const canUseRequestFlow = Boolean(uid) && profileMissing.length === 0 && unlockPaid;
   const backToWeHelpHref = `/app/${safeTrack}/we-help?country=${encodeURIComponent(country)}`;
 
   const latestByItemKey = useMemo(() => {
@@ -279,14 +290,14 @@ export default function FullPackageMissingScreen() {
   }, [itemRows]);
 
   useEffect(() => {
-    if (!fullPackageId || !depositPaid || !Object.keys(itemStatePayload).length) return;
+    if (!fullPackageId || !unlockPaid || !Object.keys(itemStatePayload).length) return;
     const serialized = JSON.stringify(itemStatePayload);
     if (serialized === syncedItemStateRef.current) return;
     syncedItemStateRef.current = serialized;
     syncFullPackageItemStates({ fullPackageId, itemStates: itemStatePayload }).catch((error) => {
       console.warn("Failed to sync full package item states:", error?.message || error);
     });
-  }, [fullPackageId, depositPaid, itemStatePayload]);
+  }, [fullPackageId, unlockPaid, itemStatePayload]);
 
   useEffect(() => {
     if (restoreAppliedRef.current) return;
@@ -355,6 +366,7 @@ export default function FullPackageMissingScreen() {
     town,
     paid,
     paymentMeta,
+    unlockPaymentReceipt,
   }) => {
     if (!uid || !fullPackageId || !pickedNeed) return;
 
@@ -365,8 +377,8 @@ export default function FullPackageMissingScreen() {
       navigate("/app/profile");
       return;
     }
-    if (!depositPaid) {
-      throw new Error("Deposit is required before submitting full package items.");
+    if (!unlockPaid) {
+      throw new Error("Unlock payment is required before submitting full package items.");
     }
 
     try {
@@ -400,8 +412,8 @@ export default function FullPackageMissingScreen() {
       county: String(county || "").trim(),
       town: String(town || "").trim(),
       city: String(town || "").trim(),
-      paid: Boolean(paid),
-      paymentMeta: paymentMeta || null,
+      paid: true,
+      paymentMeta: paymentMeta || unlockPaymentReceipt || unlockPaymentMeta || null,
       requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
       parentRequestId,
       isFullPackage: true,
@@ -410,6 +422,32 @@ export default function FullPackageMissingScreen() {
       fullPackageItemKey: itemKey,
       fullPackageSelectedItems: selectedItems,
     });
+
+    try {
+      const receipt = unlockPaymentReceipt || unlockPaymentMeta || {};
+      const amountNum = toAmountNumber(
+        receipt?.amount || fullPackageDoc?.unlockAmount || fullPackageDoc?.depositAmount
+      );
+      await createUnlockPaymentForRequest({
+        requestId,
+        requestUid: uid,
+        amount: amountNum,
+        currency: String(receipt?.currency || "KES"),
+        paymentLabel: "Unlock request payment",
+        note: "Full package unlock payment",
+        paidAtMs: Number(receipt?.paidAtMs || receipt?.paidAt || Date.now()) || Date.now(),
+        transactionReference: String(
+          receipt?.transactionReference || receipt?.ref || ""
+        ),
+        context: {
+          flow: "fullpackage",
+          fullPackageId,
+          fullPackageItem: pickedNeed,
+        },
+      });
+    } catch (payError) {
+      console.warn("Failed to persist full package unlock payment record:", payError);
+    }
 
     const files = Array.isArray(dummyFiles) ?dummyFiles : [];
     for (const file of files) {
@@ -518,23 +556,23 @@ export default function FullPackageMissingScreen() {
             <h1 className="mt-2 text-lg font-semibold text-zinc-900">{trackTitle} - Continue your full package</h1>
             <p className="mt-1 text-sm text-zinc-600">Country: <span className="font-semibold text-zinc-900">{country}</span></p>
           </div>
-          <span className={["rounded-full border px-2.5 py-1 text-xs font-semibold", depositPaid ?"border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"].join(" ")}>
-            {depositPaid ?"Deposit paid" : "Deposit required"}
+          <span className={["rounded-full border px-2.5 py-1 text-xs font-semibold", unlockPaid ?"border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"].join(" ")}>
+            {unlockPaid ?"Unlock paid" : "Unlock required"}
           </span>
         </div>
       </div>
 
       {fullPackageErr ?<div className="mt-4 rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{fullPackageErr}</div> : null}
 
-      {!depositPaid ?(
+      {!unlockPaid ?(
         <div className="mt-4 rounded-3xl border border-amber-200 bg-amber-50/70 p-4">
           <div className="flex items-start gap-3">
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-200 bg-white text-amber-900">
               <IconLock className="h-5 w-5" />
             </span>
             <div>
-              <div className="text-sm font-semibold text-zinc-900">Deposit payment is required</div>
-              <div className="mt-1 text-sm text-zinc-700">This hub is locked until the deposit is paid from the full package diagnostic modal.</div>
+              <div className="text-sm font-semibold text-zinc-900">Unlock payment is required</div>
+              <div className="mt-1 text-sm text-zinc-700">This hub is locked until unlock payment is completed from the full package diagnostic modal.</div>
             </div>
           </div>
           <button onClick={() => navigate(backToWeHelpHref, { replace: true })} className="mt-4 w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white">
@@ -609,7 +647,10 @@ export default function FullPackageMissingScreen() {
           country,
           selectedItem: pickedNeed || "",
           fullPackageId: fullPackageId || "",
+          unlockPaid: true,
+          unlockPaymentMeta: unlockPaymentMeta || null,
         }}
+        paymentRequired={false}
         initialState={requestModalResumeState?.formState || null}
         onStateChange={setRequestModalResumeState}
         enableAttachments={true}

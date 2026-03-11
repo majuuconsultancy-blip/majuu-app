@@ -52,6 +52,16 @@ function sortByCreatedAtDesc(rows) {
   });
 }
 
+function rowMatchesRequestFilters(row, { status = "", track = "", uid = "" } = {}) {
+  const st = String(status || "").trim().toLowerCase();
+  const tr = String(track || "").trim().toLowerCase();
+  const ownerUid = String(uid || "").trim();
+  if (st && String(row?.status || "").trim().toLowerCase() !== st) return false;
+  if (tr && String(row?.track || "").trim().toLowerCase() !== tr) return false;
+  if (ownerUid && String(row?.uid || "").trim() !== ownerUid) return false;
+  return true;
+}
+
 async function requireAdminActorContext() {
   const actorUid = String(auth.currentUser?.uid || "").trim();
   if (!actorUid) throw new Error("Not signed in");
@@ -100,24 +110,16 @@ export async function getRequests({
     snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
 
   if (roleCtx?.isAssignedAdmin) {
+    // Use index-safe scoped queries and apply status/track/uid filters client-side.
+    // This avoids relying on composite indexes like (status + currentAdminUid).
+    const scopedTake = Math.max(20, take);
+    const fetchTake = Math.min(800, Math.max(scopedTake * 6, 180));
     const scopedQueries = [
-      query(ref, ...clauses, where("currentAdminUid", "==", actorUid), qLimit(take)),
-      query(ref, ...clauses, where("ownerLockedAdminUid", "==", actorUid), qLimit(take)),
+      query(ref, where("currentAdminUid", "==", actorUid), qLimit(fetchTake)),
+      query(ref, where("ownerLockedAdminUid", "==", actorUid), qLimit(fetchTake)),
     ];
 
-    const snaps = await Promise.all(
-      scopedQueries.map((qy, idx) =>
-        getDocs(qy).catch((error) => {
-          // Keep currentAdminUid query authoritative; ownerLocked fallback is best-effort.
-          if (idx === 1) {
-            console.warn("assigned-admin owner lock fallback query failed:", error?.message || error);
-            return null;
-          }
-          throw error;
-        })
-      )
-    );
-
+    const snaps = await Promise.all(scopedQueries.map((qy) => getDocs(qy).catch(() => null)));
     const deduped = new Map();
     snaps.forEach((snap) => {
       if (!snap) return;
@@ -126,7 +128,11 @@ export async function getRequests({
         deduped.set(String(row.id), row);
       });
     });
-    return sortByCreatedAtDesc(Array.from(deduped.values()));
+
+    const filtered = Array.from(deduped.values()).filter((row) =>
+      rowMatchesRequestFilters(row, { status: s, track: t, uid: u })
+    );
+    return sortByCreatedAtDesc(filtered).slice(0, scopedTake);
   }
 
   const qy = query(ref, ...clauses, qLimit(take));

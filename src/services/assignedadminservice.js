@@ -132,7 +132,7 @@ async function findUserDocsByEmail(email) {
   };
 }
 
-export async function listAssignedAdmins({ max = 100 } = {}) {
+export async function listAssignedAdmins({ max = 100, dedupeEmail = true } = {}) {
   await requireSuperAdmin();
   const maxRows = Math.max(1, Math.min(300, Number(max) || 100));
   const snap = await getDocs(
@@ -143,8 +143,12 @@ export async function listAssignedAdmins({ max = 100 } = {}) {
     )
   );
   const rows = snap.docs.map((d) => ({ uid: d.id, ...(d.data() || {}) }));
-  return dedupeByEmail(rows)
-    .sort((a, b) => normalizeEmail(a?.email).localeCompare(normalizeEmail(b?.email)));
+  const scoped = dedupeEmail === false ?rows : dedupeByEmail(rows);
+  return scoped.sort((a, b) => {
+    const emailCmp = normalizeEmail(a?.email).localeCompare(normalizeEmail(b?.email));
+    if (emailCmp !== 0) return emailCmp;
+    return safeStr(a?.uid).localeCompare(safeStr(b?.uid));
+  });
 }
 
 export async function setAssignedAdminByEmail({

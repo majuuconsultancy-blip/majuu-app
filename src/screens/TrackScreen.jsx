@@ -398,7 +398,7 @@ export default function TrackScreen({ track }) {
       <AnimatePresence>
         {showModal && (
           <motion.div
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 px-4 motion-modal-backdrop"
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 app-overlay-safe motion-modal-backdrop"
             variants={overlayMotion}
             initial="hidden"
             animate="show"
@@ -409,7 +409,7 @@ export default function TrackScreen({ track }) {
               className={[
                 "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 p-5 shadow-lg backdrop-blur motion-modal-panel",
                 "dark:border-zinc-800 dark:bg-zinc-900/70",
-                "sm:mb-0 mb-[calc(var(--app-helpchoice-lift)+var(--app-safe-bottom))]",
+                "sm:mb-0 mb-[calc(var(--app-helpchoice-lift)+0.5rem)]",
               ].join(" ")}
               variants={sheetMotion}
               initial="hidden"
@@ -512,4 +512,3 @@ export default function TrackScreen({ track }) {
     </div>
   );
 }
-

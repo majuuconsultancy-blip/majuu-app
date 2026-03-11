@@ -9,7 +9,7 @@ export default function OpenExternalLinkDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 app-overlay-safe">
       <div
         role="dialog"
         aria-modal="true"

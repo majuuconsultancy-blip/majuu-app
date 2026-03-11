@@ -796,11 +796,13 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
   const sendBtnTone = canSend
     ?"bg-emerald-600 text-white shadow-[0_0_0_3px_rgba(16,185,129,0.22)] hover:bg-emerald-700"
     : "bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
-  const navLiftPad = keyboardInset > 0 ?"0px" : "var(--app-bottom-nav-lift, 0px)";
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-white dark:bg-zinc-950">
-      <div className="flex items-center justify-between gap-3 border-b border-zinc-200/80 dark:border-zinc-800/80 px-4 pb-2.5 pt-[calc(env(safe-area-inset-top,0px)+0.6rem)]">
+    <div
+      className="fixed inset-0 z-[60] flex flex-col bg-white dark:bg-zinc-950"
+      style={{ paddingLeft: "var(--app-safe-left)", paddingRight: "var(--app-safe-right)" }}
+    >
+      <div className="flex items-center justify-between gap-3 border-b border-zinc-200/80 dark:border-zinc-800/80 px-4 pb-2.5 pt-[calc(var(--app-safe-top)+0.6rem)]">
         <div>
           <div className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">Request Chat</div>
           <div className="text-xs text-zinc-500">{roleLabel(myRole)} support thread</div>
@@ -850,7 +852,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
       <div
         className="px-3 pt-2"
         style={{
-          paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + ${navLiftPad} + ${Math.max(0, keyboardInset - 8)}px + 0.65rem)`,
+          paddingBottom: `calc(var(--app-safe-bottom) + ${Math.max(0, keyboardInset - 8)}px + 0.65rem)`,
         }}
       >
         <input

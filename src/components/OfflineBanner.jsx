@@ -31,7 +31,7 @@ export default function OfflineBanner({ online }) {
   return (
     <div
       className="pointer-events-none fixed inset-x-0 z-[70] flex justify-center px-4"
-      style={{ bottom: "calc(6rem + env(safe-area-inset-bottom))" }}
+      style={{ bottom: "var(--app-floating-offset)" }}
     >
       <div
         className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-xl ${shellClass}`}

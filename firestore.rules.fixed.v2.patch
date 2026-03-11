@@ -420,6 +420,125 @@ service cloud.firestore {
           || (isRequestOwner(requestId) && requestIsFinalized(requestId));
       }
 
+      match /payments/{paymentId} {
+        function paymentRecordLinksValid(data) {
+          return data != null
+            && data.requestId == requestId
+            && str(data.requestUid).size() > 0
+            && data.requestUid == requestOwner(requestId)
+            && data.paymentType in ["unlock_request", "in_progress"]
+            && str(data.paymentLabel).size() > 0
+            && data.amount is number
+            && data.amount > 0
+            && str(data.currency).size() > 0
+            && data.status in [
+              "pending_admin_approval",
+              "awaiting_user_payment",
+              "paid",
+              "rejected",
+              "auto_refunded",
+              "refunded"
+            ];
+        }
+
+        allow read: if canReadRequestData(requestDoc(requestId));
+
+        allow create: if paymentRecordLinksValid(request.resource.data)
+          && (
+            (isRequestOwner(requestId)
+              && request.resource.data.paymentType == "unlock_request"
+              && request.resource.data.status == "paid")
+            || (isRequestAssignedStaff(requestId)
+              && request.resource.data.paymentType == "in_progress"
+              && request.resource.data.status == "pending_admin_approval")
+          );
+
+        allow update: if paymentRecordLinksValid(request.resource.data)
+          && request.resource.data.requestId == resource.data.requestId
+          && request.resource.data.requestUid == resource.data.requestUid
+          && request.resource.data.paymentType == resource.data.paymentType
+          && request.resource.data.amount == resource.data.amount
+          && request.resource.data.currency == resource.data.currency
+          && (
+            (isRequestOwner(requestId)
+              && resource.data.status == "awaiting_user_payment"
+              && request.resource.data.status == "paid")
+            || (canAdminAccessRequest(requestId)
+              && resource.data.paymentType == "in_progress"
+              && resource.data.status == "pending_admin_approval"
+              && request.resource.data.status in ["awaiting_user_payment", "rejected"])
+            || ((isRequestOwner(requestId) || canAdminAccessRequest(requestId))
+              && resource.data.paymentType == "unlock_request"
+              && resource.data.status == "paid"
+              && request.resource.data.status == "auto_refunded")
+            || (canAdminAccessRequest(requestId)
+              && resource.data.status == "paid"
+              && request.resource.data.status == "refunded")
+          );
+
+        allow delete: if false;
+      }
+
+      match /refundRequests/{refundId} {
+        function paymentSubPath(paymentId) {
+          return /databases/$(database)/documents/serviceRequests/$(requestId)/payments/$(paymentId);
+        }
+
+        function paymentSubExists(paymentId) {
+          return str(paymentId).size() > 0 && exists(paymentSubPath(paymentId));
+        }
+
+        function paymentSubDoc(paymentId) {
+          return paymentSubExists(paymentId) ? get(paymentSubPath(paymentId)).data : null;
+        }
+
+        function refundRecordLinksValid(data) {
+          let pid = str(data.paymentId);
+          let pay = paymentSubDoc(pid);
+          return data != null
+            && data.refundId == refundId
+            && data.requestId == requestId
+            && pid.size() > 0
+            && paymentSubExists(pid)
+            && pay != null
+            && pay.requestId == requestId
+            && data.uid == requestOwner(requestId)
+            && data.paymentType == pay.paymentType
+            && data.paymentLabel == pay.paymentLabel
+            && data.amount == pay.amount
+            && data.currency == pay.currency
+            && data.status in ["pending", "approved", "rejected", "auto_refunded", "refunded"];
+        }
+
+        allow read: if canReadRequestData(requestDoc(requestId));
+
+        allow create: if refundRecordLinksValid(request.resource.data)
+          && (
+            (isRequestOwner(requestId) && request.resource.data.status == "pending")
+            || (
+              (isRequestOwner(requestId) || canAdminAccessRequest(requestId))
+              && request.resource.data.status == "auto_refunded"
+            )
+          );
+
+        allow update: if canAdminAccessRequest(requestId)
+          && refundRecordLinksValid(resource.data)
+          && refundRecordLinksValid(request.resource.data)
+          && resource.data.status == "pending"
+          && request.resource.data.status in ["rejected", "refunded"]
+          && request.resource.data.refundId == resource.data.refundId
+          && request.resource.data.requestId == resource.data.requestId
+          && request.resource.data.paymentId == resource.data.paymentId
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.paymentType == resource.data.paymentType
+          && request.resource.data.paymentLabel == resource.data.paymentLabel
+          && request.resource.data.amount == resource.data.amount
+          && request.resource.data.currency == resource.data.currency
+          && request.resource.data.decidedByAdminUid == authUid();
+
+        allow delete: if false;
+      }
+
       match /documentExtracts/{attachmentId} {
         function extractKeysOk() {
           return request.resource.data.keys().hasOnly([

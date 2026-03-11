@@ -238,11 +238,11 @@ export default function AppLayout() {
     "text-zinc-700 dark:text-zinc-300 hover:bg-emerald-50/70 dark:text-zinc-200 dark:hover:bg-zinc-900/60";
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
+    <div className="app-shell min-h-screen overflow-x-hidden bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
       <OfflineBanner online={online} />
 
       <div
-        className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white pb-28 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950"
+        className="app-shell-content min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950"
       >
         <div className="max-w-xl mx-auto min-h-screen">
           <AnimatePresence initial={false} mode="sync">
@@ -255,9 +255,11 @@ export default function AppLayout() {
 
       {uid && hasActiveProcess && activeTrack && (
         <div
-          className="fixed left-0 right-0 z-40 pointer-events-none px-4"
+          className="fixed left-0 right-0 z-40 pointer-events-none"
           style={{
-            bottom: "calc(var(--app-active-track-lift) + var(--app-safe-bottom))",
+            paddingLeft: "calc(var(--app-safe-left) + 1rem)",
+            paddingRight: "calc(var(--app-safe-right) + 1rem)",
+            bottom: "var(--app-active-track-offset)",
             opacity: Math.max(0, 1 - scrollY / 120),
             transition: "opacity 120ms linear",
           }}
@@ -272,12 +274,11 @@ export default function AppLayout() {
       )}
 
       <nav
-        className="app-bottom-nav fixed left-0 right-0 z-50 px-4"
-        style={{ bottom: "calc(var(--app-bottom-nav-lift) + var(--app-safe-bottom))" }}
+        className="app-bottom-nav fixed inset-x-0 z-50"
       >
         <div className="max-w-xl mx-auto">
           <div
-            className="rounded-2xl border border-white/50 dark:border-zinc-700/45 bg-white/15 dark:bg-zinc-900/18 px-2 py-2 shadow-[0_10px_28px_rgba(15,23,42,0.10)] t-pop"
+            className="app-bottom-nav-inner rounded-2xl border border-white/50 dark:border-zinc-700/45 bg-white/15 dark:bg-zinc-900/18 px-2 py-1.5 shadow-[0_6px_18px_rgba(15,23,42,0.10)] t-pop"
             style={{
               WebkitBackdropFilter: "blur(10px)",
               backdropFilter: "blur(10px)",

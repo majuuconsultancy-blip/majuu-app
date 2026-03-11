@@ -364,7 +364,7 @@ export default function AdminAssignAdminScreen() {
             className="absolute inset-0 bg-black/40"
             aria-label="Close assign confirmation"
           />
-          <div className="absolute inset-0 flex items-center justify-center p-4">
+          <div className="absolute inset-0 flex items-center justify-center app-overlay-safe">
             <div className="w-full max-w-sm rounded-3xl border border-emerald-200 bg-white p-4 shadow-xl dark:border-emerald-900/40 dark:bg-zinc-900">
               <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
                 <AppIcon icon={CheckCircle2} size={ICON_SM} />

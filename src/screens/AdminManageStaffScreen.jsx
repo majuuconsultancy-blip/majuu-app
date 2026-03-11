@@ -353,7 +353,7 @@ export default function AdminManageStaffScreen() {
             className="absolute inset-0 bg-black/40"
             aria-label="Close fire confirmation"
           />
-          <div className="absolute inset-0 flex items-center justify-center p-4">
+          <div className="absolute inset-0 flex items-center justify-center app-overlay-safe">
             <div className="w-full max-w-sm rounded-3xl border border-rose-200 bg-white p-4 shadow-xl dark:border-rose-900/40 dark:bg-zinc-900">
               <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
                 <AppIcon icon={UserX} size={ICON_SM} />
@@ -394,7 +394,7 @@ export default function AdminManageStaffScreen() {
             className="absolute inset-0 bg-black/40"
             aria-label="Close unassign confirmation"
           />
-          <div className="absolute inset-0 flex items-center justify-center p-4">
+          <div className="absolute inset-0 flex items-center justify-center app-overlay-safe">
             <div className="w-full max-w-sm rounded-3xl border border-amber-200 bg-white p-4 shadow-xl dark:border-amber-900/40 dark:bg-zinc-900">
               <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
                 <AppIcon icon={Unlink} size={ICON_SM} />

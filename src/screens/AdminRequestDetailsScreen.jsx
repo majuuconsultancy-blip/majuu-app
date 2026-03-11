@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   doc,
@@ -30,6 +30,20 @@ import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { smartBack } from "../utils/navBack";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import {
+  adminApproveInProgressPayment,
+  adminApproveRefund,
+  adminRejectInProgressPayment,
+  adminRejectRefund,
+  ensureUnlockAutoRefundForRequest,
+  normalizePaymentDoc,
+  normalizeRefundDoc,
+  PAYMENT_TYPES,
+  PAYMENT_STATUSES,
+  paymentStatusUi,
+  REFUND_STATUSES,
+  refundStatusUi,
+} from "../services/paymentservice";
 
 /* ---------- UI helpers ---------- */
 function pill(status) {
@@ -94,7 +108,7 @@ export default function AdminRequestDetailsScreen() {
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // ✅ staged links (adminFileDrafts)
+  // âœ… staged links (adminFileDrafts)
   const [drafts, setDrafts] = useState([]);
   const [draftErr, setDraftErr] = useState("");
   const [addingDraft, setAddingDraft] = useState(false);
@@ -102,12 +116,12 @@ export default function AdminRequestDetailsScreen() {
   const [draftName, setDraftName] = useState("");
   const [draftUrl, setDraftUrl] = useState("");
 
-  // ✅ staff proposed links (staffFileDrafts)
+  // âœ… staff proposed links (staffFileDrafts)
   const [staffDrafts, setStaffDrafts] = useState([]);
   const [staffDraftErr, setStaffDraftErr] = useState("");
   const [stagingStaffDrafts, setStagingStaffDrafts] = useState(false);
 
-  // ✅ chat notification
+  // âœ… chat notification
   const [chatPendingCount, setChatPendingCount] = useState(0);
   const [roleCtx, setRoleCtx] = useState(null);
   const [assignedAdminRows, setAssignedAdminRows] = useState([]);
@@ -115,6 +129,18 @@ export default function AdminRequestDetailsScreen() {
   const [overrideBusy, setOverrideBusy] = useState(false);
   const [overrideErr, setOverrideErr] = useState("");
   const [overrideMsg, setOverrideMsg] = useState("");
+
+  const [payments, setPayments] = useState([]);
+  const [paymentsErr, setPaymentsErr] = useState("");
+  const [paymentRejectReasonById, setPaymentRejectReasonById] = useState({});
+  const [paymentDecisionBusyId, setPaymentDecisionBusyId] = useState("");
+
+  const [refunds, setRefunds] = useState([]);
+  const [refundsErr, setRefundsErr] = useState("");
+  const [refundApproveExplanationById, setRefundApproveExplanationById] = useState({});
+  const [refundApproveEtaById, setRefundApproveEtaById] = useState({});
+  const [refundRejectReasonById, setRefundRejectReasonById] = useState({});
+  const [refundDecisionBusyId, setRefundDecisionBusyId] = useState("");
 
   const status = String(req?.status || "new").toLowerCase();
   const statusPill = useMemo(() => pill(status), [status]);
@@ -169,7 +195,7 @@ export default function AdminRequestDetailsScreen() {
       try {
         const ctx = await getCurrentUserRoleContext();
         if (!cancelled) setRoleCtx(ctx || null);
-      } catch (error) {
+      } catch {
         if (!cancelled) setRoleCtx(null);
       }
     })();
@@ -183,7 +209,7 @@ export default function AdminRequestDetailsScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const rows = await listAssignedAdmins({ max: 200 });
+        const rows = await listAssignedAdmins({ max: 300, dedupeEmail: false });
         if (cancelled) return;
         setAssignedAdminRows(Array.isArray(rows) ?rows : []);
       } catch (error) {
@@ -198,7 +224,7 @@ export default function AdminRequestDetailsScreen() {
     };
   }, [roleCtx?.isSuperAdmin]);
 
-  /* ✅ FIX: pending chat count without orderBy (no index needed) */
+  /* âœ… FIX: pending chat count without orderBy (no index needed) */
   useEffect(() => {
     if (!requestId) return;
 
@@ -230,7 +256,60 @@ export default function AdminRequestDetailsScreen() {
     return () => unsub();
   }, [requestId]);
 
-  // ✅ live drafts list (adminFileDrafts)
+  useEffect(() => {
+    if (!requestId) return;
+    const ref = collection(db, "serviceRequests", requestId, "payments");
+    const qy = query(ref);
+
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        const rows = snap.docs
+          .map((d) => normalizePaymentDoc(normalizeTextDeep({ id: d.id, ...d.data() })))
+          .sort((a, b) => Number(b.createdAtMs || 0) - Number(a.createdAtMs || 0));
+        setPayments(rows);
+        setPaymentsErr("");
+      },
+      (error) => {
+        console.error("admin payments snapshot error:", error);
+        setPaymentsErr(error?.message || "Failed to load payments.");
+      }
+    );
+
+    return () => unsub();
+  }, [requestId]);
+
+  useEffect(() => {
+    if (!requestId) return;
+    const ref = collection(db, "serviceRequests", requestId, "refundRequests");
+    const qy = query(ref);
+
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        const rows = snap.docs
+          .map((d) => normalizeRefundDoc(normalizeTextDeep({ id: d.id, ...d.data() })))
+          .sort((a, b) => Number(b.createdAtMs || 0) - Number(a.createdAtMs || 0));
+        setRefunds(rows);
+        setRefundsErr("");
+      },
+      (error) => {
+        console.error("admin refunds snapshot error:", error);
+        setRefundsErr(error?.message || "Failed to load refund requests.");
+      }
+    );
+
+    return () => unsub();
+  }, [requestId]);
+
+  useEffect(() => {
+    if (!requestId) return;
+    ensureUnlockAutoRefundForRequest(requestId).catch((error) => {
+      console.warn("unlock auto-refund check failed:", error?.message || error);
+    });
+  }, [requestId, req?.status, req?.markedInProgressAtMs]);
+
+  // âœ… live drafts list (adminFileDrafts)
   useEffect(() => {
     if (!requestId) return;
 
@@ -254,7 +333,7 @@ export default function AdminRequestDetailsScreen() {
     return () => unsub();
   }, [requestId]);
 
-  // ✅ live staff drafts list (staffFileDrafts)
+  // âœ… live staff drafts list (staffFileDrafts)
   useEffect(() => {
     if (!requestId) return;
 
@@ -278,7 +357,7 @@ export default function AdminRequestDetailsScreen() {
     return () => unsub();
   }, [requestId]);
 
-  // ✅ AUTO-STAGE: when staff recommends accept and has links, auto-fill admin drafts
+  // âœ… AUTO-STAGE: when staff recommends accept and has links, auto-fill admin drafts
   useEffect(() => {
     if (!requestId) return;
     if (decisionLocked) return;
@@ -467,6 +546,8 @@ export default function AdminRequestDetailsScreen() {
     try {
       await updateDoc(doc(db, "serviceRequests", requestId), {
         status: "contacted",
+        markedInProgressAt: serverTimestamp(),
+        markedInProgressAtMs: nowMs,
         adminRespondedAt: serverTimestamp(),
         adminRespondedAtMs: nowMs,
         adminRespondedBy: actingAdminUid || null,
@@ -486,11 +567,103 @@ export default function AdminRequestDetailsScreen() {
     }
   };
 
+  const approveInProgressPayment = async (paymentId) => {
+    const id = safeStr(paymentId);
+    if (!id) return;
+    setPaymentDecisionBusyId(id);
+    try {
+      await adminApproveInProgressPayment({ requestId, paymentId: id });
+    } catch (error) {
+      alert(error?.message || "Failed to approve payment.");
+    } finally {
+      setPaymentDecisionBusyId("");
+    }
+  };
+
+  const rejectInProgressPayment = async (paymentId) => {
+    const id = safeStr(paymentId);
+    if (!id) return;
+    const reason = safeStr(paymentRejectReasonById?.[id] || "");
+    if (!reason) {
+      alert("Rejection reason is required.");
+      return;
+    }
+
+    setPaymentDecisionBusyId(id);
+    try {
+      await adminRejectInProgressPayment({
+        requestId,
+        paymentId: id,
+        rejectionReason: reason,
+      });
+      setPaymentRejectReasonById((prev) => ({ ...prev, [id]: "" }));
+    } catch (error) {
+      alert(error?.message || "Failed to reject payment.");
+    } finally {
+      setPaymentDecisionBusyId("");
+    }
+  };
+
+  const approveRefund = async (refundId) => {
+    const id = safeStr(refundId);
+    if (!id) return;
+    const explanation = safeStr(refundApproveExplanationById?.[id] || "");
+    const etaText = safeStr(refundApproveEtaById?.[id] || "");
+    if (!explanation) {
+      alert("Approval explanation is required.");
+      return;
+    }
+    if (!etaText) {
+      alert("Expected refund period text is required.");
+      return;
+    }
+
+    setRefundDecisionBusyId(id);
+    try {
+      await adminApproveRefund({
+        requestId,
+        refundId: id,
+        adminExplanation: explanation,
+        expectedRefundPeriodText: etaText,
+      });
+      setRefundApproveExplanationById((prev) => ({ ...prev, [id]: "" }));
+      setRefundApproveEtaById((prev) => ({ ...prev, [id]: "" }));
+    } catch (error) {
+      alert(error?.message || "Failed to approve refund.");
+    } finally {
+      setRefundDecisionBusyId("");
+    }
+  };
+
+  const rejectRefund = async (refundId) => {
+    const id = safeStr(refundId);
+    if (!id) return;
+    const reason = safeStr(refundRejectReasonById?.[id] || "");
+    if (!reason) {
+      alert("Rejection explanation is required.");
+      return;
+    }
+
+    setRefundDecisionBusyId(id);
+    try {
+      await adminRejectRefund({
+        requestId,
+        refundId: id,
+        rejectionReason: reason,
+      });
+      setRefundRejectReasonById((prev) => ({ ...prev, [id]: "" }));
+    } catch (error) {
+      alert(error?.message || "Failed to reject refund.");
+    } finally {
+      setRefundDecisionBusyId("");
+    }
+  };
+
   if (loading) {
     return (
       <div className={pageBg}>
         <div className="max-w-xl mx-auto px-5 py-6">
-          <div className={`${card} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>Loading…</div>
+          <div className={`${card} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>Loadingâ€¦</div>
         </div>
       </div>
     );
@@ -523,11 +696,11 @@ export default function AdminRequestDetailsScreen() {
     );
   }
 
-  const headerLeft = `${String(req?.track || "").toUpperCase()} • ${req?.country || "-"}`;
+  const headerLeft = `${String(req?.track || "").toUpperCase()} â€¢ ${req?.country || "-"}`;
   const headerRight =
     req?.requestType === "full"
       ?"Full Package"
-      : `Single Service • ${req?.serviceName || "-"}`;
+      : `Single Service â€¢ ${req?.serviceName || "-"}`;
 
   const createdLabel = formatDT(req?.createdAt);
 
@@ -542,6 +715,12 @@ export default function AdminRequestDetailsScreen() {
   const reassignmentCount = Array.isArray(req?.routingMeta?.reassignmentHistory)
     ?req.routingMeta.reassignmentHistory.length
     : 0;
+  const unlockPayment =
+    payments.find((p) => String(p.paymentType || "").toLowerCase() === PAYMENT_TYPES.UNLOCK_REQUEST) ||
+    null;
+  const inProgressPayments = payments.filter(
+    (p) => String(p.paymentType || "").toLowerCase() === PAYMENT_TYPES.IN_PROGRESS
+  );
 
   return (
     <div className={pageBg}>
@@ -563,7 +742,7 @@ export default function AdminRequestDetailsScreen() {
           </div>
 
           <div className="shrink-0 flex items-center gap-2">
-            {/* ✅ Chat launcher with badge */}
+            {/* âœ… Chat launcher with badge */}
             <span className="relative inline-flex">
               <AdminRequestChatLauncher requestId={requestId} />
               {chatPendingCount > 0 ?(
@@ -664,7 +843,7 @@ export default function AdminRequestDetailsScreen() {
                   <option value="">Auto best route</option>
                   {assignedAdminRows.map((row) => (
                     <option key={row.uid} value={row.uid}>
-                      {String(row?.email || row.uid)}
+                      {`${String(row?.email || "No email")} · ${String(row?.uid || "")}`}
                     </option>
                   ))}
                 </select>
@@ -691,7 +870,250 @@ export default function AdminRequestDetailsScreen() {
           ) : null}
         </div>
 
-        {/* ✅ STAFF ASSIGNMENT */}
+
+        <div className={`mt-4 ${card} p-5`}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Payments</h2>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                Unlock and in-progress payment records for this request.
+              </p>
+            </div>
+            <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+              {payments.length} records
+            </span>
+          </div>
+
+          {paymentsErr ?(
+            <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+              {paymentsErr}
+            </div>
+          ) : null}
+
+          {unlockPayment ?(
+            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-emerald-900">Unlock request payment</div>
+                  <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    {unlockPayment.currency} {Number(unlockPayment.amount || 0).toLocaleString()}
+                  </div>
+                  {unlockPayment.transactionReference ?(
+                    <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                      Ref: <span className="font-semibold">{unlockPayment.transactionReference}</span>
+                    </div>
+                  ) : null}
+                </div>
+                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${paymentStatusUi(unlockPayment.status).cls}`}>
+                  {paymentStatusUi(unlockPayment.status).label}
+                </span>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-4 grid gap-2">
+            {inProgressPayments.length === 0 ?(
+              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
+                No in-progress payment proposals yet.
+              </div>
+            ) : (
+              inProgressPayments.map((payment) => {
+                const pStatus = String(payment.status || "").toLowerCase();
+                const isPending = pStatus === PAYMENT_STATUSES.PENDING_ADMIN_APPROVAL;
+                const isBusy = paymentDecisionBusyId === payment.id;
+                const ui = paymentStatusUi(pStatus);
+                return (
+                  <div key={payment.id} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
+                          {payment.paymentLabel || "In-progress payment"}
+                        </div>
+                        <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                          {payment.currency} {Number(payment.amount || 0).toLocaleString()}
+                        </div>
+                        {payment.note ?(
+                          <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
+                            {payment.note}
+                          </div>
+                        ) : null}
+                        {payment.rejectionReason ?(
+                          <div className="mt-1 text-xs text-rose-700 whitespace-pre-wrap">
+                            Rejection reason: {payment.rejectionReason}
+                          </div>
+                        ) : null}
+                      </div>
+                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${ui.cls}`}>
+                        {ui.label}
+                      </span>
+                    </div>
+
+                    {isPending ?(
+                      <div className="mt-3 grid gap-2">
+                        <textarea
+                          value={String(paymentRejectReasonById?.[payment.id] || "")}
+                          onChange={(e) =>
+                            setPaymentRejectReasonById((prev) => ({ ...prev, [payment.id]: e.target.value }))
+                          }
+                          rows={2}
+                          placeholder="Rejection reason (required when rejecting)"
+                          className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                          disabled={isBusy}
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => approveInProgressPayment(payment.id)}
+                            disabled={isBusy}
+                            className="rounded-2xl border border-emerald-200 bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                          >
+                            {isBusy ? "Please wait..." : "Approve"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => rejectInProgressPayment(payment.id)}
+                            disabled={isBusy}
+                            className="rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div className={`mt-4 ${card} p-5`}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Refund requests</h2>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                Each refund targets a specific payment ID.
+              </p>
+            </div>
+            <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+              {refunds.length} requests
+            </span>
+          </div>
+
+          {refundsErr ?(
+            <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+              {refundsErr}
+            </div>
+          ) : null}
+
+          <div className="mt-4 grid gap-2">
+            {refunds.length === 0 ?(
+              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
+                No refund requests yet.
+              </div>
+            ) : (
+              refunds.map((refund) => {
+                const rStatus = String(refund.status || "").toLowerCase();
+                const pending = rStatus === REFUND_STATUSES.PENDING;
+                const isBusy = refundDecisionBusyId === refund.id;
+                const ui = refundStatusUi(rStatus);
+                return (
+                  <div key={refund.id} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
+                          {refund.paymentLabel || "Refund request"}
+                        </div>
+                        <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                          Payment ID: <span className="font-mono">{refund.paymentId}</span>
+                        </div>
+                        <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                          {refund.currency} {Number(refund.amount || 0).toLocaleString()}
+                        </div>
+                        {refund.userReason ?(
+                          <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
+                            User reason: {refund.userReason}
+                          </div>
+                        ) : null}
+                        {refund.adminExplanation ?(
+                          <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
+                            Decision note: {refund.adminExplanation}
+                          </div>
+                        ) : null}
+                        {refund.expectedRefundPeriodText ?(
+                          <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                            ETA: {refund.expectedRefundPeriodText}
+                          </div>
+                        ) : null}
+                        {refund.rejectionReason ?(
+                          <div className="mt-1 text-xs text-rose-700 whitespace-pre-wrap">
+                            Rejection: {refund.rejectionReason}
+                          </div>
+                        ) : null}
+                      </div>
+                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${ui.cls}`}>
+                        {ui.label}
+                      </span>
+                    </div>
+
+                    {pending ?(
+                      <div className="mt-3 grid gap-2">
+                        <textarea
+                          value={String(refundApproveExplanationById?.[refund.id] || "")}
+                          onChange={(e) =>
+                            setRefundApproveExplanationById((prev) => ({ ...prev, [refund.id]: e.target.value }))
+                          }
+                          rows={2}
+                          placeholder="Approval note to applicant"
+                          className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                          disabled={isBusy}
+                        />
+                        <input
+                          value={String(refundApproveEtaById?.[refund.id] || "")}
+                          onChange={(e) =>
+                            setRefundApproveEtaById((prev) => ({ ...prev, [refund.id]: e.target.value }))
+                          }
+                          placeholder="Expected refund period (e.g. 3 to 7 business days)"
+                          className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                          disabled={isBusy}
+                        />
+                        <textarea
+                          value={String(refundRejectReasonById?.[refund.id] || "")}
+                          onChange={(e) =>
+                            setRefundRejectReasonById((prev) => ({ ...prev, [refund.id]: e.target.value }))
+                          }
+                          rows={2}
+                          placeholder="Rejection explanation (required when rejecting)"
+                          className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                          disabled={isBusy}
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => approveRefund(refund.id)}
+                            disabled={isBusy}
+                            className="rounded-2xl border border-emerald-200 bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                          >
+                            {isBusy ? "Please wait..." : "Approve"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => rejectRefund(refund.id)}
+                            disabled={isBusy}
+                            className="rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+        {/* âœ… STAFF ASSIGNMENT */}
         {req && !decisionLocked ?(
           <AssignStaffPanel request={req} />
         ) : (
@@ -778,7 +1200,7 @@ export default function AdminRequestDetailsScreen() {
                 Message to applicant
               </h2>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                This shows on the applicant’s Request Details. Required if
+                This shows on the applicantâ€™s Request Details. Required if
                 rejecting.
               </p>
             </div>
@@ -790,11 +1212,11 @@ export default function AdminRequestDetailsScreen() {
             value={note}
             onChange={(e) => setNote(e.target.value)}
             disabled={saving || decisionLocked}
-            placeholder="Example: Please upload a clear passport bio page, then re-submit. Processing starts 24–48 hours after upload."
+            placeholder="Example: Please upload a clear passport bio page, then re-submit. Processing starts 24â€“48 hours after upload."
           />
         </div>
 
-        {/* ✅ Staff suggested files */}
+        {/* âœ… Staff suggested files */}
         <div className={`mt-6 ${card} p-5`}>
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -803,13 +1225,13 @@ export default function AdminRequestDetailsScreen() {
               </h2>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 These are links staff added. If staff recommended accept, they
-                auto-fill your “Attach files” section.
+                auto-fill your â€œAttach filesâ€ section.
               </p>
             </div>
 
             {stagingStaffDrafts ?(
               <span className="rounded-full border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
-                Autofilling…
+                Autofillingâ€¦
               </span>
             ) : (
               <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
@@ -860,7 +1282,7 @@ export default function AdminRequestDetailsScreen() {
 
                         {staged ?(
                           <div className="mt-2 text-xs font-semibold text-emerald-800">
-                            ✅ Already staged to applicant
+                            âœ… Already staged to applicant
                           </div>
                         ) : (
                           <div className="mt-2 text-xs text-zinc-500">
@@ -886,7 +1308,7 @@ export default function AdminRequestDetailsScreen() {
           )}
         </div>
 
-        {/* ✅ Attach files for applicant */}
+        {/* âœ… Attach files for applicant */}
         <div className={`mt-6 ${card} p-5`}>
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -940,18 +1362,18 @@ export default function AdminRequestDetailsScreen() {
                   disabled={saving || addingDraft}
                   className="shrink-0 inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                 >
-                  {addingDraft ?"Adding…" : "Add"}
+                  {addingDraft ?"Addingâ€¦" : "Add"}
                 </button>
               </div>
 
               <div className="text-xs text-zinc-500">
-                Tip: Make sure the link access is set to “Anyone with the link can
-                view”.
+                Tip: Make sure the link access is set to â€œAnyone with the link can
+                viewâ€.
               </div>
             </div>
           ) : (
             <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
-              Decision is locked — attachments can’t be changed.
+              Decision is locked â€” attachments canâ€™t be changed.
             </div>
           )}
 
@@ -1030,7 +1452,7 @@ export default function AdminRequestDetailsScreen() {
                 title={!note.trim() ?"Note is required for rejection." : ""}
               >
                 <AppIcon icon={X} size={ICON_MD} />
-                {saving ?"Saving…" : "Reject"}
+                {saving ?"Savingâ€¦" : "Reject"}
               </button>
 
               <button
@@ -1040,7 +1462,7 @@ export default function AdminRequestDetailsScreen() {
                 type="button"
               >
                 <AppIcon icon={Check} size={ICON_MD} className="text-white" />
-                {saving ?"Saving…" : "Accept"}
+                {saving ?"Savingâ€¦" : "Accept"}
               </button>
             </div>
           )}

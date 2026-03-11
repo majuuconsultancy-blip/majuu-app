@@ -238,7 +238,7 @@ export default function StaffStartWorkModalScreen() {
 
             {/* sheet/card */}
             <div
-              className="absolute inset-x-0 bottom-0 top-0 flex items-end justify-center p-3 sm:items-center sm:p-6"
+              className="absolute inset-0 flex items-end justify-center app-overlay-safe sm:items-center"
               style={{
                 // slide up on mobile / scale on desktop
                 animation: "ssw_slideUp 220ms cubic-bezier(.2,.8,.2,1) both",
@@ -321,8 +321,6 @@ export default function StaffStartWorkModalScreen() {
                     If you choose “Not now”, the request stays in New.
                   </div>
 
-                  {/* safe-area spacer for iOS bottom bars */}
-                  <div className="h-[max(0px,env(safe-area-inset-bottom))]" />
                 </div>
               </div>
             </div>
@@ -347,5 +345,4 @@ export default function StaffStartWorkModalScreen() {
     </div>
   );
 }
-
 

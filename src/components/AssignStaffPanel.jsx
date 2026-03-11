@@ -414,7 +414,7 @@ export default function AssignStaffPanel({ request }) {
             className="absolute inset-0 bg-black/40"
             aria-label="Close unassign confirmation"
           />
-          <div className="absolute inset-0 flex items-center justify-center p-4">
+          <div className="absolute inset-0 flex items-center justify-center app-overlay-safe">
             <div className="w-full max-w-sm rounded-3xl border border-rose-200 bg-white p-4 shadow-xl dark:border-rose-900/40 dark:bg-zinc-900">
               <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
                 <AppIcon icon={AlertTriangle} size={ICON_SM} />

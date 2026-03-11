@@ -83,6 +83,59 @@ function createEnvProbeSync() {
   };
 }
 
+function syncViewportHeightCssVar() {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+
+  const root = document.documentElement;
+  let stableHeight = 0;
+  let lastWidth = 0;
+  let raf = 0;
+
+  const update = () => {
+    const vv = window.visualViewport;
+    const width = Math.round(Number(vv?.width) || Number(window.innerWidth) || 0);
+    const candidate = Math.max(
+      Math.round(Number(window.innerHeight) || 0),
+      Math.round(Number(document.documentElement?.clientHeight) || 0),
+      Math.round((Number(vv?.height) || 0) + (Number(vv?.offsetTop) || 0))
+    );
+    if (candidate <= 0) return;
+
+    const orientationChanged = lastWidth > 0 && width > 0 && Math.abs(width - lastWidth) > 120;
+    if (orientationChanged) {
+      stableHeight = candidate;
+    } else {
+      stableHeight = Math.max(stableHeight, candidate);
+    }
+
+    if (width > 0) lastWidth = width;
+    root.style.setProperty("--app-viewport-height", `${stableHeight}px`);
+  };
+
+  const schedule = () => {
+    if (raf) window.cancelAnimationFrame(raf);
+    raf = window.requestAnimationFrame(() => {
+      raf = 0;
+      update();
+    });
+  };
+
+  update();
+  window.addEventListener("resize", schedule, { passive: true });
+  window.addEventListener("orientationchange", schedule, { passive: true });
+  window.visualViewport?.addEventListener("resize", schedule, { passive: true });
+  window.visualViewport?.addEventListener("scroll", schedule, { passive: true });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) schedule();
+  });
+  CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+    if (isActive) schedule();
+  }).catch(() => {});
+
+  setTimeout(schedule, 90);
+  setTimeout(schedule, 320);
+}
+
 function syncNativeSafeAreaVars() {
   if (!isNativeCapacitor) return;
   if (typeof window === "undefined" || typeof document === "undefined") return;
@@ -133,6 +186,7 @@ function syncNativeSafeAreaVars() {
   })();
 }
 
+syncViewportHeightCssVar();
 syncNativeSafeAreaVars();
 
 function disableServiceWorkersInNative() {

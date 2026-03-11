@@ -1087,7 +1087,7 @@ export default function StaffTasksScreen() {
               className="absolute inset-0 bg-black/45"
               aria-label="Close delete confirmation"
             />
-            <div className="absolute inset-0 flex items-center justify-center p-4">
+            <div className="absolute inset-0 flex items-center justify-center app-overlay-safe">
               <div className="w-full max-w-sm rounded-3xl border border-rose-200 bg-white p-4 shadow-xl dark:border-rose-900/40 dark:bg-zinc-900">
                 <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                   Delete done request?

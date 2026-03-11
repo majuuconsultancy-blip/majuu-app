@@ -303,6 +303,17 @@ async function getUserDocByUid(uid) {
   return { id: snap.id, ...snap.data() };
 }
 
+async function resolveAuthUidByEmail(email, fallbackUid = "") {
+  const safeEmail = safeStr(email).toLowerCase();
+  if (!safeEmail) return safeStr(fallbackUid);
+  try {
+    const user = await admin.auth().getUserByEmail(safeEmail);
+    return safeStr(user?.uid) || safeStr(fallbackUid);
+  } catch {
+    return safeStr(fallbackUid);
+  }
+}
+
 async function getCallerRoleFromContext(context) {
   const callerUid = safeStr(context?.auth?.uid);
   if (!callerUid) return "";
@@ -853,7 +864,7 @@ exports.revokeStaffAccess = functions.https.onCall(async (data, context) => {
 });
 
 exports.superAdminOverrideRouteRequest = functions.https.onCall(async (data, context) => {
-  await requireAdminCallerContext(context, { superOnly: true });
+  const caller = await requireAdminCallerContext(context, { superOnly: true });
 
   const requestId = safeStr(data?.requestId);
   const targetAdminUid = safeStr(data?.targetAdminUid);
@@ -885,17 +896,60 @@ exports.superAdminOverrideRouteRequest = functions.https.onCall(async (data, con
     return { ok: Boolean(result?.ok), mode: "auto", result };
   }
 
-  const targetAdminDoc = await getUserDocByUid(targetAdminUid);
-  const targetRole = normalizeRole(targetAdminDoc?.role);
-  const targetIsHardcodedSuper = isHardcodedSuperAdminEmail(targetAdminDoc?.email);
-  if (!(targetIsHardcodedSuper || targetRole === "assignedAdmin")) {
+  const selectedTargetAdminDoc = await getUserDocByUid(targetAdminUid);
+  const selectedTargetRole = normalizeRole(selectedTargetAdminDoc?.role);
+  const selectedIsHardcodedSuper = isHardcodedSuperAdminEmail(selectedTargetAdminDoc?.email);
+  if (!(selectedIsHardcodedSuper || selectedTargetRole === "assignedAdmin")) {
     throw new functions.https.HttpsError("invalid-argument", "Target user is not an admin");
   }
 
-  const targetScope = normalizeAdminScope(targetAdminDoc?.adminScope);
+  const canonicalTargetAdminUid = await resolveAuthUidByEmail(
+    selectedTargetAdminDoc?.email,
+    targetAdminUid
+  );
+  const effectiveTargetAdminUid = safeStr(canonicalTargetAdminUid || targetAdminUid);
+
+  let targetAdminDoc = selectedTargetAdminDoc;
+  if (effectiveTargetAdminUid && effectiveTargetAdminUid !== safeStr(targetAdminUid)) {
+    const canonicalDoc = await getUserDocByUid(effectiveTargetAdminUid);
+    if (canonicalDoc) {
+      targetAdminDoc = canonicalDoc;
+    } else {
+      await db.collection("users").doc(effectiveTargetAdminUid).set(
+        {
+          email: safeStr(selectedTargetAdminDoc?.email),
+          role: "assignedAdmin",
+          adminScope:
+            selectedTargetAdminDoc?.adminScope &&
+            typeof selectedTargetAdminDoc.adminScope === "object"
+              ? selectedTargetAdminDoc.adminScope
+              : {},
+          adminUpdatedBy: safeStr(caller?.callerUid),
+          adminUpdatedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      targetAdminDoc = await getUserDocByUid(effectiveTargetAdminUid);
+    }
+  }
+
+  const targetRole = normalizeRole(targetAdminDoc?.role);
+  const targetIsHardcodedSuper = isHardcodedSuperAdminEmail(
+    targetAdminDoc?.email || selectedTargetAdminDoc?.email
+  );
+  if (!(targetIsHardcodedSuper || targetRole === "assignedAdmin")) {
+    throw new functions.https.HttpsError("invalid-argument", "Target admin account is not active.");
+  }
+
+  const targetScope = normalizeAdminScope(
+    targetAdminDoc?.adminScope && typeof targetAdminDoc.adminScope === "object"
+      ? targetAdminDoc.adminScope
+      : selectedTargetAdminDoc?.adminScope
+  );
   const candidate = {
-    uid: targetAdminUid,
-    email: safeStr(targetAdminDoc?.email),
+    uid: effectiveTargetAdminUid || safeStr(targetAdminUid),
+    email: safeStr(targetAdminDoc?.email || selectedTargetAdminDoc?.email),
     role: targetIsHardcodedSuper ? "superAdmin" : "assignedAdmin",
     availability: targetScope.availability,
     maxActiveRequests: targetScope.maxActiveRequests,
@@ -915,13 +969,13 @@ exports.superAdminOverrideRouteRequest = functions.https.onCall(async (data, con
   if (safeStr(reqData?.ownerLockedAdminUid)) {
     await reqRef.set(
       {
-        ownerLockedAdminUid: targetAdminUid,
+        ownerLockedAdminUid: candidate.uid,
         ownerLockedAt: FieldValue.serverTimestamp(),
         routingMeta: {
           ...(reqData?.routingMeta && typeof reqData.routingMeta === "object"
             ? reqData.routingMeta
             : {}),
-          lockedOwnerAdminUid: targetAdminUid,
+          lockedOwnerAdminUid: candidate.uid,
         },
       },
       { merge: true }

@@ -168,6 +168,8 @@ export async function createServiceRequest(payload) {
   const requestUploadMeta = cleanUploadMeta(payload?.requestUploadMeta);
   const county = cleanRequiredCounty(payload?.county);
   const town = cleanStr(payload?.town || payload?.city, 80);
+  const unlockPaymentId = cleanStr(payload?.unlockPaymentId, 180);
+  const unlockPaymentRequestId = cleanStr(payload?.unlockPaymentRequestId, 180);
 
   const clean = {
     uid: user.uid,
@@ -198,6 +200,8 @@ export async function createServiceRequest(payload) {
 
     paid,
     paymentMeta,
+    unlockPaymentId,
+    unlockPaymentRequestId,
     requestUploadMeta,
 
     status: "new",
@@ -205,6 +209,8 @@ export async function createServiceRequest(payload) {
     currentAdminRole: "",
     currentAdminAvailability: "",
     ownerLockedAdminUid: "",
+    markedInProgressAt: null,
+    markedInProgressAtMs: 0,
     escalationCount: 0,
     responseDeadlineAtMs: 0,
     routingMeta: {

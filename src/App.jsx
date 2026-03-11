@@ -562,7 +562,6 @@ export default function App() {
       <div className="app-safe-area">
         <AppRoutes />
       </div>
-      {IS_NATIVE_PLATFORM ? <div aria-hidden="true" className="app-native-nav-tab" /> : null}
     </Router>
   );
 }
