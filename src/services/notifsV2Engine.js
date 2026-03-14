@@ -1,7 +1,6 @@
 import {
   collection,
   collectionGroup,
-  doc,
   limit,
   onSnapshot,
   orderBy,
@@ -96,11 +95,7 @@ function createChatUnreadTracker({ requestId, role, uid }) {
   };
 
   unsubMessages = onSnapshot(
-    query(
-      collection(db, "serviceRequests", rid, "messages"),
-      orderBy("createdAt", "desc"),
-      limit(80)
-    ),
+    query(collection(db, "serviceRequests", rid, "messages"), orderBy("createdAt", "desc"), limit(80)),
     (snap) => {
       messageRows = snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
       recompute();
@@ -185,26 +180,51 @@ function createAdminForegroundPushWatchers({ role, uid }) {
   const safeRole = safeStr(role).toLowerCase();
   const safeUid = safeStr(uid);
   const unsubs = [];
-  let initializedRequests = false;
-  let initializedPending = false;
+  const seenRequestKeys = new Set();
+  let requestsInitialized = false;
+  let pendingInitialized = false;
 
-  unsubs.push(
-    onSnapshot(
-      safeRole === "assignedadmin"
-        ? query(
-            collection(db, "serviceRequests"),
-            where("currentAdminUid", "==", safeUid),
-            orderBy("createdAt", "desc"),
-            limit(60)
-          )
-        : query(collection(db, "serviceRequests"), orderBy("createdAt", "desc"), limit(60)),
-      (snap) => {
-        if (initializedRequests) {
+  const requestQueries = [];
+  if (safeRole === "assignedadmin") {
+    requestQueries.push(
+      query(
+        collection(db, "serviceRequests"),
+        where("currentAdminUid", "==", safeUid),
+        orderBy("createdAt", "desc"),
+        limit(60)
+      )
+    );
+    requestQueries.push(
+      query(
+        collection(db, "serviceRequests"),
+        where("ownerLockedAdminUid", "==", safeUid),
+        orderBy("createdAt", "desc"),
+        limit(60)
+      )
+    );
+  } else {
+    requestQueries.push(query(collection(db, "serviceRequests"), orderBy("createdAt", "desc"), limit(60)));
+  }
+
+  requestQueries.forEach((qy, index) => {
+    unsubs.push(
+      onSnapshot(
+        qy,
+        (snap) => {
+          if (!requestsInitialized) {
+            snap.docs.forEach((docSnap) => {
+              seenRequestKeys.add(`${index}:${safeStr(docSnap.id)}`);
+            });
+            if (index === requestQueries.length - 1) requestsInitialized = true;
+            return;
+          }
+
           snap.docChanges().forEach((change) => {
             if (change.type !== "added") return;
-            const data = change.doc.data() || {};
             const rid = safeStr(change.doc.id);
-            if (!rid) return;
+            const dedupeKey = `${index}:${rid}`;
+            if (!rid || seenRequestKeys.has(dedupeKey)) return;
+            seenRequestKeys.add(dedupeKey);
             scheduleForegroundLocalNotification({
               dedupeKey: `admin:new_request:${rid}`,
               title: "New request",
@@ -213,22 +233,20 @@ function createAdminForegroundPushWatchers({ role, uid }) {
               extra: { type: "NEW_REQUEST", requestId: rid },
             }).catch(() => {});
           });
-        } else {
-          initializedRequests = true;
+        },
+        (error) => {
+          console.error("notifsV2Engine admin request watcher failed:", error);
         }
-      },
-      (error) => {
-        console.error("notifsV2Engine admin request watcher failed:", error);
-      }
-    )
-  );
+      )
+    );
+  });
 
-  if (safeRole !== "assignedadmin") {
+  if (safeRole === "admin") {
     unsubs.push(
       onSnapshot(
         query(collectionGroup(db, "pendingMessages"), where("status", "==", "pending")),
         (snap) => {
-          if (initializedPending) {
+          if (pendingInitialized) {
             snap.docChanges().forEach((change) => {
               if (change.type !== "added") return;
               const rid = parseRequestIdFromPendingDoc(change.doc);
@@ -243,7 +261,7 @@ function createAdminForegroundPushWatchers({ role, uid }) {
               }).catch(() => {});
             });
           } else {
-            initializedPending = true;
+            pendingInitialized = true;
           }
         },
         (error) => {
@@ -283,9 +301,6 @@ export function startNotifsV2Engine({ role, uid }) {
   }
 
   notifsV2Store.setSession({ role: safeRole, uid: safeUid });
-  if (safeRole === "admin" || safeRole === "assignedadmin") {
-    notifsV2Store.setNotifications([]);
-  }
 
   let rootUnsub = null;
   let notificationsUnsub = null;
@@ -302,7 +317,12 @@ export function startNotifsV2Engine({ role, uid }) {
         requestTrackers.get(rid)?.cleanup?.();
       } catch {}
       requestTrackers.delete(rid);
-      notifsV2Store.setUnreadForRequest(rid, { unread: false, count: 0, lastMessageId: "", lastMessageAtMs: 0 });
+      notifsV2Store.setUnreadForRequest(rid, {
+        unread: false,
+        count: 0,
+        lastMessageId: "",
+        lastMessageAtMs: 0,
+      });
     });
 
     ids.forEach((rid) => {
@@ -313,9 +333,7 @@ export function startNotifsV2Engine({ role, uid }) {
     notifsV2Store.pruneUnreadRequests(ids);
   };
 
-  if (safeRole === "user" || safeRole === "staff" || safeRole === "assignedadmin") {
-    notificationsUnsub = createNotificationsListener({ role: safeRole, uid: safeUid });
-  }
+  notificationsUnsub = createNotificationsListener({ role: safeRole, uid: safeUid });
 
   if (safeRole === "user") {
     rootUnsub = onSnapshot(
@@ -333,9 +351,7 @@ export function startNotifsV2Engine({ role, uid }) {
     rootUnsub = onSnapshot(
       query(collection(db, "staff", safeUid, "tasks"), orderBy("assignedAt", "desc")),
       (snap) => {
-        const ids = snap.docs
-          .map((d) => safeStr(d.data()?.requestId || d.id))
-          .filter(Boolean);
+        const ids = snap.docs.map((d) => safeStr(d.data()?.requestId || d.id)).filter(Boolean);
         syncRequestTrackers(ids);
       },
       (error) => {
@@ -343,9 +359,13 @@ export function startNotifsV2Engine({ role, uid }) {
         syncRequestTrackers([]);
       }
     );
-  } else if (safeRole === "admin" || safeRole === "assignedadmin") {
+  } else {
     adminPushCleanup = createAdminForegroundPushWatchers({ role: safeRole, uid: safeUid });
-    notifsV2Store.pruneUnreadRequests([]);
+    notifsV2Store.pruneUnreadRequests(
+      (notifsV2Store.getState().notifications || [])
+        .map((row) => safeStr(row.requestId))
+        .filter(Boolean)
+    );
   }
 
   const cleanup = () => {

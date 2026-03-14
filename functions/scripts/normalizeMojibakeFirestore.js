@@ -3,8 +3,8 @@
  * One-time Firestore mojibake cleanup script.
  *
  * Usage (from /functions):
- *   node scripts/normalizeMojibakeFirestore.js          # dry-run (no writes)
- *   node scripts/normalizeMojibakeFirestore.js --write  # apply updates
+ *   node scripts/normalizeMojibakeFirestore.js
+ *   node scripts/normalizeMojibakeFirestore.js --write
  *
  * Prereq:
  * - Run in an environment with Firebase Admin credentials configured.
@@ -24,12 +24,13 @@ function normalizeText(text) {
   if (!text || typeof text !== "string") return text;
 
   const fixes = {
-    "â€™": "’",
-    "â€œ": "“",
-    "â€": "”",
-    "â€“": "–",
-    "â€”": "—",
-    "â€¢": "•",
+    "â€™": "'",
+    "â€œ": "\"",
+    "â€": "\"",
+    "â€“": "-",
+    "â€”": "-",
+    "â€¢": " - ",
+    "â€¦": "...",
     "Ã©": "é",
     "Ã¨": "è",
     "Ã¡": "á",
@@ -37,6 +38,21 @@ function normalizeText(text) {
     "Ã¶": "ö",
     "Ã¼": "ü",
     "Ã±": "ñ",
+    "Ã¢â‚¬â„¢": "'",
+    "Ã¢â‚¬Å“": "\"",
+    "Ã¢â‚¬Â": "\"",
+    "Ã¢â‚¬â€œ": "-",
+    "Ã¢â‚¬â€": "-",
+    "Ã¢â‚¬Â¢": " - ",
+    "Ã¢â‚¬Â¦": "...",
+    "ÃƒÂ©": "é",
+    "ÃƒÂ¨": "è",
+    "ÃƒÂ¡": "á",
+    "Ãƒ ": "à",
+    "ÃƒÂ¶": "ö",
+    "ÃƒÂ¼": "ü",
+    "ÃƒÂ±": "ñ",
+    "Ã‚Â·": " - ",
   };
 
   let cleaned = text;

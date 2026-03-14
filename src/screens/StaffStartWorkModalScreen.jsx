@@ -156,6 +156,8 @@ export default function StaffStartWorkModalScreen() {
       staffStartedAt: serverTimestamp(),
       staffStartedAtMs: nowMs,
       staffStartedBy: uid,
+      markedInProgressAt: serverTimestamp(),
+      markedInProgressAtMs: nowMs,
 
       staffUpdatedAt: serverTimestamp(),
     };
@@ -260,8 +262,8 @@ export default function StaffStartWorkModalScreen() {
                         Ready to begin?
                       </div>
                       <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                        This will move the task to <span className="font-semibold">Ongoing</span>{" "}
-                        and start the timer fields.
+                        This will move the task to <span className="font-semibold">Ongoing</span>,
+                        mark the request in progress, and start the timer fields.
                       </div>
                     </div>
 

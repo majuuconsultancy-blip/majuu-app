@@ -17,6 +17,7 @@ import {
 import { auth, authPersistenceReady, googleProvider } from "../firebase";
 import { ensureUserDoc } from "../services/userservice";
 import { isLikelyFirstSignIn, setBiometricPromptPending } from "../services/biometricLockService";
+import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
 
 /* ---------------- Icons ---------------- */
 function IconMail(props) {
@@ -264,6 +265,12 @@ export default function LoginScreen() {
   const [resetEmail, setResetEmail] = useState("");
   const [resetMsg, setResetMsg] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
+
+  const openLegalDoc = (docKey) => {
+    navigate(buildLegalDocRoute(docKey), {
+      state: { backTo: "/login" },
+    });
+  };
 
   const lastAttemptRef = useRef(null); // { type: "email"|"google", payload: {...} }
 
@@ -701,7 +708,23 @@ export default function LoginScreen() {
                   </button>
 
                   <p className="text-center text-xs text-zinc-500">
-                    By continuing, you agree to our terms and privacy policy.
+                    Review{" "}
+                    <button
+                      type="button"
+                      onClick={() => openLegalDoc(LEGAL_DOC_KEYS.TERMS_AND_CONDITIONS)}
+                      className="font-semibold text-emerald-700 transition hover:text-emerald-800"
+                    >
+                      Terms &amp; Conditions
+                    </button>{" "}
+                    and{" "}
+                    <button
+                      type="button"
+                      onClick={() => openLegalDoc(LEGAL_DOC_KEYS.PRIVACY_POLICY)}
+                      className="font-semibold text-emerald-700 transition hover:text-emerald-800"
+                    >
+                      Privacy Policy
+                    </button>
+                    .
                   </p>
                 </form>
               </div>

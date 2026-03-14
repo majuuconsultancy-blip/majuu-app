@@ -16,6 +16,7 @@ import {
 import { auth, authPersistenceReady, googleProvider } from "../firebase";
 import { ensureUserDoc } from "../services/userservice";
 import { isLikelyFirstSignIn, setBiometricPromptPending } from "../services/biometricLockService";
+import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
 
 /* ---------------- Icons ---------------- */
 function IconMail(props) {
@@ -190,6 +191,7 @@ export default function SignupScreen() {
   const [confirm, setConfirm] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [acceptedLegal, setAcceptedLegal] = useState(false);
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -227,6 +229,11 @@ export default function SignupScreen() {
   }
 
   const handleGoogle = async () => {
+    if (!acceptedLegal) {
+      setError("Please review and accept the Terms & Conditions and Privacy Policy to continue.");
+      return;
+    }
+
     setError("");
     setLoading(true);
     try {
@@ -259,6 +266,9 @@ export default function SignupScreen() {
     setError("");
 
     const cleanEmail = email.trim();
+    if (!acceptedLegal) {
+      return setError("Please review and accept the Terms & Conditions and Privacy Policy to continue.");
+    }
     if (!passwordOk) return setError("Password must be at least 6 characters.");
     if (!matchOk) return setError("Passwords do not match.");
 
@@ -277,6 +287,12 @@ export default function SignupScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const openLegalDoc = (docKey) => {
+    navigate(buildLegalDocRoute(docKey), {
+      state: { backTo: "/signup" },
+    });
   };
 
   return (
@@ -432,6 +448,41 @@ export default function SignupScreen() {
                   </div>
                 ) : null}
 
+                <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/50 px-3 py-3">
+                  <label className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={acceptedLegal}
+                      onChange={(e) => setAcceptedLegal(e.target.checked)}
+                      disabled={loading}
+                      className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="text-sm text-zinc-800 dark:text-zinc-200">
+                      I agree to MAJUU&apos;s legal terms before creating my account.
+                    </span>
+                  </label>
+
+                  <div className="mt-2 pl-7 text-xs text-zinc-500 dark:text-zinc-400">
+                    Review{" "}
+                    <button
+                      type="button"
+                      onClick={() => openLegalDoc(LEGAL_DOC_KEYS.TERMS_AND_CONDITIONS)}
+                      className="font-semibold text-emerald-700 transition hover:text-emerald-800"
+                    >
+                      Terms &amp; Conditions
+                    </button>{" "}
+                    and{" "}
+                    <button
+                      type="button"
+                      onClick={() => openLegalDoc(LEGAL_DOC_KEYS.PRIVACY_POLICY)}
+                      className="font-semibold text-emerald-700 transition hover:text-emerald-800"
+                    >
+                      Privacy Policy
+                    </button>
+                    .
+                  </div>
+                </div>
+
                 {/* Submit */}
                 <button
                   type="submit"
@@ -451,9 +502,6 @@ export default function SignupScreen() {
                   I already have an account
                 </button>
 
-                <p className="text-center text-xs text-zinc-500">
-                  By continuing, you agree to our terms and privacy policy.
-                </p>
               </form>
             </div>
           </div>

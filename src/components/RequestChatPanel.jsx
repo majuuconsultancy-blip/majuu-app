@@ -1,6 +1,6 @@
-// âœ… src/components/RequestChatPanel.jsx (FULL COPY-PASTE)
+﻿// src/components/RequestChatPanel.jsx
 // CHANGE ONLY:
-// âœ… Default back button (Android/browser) now returns to RequestStatusScreen for this request
+// Default back button (Android/browser) now returns to RequestStatusScreen for this request
 // - Pushes one history state when chat opens (so Back closes chat instead of leaving the request)
 // - Handles popstate to: close modal + navigate to /app/request/:id (replace)
 // - Close (X) button does the same (so behavior is consistent)
@@ -159,7 +159,7 @@ function StatusDots({ status }) {
   );
 }
 
-// âœ… autosize textarea like ChatGPT
+// Autosize textarea like ChatGPT
 function useAutosizeTextArea(textareaRef, value, { maxRows = 6 } = {}) {
   useEffect(() => {
     const el = textareaRef.current;
@@ -321,7 +321,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
 
   const backHref = useMemo(() => `/app/request/${encodeURIComponent(rid)}`, [rid]);
 
-  // âœ… BACK FIX: add a "chat layer" history entry and intercept Back
+  // Add a "chat layer" history entry and intercept Back.
   useEffect(() => {
     if (!rid) return;
 
@@ -737,7 +737,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
                   <div className="text-xs font-semibold opacity-90">PDF</div>
                   <div className="text-xs opacity-90">
                     {safeText(m?.pdfMeta?.name) || "document.pdf"}
-                    {m?.pdfMeta?.size ?` • ${m.pdfMeta.size} bytes` : ""}
+                    {m?.pdfMeta?.size ?` - ${m.pdfMeta.size} bytes` : ""}
                   </div>
                 </div>
               ) : null}
@@ -750,7 +750,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
                   <div className="text-xs font-semibold opacity-90">PDF</div>
                   <div className="text-xs opacity-90">
                     {safeText(m?.pdfMeta?.name) || "document.pdf"}
-                    {m?.pdfMeta?.size ?` • ${m.pdfMeta.size} bytes` : ""}
+                    {m?.pdfMeta?.size ?` - ${m.pdfMeta.size} bytes` : ""}
                   </div>
                 </div>
               ) : null}
@@ -760,7 +760,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
               <div className="font-semibold">PDF</div>
               <div className="text-xs opacity-90">
                 {safeText(m?.pdfMeta?.name) || "document.pdf"}
-                {m?.pdfMeta?.size ?` • ${m.pdfMeta.size} bytes` : ""}
+                {m?.pdfMeta?.size ?` - ${m.pdfMeta.size} bytes` : ""}
               </div>
             </div>
           ) : (
@@ -828,7 +828,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2">
         {loading ?(
-          <div className="px-1 py-2 text-sm text-zinc-600 dark:text-zinc-300">Loading chat…</div>
+          <div className="px-1 py-2 text-sm text-zinc-600 dark:text-zinc-300">Loading chat...</div>
         ) : timelineRows.length === 0 ?(
           <div className="px-1 py-2 text-sm text-zinc-600 dark:text-zinc-300">No messages yet.</div>
         ) : (
@@ -917,4 +917,6 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     </div>
   );
 }
+
+
 

@@ -1,4 +1,4 @@
-﻿// âœ… WorkSelfHelp.jsx (FULL COPY-PASTE)
+﻿// WorkSelfHelp.jsx (FULL COPY-PASTE)
 // CHANGE: Android hardware back now ALWAYS goes to TrackScreen (/app/work)
 // - Uses history.pushState + popstate trap (PWA-safe)
 // - On-screen Back also goes to /app/work
@@ -154,10 +154,10 @@ export default function WorkSelfHelp() {
     });
   }, [country, location.pathname, location.search]);
 
-  // âœ… Desired back destination (TrackScreen)
+  // Desired back destination (TrackScreen)
   const backUrl = `/app/work?country=${encodeURIComponent(country || "")}&from=choice`;
 
-  // âœ… HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/work)
+  // HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/work)
   useEffect(() => {
     try {
       window.history.pushState(
@@ -175,7 +175,7 @@ export default function WorkSelfHelp() {
     return () => window.removeEventListener("popstate", onPopState);
   }, [navigate, backUrl]);
 
-  // âœ… On-screen Back
+  // On-screen Back
   const goBackToChoice = () => {
     smartBack(navigate, "/app/home");
   };
@@ -322,5 +322,6 @@ export default function WorkSelfHelp() {
     </div>
   );
 }
+
 
 

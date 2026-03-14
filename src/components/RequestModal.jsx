@@ -1,5 +1,5 @@
-﻿// âœ… RequestModal.jsx (FINAL COPY-PASTE â€” ANDROID KEYBOARD WARM-UP + TOUCH + SCROLL FIX)
-// âœ… UPDATE (Back routing support):
+﻿// RequestModal.jsx (FINAL COPY-PASTE - ANDROID KEYBOARD WARM-UP + TOUCH + SCROLL FIX)
+// UPDATE (Back routing support):
 // - Add optional prop: returnTo (string path)
 // - If returnTo is set, closing the modal (X / Cancel / overlay) will navigate there.
 // - If not set, it behaves exactly like before.
@@ -10,6 +10,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { isStandalone } from "../utils/isStandalone";
 import { KENYA_COUNTY_OPTIONS, normalizeCountyName } from "../constants/kenyaCounties";
+import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
 import {
   clearDummyPaymentDraft,
   clearDummyPaymentState,
@@ -197,7 +198,7 @@ function normalizeUnlockPaymentReceipt(input) {
   };
 }
 
-// âœ… Best-practice body lock for Android PWA keyboard stability
+// Best-practice body lock for Android PWA keyboard stability
 function lockBodyScrollFixed() {
   const y = window.scrollY || 0;
 
@@ -248,7 +249,7 @@ function scrollFieldIntoView(el, scrollContainer) {
 }
 
 /**
- * âœ… Android WebView IME warm-up (one-time per session)
+ * Android WebView IME warm-up (one-time per session)
  * Runs only on a real user gesture (we call it from onPointerDownCapture on inputs).
  * Then refocuses the target input.
  */
@@ -318,7 +319,7 @@ export default function RequestModal({
   maxPdfMb = 10,
   enableAttachments = true,
 
-  // âœ… NEW: optional "where to go back to when closing"
+  // NEW: optional "where to go back to when closing"
   // Example:
   //   returnTo={`/app/work/we-help?country=${encodeURIComponent(country)}`}
   returnTo,
@@ -335,10 +336,10 @@ export default function RequestModal({
   const wasOpenRef = useRef(false);
   const lastStateEmitRef = useRef("");
 
-  // âœ… prevents "tap causes close + blur" on Android
+  // prevents "tap causes close + blur" on Android
   const startedInsidePanelRef = useRef(false);
 
-  // âœ… fallback: allow returnTo via query param (?returnTo=/app/...)
+  // fallback: allow returnTo via query param (?returnTo=/app/...)
   const effectiveReturnTo = useMemo(() => {
     if (returnTo) return String(returnTo);
     try {
@@ -520,7 +521,7 @@ export default function RequestModal({
     resolvedPaymentAmount,
   ]);
 
-  // âœ… lock body scroll (ANDROID SAFE)
+  // lock body scroll (ANDROID SAFE)
   useEffect(() => {
     if (!open) return;
     const unlock = lockBodyScrollFixed();
@@ -651,6 +652,12 @@ export default function RequestModal({
     });
   };
 
+  const openLegalDoc = (docKey) => {
+    navigate(buildLegalDocRoute(docKey, { scope: "app" }), {
+      state: { backTo: `${location.pathname}${location.search}` },
+    });
+  };
+
   const submit = async () => {
     setErr("");
 
@@ -734,7 +741,7 @@ export default function RequestModal({
     }
   };
 
-  // âœ… lighter styles in standalone (no blur, no heavy shadows)
+  // lighter styles in standalone (no blur, no heavy shadows)
   const overlayCls = STANDALONE ? "bg-black/40" : "bg-black/35 backdrop-blur-[2px]";
   const panelCls = STANDALONE
     ? "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 dark:border-zinc-800 dark:bg-zinc-950 flex flex-col motion-modal-panel anim-in-pop"
@@ -770,7 +777,7 @@ export default function RequestModal({
       role="dialog"
       style={{ overscrollBehavior: "contain" }}
     >
-      {/* âœ… Overlay: close ONLY if pointer started on overlay (not inside modal) */}
+      {/* Overlay: close ONLY if pointer started on overlay (not inside modal) */}
       <div
         className={`absolute inset-0 ${overlayCls} motion-modal-backdrop anim-in-fade`}
         aria-hidden="true"
@@ -992,7 +999,7 @@ export default function RequestModal({
                               key={`${f.name}-${idx}`}
                               className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
                             >
-                              {f.name} â€¢ {Math.round((f.size || 0) / 1024)} KB
+                              {f.name} - {Math.round((f.size || 0) / 1024)} KB
                             </div>
                           ))}
                         </div>
@@ -1082,6 +1089,26 @@ export default function RequestModal({
                           Unlock payment was already completed for this request flow.
                         </p>
                       )}
+
+                      <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
+                        Review{" "}
+                        <button
+                          type="button"
+                          onClick={() => openLegalDoc(LEGAL_DOC_KEYS.ESCROW_POLICY)}
+                          className="font-semibold text-emerald-700 transition hover:text-emerald-800"
+                        >
+                          Escrow Policy
+                        </button>{" "}
+                        and{" "}
+                        <button
+                          type="button"
+                          onClick={() => openLegalDoc(LEGAL_DOC_KEYS.REFUND_POLICY)}
+                          className="font-semibold text-emerald-700 transition hover:text-emerald-800"
+                        >
+                          Refund Policy
+                        </button>
+                        .
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -1092,3 +1119,5 @@ export default function RequestModal({
     </div>
   );
 }
+
+

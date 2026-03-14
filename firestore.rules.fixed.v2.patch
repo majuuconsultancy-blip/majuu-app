@@ -204,6 +204,10 @@ service cloud.firestore {
       return v in ["recommend_accept", "recommend_reject", "none"];
     }
 
+    function staffAllowedProgressPercent(v) {
+      return v in [10, 20, 30, 40, 50, 60, 70, 80, 90];
+    }
+
     function chatTypeOk(t) {
       return t in ["text", "pdf", "bundle"];
     }
@@ -384,10 +388,15 @@ service cloud.firestore {
             "staffStartedAt",
             "staffStartedAtMs",
             "staffStartedBy",
+            "markedInProgressAt",
+            "markedInProgressAtMs",
             "staffCompletedAt",
             "staffCompletedAtMs",
             "staffCompletedBy",
-            "staffWorkMinutes"
+            "staffWorkMinutes",
+            "staffProgressPercent",
+            "staffProgressUpdatedAt",
+            "staffProgressUpdatedAtMs"
           ])
           && (
             !changedHas("status")
@@ -400,6 +409,10 @@ service cloud.firestore {
           && (
             !changedHas("staffDecision")
             || staffAllowedDecision(request.resource.data.staffDecision)
+          )
+          && (
+            !changedHas("staffProgressPercent")
+            || staffAllowedProgressPercent(request.resource.data.staffProgressPercent)
           )
         );
 

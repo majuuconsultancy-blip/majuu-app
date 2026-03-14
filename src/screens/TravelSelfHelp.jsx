@@ -1,6 +1,6 @@
-﻿// âœ… TravelSelfHelp.jsx (FULL COPY-PASTE)
+﻿// TravelSelfHelp.jsx (FULL COPY-PASTE)
 // CHANGE: Redo ALL icons using lucide-react (no custom SVG icon components)
-// âœ… ADD: Android hardware back ALWAYS goes to TrackScreen (/app/travel)
+// ADD: Android hardware back ALWAYS goes to TrackScreen (/app/travel)
 // - Uses history.pushState + popstate trap (PWA-safe)
 // - On-screen Back also goes to /app/travel
 // Everything else (layout/logic/keys) unchanged.
@@ -155,10 +155,10 @@ export default function TravelSelfHelp() {
     });
   }, [country, location.pathname, location.search]);
 
-  // âœ… Desired back destination (TrackScreen)
+  // Desired back destination (TrackScreen)
   const backUrl = `/app/travel?country=${encodeURIComponent(country)}&from=choice`;
 
-  // âœ… HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/travel)
+  // HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/travel)
   useEffect(() => {
     try {
       window.history.pushState(
@@ -339,5 +339,6 @@ export default function TravelSelfHelp() {
     </div>
   );
 }
+
 
 

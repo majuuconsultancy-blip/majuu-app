@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   doc,
@@ -6,10 +6,8 @@ import {
   collection,
   onSnapshot,
   query,
-  updateDoc,
-  serverTimestamp,
 } from "firebase/firestore";
-import { auth, db } from "../firebase";
+import { db } from "../firebase";
 import {
   adminAcceptRequest,
   adminRejectRequest,
@@ -23,19 +21,20 @@ import {
   publishStagedAdminFiles,
   markStaffDraftStaged,
 } from "../services/adminfileservice";
-import { ArrowLeft, FileText, Check, X, ChevronRight, Link2, Trash2 } from "lucide-react";
+import { ArrowLeft, FileText, Check, X, ChevronRight, ChevronDown, Link2, Trash2 } from "lucide-react";
 import AssignStaffPanel from "../components/AssignStaffPanel";
 import AdminRequestChatLauncher from "../components/AdminRequestChatLauncher";
 import AppIcon from "../components/AppIcon";
+import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { smartBack } from "../utils/navBack";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import { getRequestWorkProgress } from "../utils/requestWorkProgress";
 import {
   adminApproveInProgressPayment,
   adminApproveRefund,
   adminRejectInProgressPayment,
   adminRejectRefund,
-  ensureUnlockAutoRefundForRequest,
   normalizePaymentDoc,
   normalizeRefundDoc,
   PAYMENT_TYPES,
@@ -44,6 +43,7 @@ import {
   REFUND_STATUSES,
   refundStatusUi,
 } from "../services/paymentservice";
+import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 
 /* ---------- UI helpers ---------- */
 function pill(status) {
@@ -91,6 +91,61 @@ function isHttp(url) {
   return u.startsWith("http://") || u.startsWith("https://");
 }
 
+function createAdminSectionState() {
+  return {
+    workProgress: false,
+    routing: false,
+    payments: false,
+    refunds: false,
+    assignment: false,
+    applicant: false,
+    messageToApplicant: false,
+    staffSuggestedFiles: false,
+    attachments: false,
+  };
+}
+
+function CollapsibleSectionCard({
+  className,
+  title,
+  subtitle,
+  open,
+  onToggle,
+  badge = null,
+  meta = null,
+  children,
+}) {
+  return (
+    <div className={className}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-start justify-between gap-3 text-left"
+      >
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
+          {subtitle ? (
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{subtitle}</p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {badge}
+          {meta}
+          <AppIcon
+            icon={ChevronDown}
+            size={ICON_MD}
+            className={`text-zinc-500 transition ${open ? "rotate-180" : ""}`}
+          />
+        </div>
+      </button>
+      {open ? children : null}
+    </div>
+  );
+}
+
+const EMPTY_REQUEST_UNREAD_STATE = Object.freeze({});
+
 export default function AdminRequestDetailsScreen() {
   const { requestId } = useParams();
   const navigate = useNavigate();
@@ -108,7 +163,7 @@ export default function AdminRequestDetailsScreen() {
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // âœ… staged links (adminFileDrafts)
+  // ✅ staged links (adminFileDrafts)
   const [drafts, setDrafts] = useState([]);
   const [draftErr, setDraftErr] = useState("");
   const [addingDraft, setAddingDraft] = useState(false);
@@ -116,12 +171,12 @@ export default function AdminRequestDetailsScreen() {
   const [draftName, setDraftName] = useState("");
   const [draftUrl, setDraftUrl] = useState("");
 
-  // âœ… staff proposed links (staffFileDrafts)
+  // ✅ staff proposed links (staffFileDrafts)
   const [staffDrafts, setStaffDrafts] = useState([]);
   const [staffDraftErr, setStaffDraftErr] = useState("");
   const [stagingStaffDrafts, setStagingStaffDrafts] = useState(false);
 
-  // âœ… chat notification
+  // ✅ chat notification
   const [chatPendingCount, setChatPendingCount] = useState(0);
   const [roleCtx, setRoleCtx] = useState(null);
   const [assignedAdminRows, setAssignedAdminRows] = useState([]);
@@ -141,6 +196,10 @@ export default function AdminRequestDetailsScreen() {
   const [refundApproveEtaById, setRefundApproveEtaById] = useState({});
   const [refundRejectReasonById, setRefundRejectReasonById] = useState({});
   const [refundDecisionBusyId, setRefundDecisionBusyId] = useState("");
+  const [openSections, setOpenSections] = useState(createAdminSectionState);
+  const unreadRequestState = useNotifsV2Store(
+    (s) => s.unreadByRequest?.[String(requestId || "").trim()] || EMPTY_REQUEST_UNREAD_STATE
+  );
 
   const status = String(req?.status || "new").toLowerCase();
   const statusPill = useMemo(() => pill(status), [status]);
@@ -224,7 +283,7 @@ export default function AdminRequestDetailsScreen() {
     };
   }, [roleCtx?.isSuperAdmin]);
 
-  /* âœ… FIX: pending chat count without orderBy (no index needed) */
+  /* ✅ FIX: pending chat count without orderBy (no index needed) */
   useEffect(() => {
     if (!requestId) return;
 
@@ -304,12 +363,14 @@ export default function AdminRequestDetailsScreen() {
 
   useEffect(() => {
     if (!requestId) return;
-    ensureUnlockAutoRefundForRequest(requestId).catch((error) => {
-      console.warn("unlock auto-refund check failed:", error?.message || error);
-    });
-  }, [requestId, req?.status, req?.markedInProgressAtMs]);
+    notifsV2Store.markRequestNotificationsRead(requestId).catch(() => {});
+  }, [requestId]);
 
-  // âœ… live drafts list (adminFileDrafts)
+  useEffect(() => {
+    setOpenSections(createAdminSectionState());
+  }, [requestId]);
+
+  // ✅ live drafts list (adminFileDrafts)
   useEffect(() => {
     if (!requestId) return;
 
@@ -333,7 +394,7 @@ export default function AdminRequestDetailsScreen() {
     return () => unsub();
   }, [requestId]);
 
-  // âœ… live staff drafts list (staffFileDrafts)
+  // ✅ live staff drafts list (staffFileDrafts)
   useEffect(() => {
     if (!requestId) return;
 
@@ -357,7 +418,7 @@ export default function AdminRequestDetailsScreen() {
     return () => unsub();
   }, [requestId]);
 
-  // âœ… AUTO-STAGE: when staff recommends accept and has links, auto-fill admin drafts
+  // ✅ AUTO-STAGE: when staff recommends accept and has links, auto-fill admin drafts
   useEffect(() => {
     if (!requestId) return;
     if (decisionLocked) return;
@@ -523,50 +584,6 @@ export default function AdminRequestDetailsScreen() {
     }
   };
 
-  const setContacted = async () => {
-    if (roleCtx?.isAssignedAdmin) {
-      const scopedAdminUid = String(
-        req?.ownerLockedAdminUid || req?.currentAdminUid || ""
-      ).trim();
-      const actorUid = String(auth.currentUser?.uid || "").trim();
-      if (scopedAdminUid && actorUid && scopedAdminUid !== actorUid) {
-        return alert("This request is outside your assigned admin scope.");
-      }
-    }
-
-    const actingAdminUid = String(auth.currentUser?.uid || "").trim();
-    const lockAdminUid = String(
-      req?.ownerLockedAdminUid || req?.currentAdminUid || actingAdminUid
-    ).trim();
-    const nowMs = Date.now();
-    const existingRoutingMeta = req?.routingMeta && typeof req.routingMeta === "object"
-      ?req.routingMeta
-      : {};
-
-    try {
-      await updateDoc(doc(db, "serviceRequests", requestId), {
-        status: "contacted",
-        markedInProgressAt: serverTimestamp(),
-        markedInProgressAtMs: nowMs,
-        adminRespondedAt: serverTimestamp(),
-        adminRespondedAtMs: nowMs,
-        adminRespondedBy: actingAdminUid || null,
-        ownerLockedAdminUid: lockAdminUid || "",
-        ownerLockedAt: serverTimestamp(),
-        routingMeta: {
-          ...existingRoutingMeta,
-          handledAt: serverTimestamp(),
-          handledAtMs: nowMs,
-          lockedOwnerAdminUid: lockAdminUid || "",
-        },
-        updatedAt: serverTimestamp(),
-      });
-      await load();
-    } catch (e) {
-      alert(e?.message || "Failed to update status.");
-    }
-  };
-
   const approveInProgressPayment = async (paymentId) => {
     const id = safeStr(paymentId);
     if (!id) return;
@@ -663,7 +680,7 @@ export default function AdminRequestDetailsScreen() {
     return (
       <div className={pageBg}>
         <div className="max-w-xl mx-auto px-5 py-6">
-          <div className={`${card} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>Loadingâ€¦</div>
+          <div className={`${card} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>Loading…</div>
         </div>
       </div>
     );
@@ -696,11 +713,11 @@ export default function AdminRequestDetailsScreen() {
     );
   }
 
-  const headerLeft = `${String(req?.track || "").toUpperCase()} â€¢ ${req?.country || "-"}`;
+  const headerLeft = `${String(req?.track || "").toUpperCase()} • ${req?.country || "-"}`;
   const headerRight =
     req?.requestType === "full"
       ?"Full Package"
-      : `Single Service â€¢ ${req?.serviceName || "-"}`;
+      : `Single Service • ${req?.serviceName || "-"}`;
 
   const createdLabel = formatDT(req?.createdAt);
 
@@ -709,7 +726,16 @@ export default function AdminRequestDetailsScreen() {
       ?"Decision complete. This request was accepted."
       : status === "rejected"
       ?"Decision complete. This request was rejected."
+      : String(req?.assignedTo || "").trim()
+      ?"Assigned requests move into active progress only after staff taps Start Work."
       : "Review the applicant details and documents, then make a decision.";
+  const workProgress = getRequestWorkProgress(req);
+  const showWorkProgressCard = Boolean(
+    String(req?.assignedTo || "").trim() || workProgress.isStarted || workProgress.progressPercent
+  );
+  const adminProgressHint = String(req?.assignedTo || "").trim()
+    ?"Staff controls live progress updates from their request details."
+    : "Assign staff first. The request stays in New until they actually start work.";
 
   const badgeText = chatPendingCount > 99 ?"99+" : String(chatPendingCount);
   const reassignmentCount = Array.isArray(req?.routingMeta?.reassignmentHistory)
@@ -721,6 +747,10 @@ export default function AdminRequestDetailsScreen() {
   const inProgressPayments = payments.filter(
     (p) => String(p.paymentType || "").toLowerCase() === PAYMENT_TYPES.IN_PROGRESS
   );
+  const canFinalizeDecision = !decisionLocked && status !== "new";
+  const toggleSection = (key) => {
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   return (
     <div className={pageBg}>
@@ -742,7 +772,7 @@ export default function AdminRequestDetailsScreen() {
           </div>
 
           <div className="shrink-0 flex items-center gap-2">
-            {/* âœ… Chat launcher with badge */}
+            {/* ✅ Chat launcher with badge */}
             <span className="relative inline-flex">
               <AdminRequestChatLauncher requestId={requestId} />
               {chatPendingCount > 0 ?(
@@ -806,23 +836,42 @@ export default function AdminRequestDetailsScreen() {
               Review status
             </div>
             <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{actionHint}</div>
-
-            {!decisionLocked && status === "new" ?(
-              <button
-                type="button"
-                onClick={setContacted}
-                className="mt-3 inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
-              >
-                Mark In Progress
-              </button>
+            {!decisionLocked ?(
+              <div className="mt-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300">
+                Staff Start Work is the only normal trigger for in-progress.
+              </div>
             ) : null}
           </div>
         </div>
 
-        <div className={`mt-4 ${card} p-4`}>
-          <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-            Routing overview
-          </div>
+        {showWorkProgressCard ?(
+          <CollapsibleSectionCard
+            className={`mt-4 ${card} p-4`}
+            title="Work progress"
+            subtitle="Live progress updates posted by staff."
+            open={openSections.workProgress}
+            onToggle={() => toggleSection("workProgress")}
+          >
+            <div className="mt-4">
+              <RequestWorkProgressCard
+                request={req}
+                title="Work progress"
+                subtitle={adminProgressHint}
+                showWhenIdle={Boolean(String(req?.assignedTo || "").trim())}
+                idleText="Assigned, but staff has not started work yet."
+                pendingText="Staff has started work. A live percentage update has not been posted yet."
+              />
+            </div>
+          </CollapsibleSectionCard>
+        ) : null}
+
+        <CollapsibleSectionCard
+          className={`mt-4 ${card} p-4`}
+          title="Routing overview"
+          subtitle="Assigned admin routing and override controls."
+          open={openSections.routing}
+          onToggle={() => toggleSection("routing")}
+        >
           <div className="mt-2 grid gap-2 text-sm text-zinc-700 dark:text-zinc-300">
             <div>
               Reassignments:{" "}
@@ -843,7 +892,7 @@ export default function AdminRequestDetailsScreen() {
                   <option value="">Auto best route</option>
                   {assignedAdminRows.map((row) => (
                     <option key={row.uid} value={row.uid}>
-                      {`${String(row?.email || "No email")} · ${String(row?.uid || "")}`}
+                      {`${String(row?.email || "No email")} � ${String(row?.uid || "")}`}
                     </option>
                   ))}
                 </select>
@@ -868,22 +917,27 @@ export default function AdminRequestDetailsScreen() {
               ) : null}
             </div>
           ) : null}
-        </div>
+        </CollapsibleSectionCard>
 
-
-        <div className={`mt-4 ${card} p-5`}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Payments</h2>
-              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                Unlock and in-progress payment records for this request.
-              </p>
-            </div>
+        <CollapsibleSectionCard
+          className={`mt-4 ${card} p-5`}
+          title="Payments"
+          subtitle="Unlock and in-progress payment records for this request."
+          open={openSections.payments}
+          onToggle={() => toggleSection("payments")}
+          badge={
+            unreadRequestState?.paymentUnread ?(
+              <span className="rounded-full border border-rose-200 bg-rose-50/80 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+                New
+              </span>
+            ) : null
+          }
+          meta={
             <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
               {payments.length} records
             </span>
-          </div>
-
+          }
+        >
           {paymentsErr ?(
             <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
               {paymentsErr}
@@ -985,21 +1039,27 @@ export default function AdminRequestDetailsScreen() {
               })
             )}
           </div>
-        </div>
+        </CollapsibleSectionCard>
 
-        <div className={`mt-4 ${card} p-5`}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Refund requests</h2>
-              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                Each refund targets a specific payment ID.
-              </p>
-            </div>
+        <CollapsibleSectionCard
+          className={`mt-4 ${card} p-5`}
+          title="Refund requests"
+          subtitle="Each refund targets a specific payment ID."
+          open={openSections.refunds}
+          onToggle={() => toggleSection("refunds")}
+          badge={
+            unreadRequestState?.refundUnread ?(
+              <span className="rounded-full border border-rose-200 bg-rose-50/80 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+                New
+              </span>
+            ) : null
+          }
+          meta={
             <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
               {refunds.length} requests
             </span>
-          </div>
-
+          }
+        >
           {refundsErr ?(
             <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
               {refundsErr}
@@ -1112,31 +1172,39 @@ export default function AdminRequestDetailsScreen() {
               })
             )}
           </div>
-        </div>
-        {/* âœ… STAFF ASSIGNMENT */}
-        {req && !decisionLocked ?(
-          <AssignStaffPanel request={req} />
-        ) : (
-          <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
-            Staff assignment is disabled because this request is already
-            finalized.
+        </CollapsibleSectionCard>
+
+        <CollapsibleSectionCard
+          className={`mt-4 ${card} p-5`}
+          title="Staff assignment"
+          subtitle="Assign or reassign staff for this request."
+          open={openSections.assignment}
+          onToggle={() => toggleSection("assignment")}
+        >
+          <div className="mt-4">
+            {req && !decisionLocked ?(
+              <AssignStaffPanel request={req} />
+            ) : (
+              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
+                Staff assignment is disabled because this request is already
+                finalized.
+              </div>
+            )}
           </div>
-        )}
+        </CollapsibleSectionCard>
 
-        {/* Applicant */}
-        <div className={`mt-6 ${card} p-5`}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Applicant</h2>
-              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                Basic details and uploaded files.
-              </p>
-            </div>
-
+        <CollapsibleSectionCard
+          className={`mt-6 ${card} p-5`}
+          title="Applicant"
+          subtitle="Basic details and uploaded files."
+          open={openSections.applicant}
+          onToggle={() => toggleSection("applicant")}
+        >
+          <div className="mt-4 flex justify-end">
             <button
               type="button"
               onClick={() => navigate(`/app/admin/request/${requestId}/documents`)}
-              className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
+              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60"
             >
               Applicant docs
               <AppIcon icon={ChevronRight} size={ICON_MD} className="text-emerald-700" />
@@ -1190,56 +1258,42 @@ export default function AdminRequestDetailsScreen() {
               </div>
             )}
           </div>
-        </div>
+        </CollapsibleSectionCard>
 
-        {/* Note */}
-        <div className={`mt-6 ${card} p-5`}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                Message to applicant
-              </h2>
-              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                This shows on the applicantâ€™s Request Details. Required if
-                rejecting.
-              </p>
-            </div>
-
-          </div>
-
+        <CollapsibleSectionCard
+          className={`mt-6 ${card} p-5`}
+          title="Message to applicant"
+          subtitle="This shows on the applicant's Request Details. Required if rejecting."
+          open={openSections.messageToApplicant}
+          onToggle={() => toggleSection("messageToApplicant")}
+        >
           <textarea
             className="mt-4 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-3 text-sm text-zinc-900 dark:text-zinc-100 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 min-h-[120px] disabled:opacity-70"
             value={note}
             onChange={(e) => setNote(e.target.value)}
             disabled={saving || decisionLocked}
-            placeholder="Example: Please upload a clear passport bio page, then re-submit. Processing starts 24â€“48 hours after upload."
+            placeholder="Example: Please upload a clear passport bio page, then re-submit. Processing starts 24-48 hours after upload."
           />
-        </div>
+        </CollapsibleSectionCard>
 
-        {/* âœ… Staff suggested files */}
-        <div className={`mt-6 ${card} p-5`}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                Staff suggested files
-              </h2>
-              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                These are links staff added. If staff recommended accept, they
-                auto-fill your â€œAttach filesâ€ section.
-              </p>
-            </div>
-
-            {stagingStaffDrafts ?(
+        <CollapsibleSectionCard
+          className={`mt-6 ${card} p-5`}
+          title="Staff suggested files"
+          subtitle="These are links staff added. If staff recommended accept, they auto-fill your attach files section."
+          open={openSections.staffSuggestedFiles}
+          onToggle={() => toggleSection("staffSuggestedFiles")}
+          meta={
+            stagingStaffDrafts ?(
               <span className="rounded-full border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
-                Autofillingâ€¦
+                Autofilling...
               </span>
             ) : (
               <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                 {staffDrafts.length} items
               </span>
-            )}
-          </div>
-
+            )
+          }
+        >
           {staffDraftErr ?(
             <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
               {staffDraftErr}
@@ -1282,7 +1336,7 @@ export default function AdminRequestDetailsScreen() {
 
                         {staged ?(
                           <div className="mt-2 text-xs font-semibold text-emerald-800">
-                            âœ… Already staged to applicant
+                            Already staged to applicant
                           </div>
                         ) : (
                           <div className="mt-2 text-xs text-zinc-500">
@@ -1306,26 +1360,20 @@ export default function AdminRequestDetailsScreen() {
               })}
             </div>
           )}
-        </div>
+        </CollapsibleSectionCard>
 
-        {/* âœ… Attach files for applicant */}
-        <div className={`mt-6 ${card} p-5`}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                Attach files for applicant
-              </h2>
-              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                Add links (Google Drive / Dropbox). Files are sent only after
-                you accept.
-              </p>
-            </div>
-
+        <CollapsibleSectionCard
+          className={`mt-6 ${card} p-5`}
+          title="Attach files for applicant"
+          subtitle="Add links for templates and supporting files. These go out after accept."
+          open={openSections.attachments}
+          onToggle={() => toggleSection("attachments")}
+          meta={
             <span className="text-[11px] font-semibold text-emerald-800">
               Sends on Accept
             </span>
-          </div>
-
+          }
+        >
           {draftErr ?(
             <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
               {draftErr}
@@ -1362,18 +1410,18 @@ export default function AdminRequestDetailsScreen() {
                   disabled={saving || addingDraft}
                   className="shrink-0 inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                 >
-                  {addingDraft ?"Addingâ€¦" : "Add"}
+                  {addingDraft ?"Adding..." : "Add"}
                 </button>
               </div>
 
               <div className="text-xs text-zinc-500">
-                Tip: Make sure the link access is set to â€œAnyone with the link can
-                viewâ€.
+                Tip: Make sure the link access is set to "Anyone with the link can
+                view".
               </div>
             </div>
           ) : (
             <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
-              Decision is locked â€” attachments canâ€™t be changed.
+              Decision is locked - attachments cannot be changed.
             </div>
           )}
 
@@ -1425,8 +1473,7 @@ export default function AdminRequestDetailsScreen() {
               ))
             )}
           </div>
-        </div>
-
+        </CollapsibleSectionCard>
         {/* Actions LAST */}
         <div className={`mt-6 ${card} p-5`}>
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Final decision</h2>
@@ -1442,6 +1489,11 @@ export default function AdminRequestDetailsScreen() {
             >
               {lockedLabel}
             </button>
+          ) : !canFinalizeDecision ?(
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-900">
+              Final decision unlocks after staff taps Start Work. While the request is still in New,
+              accept and reject stay disabled.
+            </div>
           ) : (
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <button
@@ -1452,7 +1504,7 @@ export default function AdminRequestDetailsScreen() {
                 title={!note.trim() ?"Note is required for rejection." : ""}
               >
                 <AppIcon icon={X} size={ICON_MD} />
-                {saving ?"Savingâ€¦" : "Reject"}
+                {saving ?"Saving…" : "Reject"}
               </button>
 
               <button
@@ -1462,7 +1514,7 @@ export default function AdminRequestDetailsScreen() {
                 type="button"
               >
                 <AppIcon icon={Check} size={ICON_MD} className="text-white" />
-                {saving ?"Savingâ€¦" : "Accept"}
+                {saving ?"Saving…" : "Accept"}
               </button>
             </div>
           )}
@@ -1477,5 +1529,8 @@ export default function AdminRequestDetailsScreen() {
     </div>
   );
 }
+
+
+
 
 

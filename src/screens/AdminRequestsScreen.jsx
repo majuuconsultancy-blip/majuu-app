@@ -21,6 +21,11 @@ import { routeUnroutedNewRequests } from "../services/adminroutingservice";
 import { setStaffAccessByEmail } from "../services/staffservice";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import { STAFF_SPECIALITY_OPTIONS } from "../constants/staffSpecialities";
+import {
+  applyUnlockAutoRefundSweep,
+  listUnlockAutoRefundEligibleRequests,
+} from "../services/paymentservice";
+import { useNotifsV2Store } from "../services/notifsV2Store";
 
 import {
   collection,
@@ -35,6 +40,7 @@ import {
   limit,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { getRequestWorkProgress } from "../utils/requestWorkProgress";
 
 import { motion, AnimatePresence } from "../utils/motionProxy";
 import {
@@ -216,12 +222,13 @@ function classifyTabFromRequestDoc(data) {
 
   const st = String(data?.status || "new").toLowerCase();
   const assignedTo = String(data?.assignedTo || "").trim();
+  const workProgress = getRequestWorkProgress(data);
 
   if (st === "closed" || st === "accepted") return "closed";
   if (st === "rejected") return "rejected";
 
-  // Any non-final request with a staff assignee belongs in Assigned.
-  if (assignedTo) return "assigned";
+  // Assigned stays in New until staff actually starts work.
+  if (assignedTo && (workProgress.isStarted || workProgress.isInProgress)) return "assigned";
 
   // Remaining non-final requests are treated as New.
   return "new";
@@ -605,6 +612,10 @@ export default function AdminRequestsScreen() {
   const [routingBusy, setRoutingBusy] = useState(false);
   const [routingErr, setRoutingErr] = useState("");
   const [routingMsg, setRoutingMsg] = useState("");
+  const [unlockRefundBusy, setUnlockRefundBusy] = useState(false);
+  const [unlockRefundErr, setUnlockRefundErr] = useState("");
+  const [unlockRefundMsg, setUnlockRefundMsg] = useState("");
+  const [unlockRefundEligible, setUnlockRefundEligible] = useState([]);
   const [search, setSearch] = useState(String(qFromUrl));
   const [debouncedSearch, setDebouncedSearch] = useState(String(qFromUrl));
   const [visibleCount, setVisibleCount] = useState(INITIAL_RENDER_COUNT);
@@ -628,6 +639,7 @@ export default function AdminRequestsScreen() {
   const longPressTimerRef = useRef(null);
   const longPressStateRef = useRef({ id: "", fired: false, x: 0, y: 0 });
   const staleSweepAtRef = useRef(0);
+  const unreadByRequest = useNotifsV2Store((s) => s.unreadByRequest || {});
 
   // ✅ subtle entrance
   const [enter, setEnter] = useState(false);
@@ -795,8 +807,8 @@ export default function AdminRequestsScreen() {
           .filter((r) => {
             const st = String(r?.status || "").toLowerCase();
             if (st === "closed" || st === "rejected") return false;
-            const assignedTo = String(r?.assignedTo || "").trim();
-            return status === "assigned" ?Boolean(assignedTo) : !assignedTo;
+            const tabKey = classifyTabFromRequestDoc(r);
+            return status === "assigned" ?tabKey === "assigned" : tabKey === "new";
           })
           .sort((a, b) => getCreatedAtMs(b) - getCreatedAtMs(a));
 
@@ -850,6 +862,29 @@ export default function AdminRequestsScreen() {
     }
   };
 
+  const runUnlockRefundSweep = async () => {
+    const requestIds = unlockRefundEligible
+      .map((row) => String(row?.requestId || "").trim())
+      .filter(Boolean);
+    if (requestIds.length === 0) return;
+
+    setUnlockRefundBusy(true);
+    setUnlockRefundErr("");
+    setUnlockRefundMsg("");
+    try {
+      const applied = await applyUnlockAutoRefundSweep({ requestIds });
+      setUnlockRefundMsg(`Processed ${applied} unlock refund${applied === 1 ? "" : "s"}.`);
+      const refreshed = await listUnlockAutoRefundEligibleRequests({ requestIds });
+      setUnlockRefundEligible(Array.isArray(refreshed) ? refreshed : []);
+      await load();
+    } catch (error) {
+      console.error(error);
+      setUnlockRefundErr(String(error?.message || "Failed to process 48h unlock refunds."));
+    } finally {
+      setUnlockRefundBusy(false);
+    }
+  };
+
   useEffect(() => {
     const uids = Array.from(
       new Set(
@@ -890,6 +925,44 @@ export default function AdminRequestsScreen() {
       cancelled = true;
     };
   }, [items, staffEmailByUid]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!roleCtx?.isSuperAdmin) {
+      setUnlockRefundEligible([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const requestIds = (items || [])
+      .map((row) => String(row?.id || "").trim())
+      .filter(Boolean);
+    if (requestIds.length === 0) {
+      setUnlockRefundEligible([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    (async () => {
+      try {
+        const rows = await listUnlockAutoRefundEligibleRequests({ requestIds });
+        if (!cancelled) {
+          setUnlockRefundEligible(Array.isArray(rows) ? rows : []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("unlock refund eligibility scan failed:", error?.message || error);
+          setUnlockRefundEligible([]);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [items, roleCtx?.isSuperAdmin]);
 
   /* ---------- ✅ GLOBAL new-message dots (fixed) ---------- */
   const [pendingSet, setPendingSet] = useState(() => new Set()); // Set<requestId>
@@ -932,7 +1005,12 @@ export default function AdminRequestsScreen() {
 
   // 2) Batch-lookup request docs for pending IDs to classify which tab gets a red dot.
   useEffect(() => {
-    const ids = Array.from(pendingSet || [])
+    const ids = Array.from(
+      new Set([
+        ...(pendingSet ? Array.from(pendingSet) : []),
+        ...Object.keys(unreadByRequest || {}).filter((rid) => unreadByRequest?.[rid]?.unread),
+      ])
+    )
       .map((x) => String(x || "").trim())
       .filter(Boolean);
     let cancelled = false;
@@ -977,7 +1055,7 @@ export default function AdminRequestsScreen() {
     return () => {
       cancelled = true;
     };
-  }, [pendingSet]);
+  }, [pendingSet, unreadByRequest]);
 
   const tabHasDot = useMemo(() => {
     const out = { new: false, closed: false, rejected: false, assigned: false };
@@ -985,8 +1063,14 @@ export default function AdminRequestsScreen() {
       const tk = reqMetaById?.[rid]?.tabKey;
       if (tk && out[tk] !== undefined) out[tk] = true;
     });
+    Object.keys(unreadByRequest || {}).forEach((rid) => {
+      if (!unreadByRequest?.[rid]?.unread) return;
+      const row = (items || []).find((item) => String(item?.id || "").trim() === rid);
+      const tk = row ? classifyTabFromRequestDoc(row) : reqMetaById?.[rid]?.tabKey;
+      if (tk && out[tk] !== undefined) out[tk] = true;
+    });
     return out;
-  }, [pendingSet, reqMetaById]);
+  }, [items, pendingSet, reqMetaById, unreadByRequest]);
 
   /* ---------- Search + Filters ---------- */
   const searched = useMemo(() => {
@@ -1341,16 +1425,8 @@ export default function AdminRequestsScreen() {
 
         {roleCtx?.isSuperAdmin ?<AssignedAdminAccessPanel /> : null}
         {roleCtx?.isSuperAdmin ?(
-          <div className="mt-5 rounded-3xl border border-emerald-200 bg-emerald-50/45 p-4 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                  Manual Bulk Routing
-                </div>
-                <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                  Routes only <span className="font-semibold">new</span> requests that do not have a current admin.
-                </div>
-              </div>
+          <div className="mt-5">
+            <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={runBulkRouteUnrouted}
@@ -1360,6 +1436,19 @@ export default function AdminRequestsScreen() {
                 <AppIcon size={ICON_MD} icon={RefreshCw} />
                 {routingBusy ?"Routing..." : "Route Unrouted New"}
               </button>
+              {unlockRefundEligible.length > 0 ?(
+                <button
+                  type="button"
+                  onClick={runUnlockRefundSweep}
+                  disabled={unlockRefundBusy}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/70 px-4 py-2.5 text-sm font-semibold text-zinc-800 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] disabled:opacity-60"
+                >
+                  <AppIcon size={ICON_MD} icon={RefreshCw} />
+                  {unlockRefundBusy
+                    ? "Processing..."
+                    : `Process 48h Unlock Refunds (${unlockRefundEligible.length})`}
+                </button>
+              ) : null}
             </div>
             {routingErr ?(
               <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/35 dark:text-rose-200">
@@ -1369,6 +1458,16 @@ export default function AdminRequestsScreen() {
             {routingMsg ?(
               <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-200">
                 {routingMsg}
+              </div>
+            ) : null}
+            {unlockRefundErr ?(
+              <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/35 dark:text-rose-200">
+                {unlockRefundErr}
+              </div>
+            ) : null}
+            {unlockRefundMsg ?(
+              <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/35 dark:text-emerald-200">
+                {unlockRefundMsg}
               </div>
             ) : null}
           </div>
@@ -1598,7 +1697,7 @@ export default function AdminRequestsScreen() {
               const sp = assignedTo ?staffPill(staffStatus || "assigned") : null;
               const rp = assignedTo ?staffRecPill(staffDecision) : null;
 
-              const hasNew = pendingSet?.has(rid);
+              const hasNew = pendingSet?.has(rid) || Boolean(unreadByRequest?.[rid]?.unread);
               const fullAccent = isFull
                 ?"border-emerald-300/80 bg-emerald-50/35 dark:border-emerald-800/60 dark:bg-emerald-950/15"
                 : "";

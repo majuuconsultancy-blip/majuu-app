@@ -60,6 +60,8 @@ const FullPackageMissingScreen = lazy(() => import("./screens/FullPackageMissing
 const SettingsScreen = lazy(() => import("./screens/SettingsScreen"));
 const NotificationsScreen = lazy(() => import("./screens/NotificationsScreen"));
 const RequestStatusScreen = lazy(() => import("./screens/RequestStatusScreen"));
+const LegalPortalScreen = lazy(() => import("./screens/LegalPortalScreen"));
+const LegalDocumentScreen = lazy(() => import("./screens/LegalDocumentScreen"));
 
 // Admin
 const AdminRequestsScreen = lazy(() => import("./screens/AdminRequestsScreen"));
@@ -76,6 +78,7 @@ const StaffTasksScreen = lazy(() => import("./screens/StaffTasksScreen"));
 const StaffRequestDetailsScreen = lazy(() => import("./screens/StaffRequestDetailsScreen"));
 const StaffRequestDocumentsScreen = lazy(() => import("./screens/StaffRequestDocumentsScreen"));
 const StaffStartWorkModalScreen = lazy(() => import("./screens/StaffStartWorkModalScreen"));
+const ServicePartnerOnboardingScreen = lazy(() => import("./screens/ServicePartnerOnboardingScreen"));
 
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
 const ROOT_EXIT_PATHS = new Set(["/app/home", "/dashboard", "/staff", "/staff/tasks"]);
@@ -104,6 +107,9 @@ function preloadCriticalScreens() {
   import("./screens/NotificationsScreen");
   import("./screens/PaymentScreen");
   import("./screens/DummyPaymentScreen");
+  import("./screens/LegalPortalScreen");
+  import("./screens/LegalDocumentScreen");
+  import("./screens/ServicePartnerOnboardingScreen");
 }
 
 function runWhenIdle(fn) {
@@ -403,6 +409,8 @@ function AppRoutes() {
           <Route path="/login" element={<LoginScreen />} />
           <Route path="/signup" element={<SignupScreen />} />
           <Route path="/verify-email" element={<VerifyEmailScreen />} />
+          <Route path="/legal" element={<LegalPortalScreen />} />
+          <Route path="/legal/:docKey" element={<LegalDocumentScreen />} />
 
           {/* Track selection hub */}
           <Route path="/dashboard" element={<TrackSelectScreen />} />
@@ -421,6 +429,14 @@ function AppRoutes() {
             element={
               <StaffGate>
                 <StaffOnboardingScreen />
+              </StaffGate>
+            }
+          />
+          <Route
+            path="/staff/onboarding/legal/:docKey"
+            element={
+              <StaffGate>
+                <LegalDocumentScreen />
               </StaffGate>
             }
           />
@@ -477,10 +493,14 @@ function AppRoutes() {
 
             <Route path="profile" element={<ProfileScreen />} />
             <Route path="profile/edit" element={<EditProfileScreen />} />
+            <Route path="legal" element={<LegalPortalScreen mode="app" />} />
+            <Route path="legal/:docKey" element={<LegalDocumentScreen />} />
 
             <Route path="payment" element={<PaymentScreen />} />
             <Route path="dummy-payment" element={<DummyPaymentScreen />} />
             <Route path="request/:requestId" element={<RequestStatusScreen />} />
+            <Route path="service-partner/onboarding" element={<ServicePartnerOnboardingScreen />} />
+            <Route path="service-partner/onboarding/legal/:docKey" element={<LegalDocumentScreen />} />
 
             <Route path="full-package/:track" element={<FullPackageMissingScreen />} />
 

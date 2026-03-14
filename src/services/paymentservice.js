@@ -13,6 +13,12 @@ import {
   where,
 } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import {
+  createAdminNotification,
+  createStaffNotification,
+  createUserNotification,
+} from "./notificationDocs";
+import { getRequestStartedAtMs } from "../utils/requestWorkProgress";
 
 export const PAYMENT_TYPES = {
   UNLOCK_REQUEST: "unlock_request",
@@ -137,6 +143,71 @@ export function buildDummyTransactionReference(nowMs = Date.now()) {
   const dd = String(d.getUTCDate()).padStart(2, "0");
   const rand = Math.floor(1000 + Math.random() * 9000);
   return `MJ-PAY-${yyyy}${mm}${dd}-${rand}`;
+}
+
+function formatMoneyText(amount, currency = "KES") {
+  const value = cleanAmount(amount);
+  if (!value) return "";
+  return `${cleanCurrency(currency)} ${value.toLocaleString()}`;
+}
+
+function requestRoutePath(requestId, role = "user") {
+  const rid = cleanStr(requestId, 180);
+  if (!rid) return "";
+  const safeRole = cleanStr(role, 40).toLowerCase();
+  if (safeRole === "staff") return `/staff/request/${encodeURIComponent(rid)}`;
+  if (safeRole === "admin" || safeRole === "assignedadmin") {
+    return `/app/admin/request/${encodeURIComponent(rid)}`;
+  }
+  return `/app/request/${encodeURIComponent(rid)}`;
+}
+
+function requestAdminUidFromData(requestData) {
+  return cleanStr(
+    requestData?.ownerLockedAdminUid || requestData?.currentAdminUid || "",
+    160
+  );
+}
+
+function requestAssignedStaffUidFromData(requestData) {
+  return cleanStr(requestData?.assignedTo, 160);
+}
+
+async function safeCreateUserNotification(payload) {
+  try {
+    return await createUserNotification(payload);
+  } catch (error) {
+    console.warn("Failed to create user notification:", error?.message || error);
+    return null;
+  }
+}
+
+async function safeCreateStaffNotification(payload) {
+  try {
+    return await createStaffNotification(payload);
+  } catch (error) {
+    console.warn("Failed to create staff notification:", error?.message || error);
+    return null;
+  }
+}
+
+async function safeCreateAdminNotification(payload) {
+  try {
+    return await createAdminNotification(payload);
+  } catch (error) {
+    console.warn("Failed to create admin notification:", error?.message || error);
+    return null;
+  }
+}
+
+async function safeNotifyAdminForRequest(requestId, requestData, payload) {
+  const adminUid = requestAdminUidFromData(requestData);
+  if (!adminUid) return null;
+  return safeCreateAdminNotification({
+    uid: adminUid,
+    requestId,
+    ...payload,
+  });
 }
 
 export function paymentStatusUi(status) {
@@ -311,9 +382,7 @@ function refundDocRef(requestId, refundId) {
 }
 
 function unlockStartedAtMs(requestData) {
-  const explicit = Number(requestData?.markedInProgressAtMs || 0);
-  if (explicit > 0) return explicit;
-  return toMillis(requestData?.markedInProgressAt);
+  return getRequestStartedAtMs(requestData);
 }
 
 export function isUnlockPaymentAutoRefundEligible({
@@ -351,6 +420,8 @@ export async function createUnlockPaymentForRequest({
   const amountNum = cleanAmount(amount);
   const ref = cleanStr(transactionReference, 120) || buildDummyTransactionReference(safePaidAtMs);
   const nowMs = Date.now();
+  const requestSnap = await getDoc(doc(db, "serviceRequests", cleanRequestId));
+  const requestData = requestSnap.exists() ? requestSnap.data() || {} : {};
 
   const payload = {
     requestId: cleanRequestId,
@@ -384,6 +455,21 @@ export async function createUnlockPaymentForRequest({
     unlockPaymentRequestId: cleanRequestId,
     markedInProgressAtMs: Number(0),
     updatedAt: serverTimestamp(),
+  });
+
+  await safeNotifyAdminForRequest(cleanRequestId, requestData, {
+    type: "PAYMENT_RECEIVED",
+    notificationId: `payment_received_unlock_${cleanRequestId}_${refDoc.id}`,
+    extras: {
+      paymentId: refDoc.id,
+      paymentType: PAYMENT_TYPES.UNLOCK_REQUEST,
+      paymentLabel: payload.paymentLabel,
+      amount: payload.amount,
+      currency: payload.currency,
+      title: "Payment received",
+      body: `${payload.paymentLabel} ${formatMoneyText(payload.amount, payload.currency)} paid.`,
+      route: requestRoutePath(cleanRequestId, "admin"),
+    },
   });
 
   return {
@@ -437,6 +523,20 @@ export async function createInProgressPaymentProposal({
   };
 
   const refDoc = await addDoc(paymentsCol(cleanRequestId), payload);
+  await safeNotifyAdminForRequest(cleanRequestId, req, {
+    type: "PAYMENT_UPDATE",
+    notificationId: `payment_review_${cleanRequestId}_${refDoc.id}`,
+    extras: {
+      paymentId: refDoc.id,
+      paymentType: PAYMENT_TYPES.IN_PROGRESS,
+      paymentLabel: payload.paymentLabel,
+      amount: payload.amount,
+      currency: payload.currency,
+      title: "Payment update",
+      body: `${payload.paymentLabel} ${formatMoneyText(payload.amount, payload.currency)} awaiting admin review.`,
+      route: requestRoutePath(cleanRequestId, "admin"),
+    },
+  });
   return { id: refDoc.id, ...payload };
 }
 
@@ -449,6 +549,14 @@ export async function adminApproveInProgressPayment({
   if (!cleanRequestId || !cleanPaymentId) throw new Error("Missing payment details.");
   const actorUid = requireActorUid();
   const nowMs = Date.now();
+  const [requestSnap, paymentSnap] = await Promise.all([
+    getDoc(doc(db, "serviceRequests", cleanRequestId)),
+    getDoc(paymentDocRef(cleanRequestId, cleanPaymentId)),
+  ]);
+  const requestData = requestSnap.exists() ? requestSnap.data() || {} : {};
+  const payment = paymentSnap.exists()
+    ? normalizePaymentDoc({ id: paymentSnap.id, ...paymentSnap.data() })
+    : null;
 
   await updateDoc(paymentDocRef(cleanRequestId, cleanPaymentId), {
     status: PAYMENT_STATUSES.AWAITING_USER_PAYMENT,
@@ -458,6 +566,43 @@ export async function adminApproveInProgressPayment({
     rejectionReason: "",
     updatedAt: serverTimestamp(),
   });
+
+  if (payment) {
+    await Promise.allSettled([
+      safeCreateUserNotification({
+        uid: payment.requestUid,
+        requestId: cleanRequestId,
+        type: "PAYMENT_REQUIRED",
+        notificationId: `payment_required_${cleanRequestId}_${cleanPaymentId}`,
+        extras: {
+          paymentId: cleanPaymentId,
+          paymentType: payment.paymentType,
+          paymentLabel: payment.paymentLabel,
+          amount: payment.amount,
+          currency: payment.currency,
+          title: "Payment required",
+          body: `${payment.paymentLabel} ${formatMoneyText(payment.amount, payment.currency)} ready for payment.`,
+          route: requestRoutePath(cleanRequestId, "user"),
+        },
+      }),
+      safeCreateStaffNotification({
+        uid: requestAssignedStaffUidFromData(requestData) || payment.createdByStaffUid,
+        requestId: cleanRequestId,
+        type: "PAYMENT_UPDATE",
+        notificationId: `payment_update_approved_${cleanRequestId}_${cleanPaymentId}`,
+        extras: {
+          paymentId: cleanPaymentId,
+          paymentType: payment.paymentType,
+          paymentLabel: payment.paymentLabel,
+          amount: payment.amount,
+          currency: payment.currency,
+          title: "Payment update",
+          body: `${payment.paymentLabel} approved and published to user.`,
+          route: requestRoutePath(cleanRequestId, "staff"),
+        },
+      }),
+    ]);
+  }
 
   return true;
 }
@@ -474,6 +619,14 @@ export async function adminRejectInProgressPayment({
   const actorUid = requireActorUid();
   const reason = cleanStr(rejectionReason, 1200);
   if (!reason) throw new Error("Rejection reason is required.");
+  const [requestSnap, paymentSnap] = await Promise.all([
+    getDoc(doc(db, "serviceRequests", cleanRequestId)),
+    getDoc(paymentDocRef(cleanRequestId, cleanPaymentId)),
+  ]);
+  const requestData = requestSnap.exists() ? requestSnap.data() || {} : {};
+  const payment = paymentSnap.exists()
+    ? normalizePaymentDoc({ id: paymentSnap.id, ...paymentSnap.data() })
+    : null;
 
   await updateDoc(paymentDocRef(cleanRequestId, cleanPaymentId), {
     status: PAYMENT_STATUSES.REJECTED,
@@ -483,6 +636,26 @@ export async function adminRejectInProgressPayment({
     approvedAtMs: Date.now(),
     updatedAt: serverTimestamp(),
   });
+
+  if (payment) {
+    await safeCreateStaffNotification({
+      uid: requestAssignedStaffUidFromData(requestData) || payment.createdByStaffUid,
+      requestId: cleanRequestId,
+      type: "PAYMENT_UPDATE",
+      notificationId: `payment_update_rejected_${cleanRequestId}_${cleanPaymentId}`,
+      extras: {
+        paymentId: cleanPaymentId,
+        paymentType: payment.paymentType,
+        paymentLabel: payment.paymentLabel,
+        amount: payment.amount,
+        currency: payment.currency,
+        title: "Payment update",
+        body: `${payment.paymentLabel} was not approved.`,
+        route: requestRoutePath(cleanRequestId, "staff"),
+        rejectionReason: reason,
+      },
+    });
+  }
 
   return true;
 }
@@ -498,6 +671,9 @@ export async function userPayAwaitingPayment({
   if (!cleanRequestId || !cleanPaymentId) throw new Error("Missing payment details.");
   const actorUid = requireActorUid();
   const paymentRef = paymentDocRef(cleanRequestId, cleanPaymentId);
+  const requestSnap = await getDoc(doc(db, "serviceRequests", cleanRequestId));
+  const requestData = requestSnap.exists() ? requestSnap.data() || {} : {};
+  let settledPayment = null;
 
   await runTransaction(db, async (tx) => {
     const paySnap = await tx.get(paymentRef);
@@ -520,7 +696,69 @@ export async function userPayAwaitingPayment({
       paymentMethod: cleanStr(method, 40) || "dummy",
       updatedAt: serverTimestamp(),
     });
+    settledPayment = {
+      ...payment,
+      status: PAYMENT_STATUSES.PAID,
+      paidAtMs: finalPaidAtMs,
+    };
   });
+
+  if (settledPayment) {
+    const title = "Payment received";
+    const body = `${settledPayment.paymentLabel} ${formatMoneyText(
+      settledPayment.amount,
+      settledPayment.currency
+    )} paid.`;
+    await Promise.allSettled([
+      safeNotifyAdminForRequest(cleanRequestId, requestData, {
+        type: "PAYMENT_RECEIVED",
+        notificationId: `payment_received_${cleanRequestId}_${cleanPaymentId}_admin`,
+        extras: {
+          paymentId: cleanPaymentId,
+          paymentType: settledPayment.paymentType,
+          paymentLabel: settledPayment.paymentLabel,
+          amount: settledPayment.amount,
+          currency: settledPayment.currency,
+          title,
+          body,
+          route: requestRoutePath(cleanRequestId, "admin"),
+        },
+      }),
+      safeCreateStaffNotification({
+        uid:
+          requestAssignedStaffUidFromData(requestData) || settledPayment.createdByStaffUid,
+        requestId: cleanRequestId,
+        type: "PAYMENT_RECEIVED",
+        notificationId: `payment_received_${cleanRequestId}_${cleanPaymentId}_staff`,
+        extras: {
+          paymentId: cleanPaymentId,
+          paymentType: settledPayment.paymentType,
+          paymentLabel: settledPayment.paymentLabel,
+          amount: settledPayment.amount,
+          currency: settledPayment.currency,
+          title,
+          body,
+          route: requestRoutePath(cleanRequestId, "staff"),
+        },
+      }),
+      safeCreateUserNotification({
+        uid: settledPayment.requestUid,
+        requestId: cleanRequestId,
+        type: "PAYMENT_RECEIVED",
+        notificationId: `payment_received_${cleanRequestId}_${cleanPaymentId}_user`,
+        extras: {
+          paymentId: cleanPaymentId,
+          paymentType: settledPayment.paymentType,
+          paymentLabel: settledPayment.paymentLabel,
+          amount: settledPayment.amount,
+          currency: settledPayment.currency,
+          title,
+          body,
+          route: requestRoutePath(cleanRequestId, "user"),
+        },
+      }),
+    ]);
+  }
 
   return true;
 }
@@ -549,6 +787,11 @@ export async function createRefundRequest({
   const payment = normalizePaymentDoc({ id: paySnap.id, ...paySnap.data() });
   if (cleanStr(payment.requestId, 180) !== cleanRequestId) {
     throw new Error("Payment reference mismatch for this request.");
+  }
+  if (payment.paymentType === PAYMENT_TYPES.UNLOCK_REQUEST) {
+    throw new Error(
+      "Unlock request payment is not manually refundable. It only auto-refunds after 48 hours if work has not started."
+    );
   }
   if (
     payment.status !== PAYMENT_STATUSES.PAID &&
@@ -598,6 +841,40 @@ export async function createRefundRequest({
   };
 
   await setDoc(refundRef, payload);
+  await Promise.allSettled([
+    safeNotifyAdminForRequest(cleanRequestId, reqData, {
+      type: "REFUND_REQUESTED",
+      notificationId: `refund_requested_${cleanRequestId}_${refundRef.id}_admin`,
+      extras: {
+        refundId: refundRef.id,
+        paymentId: cleanPaymentId,
+        paymentType: payment.paymentType,
+        paymentLabel: payment.paymentLabel,
+        amount: payment.amount,
+        currency: payment.currency,
+        title: "Refund requested",
+        body: `${payment.paymentLabel} ${formatMoneyText(payment.amount, payment.currency)} refund requested.`,
+        route: requestRoutePath(cleanRequestId, "admin"),
+      },
+    }),
+    safeCreateStaffNotification({
+      uid: requestAssignedStaffUidFromData(reqData),
+      requestId: cleanRequestId,
+      type: "REFUND_REQUESTED",
+      notificationId: `refund_requested_${cleanRequestId}_${refundRef.id}_staff`,
+      extras: {
+        refundId: refundRef.id,
+        paymentId: cleanPaymentId,
+        paymentType: payment.paymentType,
+        paymentLabel: payment.paymentLabel,
+        amount: payment.amount,
+        currency: payment.currency,
+        title: "Refund requested",
+        body: `${payment.paymentLabel} ${formatMoneyText(payment.amount, payment.currency)} refund requested.`,
+        route: requestRoutePath(cleanRequestId, "staff"),
+      },
+    }),
+  ]);
   return { id: refundRef.id, ...payload };
 }
 
@@ -615,6 +892,10 @@ export async function adminApproveRefund({
   const expected = cleanStr(expectedRefundPeriodText, 300);
   if (!explanation) throw new Error("Approval explanation is required.");
   if (!expected) throw new Error("Expected refund period text is required.");
+  const requestSnap = await getDoc(doc(db, "serviceRequests", cleanRequestId));
+  const requestData = requestSnap.exists() ? requestSnap.data() || {} : {};
+  let settledRefund = null;
+  let settledPayment = null;
 
   const nowMs = Date.now();
   await runTransaction(db, async (tx) => {
@@ -634,6 +915,8 @@ export async function adminApproveRefund({
     if (cleanStr(payment.requestId, 180) !== cleanRequestId) {
       throw new Error("Target payment is not linked to this request.");
     }
+    settledRefund = refund;
+    settledPayment = payment;
 
     tx.update(refundRef, {
       refundId: links.refundId,
@@ -670,6 +953,71 @@ export async function adminApproveRefund({
     }
   });
 
+  if (settledRefund && settledPayment) {
+    await safeCreateUserNotification({
+      uid: settledRefund.uid,
+      requestId: cleanRequestId,
+      type: "REFUND_COMPLETED",
+      notificationId: `refund_completed_${cleanRequestId}_${cleanRefundId}`,
+      extras: {
+        refundId: cleanRefundId,
+        paymentId: settledRefund.paymentId,
+        paymentType: settledPayment.paymentType,
+        paymentLabel: settledPayment.paymentLabel,
+        amount: settledPayment.amount,
+        currency: settledPayment.currency,
+        title: "Refund completed",
+        body: `${settledPayment.paymentLabel} ${formatMoneyText(
+          settledPayment.amount,
+          settledPayment.currency
+        )} refunded.`,
+        route: requestRoutePath(cleanRequestId, "user"),
+        adminExplanation: explanation,
+        expectedRefundPeriodText: expected,
+      },
+    });
+    await Promise.allSettled([
+      safeNotifyAdminForRequest(cleanRequestId, requestData, {
+        type: "REFUND_COMPLETED",
+        notificationId: `refund_completed_${cleanRequestId}_${cleanRefundId}_admin`,
+        extras: {
+          refundId: cleanRefundId,
+          paymentId: settledRefund.paymentId,
+          paymentType: settledPayment.paymentType,
+          paymentLabel: settledPayment.paymentLabel,
+          amount: settledPayment.amount,
+          currency: settledPayment.currency,
+          title: "Refund completed",
+          body: `${settledPayment.paymentLabel} ${formatMoneyText(
+            settledPayment.amount,
+            settledPayment.currency
+          )} refunded.`,
+          route: requestRoutePath(cleanRequestId, "admin"),
+        },
+      }),
+      safeCreateStaffNotification({
+        uid: requestAssignedStaffUidFromData(requestData),
+        requestId: cleanRequestId,
+        type: "REFUND_COMPLETED",
+        notificationId: `refund_completed_${cleanRequestId}_${cleanRefundId}_staff`,
+        extras: {
+          refundId: cleanRefundId,
+          paymentId: settledRefund.paymentId,
+          paymentType: settledPayment.paymentType,
+          paymentLabel: settledPayment.paymentLabel,
+          amount: settledPayment.amount,
+          currency: settledPayment.currency,
+          title: "Refund completed",
+          body: `${settledPayment.paymentLabel} ${formatMoneyText(
+            settledPayment.amount,
+            settledPayment.currency
+          )} refunded.`,
+          route: requestRoutePath(cleanRequestId, "staff"),
+        },
+      }),
+    ]);
+  }
+
   return true;
 }
 
@@ -685,6 +1033,8 @@ export async function adminRejectRefund({
   const reason = cleanStr(rejectionReason, 2000);
   if (!reason) throw new Error("Rejection explanation is required.");
   const nowMs = Date.now();
+  let settledRefund = null;
+  let settledPayment = null;
 
   await runTransaction(db, async (tx) => {
     const refundRef = refundDocRef(cleanRequestId, cleanRefundId);
@@ -695,10 +1045,12 @@ export async function adminRejectRefund({
     if (refund.status !== REFUND_STATUSES.PENDING) {
       throw new Error("Refund request already decided.");
     }
+    settledRefund = refund;
 
     const payRef = paymentDocRef(cleanRequestId, links.paymentId);
     const paySnap = await tx.get(payRef);
     if (!paySnap.exists()) throw new Error("Target payment not found.");
+    settledPayment = normalizePaymentDoc({ id: paySnap.id, ...paySnap.data() });
 
     tx.update(refundRef, {
       refundId: links.refundId,
@@ -713,6 +1065,26 @@ export async function adminRejectRefund({
       updatedAt: serverTimestamp(),
     });
   });
+  if (settledRefund && settledPayment) {
+    await safeCreateUserNotification({
+      uid: settledRefund.uid,
+      requestId: cleanRequestId,
+      type: "REFUND_REJECTED",
+      notificationId: `refund_rejected_${cleanRequestId}_${cleanRefundId}`,
+      extras: {
+        refundId: cleanRefundId,
+        paymentId: settledRefund.paymentId,
+        paymentType: settledPayment.paymentType,
+        paymentLabel: settledPayment.paymentLabel,
+        amount: settledPayment.amount,
+        currency: settledPayment.currency,
+        title: "Refund rejected",
+        body: `${settledPayment.paymentLabel} refund rejected.`,
+        route: requestRoutePath(cleanRequestId, "user"),
+        rejectionReason: reason,
+      },
+    });
+  }
   return true;
 }
 
@@ -735,6 +1107,7 @@ export async function ensureUnlockAutoRefundForRequest(requestId) {
 
   let applied = 0;
   const nowMs = Date.now();
+  const appliedRows = [];
 
   for (const row of paySnap.docs) {
     const payment = normalizePaymentDoc({ id: row.id, ...row.data() });
@@ -770,7 +1143,7 @@ export async function ensureUnlockAutoRefundForRequest(requestId) {
           currency: payData.currency,
           uid: ownerUid,
           status: REFUND_STATUSES.AUTO_REFUNDED,
-          userReason: "Auto-refund: request was not marked in progress within 48 hours.",
+          userReason: "Auto-refund: staff had not started work within 48 hours.",
           adminExplanation: "Auto-refund applied by system rule.",
           expectedRefundPeriodText: "Auto-refunded in showcase mode.",
           rejectionReason: "",
@@ -788,13 +1161,101 @@ export async function ensureUnlockAutoRefundForRequest(requestId) {
         status: PAYMENT_STATUSES.AUTO_REFUNDED,
         refundedAt: serverTimestamp(),
         refundedAtMs: nowMs,
-        refundReason: "Auto-refund after 48 hours without mark in progress.",
+        refundReason: "Auto-refund after 48 hours without staff starting work.",
         updatedAt: serverTimestamp(),
       });
     });
 
+    appliedRows.push({
+      requestId: cleanRequestId,
+      requestUid: cleanStr(reqData.uid, 160),
+      paymentId: row.id,
+      paymentLabel: payment.paymentLabel,
+      paymentType: payment.paymentType,
+      amount: payment.amount,
+      currency: payment.currency,
+    });
     applied += 1;
   }
 
+  await Promise.allSettled(
+    appliedRows.flatMap((row) => [
+      safeCreateUserNotification({
+        uid: row.requestUid,
+        requestId: row.requestId,
+        type: "REFUND_COMPLETED",
+        notificationId: `refund_completed_auto_${row.requestId}_${row.paymentId}`,
+        extras: {
+          refundId: `auto_${row.paymentId}`,
+          paymentId: row.paymentId,
+          paymentType: row.paymentType,
+          paymentLabel: row.paymentLabel,
+          amount: row.amount,
+          currency: row.currency,
+          title: "Refund completed",
+          body: `${row.paymentLabel} ${formatMoneyText(row.amount, row.currency)} refunded.`,
+          route: requestRoutePath(row.requestId, "user"),
+        },
+      }),
+      safeNotifyAdminForRequest(cleanRequestId, reqData, {
+        type: "REFUND_COMPLETED",
+        notificationId: `refund_completed_auto_${row.requestId}_${row.paymentId}_admin`,
+        extras: {
+          refundId: `auto_${row.paymentId}`,
+          paymentId: row.paymentId,
+          paymentType: row.paymentType,
+          paymentLabel: row.paymentLabel,
+          amount: row.amount,
+          currency: row.currency,
+          title: "Refund completed",
+          body: `${row.paymentLabel} ${formatMoneyText(row.amount, row.currency)} refunded.`,
+          route: requestRoutePath(row.requestId, "admin"),
+        },
+      }),
+    ])
+  );
+
+  return applied;
+}
+
+export async function listUnlockAutoRefundEligibleRequests({ requestIds = [] } = {}) {
+  const ids = Array.from(new Set((requestIds || []).map((id) => cleanStr(id, 180)).filter(Boolean)));
+  const rows = [];
+
+  for (const requestId of ids) {
+    const reqSnap = await getDoc(doc(db, "serviceRequests", requestId));
+    if (!reqSnap.exists()) continue;
+    const reqData = reqSnap.data() || {};
+    const paySnap = await getDocs(
+      query(
+        paymentsCol(requestId),
+        where("paymentType", "==", PAYMENT_TYPES.UNLOCK_REQUEST),
+        limit(10)
+      )
+    );
+    paySnap.docs.forEach((row) => {
+      const payment = normalizePaymentDoc({ id: row.id, ...row.data() });
+      if (!isUnlockPaymentAutoRefundEligible({ payment, requestData: reqData })) return;
+      rows.push({
+        requestId,
+        paymentId: payment.id,
+        paymentLabel: payment.paymentLabel,
+        amount: payment.amount,
+        currency: payment.currency,
+        paidAtMs: payment.paidAtMs,
+      });
+    });
+  }
+
+  rows.sort((a, b) => Number(a.paidAtMs || 0) - Number(b.paidAtMs || 0));
+  return rows;
+}
+
+export async function applyUnlockAutoRefundSweep({ requestIds = [] } = {}) {
+  const ids = Array.from(new Set((requestIds || []).map((id) => cleanStr(id, 180)).filter(Boolean)));
+  let applied = 0;
+  for (const requestId of ids) {
+    applied += Number(await ensureUnlockAutoRefundForRequest(requestId)) || 0;
+  }
   return applied;
 }

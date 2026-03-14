@@ -1,6 +1,6 @@
-// âœ… src/components/AdminRequestChatPanel.jsx (FULL COPY-PASTE)
+﻿// src/components/AdminRequestChatPanel.jsx
 // FIX:
-// âœ… White screen was caused by missing Firestore import: `collection`
+// White screen was caused by missing Firestore import: `collection`
 //    You call collection(...) but it wasn't imported, so runtime crashed.
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -10,7 +10,7 @@ import {
   query,
   where,
   doc,
-  collection, // âœ… FIX: required (was missing)
+  collection, // required (was missing)
 } from "firebase/firestore";
 import { db } from "../firebase";
 import {
@@ -89,7 +89,7 @@ function msgPreview(m) {
   return safeText(m?.text || "");
 }
 
-/* âœ… autosize textarea like ChatGPT */
+/* Autosize textarea like ChatGPT */
 function useAutosizeTextArea(textareaRef, value, { maxRows = 6 } = {}) {
   useEffect(() => {
     const el = textareaRef.current;
@@ -108,7 +108,7 @@ function useAutosizeTextArea(textareaRef, value, { maxRows = 6 } = {}) {
   }, [textareaRef, value, maxRows]);
 }
 
-/* âœ… UI-only merge rule for adjacent pdf+text */
+/* UI-only merge rule for adjacent pdf+text */
 function shouldMergePair(a, b, WINDOW_MS) {
   if (!a || !b || !WINDOW_MS) return false;
   // Keep timeline stable and avoid UI jumps after sends.
@@ -217,13 +217,13 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   const [busyKey, setBusyKey] = useState(""); // message id or bundle id
   const [err, setErr] = useState("");
 
-  // âœ… NEW: track whether staff is assigned
+  // Track whether staff is assigned
   const [assignedStaffUid, setAssignedStaffUid] = useState("");
 
-  // âœ… Hide removes message instantly (optimistic)
+  // Hide removes message instantly (optimistic)
   const [optimisticHidden, setOptimisticHidden] = useState(() => new Set());
 
-  // âœ… Accept removes buttons instantly and NEVER rolls back
+  // Accept removes buttons instantly and never rolls back
   const [optimisticNoActions, setOptimisticNoActions] = useState(() => new Set());
 
   // admin composer
@@ -461,7 +461,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
     setBusyKey(bundleId);
 
-    // âœ… Accept: hide buttons immediately & permanently
+    // Accept: hide buttons immediately and permanently
     pendingChildren.forEach((c) => disableActionsOptimistic(c.id));
 
     try {
@@ -470,7 +470,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
       }
     } catch (e) {
       console.error(e);
-      // âœ… DO NOT rollback button hide
+      // Do not roll back button hide
       setErr(e?.message || "Approve failed (buttons will stay hidden).");
     } finally {
       setBusyKey("");
@@ -483,7 +483,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
     setBusyKey(bundleId);
 
-    // âœ… Hide: remove bubble instantly
+    // Hide: remove bubble instantly
     pendingChildren.forEach((c) => hidePendingOptimistic(c.id));
 
     try {
@@ -508,14 +508,14 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     setErr("");
     setBusyKey(p.id);
 
-    // âœ… Accept: hide buttons immediately & permanently
+    // Accept: hide buttons immediately and permanently
     disableActionsOptimistic(p.id);
 
     try {
       await adminApprovePendingMessage({ requestId: rid, pendingId: p.id });
     } catch (e) {
       console.error(e);
-      // âœ… DO NOT rollback button hide
+      // Do not roll back button hide
       setErr(e?.message || "Approve failed (buttons will stay hidden).");
     } finally {
       setBusyKey("");
@@ -653,9 +653,9 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             <div className="text-xs text-zinc-500">
               Moderation thread
               {assignedStaffUid ?(
-                <span className="ml-2 font-semibold text-emerald-700">• Staff assigned</span>
+                <span className="ml-2 font-semibold text-emerald-700">- Staff assigned</span>
               ) : (
-                <span className="ml-2 font-semibold text-amber-700">• No staff assigned</span>
+                <span className="ml-2 font-semibold text-amber-700">- No staff assigned</span>
               )}
             </div>
           </div>
@@ -747,7 +747,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                             <div className="text-xs font-semibold opacity-90">PDF</div>
                             <div className="text-xs opacity-90">
                               {safeText(m?.pdfMeta?.name) || "document.pdf"}
-                              {m?.pdfMeta?.size ?` • ${m.pdfMeta.size} bytes` : ""}
+                              {m?.pdfMeta?.size ?` - ${m.pdfMeta.size} bytes` : ""}
                             </div>
                           </div>
                         ) : null}
@@ -782,7 +782,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                           disabled={busy}
                           className={`${smallBtn} border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700`}
                         >
-                          {busy ?"…" : "Accept"}
+                          {busy ? "..." : "Accept"}
                         </button>
 
                         <button
@@ -794,7 +794,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                           disabled={busy}
                           className={`${smallBtn} border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-800 hover:bg-zinc-50`}
                         >
-                          {busy ?"…" : "Hide"}
+                          {busy ? "..." : "Hide"}
                         </button>
                       </div>
                     ) : null}
@@ -892,3 +892,5 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     </div>
   );
 }
+
+

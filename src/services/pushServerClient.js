@@ -11,7 +11,6 @@ function trimTrailingSlash(value) {
 
 const DEFAULT_ADMIN_EMAIL = "brioneroo@gmail.com";
 const PUSH_SERVER_URL = trimTrailingSlash(import.meta.env.VITE_PUSH_SERVER_URL);
-// TODO: Move this secret off the client (server-side relay / signed requests). Build-time env only for now.
 const PUSH_SERVER_API_KEY = safeStr(import.meta.env.VITE_PUSH_SERVER_API_KEY);
 const PUSH_SERVER_ADMIN_UID = safeStr(import.meta.env.VITE_PUSH_SERVER_ADMIN_UID);
 const PUSH_SERVER_ADMIN_EMAIL = safeStr(
@@ -104,9 +103,7 @@ async function lookupAdminUidByEmail(email) {
   const safeEmail = safeStr(email).toLowerCase();
   if (!safeEmail) return "";
 
-  const snap = await getDocs(
-    query(collection(db, "users"), where("email", "==", safeEmail), limit(1))
-  );
+  const snap = await getDocs(query(collection(db, "users"), where("email", "==", safeEmail), limit(1)));
   if (snap.empty) return "";
   return safeStr(snap.docs[0]?.id);
 }
@@ -146,8 +143,9 @@ export async function sendPushToAdmin({ title, body, data = {} } = {}) {
 }
 
 export async function sendPushForNotificationDoc({ scope, uid, notification } = {}) {
-  const role = safeStr(scope).toLowerCase();
-  if (role !== "user" && role !== "staff") {
+  const inputRole = safeStr(scope).toLowerCase();
+  const role = inputRole === "assignedadmin" ? "admin" : inputRole;
+  if (!["user", "staff", "admin"].includes(role)) {
     return { ok: false, skipped: true, reason: "unsupported_scope" };
   }
 
@@ -163,6 +161,8 @@ export async function sendPushForNotificationDoc({ scope, uid, notification } = 
     data: {
       type: safeStr(row.type),
       requestId: safeStr(row.requestId),
+      paymentId: safeStr(row.paymentId),
+      refundId: safeStr(row.refundId),
       route: safeStr(row.route),
       notificationId: safeStr(row.id),
       role,

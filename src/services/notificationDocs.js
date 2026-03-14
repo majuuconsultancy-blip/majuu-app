@@ -1,4 +1,4 @@
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { sendPushForNotificationDoc } from "./pushServerClient";
 
@@ -6,120 +6,177 @@ function safeStr(value) {
   return String(value || "").trim();
 }
 
-function buildNotificationCopy(type, requestId) {
-  const rid = safeStr(requestId);
-  const routeRequest = rid ? `/app/request/${encodeURIComponent(rid)}` : "/app/progress";
-  const routeRequestChat = rid ? `${routeRequest}?openChat=1` : "/app/progress";
-  const routeStaffRequest = rid ? `/staff/request/${encodeURIComponent(rid)}?openChat=1` : "/staff/tasks";
-  const routeStaffStart = rid ? `/staff/request/${encodeURIComponent(rid)}/start` : "/staff/tasks";
+function formatAmount(amount, currency = "KES") {
+  const value = Number(amount || 0);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  return `${safeStr(currency || "KES").toUpperCase()} ${value.toLocaleString()}`;
+}
 
-  switch (safeStr(type).toUpperCase()) {
+function routeForScope(scope, requestId, { openChat = false } = {}) {
+  const rid = safeStr(requestId);
+  const suffix = openChat ? "?openChat=1" : "";
+  const normalizedScope = safeStr(scope).toLowerCase();
+
+  if (normalizedScope === "staff") {
+    return rid ? `/staff/request/${encodeURIComponent(rid)}${suffix}` : "/staff/tasks";
+  }
+  if (normalizedScope === "admin" || normalizedScope === "assignedadmin") {
+    return rid ? `/app/admin/request/${encodeURIComponent(rid)}${suffix}` : "/app/admin";
+  }
+  return rid ? `/app/request/${encodeURIComponent(rid)}${suffix}` : "/app/progress";
+}
+
+function buildNotificationCopy(type, requestId, scope, extras = {}) {
+  const notifType = safeStr(type).toUpperCase();
+  const amountText = formatAmount(extras.amount, extras.currency);
+  const paymentLabel = safeStr(extras.paymentLabel || extras.label || "Payment");
+
+  switch (notifType) {
     case "REQUEST_ASSIGNED":
       return {
         title: "Request update",
         body: "Your request is being worked on.",
-        route: routeRequest,
+        route: routeForScope(scope, requestId),
       };
     case "REQUEST_ACCEPTED":
       return {
         title: "Request accepted",
         body: "Your request has been accepted.",
-        route: routeRequest,
+        route: routeForScope(scope, requestId),
       };
     case "REQUEST_REJECTED":
       return {
         title: "Request rejected",
         body: "Your request has been rejected.",
-        route: routeRequest,
+        route: routeForScope(scope, requestId),
       };
     case "NEW_MESSAGE":
+    case "STAFF_NEW_MESSAGE":
       return {
         title: "New message",
         body: "You have a new message.",
-        route: routeRequestChat,
+        route: routeForScope(scope, requestId, { openChat: true }),
       };
     case "MESSAGE_REJECTED_USER":
+    case "STAFF_MESSAGE_REJECTED":
       return {
         title: "Message rejected",
-        body: "Your message was rejected by admin.",
-        route: routeRequestChat,
+        body: "A message was rejected by admin.",
+        route: routeForScope(scope, requestId, { openChat: true }),
       };
     case "STAFF_ASSIGNED_REQUEST":
       return {
         title: "New assignment",
         body: "You have been assigned a request.",
-        route: "/staff/tasks",
+        route: routeForScope("staff", requestId),
       };
     case "STAFF_UNASSIGNED_REQUEST":
       return {
         title: "Assignment removed",
-        body: "A request was unassigned from your queue.",
-        route: "/staff/tasks",
+        body: "A request was removed from your queue.",
+        route: routeForScope("staff", requestId),
       };
     case "STAFF_REQUEST_EXPIRING_SOON":
       return {
         title: "Action needed soon",
-        body: "A new request is close to reassignment timeout.",
-        route: routeStaffStart,
+        body: "A request is close to reassignment timeout.",
+        route: requestId
+          ? `/staff/request/${encodeURIComponent(safeStr(requestId))}/start`
+          : "/staff/tasks",
       };
     case "STAFF_REQUEST_ACCEPTED_BY_ADMIN":
       return {
         title: "Request finalized",
         body: "Admin accepted this request.",
-        route: routeStaffRequest,
+        route: routeForScope("staff", requestId),
       };
     case "STAFF_REQUEST_REJECTED_BY_ADMIN":
       return {
         title: "Request finalized",
         body: "Admin rejected this request.",
-        route: routeStaffRequest,
+        route: routeForScope("staff", requestId),
       };
-    case "STAFF_NEW_MESSAGE":
+    case "PAYMENT_UPDATE":
       return {
-        title: "New message",
-        body: "You have a new message.",
-        route: routeStaffRequest,
+        title: "Payment update",
+        body: amountText ? `${paymentLabel} ${amountText}.` : "There is an update on a payment.",
+        route: routeForScope(scope, requestId),
       };
-    case "STAFF_MESSAGE_REJECTED":
+    case "PAYMENT_REQUIRED":
       return {
-        title: "Message rejected",
-        body: "A message you sent was rejected by admin.",
-        route: routeStaffRequest,
+        title: "Payment required",
+        body: amountText ? `${paymentLabel} ${amountText} ready for payment.` : "A payment is ready for your action.",
+        route: routeForScope(scope, requestId),
+      };
+    case "PAYMENT_RECEIVED":
+      return {
+        title: "Payment received",
+        body: amountText ? `${paymentLabel} ${amountText} paid.` : "A payment has been received.",
+        route: routeForScope(scope, requestId),
+      };
+    case "REFUND_REQUESTED":
+      return {
+        title: "Refund requested",
+        body: amountText ? `${paymentLabel} ${amountText} refund requested.` : "A refund has been requested.",
+        route: routeForScope(scope, requestId),
+      };
+    case "REFUND_APPROVED":
+      return {
+        title: "Refund approved",
+        body: amountText ? `${paymentLabel} ${amountText} refund approved.` : "A refund has been approved.",
+        route: routeForScope(scope, requestId),
+      };
+    case "REFUND_COMPLETED":
+      return {
+        title: "Refund completed",
+        body: amountText ? `${paymentLabel} ${amountText} refunded.` : "A refund has been completed.",
+        route: routeForScope(scope, requestId),
+      };
+    case "REFUND_REJECTED":
+      return {
+        title: "Refund rejected",
+        body: paymentLabel ? `${paymentLabel} refund rejected.` : "A refund was rejected.",
+        route: routeForScope(scope, requestId),
       };
     default:
       return {
         title: "Notification",
         body: "You have an update.",
-        route: routeRequest,
+        route: routeForScope(scope, requestId),
       };
   }
 }
 
-async function createNotificationDoc({ scope, uid, type, requestId, extras = {} }) {
+async function createNotificationDoc({
+  scope,
+  uid,
+  type,
+  requestId,
+  extras = {},
+  notificationId = "",
+} = {}) {
   const targetUid = safeStr(uid);
   const notifType = safeStr(type).toUpperCase();
   const rid = safeStr(requestId);
+  const normalizedScope = safeStr(scope).toLowerCase();
   if (!targetUid || !notifType) return null;
 
-  const copy = buildNotificationCopy(notifType, rid);
+  const copy = buildNotificationCopy(notifType, rid, normalizedScope, extras);
   const actorUid = safeStr(auth.currentUser?.uid);
-
-  let colRef = null;
-  if (scope === "user") {
-    colRef = collection(db, "users", targetUid, "notifications");
-  } else if (scope === "staff") {
-    colRef = collection(db, "staff", targetUid, "notifications");
-  }
-  if (!colRef) return null;
+  const rootCollection = normalizedScope === "staff" ? "staff" : "users";
+  const colRef = collection(db, rootCollection, targetUid, "notifications");
+  const route = safeStr(extras.route || copy.route);
 
   const payload = {
     type: notifType,
-    role: scope,
+    role: normalizedScope === "assignedadmin" ? "admin" : normalizedScope,
     uid: targetUid,
     requestId: rid || null,
-    title: safeStr(copy.title),
-    body: safeStr(copy.body),
-    route: safeStr(copy.route),
+    paymentId: safeStr(extras.paymentId) || null,
+    refundId: safeStr(extras.refundId) || null,
+    title: safeStr(extras.title || copy.title),
+    body: safeStr(extras.body || copy.body),
+    route,
     readAt: null,
     createdAt: serverTimestamp(),
     createdAtMs: Date.now(),
@@ -127,12 +184,23 @@ async function createNotificationDoc({ scope, uid, type, requestId, extras = {} 
     ...extras,
   };
 
-  const ref = await addDoc(colRef, payload);
-  const row = { id: ref.id, ...payload };
+  delete payload.notificationId;
+
+  const fixedId = safeStr(notificationId || extras.notificationId);
+  let id = "";
+  if (fixedId) {
+    await setDoc(doc(colRef, fixedId), payload, { merge: true });
+    id = fixedId;
+  } else {
+    const ref = await addDoc(colRef, payload);
+    id = ref.id;
+  }
+
+  const row = { id, ...payload };
 
   try {
     await sendPushForNotificationDoc({
-      scope,
+      scope: normalizedScope,
       uid: targetUid,
       notification: row,
     });
@@ -143,14 +211,39 @@ async function createNotificationDoc({ scope, uid, type, requestId, extras = {} 
   return row;
 }
 
-export async function createUserNotification({ uid, type, requestId, extras } = {}) {
-  return createNotificationDoc({ scope: "user", uid, type, requestId, extras });
+export async function createUserNotification({ uid, type, requestId, extras, notificationId } = {}) {
+  return createNotificationDoc({
+    scope: "user",
+    uid,
+    type,
+    requestId,
+    extras,
+    notificationId,
+  });
 }
 
-export async function createStaffNotification({ uid, type, requestId, extras } = {}) {
-  return createNotificationDoc({ scope: "staff", uid, type, requestId, extras });
+export async function createStaffNotification({ uid, type, requestId, extras, notificationId } = {}) {
+  return createNotificationDoc({
+    scope: "staff",
+    uid,
+    type,
+    requestId,
+    extras,
+    notificationId,
+  });
 }
 
-export function notificationRouteForType(type, requestId) {
-  return buildNotificationCopy(type, requestId)?.route || "";
+export async function createAdminNotification({ uid, type, requestId, extras, notificationId } = {}) {
+  return createNotificationDoc({
+    scope: "admin",
+    uid,
+    type,
+    requestId,
+    extras,
+    notificationId,
+  });
+}
+
+export function notificationRouteForType(type, requestId, scope = "user", extras = {}) {
+  return buildNotificationCopy(type, requestId, scope, extras)?.route || "";
 }

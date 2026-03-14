@@ -6,14 +6,62 @@ import { useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { smartBack } from "../utils/navBack";
 import { getSpecialityLabel, normalizeSpecialities } from "../constants/staffSpecialities";
+import {
+  areStaffOnboardingItemsComplete,
+  buildLegalDocRoute,
+  countCompletedStaffOnboardingItems,
+  createInitialStaffOnboardingState,
+  hydrateStaffOnboardingState,
+  STAFF_ONBOARDING_ITEMS,
+} from "../legal/legalRegistry";
 
-const ONBOARDING_VERSION = 2;
+const ONBOARDING_VERSION = 3;
+const STAFF_ONBOARDING_LOCAL_PREFIX = "majuu_staff_onboarding_";
+
+function localChecklistKey(uid) {
+  return `${STAFF_ONBOARDING_LOCAL_PREFIX}${String(uid || "")}`;
+}
+
+function readLocalChecklistState(uid) {
+  if (!uid || typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(localChecklistKey(uid));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalChecklistState(uid, state) {
+  if (!uid || typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(localChecklistKey(uid), JSON.stringify(state || {}));
+  } catch {
+    // Ignore local storage write failures.
+  }
+}
 
 function IconChevronLeft(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
       <path
         d="M14.5 5.5 8 12l6.5 6.5"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconChevronRight(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M9.5 5.5 16 12l-6.5 6.5"
         stroke="currentColor"
         strokeWidth="1.9"
         strokeLinecap="round"
@@ -49,12 +97,21 @@ export default function StaffOnboardingScreen() {
   const [specialities, setSpecialities] = useState([]);
   const [alreadyAccepted, setAlreadyAccepted] = useState(false);
   const [acceptedAtLabel, setAcceptedAtLabel] = useState("");
-  const [agree, setAgree] = useState(false);
+  const [checklistState, setChecklistState] = useState(() => createInitialStaffOnboardingState());
 
   const specialityLabels = useMemo(() => {
     const keys = normalizeSpecialities(specialities);
     return keys.map((key) => getSpecialityLabel(key));
   }, [specialities]);
+
+  const completedCount = useMemo(
+    () => countCompletedStaffOnboardingItems(checklistState),
+    [checklistState]
+  );
+
+  const canContinue = useMemo(() => {
+    return alreadyAccepted || areStaffOnboardingItemsComplete(checklistState);
+  }, [alreadyAccepted, checklistState]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -77,13 +134,18 @@ export default function StaffOnboardingScreen() {
         setMaxActive(Math.max(1, Number(data?.maxActive) || 2));
         setSpecialities(Array.isArray(data?.specialities) ? data.specialities : []);
 
-        const accepted = data?.onboarded === true;
+        const accepted = data?.onboarded === true || data?.onboardingAccepted === true;
+        const storedChecklist = readLocalChecklistState(user.uid);
+        const hydratedChecklist = hydrateStaffOnboardingState(storedChecklist || {}, {
+          forceComplete: accepted,
+        });
+
         setAlreadyAccepted(accepted);
-        setAgree(accepted);
         setAcceptedAtLabel(formatAcceptedDate(data?.onboardingAcceptedAt));
+        setChecklistState(hydratedChecklist);
       } catch (e) {
         console.error(e);
-        setErr(e?.message || "Failed to load staff guide.");
+        setErr(e?.message || "Failed to load staff onboarding.");
       } finally {
         setLoading(false);
       }
@@ -92,13 +154,62 @@ export default function StaffOnboardingScreen() {
     return () => unsub();
   }, [navigate]);
 
+  const persistChecklistState = (nextState) => {
+    setChecklistState(nextState);
+    writeLocalChecklistState(uid, nextState);
+  };
+
+  const openItem = (item) => {
+    if (!uid || saving) return;
+
+    const alreadyReviewed = checklistState[item.reviewedStateKey] === true;
+    const nextState = alreadyReviewed
+      ? checklistState
+      : {
+          ...checklistState,
+          [item.reviewedStateKey]: true,
+        };
+
+    if (!alreadyReviewed) {
+      persistChecklistState(nextState);
+    }
+
+    navigate(buildLegalDocRoute(item.docKey, { scope: "staffOnboarding" }), {
+      state: { backTo: "/staff/onboarding" },
+    });
+  };
+
+  const toggleChecked = (item, value) => {
+    if (saving || alreadyAccepted) return;
+    if (checklistState[item.reviewedStateKey] !== true) return;
+
+    const nextState = {
+      ...checklistState,
+      [item.checkedStateKey]: value,
+    };
+
+    persistChecklistState(nextState);
+  };
+
   const saveAgreement = async () => {
-    if (!uid || !agree) return;
+    if (!uid) return;
+
+    if (alreadyAccepted) {
+      navigate("/staff/tasks", { replace: true });
+      return;
+    }
+
+    if (!areStaffOnboardingItemsComplete(checklistState)) {
+      setErr("Review and confirm every required item before continuing.");
+      return;
+    }
 
     setSaving(true);
     setErr("");
 
     try {
+      writeLocalChecklistState(uid, checklistState);
+
       const ref = doc(db, "staff", uid);
       await setDoc(ref, { uid }, { merge: true });
       await updateDoc(ref, {
@@ -108,10 +219,16 @@ export default function StaffOnboardingScreen() {
         onboardingVersion: ONBOARDING_VERSION,
         updatedAt: serverTimestamp(),
       });
+
+      const completedState = hydrateStaffOnboardingState({}, { forceComplete: true });
+      setAlreadyAccepted(true);
+      setAcceptedAtLabel(new Date().toLocaleDateString());
+      persistChecklistState(completedState);
+
       navigate("/staff/tasks", { replace: true });
     } catch (e) {
       console.error(e);
-      setErr(e?.message || "Failed to save agreement.");
+      setErr(e?.message || "Failed to save onboarding acceptance.");
     } finally {
       setSaving(false);
     }
@@ -124,16 +241,13 @@ export default function StaffOnboardingScreen() {
           <div className="max-w-xl mx-auto px-5 py-10">
             <div className="mx-auto h-10 w-10 rounded-2xl border border-emerald-100 bg-emerald-50/70 dark:border-zinc-800 dark:bg-zinc-900/60" />
             <p className="mt-3 text-center text-sm text-zinc-600 dark:text-zinc-300">
-              Loading staff guide...
+              Loading staff onboarding...
             </p>
           </div>
         </div>
       </div>
     );
   }
-
-  const card =
-    "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 backdrop-blur p-4 shadow-sm";
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -149,10 +263,10 @@ export default function StaffOnboardingScreen() {
           </button>
 
           <h1 className="mt-4 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-            Staff guide and agreement
+            Staff Onboarding
           </h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-            Read payout, tier and terms details. New staff must agree before accessing tasks.
+            Review and confirm the required legal and policy documents before accessing staff tasks.
           </p>
 
           {err ? (
@@ -161,9 +275,9 @@ export default function StaffOnboardingScreen() {
             </div>
           ) : null}
 
-          <div className={`mt-5 ${card}`}>
+          <div className="mt-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm">
             <div className="text-xs text-zinc-500 dark:text-zinc-400">Staff account</div>
-            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100 break-words">
+            <div className="mt-1 break-words text-sm font-semibold text-zinc-900 dark:text-zinc-100">
               {email || "Staff account"}
             </div>
             <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
@@ -188,70 +302,102 @@ export default function StaffOnboardingScreen() {
             </div>
           </div>
 
-          <div className={`mt-4 ${card}`}>
-            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Payment and payout
-            </div>
-            <ul className="mt-2 space-y-1 text-sm text-zinc-700 dark:text-zinc-200">
-              <li>- Payment is issued for completed tasks approved by admin.</li>
-              <li>- Rejected or unresolved submissions are not payable.</li>
-              <li>- Payout cycles and methods are communicated by admin finance updates.</li>
-            </ul>
-          </div>
-
-          <div className={`mt-4 ${card}`}>
-            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Tier system
-            </div>
-            <ul className="mt-2 space-y-1 text-sm text-zinc-700 dark:text-zinc-200">
-              <li>- Tiers are Provisional, Silver, Gold and Diamond.</li>
-              <li>- Your tier is based on output quality, completion speed and acceptance rate.</li>
-              <li>- Revoke and rehire policy: first rehire no penalty, second resets tier, third blocks account.</li>
-            </ul>
-          </div>
-
-          <div className={`mt-4 ${card}`}>
-            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Staff terms and conditions
-            </div>
-            <ul className="mt-2 space-y-1 text-sm text-zinc-700 dark:text-zinc-200">
-              <li>- Keep applicant data private and use it only for assigned work.</li>
-              <li>- Start assigned tasks on time; stale assignments can be revoked and reassigned.</li>
-              <li>- Never request direct payment from applicants outside official channels.</li>
-              <li>- Keep status updates accurate and follow admin quality instructions.</li>
-            </ul>
-          </div>
-
           {alreadyAccepted ? (
             <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
-              Agreement already accepted{acceptedAtLabel ? ` on ${acceptedAtLabel}` : ""}.
+              Staff onboarding already completed{acceptedAtLabel ? ` on ${acceptedAtLabel}` : ""}.
             </div>
           ) : null}
 
-          <div className={`mt-4 ${card}`}>
-            <label className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                checked={agree}
-                onChange={(e) => setAgree(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
-              />
-              <span className="text-sm text-zinc-800 dark:text-zinc-200">
-                I have read and agree to the payout policy, tier system and staff terms.
-              </span>
-            </label>
+          <div className="mt-5">
+            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Complete these before continuing
+            </div>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+              Open each item, review it, then confirm once you have read it.
+            </p>
           </div>
 
-          <div className="mt-5">
-            <button
-              type="button"
-              onClick={saveAgreement}
-              disabled={!agree || saving}
-              className="w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
-            >
-              {saving ? "Saving..." : alreadyAccepted ? "Continue to tasks" : "Agree and continue to tasks"}
-            </button>
+          <div className="mt-4 grid gap-3">
+            {STAFF_ONBOARDING_ITEMS.map((item) => {
+              const reviewed = checklistState[item.reviewedStateKey] === true;
+              const checked = reviewed && checklistState[item.checkedStateKey] === true;
+
+              return (
+                <div
+                  key={item.key}
+                  className={`rounded-2xl border p-4 shadow-sm transition ${
+                    reviewed
+                      ? "border-emerald-200 bg-emerald-50/40 dark:border-emerald-900/40 dark:bg-emerald-950/15"
+                      : "border-zinc-200 bg-white/75 dark:border-zinc-800 dark:bg-zinc-900/60"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => openItem(item)}
+                    disabled={saving}
+                    className="w-full text-left"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                          {item.title}
+                        </div>
+                        <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                          {item.description}
+                        </div>
+                        <div
+                          className={`mt-2 text-xs font-semibold ${
+                            reviewed
+                              ? "text-emerald-700 dark:text-emerald-300"
+                              : "text-zinc-500 dark:text-zinc-400"
+                          }`}
+                        >
+                          {reviewed ? "Reviewed" : "Not reviewed"}
+                        </div>
+                      </div>
+                      <IconChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
+                    </div>
+                  </button>
+
+                  {reviewed ? (
+                    <label className="mt-3 flex items-start gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/50 px-3 py-3 text-sm text-zinc-800 dark:text-zinc-200">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => toggleChecked(item, e.target.checked)}
+                        disabled={saving || alreadyAccepted}
+                        className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span>I have read and understood this.</span>
+                    </label>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
+
+          <div className="mt-4 text-sm text-zinc-600 dark:text-zinc-300">
+            {completedCount} of {STAFF_ONBOARDING_ITEMS.length} completed
+          </div>
+
+          <button
+            type="button"
+            onClick={saveAgreement}
+            disabled={!canContinue || saving}
+            className="mt-3 w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+          >
+            {saving
+              ? "Saving..."
+              : alreadyAccepted
+              ? "Continue to tasks"
+              : "Continue to staff tasks"}
+          </button>
+
+          {!canContinue ? (
+            <p className="mt-2 text-center text-xs text-zinc-500 dark:text-zinc-400">
+              Review and confirm all required items to continue.
+            </p>
+          ) : null}
         </div>
       </div>
     </div>

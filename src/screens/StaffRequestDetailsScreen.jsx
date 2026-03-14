@@ -36,15 +36,21 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { auth, db } from "../firebase";
 
+import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
 import StaffRequestChatPanel from "../components/StaffRequestChatPanel";
 import { smartBack } from "../utils/navBack";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import {
+  normalizeStaffProgressPercent,
+  STAFF_PROGRESS_OPTIONS,
+} from "../utils/requestWorkProgress";
 import {
   createInProgressPaymentProposal,
   normalizePaymentDoc,
   PAYMENT_TYPES,
   paymentStatusUi,
 } from "../services/paymentservice";
+import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 
 /* ---------- Minimal icons ---------- */
 function IconChevronLeft(props) {
@@ -114,6 +120,20 @@ function IconChevronRight(props) {
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
       <path
         d="M9 5.5 15.5 12 9 18.5"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconChevronDown(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M6.5 9.5 12 15l5.5-5.5"
         stroke="currentColor"
         strokeWidth="1.9"
         strokeLinecap="round"
@@ -202,6 +222,56 @@ function safeMinutesBetween(startTs, endMs) {
   return Math.max(1, mins);
 }
 
+function createStaffSectionState() {
+  return {
+    chat: false,
+    workProgress: false,
+    applicant: false,
+    payments: false,
+    attachments: false,
+    note: false,
+  };
+}
+
+function StaffCollapsibleSectionCard({
+  className,
+  title,
+  subtitle,
+  open,
+  onToggle,
+  badge = null,
+  meta = null,
+  children,
+}) {
+  return (
+    <div className={className}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-start justify-between gap-3 text-left"
+      >
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</div>
+          {subtitle ? (
+            <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{subtitle}</div>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {badge}
+          {meta}
+          <IconChevronDown
+            className={`h-5 w-5 text-zinc-500 transition ${open ? "rotate-180" : ""}`}
+          />
+        </div>
+      </button>
+      {open ? children : null}
+    </div>
+  );
+}
+
+const EMPTY_REQUEST_UNREAD_STATE = Object.freeze({});
+
 export default function StaffRequestDetailsScreen() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -215,6 +285,7 @@ export default function StaffRequestDetailsScreen() {
 
   const [req, setReq] = useState(null);
   const [note, setNote] = useState("");
+  const [progressDraft, setProgressDraft] = useState("");
   const [decision, setDecision] = useState("recommend_accept");
   const [busy, setBusy] = useState("");
 
@@ -230,6 +301,10 @@ export default function StaffRequestDetailsScreen() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
+  const [openSections, setOpenSections] = useState(createStaffSectionState);
+  const unreadRequestState = useNotifsV2Store(
+    (s) => s.unreadByRequest?.[String(requestId || "").trim()] || EMPTY_REQUEST_UNREAD_STATE
+  );
 
   // ✅ polish tokens
   const softBg = "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
@@ -282,6 +357,8 @@ export default function StaffRequestDetailsScreen() {
 
   const canWork = status !== "closed" && status !== "rejected";
   const isDone = staffStatus === "done";
+  const currentProgressPercent = normalizeStaffProgressPercent(req?.staffProgressPercent);
+  const canUpdateProgress = canWork && staffStatus === "in_progress";
   const inProgressPayments = useMemo(
     () => payments.filter((p) => String(p.paymentType || "").toLowerCase() === PAYMENT_TYPES.IN_PROGRESS),
     [payments]
@@ -290,6 +367,9 @@ export default function StaffRequestDetailsScreen() {
     () => payments.find((p) => String(p.paymentType || "").toLowerCase() === PAYMENT_TYPES.UNLOCK_REQUEST) || null,
     [payments]
   );
+  const toggleSection = (key) => {
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const load = async () => {
     setLoading(true);
@@ -316,6 +396,19 @@ export default function StaffRequestDetailsScreen() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestId]);
+
+  useEffect(() => {
+    if (!requestId) return;
+    notifsV2Store.markRequestNotificationsRead(requestId).catch(() => {});
+  }, [requestId]);
+
+  useEffect(() => {
+    setOpenSections(createStaffSectionState());
+  }, [requestId]);
+
+  useEffect(() => {
+    setProgressDraft(currentProgressPercent ? String(currentProgressPercent) : "");
+  }, [currentProgressPercent, requestId]);
 
   useEffect(() => {
     if (!requestId) return;
@@ -467,6 +560,43 @@ export default function StaffRequestDetailsScreen() {
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Save failed (check rules).");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const saveProgress = async () => {
+    const nextProgress = normalizeStaffProgressPercent(progressDraft);
+    if (!canUpdateProgress) {
+      setErr("Start work from the modal before updating live progress.");
+      return;
+    }
+    if (!nextProgress) {
+      setErr("Pick a valid progress percentage.");
+      return;
+    }
+
+    try {
+      setBusy("progress");
+      setErr("");
+      const nowMs = Date.now();
+      await updateRequest({
+        staffProgressPercent: nextProgress,
+        staffProgressUpdatedAt: serverTimestamp(),
+        staffProgressUpdatedAtMs: nowMs,
+      });
+      setReq((prev) =>
+        prev
+          ? {
+              ...prev,
+              staffProgressPercent: nextProgress,
+              staffProgressUpdatedAtMs: nowMs,
+            }
+          : prev
+      );
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || "Progress update failed (check rules).");
     } finally {
       setBusy("");
     }
@@ -650,10 +780,24 @@ export default function StaffRequestDetailsScreen() {
           <div className="mt-4 h-px w-full bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent dark:via-zinc-700/70" />
         </div>
 
-        {/* Chat first (primary block) */}
-        <div className={`mt-4 ${floatCard} p-5`}>
-          <StaffRequestChatPanel requestId={requestId} />
-        </div>
+        <StaffCollapsibleSectionCard
+          className={`mt-4 ${floatCard} p-5`}
+          title="Chat"
+          subtitle="Open the request conversation and shared files."
+          open={openSections.chat}
+          onToggle={() => toggleSection("chat")}
+          badge={
+            unreadRequestState?.chatUnread ? (
+              <span className="rounded-full border border-rose-200 bg-rose-50/80 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+                New
+              </span>
+            ) : null
+          }
+        >
+          <div className="mt-4">
+            <StaffRequestChatPanel requestId={requestId} />
+          </div>
+        </StaffCollapsibleSectionCard>
 
         {err ?(
           <div className="mt-4 rounded-3xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 shadow-sm dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
@@ -663,7 +807,7 @@ export default function StaffRequestDetailsScreen() {
 
         {loading ?(
           <div className={`mt-4 ${card} p-4`}>
-            <p className="text-sm text-zinc-600 dark:text-zinc-300">Loading request…</p>
+            <p className="text-sm text-zinc-600 dark:text-zinc-300">Loading request...</p>
           </div>
         ) : !req ?(
           <div className={`mt-4 ${card} p-4`}>
@@ -705,22 +849,72 @@ export default function StaffRequestDetailsScreen() {
               ) : null}
             </div>
 
-            {/* Applicant summary */}
-            <div className={`mt-6 ${floatCard} p-5`}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                    Applicant
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                    Contact details are hidden in staff view.
-                  </div>
-                </div>
+            <StaffCollapsibleSectionCard
+              className={`mt-6 ${floatCard} p-5`}
+              title="Work progress"
+              subtitle="Only staff can update this live percentage. Admin and user can view it."
+              open={openSections.workProgress}
+              onToggle={() => toggleSection("workProgress")}
+            >
+              <div className="mt-4">
+                <RequestWorkProgressCard
+                  request={req}
+                  title="Work progress"
+                  subtitle="Only staff can update this live percentage. Admin and user can view it."
+                  showWhenIdle={true}
+                  idleText="Start work from the staff modal first."
+                  pendingText="Work started. Add a live progress update when you have one."
+                >
+                  <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                    <label className="grid gap-2">
+                      <span className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
+                        Progress percentage
+                      </span>
+                      <select
+                        value={progressDraft}
+                        onChange={(e) => setProgressDraft(e.target.value)}
+                        disabled={!canUpdateProgress || busy === "progress"}
+                        className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950/40 dark:focus:ring-emerald-300/20"
+                      >
+                        <option value="">Select live progress</option>
+                        {STAFF_PROGRESS_OPTIONS.map((value) => (
+                          <option key={value} value={value}>
+                            {value}%
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
+                    <button
+                      type="button"
+                      onClick={saveProgress}
+                      disabled={!canUpdateProgress || busy === "progress" || !progressDraft}
+                      className="rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                    >
+                      {busy === "progress" ? "Updating..." : "Update progress"}
+                    </button>
+                  </div>
+
+                  <div className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+                    Use this for live work updates only. Completion should still go through the existing
+                    done flow.
+                  </div>
+                </RequestWorkProgressCard>
+              </div>
+            </StaffCollapsibleSectionCard>
+
+            <StaffCollapsibleSectionCard
+              className={`mt-6 ${floatCard} p-5`}
+              title="Applicant"
+              subtitle="Contact details are hidden in staff view."
+              open={openSections.applicant}
+              onToggle={() => toggleSection("applicant")}
+            >
+              <div className="mt-4 flex justify-end">
                 <button
                   type="button"
                   onClick={() => navigate(`/staff/request/${req?.id}/documents`)}
-                  className="shrink-0 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                  className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 dark:hover:bg-zinc-900"
                 >
                   Applicant docs
                   <IconChevronRight className="h-5 w-5 text-emerald-700 dark:text-emerald-200" />
@@ -750,24 +944,27 @@ export default function StaffRequestDetailsScreen() {
                   <div className={warnBox}>No note provided.</div>
                 )}
               </div>
-            </div>
+            </StaffCollapsibleSectionCard>
 
-            {/* In-progress payments */}
-            <div className={`mt-6 ${floatCard} p-5`}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                    In-progress payments
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                    Propose payment requests. Admin must approve before user can pay.
-                  </div>
-                </div>
+            <StaffCollapsibleSectionCard
+              className={`mt-6 ${floatCard} p-5`}
+              title="In-progress payments"
+              subtitle="Propose payment requests. Admin must approve before user can pay."
+              open={openSections.payments}
+              onToggle={() => toggleSection("payments")}
+              badge={
+                unreadRequestState?.paymentUnread ? (
+                  <span className="rounded-full border border-rose-200 bg-rose-50/80 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+                    New
+                  </span>
+                ) : null
+              }
+              meta={
                 <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                   {inProgressPayments.length} proposals
                 </span>
-              </div>
-
+              }
+            >
               {unlockPayment ? (
                 <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3 text-xs text-emerald-900">
                   Unlock payment:{" "}
@@ -859,26 +1056,20 @@ export default function StaffRequestDetailsScreen() {
                   })
                 )}
               </div>
-            </div>
+            </StaffCollapsibleSectionCard>
 
-            {/* Staff attachments */}
-            <div className={`mt-6 ${floatCard} p-5`}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                    Attach files for applicant
-                  </h2>
-                  <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                    Add links (Google Drive / Dropbox). When you mark done, these auto-fill admin’s staged
-                    files.
-                  </p>
-                </div>
-
+            <StaffCollapsibleSectionCard
+              className={`mt-6 ${floatCard} p-5`}
+              title="Attach files for applicant"
+              subtitle="Add links (Google Drive / Dropbox). When you mark done, these auto-fill admin's staged files."
+              open={openSections.attachments}
+              onToggle={() => toggleSection("attachments")}
+              meta={
                 <span className="rounded-full border border-emerald-100 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
                   Auto-fills Admin
                 </span>
-              </div>
-
+              }
+            >
               {draftErr ?(
                 <div className="mt-4 rounded-3xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 shadow-sm dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
                   {draftErr}
@@ -919,12 +1110,12 @@ export default function StaffRequestDetailsScreen() {
                       disabled={addingDraft || busy}
                       className={btnPrimary}
                     >
-                      {addingDraft ?"Adding…" : "Add"}
+                      {addingDraft ?"Adding..." : "Add"}
                     </button>
                   </div>
 
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Tip: set access to “Anyone with the link can view”.
+                    Tip: set access to "Anyone with the link can view".
                   </div>
                 </div>
               )}
@@ -975,25 +1166,23 @@ export default function StaffRequestDetailsScreen() {
                   ))
                 )}
               </div>
-            </div>
+            </StaffCollapsibleSectionCard>
 
-            {/* Staff note */}
-            <div className={`mt-6 ${floatCard} p-5`}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Staff note</div>
-                  <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                    Internal note for admin. Save anytime.
-                  </div>
-                </div>
-
+            <StaffCollapsibleSectionCard
+              className={`mt-6 ${floatCard} p-5`}
+              title="Staff note"
+              subtitle="Internal note for admin. Save anytime."
+              open={openSections.note}
+              onToggle={() => toggleSection("note")}
+            >
+              <div className="mt-4 flex justify-end">
                 <button
                   type="button"
                   onClick={saveNote}
                   disabled={!canWork || busy}
                   className={btnGhost}
                 >
-                  {busy === "save" ?"Saving…" : "Save note"}
+                  {busy === "save" ?"Saving..." : "Save note"}
                 </button>
               </div>
 
@@ -1001,12 +1190,11 @@ export default function StaffRequestDetailsScreen() {
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 rows={5}
-                placeholder="What did you find?What’s missing?Next steps?"
+                placeholder="What did you find? What's missing? Next steps?"
                 disabled={!canWork || isDone}
                 className="mt-4 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-3 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 min-h-[120px] disabled:opacity-70 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-emerald-300/20"
               />
-            </div>
-
+            </StaffCollapsibleSectionCard>
             {/* Staff actions */}
             <div className={`mt-6 ${floatCard} p-5`}>
               <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Staff actions</div>
@@ -1086,5 +1274,6 @@ export default function StaffRequestDetailsScreen() {
     </div>
   );
 }
+
 
 

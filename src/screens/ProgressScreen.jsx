@@ -230,6 +230,7 @@ export default function ProgressScreen() {
   const [deletingId, setDeletingId] = useState("");
 
   const unreadNotifCount = useNotifsV2Store((s) => Number(s.unreadNotifCount || 0) || 0);
+  const unreadByRequest = useNotifsV2Store((s) => s.unreadByRequest || {});
 
   /* ✅ pins state (max 2) */
   const [pinnedIds, setPinnedIds] = useState([]);
@@ -718,6 +719,7 @@ export default function ProgressScreen() {
                     : "";
 
                   const rid = String(r.id || "");
+                  const hasUnread = Boolean(unreadByRequest?.[rid]?.unread);
                   const isPinned = (pinnedIds || []).includes(rid);
 
                   const handleTryAgain = () => {
@@ -796,8 +798,14 @@ export default function ProgressScreen() {
                       key={r.id}
                       className={`${cardBase} ${cardHover} ${fullAccentCard} relative overflow-hidden`}
                     >
-                      {isFull ?(
-                        <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5 rounded-l-3xl bg-emerald-500/80 dark:bg-emerald-400/70" />
+                      {isFull || hasUnread ?(
+                        <span
+                          className={`pointer-events-none absolute inset-y-0 left-0 w-1.5 rounded-l-3xl ${
+                            isFull
+                              ? "bg-emerald-500/80 dark:bg-emerald-400/70"
+                              : "bg-rose-600/80"
+                          }`}
+                        />
                       ) : null}
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -806,7 +814,9 @@ export default function ProgressScreen() {
                             <div className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">
                               {titleLeft}
                             </div>
-
+                            {hasUnread ? (
+                              <span className="inline-flex h-2.5 w-2.5 rounded-full bg-rose-600 shadow-[0_0_0_3px_rgba(244,63,94,0.12)]" />
+                            ) : null}
                           </div>
 
                           <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">

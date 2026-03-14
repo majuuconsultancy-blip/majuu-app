@@ -46,7 +46,10 @@ import {
   upsertUserContact,
 } from "../services/userservice";
 import { getMissingProfileFields } from "../utils/profileGuard";
-import { createPendingAttachment } from "../services/attachmentservice";
+import {
+  createPendingAttachment,
+  createPendingAttachmentFromMeta,
+} from "../services/attachmentservice";
 import { setSnapshot } from "../resume/resumeEngine";
 
 /* ---------------- Data ---------------- */
@@ -469,6 +472,11 @@ export default function TravelWeHelp() {
       if (picked.length > 0) {
         for (const file of picked) {
           await createPendingAttachment({ requestId, file });
+        }
+      } else {
+        const metaFiles = Array.isArray(requestUploadMeta?.files) ? requestUploadMeta.files : [];
+        for (const fileMeta of metaFiles) {
+          await createPendingAttachmentFromMeta({ requestId, fileMeta });
         }
       }
 

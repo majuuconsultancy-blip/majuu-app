@@ -1,6 +1,6 @@
-﻿// âœ… StudySelfHelp.jsx (FULL COPY-PASTE)
+﻿// StudySelfHelp.jsx (FULL COPY-PASTE)
 // CHANGE: Redo ALL icons using lucide-react (no custom SVG icon components)
-// âœ… ADD: Android hardware back ALWAYS goes to TrackScreen (/app/study)
+// ADD: Android hardware back ALWAYS goes to TrackScreen (/app/study)
 // - Uses history.pushState + popstate trap (PWA-safe)
 // - On-screen Back also goes to /app/study
 // Everything else (layout/logic/keys) unchanged.
@@ -155,10 +155,10 @@ export default function StudySelfHelp() {
     });
   }, [country, location.pathname, location.search]);
 
-  // âœ… Desired back destination (TrackScreen)
+  // Desired back destination (TrackScreen)
   const backUrl = `/app/study?country=${encodeURIComponent(country || "")}&from=choice`;
 
-  // âœ… HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/study)
+  // HARD FIX: Android hardware back ALWAYS goes to TrackScreen (/app/study)
   useEffect(() => {
     try {
       window.history.pushState(
@@ -176,7 +176,7 @@ export default function StudySelfHelp() {
     return () => window.removeEventListener("popstate", onPopState);
   }, [navigate, backUrl]);
 
-  // âœ… On-screen Back
+  // On-screen Back
   const goBackToChoice = () => {
     smartBack(navigate, "/app/home");
   };
@@ -334,5 +334,6 @@ export default function StudySelfHelp() {
     </div>
   );
 }
+
 
 

@@ -19,6 +19,7 @@ import {
 } from "firebase/firestore";
 import { motion, AnimatePresence } from "../utils/motionProxy";
 import RequestChatLauncher from "../components/RequestChatLauncher";
+import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
 
 import { auth, db } from "../firebase";
 import { clearActiveProcess } from "../services/userservice";
@@ -29,9 +30,9 @@ import {
   toFullPackageItemKey,
 } from "../services/fullpackageservice";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import { getRequestWorkProgress } from "../utils/requestWorkProgress";
 import {
   createRefundRequest,
-  ensureUnlockAutoRefundForRequest,
   normalizePaymentDoc,
   normalizeRefundDoc,
   PAYMENT_STATUSES,
@@ -39,6 +40,8 @@ import {
   paymentStatusUi,
   refundStatusUi,
 } from "../services/paymentservice";
+import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
+import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
 
 /* ---------------- Minimal icons ---------------- */
 function IconReceipt(props) {
@@ -111,6 +114,20 @@ function IconArrowLeft(props) {
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
       <path
         d="M14.5 18 8.5 12l6-6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconChevronDown(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M6.5 9.5 12 15l5.5-5.5"
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"
@@ -233,9 +250,12 @@ const floaty = {
   tap: { scale: 0.99 },
 };
 
+const EMPTY_REQUEST_UNREAD_STATE = Object.freeze({});
+
 export default function RequestStatusScreen() {
   const navigate = useNavigate();
   const { requestId } = useParams();
+  const paymentPolicyBackTo = requestId ? `/app/request/${requestId}` : "/app/progress";
 
   const [loading, setLoading] = useState(true);
   const [req, setReq] = useState(null);
@@ -255,6 +275,11 @@ export default function RequestStatusScreen() {
   const [selectedRefundPaymentId, setSelectedRefundPaymentId] = useState("");
   const [refundReason, setRefundReason] = useState("");
   const [refundBusy, setRefundBusy] = useState(false);
+  const [paymentsOpen, setPaymentsOpen] = useState(false);
+  const [refundsOpen, setRefundsOpen] = useState(false);
+  const unreadRequestState = useNotifsV2Store(
+    (s) => s.unreadByRequest?.[String(requestId || "").trim()] || EMPTY_REQUEST_UNREAD_STATE
+  );
 
   // subtle "apple-ish" entrance animation (CSS-only, no deps)
   const [enter, setEnter] = useState(false);
@@ -427,10 +452,13 @@ export default function RequestStatusScreen() {
 
   useEffect(() => {
     if (!validRequestId) return;
-    ensureUnlockAutoRefundForRequest(validRequestId).catch((error) => {
-      console.warn("unlock auto-refund check failed:", error?.message || error);
-    });
-  }, [validRequestId, req?.status, req?.markedInProgressAtMs]);
+    notifsV2Store.markRequestNotificationsRead(validRequestId).catch(() => {});
+  }, [validRequestId]);
+
+  useEffect(() => {
+    setPaymentsOpen(false);
+    setRefundsOpen(false);
+  }, [validRequestId]);
 
   useEffect(() => {
     if (!isFullRequest || !fullPackageIdValue) return;
@@ -651,6 +679,8 @@ export default function RequestStatusScreen() {
 
   const serviceTitle = `${String(req?.track || "").toUpperCase()} • ${req?.country || "-"}`;
   const serviceSub = isFull ?"Full package" : `Single service: ${req?.serviceName || "-"}`;
+  const workProgress = getRequestWorkProgress(req);
+  const showWorkProgressCard = Boolean(workProgress.isStarted || workProgress.progressPercent);
   const unlockPayment =
     payments.find((p) => String(p.paymentType || "").toLowerCase() === PAYMENT_TYPES.UNLOCK_REQUEST) ||
     null;
@@ -659,6 +689,25 @@ export default function RequestStatusScreen() {
     if (status !== PAYMENT_STATUSES.AWAITING_USER_PAYMENT) return false;
     const paymentType = String(p.paymentType || "").toLowerCase();
     return paymentType !== PAYMENT_TYPES.UNLOCK_REQUEST;
+  });
+  const visiblePayments = payments.filter((payment) => {
+    const paymentType = String(payment.paymentType || "").toLowerCase();
+    const status = String(payment.status || "").toLowerCase();
+    if (paymentType === PAYMENT_TYPES.UNLOCK_REQUEST) {
+      return (
+        status === PAYMENT_STATUSES.PAID ||
+        status === PAYMENT_STATUSES.AUTO_REFUNDED ||
+        status === PAYMENT_STATUSES.REFUNDED
+      );
+    }
+    if (paymentType === PAYMENT_TYPES.IN_PROGRESS) {
+      return (
+        status === PAYMENT_STATUSES.AWAITING_USER_PAYMENT ||
+        status === PAYMENT_STATUSES.PAID ||
+        status === PAYMENT_STATUSES.REFUNDED
+      );
+    }
+    return false;
   });
   const refundStatusByPaymentId = new Map();
   for (const row of refunds) {
@@ -669,6 +718,8 @@ export default function RequestStatusScreen() {
   }
   const refundablePayments = payments.filter((p) => {
     const status = String(p.status || "").toLowerCase();
+    const paymentType = String(p.paymentType || "").toLowerCase();
+    if (paymentType === PAYMENT_TYPES.UNLOCK_REQUEST) return false;
     if (status !== PAYMENT_STATUSES.PAID) return false;
     const refundStatus = refundStatusByPaymentId.get(String(p.id || "").trim());
     if (!refundStatus) return true;
@@ -741,6 +792,8 @@ export default function RequestStatusScreen() {
     }
   };
 
+  const MotionDiv = motion.div;
+
   return (
     <div className={`min-h-screen ${softBg} ${TOP_LAYER_CLS}`}>
       {/* ✅ this fixed, high z-index layer guarantees chat modal can sit above */}
@@ -752,7 +805,7 @@ export default function RequestStatusScreen() {
         <div className="absolute top-56 -right-28 h-72 w-72 rounded-full bg-sky-200/20 blur-3xl" />
       </div>
 
-      <motion.div
+      <MotionDiv
         variants={pageIn}
         initial="hidden"
         animate="show"
@@ -853,7 +906,7 @@ export default function RequestStatusScreen() {
 
               {st === "contacted" ?(
                 <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 text-sm text-emerald-900">
-                  In progress. Please check back later.
+                  In progress. Live staff updates will appear below.
                 </div>
               ) : null}
 
@@ -871,235 +924,316 @@ export default function RequestStatusScreen() {
             </motion.div>
           </motion.div>
 
-          {/* Payments + refunds */}
+          {showWorkProgressCard ?(
+            <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
+              <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
+                <RequestWorkProgressCard
+                  request={req}
+                  title="Work progress"
+                  subtitle="Your staff member posts live progress updates here."
+                  pendingText="Work has started. A percentage update has not been posted yet."
+                />
+              </motion.div>
+            </motion.div>
+          ) : null}
+
           <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
             <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
-              <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setPaymentsOpen((prev) => !prev)}
+                aria-expanded={paymentsOpen}
+                className="flex w-full items-center justify-between gap-3 text-left"
+              >
                 <div className="min-w-0">
                   <div className="font-semibold text-zinc-900 dark:text-zinc-100">Payments</div>
-                  <div className="text-xs text-zinc-500">Request-linked payment and refund activity.</div>
+                  <div className="text-xs text-zinc-500">Request-linked payment activity.</div>
                 </div>
-                <span className="text-xs text-zinc-500 shrink-0">{payments.length} records</span>
-              </div>
-
-              {paymentsErr ?(
-                <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-                  {paymentsErr}
-                </div>
-              ) : null}
-
-              {pendingUserPayments.length > 0 ?(
-                <div className="mt-4 grid gap-2">
-                  {pendingUserPayments.map((payment) => {
-                    const uiPayment = paymentStatusUi(payment.status);
-                    return (
-                      <div
-                        key={payment.id}
-                        className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="text-xs font-semibold text-amber-900">Payment required</div>
-                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                              {payment.paymentLabel || "In-progress payment"}
-                            </div>
-                            <div className="mt-1 text-xs text-zinc-700 dark:text-zinc-300">
-                              {payment.currency} {Number(payment.amount || 0).toLocaleString()}
-                            </div>
-                            {payment.note ?(
-                              <div className="mt-1 text-xs text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">
-                                {payment.note}
-                              </div>
-                            ) : null}
-                          </div>
-                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${uiPayment.cls}`}>
-                            {uiPayment.label}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => openInProgressPayment(payment)}
-                          className="mt-3 w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
-                        >
-                          Pay now
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-
-              {unlockPayment ?(
-                <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold text-emerald-900">Unlock request payment</div>
-                      <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        {unlockPayment.currency} {Number(unlockPayment.amount || 0).toLocaleString()}
-                      </div>
-                      {unlockPayment.transactionReference ?(
-                        <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                          Ref: <span className="font-semibold">{unlockPayment.transactionReference}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                        paymentStatusUi(unlockPayment.status).cls
-                      }`}
-                    >
-                      {paymentStatusUi(unlockPayment.status).label}
+                <div className="flex items-center gap-2 shrink-0">
+                  {unreadRequestState?.paymentUnread ? (
+                    <span className="rounded-full border border-rose-200 bg-rose-50/80 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+                      New
                     </span>
-                  </div>
+                  ) : null}
+                  <span className="text-xs text-zinc-500">{visiblePayments.length} records</span>
+                  <IconChevronDown className={`h-5 w-5 text-zinc-500 transition ${paymentsOpen ? "rotate-180" : ""}`} />
                 </div>
-              ) : null}
+              </button>
 
-              <div className="mt-4 grid gap-2">
-                {payments.length === 0 ?(
-                  <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
-                    No payment records yet.
-                  </div>
-                ) : (
-                  payments.map((payment) => {
-                    const uiPayment = paymentStatusUi(payment.status);
-                    return (
-                      <div
-                        key={payment.id}
-                        className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
-                              {payment.paymentLabel || "Payment"}
-                            </div>
-                            <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                              {payment.currency} {Number(payment.amount || 0).toLocaleString()}
-                            </div>
-                            {payment.note ?(
-                              <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
-                                {payment.note}
-                              </div>
-                            ) : null}
-                            {payment.transactionReference ?(
-                              <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                                Ref: <span className="font-semibold">{payment.transactionReference}</span>
-                              </div>
-                            ) : null}
-                          </div>
-                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${uiPayment.cls}`}>
-                            {uiPayment.label}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              <div className="mt-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4">
-                <div className="text-xs text-zinc-600 dark:text-zinc-300">
-                  Unlock payment may be auto-refunded if not attended within 48 hours.
-                  In-progress payment refunds are reviewed manually.
-                </div>
-              </div>
-
-              <div className="mt-4">
-                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Request refund</div>
-                {refundsErr ?(
-                  <div className="mt-2 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-                    {refundsErr}
-                  </div>
-                ) : null}
-
-                {refundablePayments.length === 0 ?(
-                  <div className="mt-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-3 text-sm text-zinc-600 dark:text-zinc-300">
-                    No refundable payment items right now.
-                  </div>
-                ) : (
-                  <div className="mt-2 grid gap-2">
-                    <select
-                      value={selectedRefundPaymentId}
-                      onChange={(e) => setSelectedRefundPaymentId(e.target.value)}
-                      className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100"
-                      disabled={refundBusy}
-                    >
-                      <option value="">Select payment item</option>
-                      {refundablePayments.map((row) => (
-                        <option key={row.id} value={row.id}>
-                          {`${row.paymentLabel || "Payment"} - ${row.currency} ${Number(row.amount || 0).toLocaleString()}`}
-                        </option>
-                      ))}
-                    </select>
-                    <textarea
-                      rows={3}
-                      value={refundReason}
-                      onChange={(e) => setRefundReason(e.target.value)}
-                      placeholder="Why are you requesting this refund?"
-                      className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100"
-                      disabled={refundBusy}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void submitRefundRequestForSelectedPayment()}
-                      disabled={refundBusy}
-                      className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:opacity-60"
-                    >
-                      {refundBusy ? "Submitting..." : "Submit refund request"}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4">
-                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Refund history</div>
-                <div className="mt-2 grid gap-2">
-                  {refunds.length === 0 ?(
-                    <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-3 text-sm text-zinc-600 dark:text-zinc-300">
-                      No refund records yet.
+              {paymentsOpen ?(
+                <>
+                  {paymentsErr ?(
+                    <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+                      {paymentsErr}
                     </div>
-                  ) : (
-                    refunds.map((refund) => {
-                      const uiRefund = refundStatusUi(refund.status);
-                      return (
-                        <div
-                          key={refund.id}
-                          className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-3"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
-                                {refund.paymentLabel || "Refund"}
-                              </div>
-                              <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                                Payment ID: <span className="font-mono">{refund.paymentId || "-"}</span>
-                              </div>
-                              <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                                {refund.currency} {Number(refund.amount || 0).toLocaleString()}
-                              </div>
-                              {refund.adminExplanation ?(
-                                <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
-                                  Note: {refund.adminExplanation}
+                  ) : null}
+
+                  {pendingUserPayments.length > 0 ?(
+                    <div className="mt-4 grid gap-2">
+                      {pendingUserPayments.map((payment) => {
+                        const uiPayment = paymentStatusUi(payment.status);
+                        return (
+                          <div
+                            key={payment.id}
+                            className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="text-xs font-semibold text-amber-900">Payment required</div>
+                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                                  {payment.paymentLabel || "In-progress payment"}
                                 </div>
-                              ) : null}
-                              {refund.rejectionReason ?(
-                                <div className="mt-1 text-xs text-rose-700 whitespace-pre-wrap">
-                                  Rejection: {refund.rejectionReason}
+                                <div className="mt-1 text-xs text-zinc-700 dark:text-zinc-300">
+                                  {payment.currency} {Number(payment.amount || 0).toLocaleString()}
                                 </div>
-                              ) : null}
+                                {payment.note ?(
+                                  <div className="mt-1 text-xs text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">
+                                    {payment.note}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${uiPayment.cls}`}>
+                                {uiPayment.label}
+                              </span>
                             </div>
-                            <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${uiRefund.cls}`}>
-                              {uiRefund.label}
-                            </span>
+                            <button
+                              type="button"
+                              onClick={() => openInProgressPayment(payment)}
+                              className="mt-3 w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
+                            >
+                              Pay now
+                            </button>
                           </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+
+                  {unlockPayment ?(
+                    <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-emerald-900">Unlock request payment</div>
+                          <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                            {unlockPayment.currency} {Number(unlockPayment.amount || 0).toLocaleString()}
+                          </div>
+                          {unlockPayment.transactionReference ?(
+                            <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                              Ref: <span className="font-semibold">{unlockPayment.transactionReference}</span>
+                            </div>
+                          ) : null}
                         </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                            paymentStatusUi(unlockPayment.status).cls
+                          }`}
+                        >
+                          {paymentStatusUi(unlockPayment.status).label}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 grid gap-2">
+                    {visiblePayments.length === 0 ?(
+                      <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
+                        No payment records yet.
+                      </div>
+                    ) : (
+                      visiblePayments.map((payment) => {
+                        const uiPayment = paymentStatusUi(payment.status);
+                        return (
+                          <div
+                            key={payment.id}
+                            className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
+                                  {payment.paymentLabel || "Payment"}
+                                </div>
+                                <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                                  {payment.currency} {Number(payment.amount || 0).toLocaleString()}
+                                </div>
+                                {payment.note ?(
+                                  <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
+                                    {payment.note}
+                                  </div>
+                                ) : null}
+                                {payment.transactionReference ?(
+                                  <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                                    Ref: <span className="font-semibold">{payment.transactionReference}</span>
+                                  </div>
+                                ) : null}
+                              </div>
+                              <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${uiPayment.cls}`}>
+                                {uiPayment.label}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div className="mt-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4">
+                    <div className="text-xs text-zinc-600 dark:text-zinc-300">
+                      Unlock payment is not manually refundable. It auto-refunds after 48 hours if work has not started.
+                      In-progress payment refunds are reviewed manually.
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      <span>Review</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          navigate(buildLegalDocRoute(LEGAL_DOC_KEYS.ESCROW_POLICY, { scope: "app" }), {
+                            state: { backTo: paymentPolicyBackTo },
+                          })
+                        }
+                        className="font-semibold text-emerald-700 transition hover:text-emerald-800"
+                      >
+                        Escrow Policy
+                      </button>
+                      <span>and</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          navigate(buildLegalDocRoute(LEGAL_DOC_KEYS.REFUND_POLICY, { scope: "app" }), {
+                            state: { backTo: paymentPolicyBackTo },
+                          })
+                        }
+                        className="font-semibold text-emerald-700 transition hover:text-emerald-800"
+                      >
+                        Refund Policy
+                      </button>
+                      <span>for full payment rules.</span>
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </motion.div>
           </motion.div>
 
+          <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
+            <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
+              <button
+                type="button"
+                onClick={() => setRefundsOpen((prev) => !prev)}
+                aria-expanded={refundsOpen}
+                className="flex w-full items-center justify-between gap-3 text-left"
+              >
+                <div className="min-w-0">
+                  <div className="font-semibold text-zinc-900 dark:text-zinc-100">Request refund</div>
+                  <div className="text-xs text-zinc-500">Select the exact payment item and review refund history.</div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {unreadRequestState?.refundUnread ? (
+                    <span className="rounded-full border border-rose-200 bg-rose-50/80 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+                      New
+                    </span>
+                  ) : null}
+                  <span className="text-xs text-zinc-500">{refunds.length} records</span>
+                  <IconChevronDown className={`h-5 w-5 text-zinc-500 transition ${refundsOpen ? "rotate-180" : ""}`} />
+                </div>
+              </button>
+
+              {refundsOpen ?(
+                <>
+                  {refundsErr ?(
+                    <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+                      {refundsErr}
+                    </div>
+                  ) : null}
+
+                  {refundablePayments.length === 0 ?(
+                    <div className="mt-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-3 text-sm text-zinc-600 dark:text-zinc-300">
+                      No manually refundable payment items right now.
+                    </div>
+                  ) : (
+                    <div className="mt-3 grid gap-2">
+                      <select
+                        value={selectedRefundPaymentId}
+                        onChange={(e) => setSelectedRefundPaymentId(e.target.value)}
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100"
+                        disabled={refundBusy}
+                      >
+                        <option value="">Select payment item</option>
+                        {refundablePayments.map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {`${row.paymentLabel || "Payment"} - ${row.currency} ${Number(row.amount || 0).toLocaleString()}`}
+                          </option>
+                        ))}
+                      </select>
+                      <textarea
+                        rows={3}
+                        value={refundReason}
+                        onChange={(e) => setRefundReason(e.target.value)}
+                        placeholder="Why are you requesting this refund?"
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100"
+                        disabled={refundBusy}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void submitRefundRequestForSelectedPayment()}
+                        disabled={refundBusy}
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:opacity-60"
+                      >
+                        {refundBusy ? "Submitting..." : "Submit refund request"}
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="mt-4">
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Refund history</div>
+                    <div className="mt-2 grid gap-2">
+                      {refunds.length === 0 ?(
+                        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-3 text-sm text-zinc-600 dark:text-zinc-300">
+                          No refund records yet.
+                        </div>
+                      ) : (
+                        refunds.map((refund) => {
+                          const uiRefund = refundStatusUi(refund.status);
+                          return (
+                            <div
+                              key={refund.id}
+                              className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-3"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
+                                    {refund.paymentLabel || "Refund"}
+                                  </div>
+                                  <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                                    Payment ID: <span className="font-mono">{refund.paymentId || "-"}</span>
+                                  </div>
+                                  <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                                    {refund.currency} {Number(refund.amount || 0).toLocaleString()}
+                                  </div>
+                                  {refund.adminExplanation ?(
+                                    <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
+                                      Note: {refund.adminExplanation}
+                                    </div>
+                                  ) : null}
+                                  {refund.rejectionReason ?(
+                                    <div className="mt-1 text-xs text-rose-700 whitespace-pre-wrap">
+                                      Rejection: {refund.rejectionReason}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${uiRefund.cls}`}>
+                                  {uiRefund.label}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : null}
+            </motion.div>
+          </motion.div>
           {/* Submitted documents by user */}
           <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
             <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
@@ -1275,7 +1409,7 @@ export default function RequestStatusScreen() {
         </div>
 
         <div className="h-10" />
-      </motion.div>
+      </MotionDiv>
 
       <div
         className="fixed z-[10000]"
@@ -1289,5 +1423,6 @@ export default function RequestStatusScreen() {
     </div>
   );
 }
+
 
 

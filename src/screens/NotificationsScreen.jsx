@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, ChevronLeft, ChevronRight, CheckCheck } from "lucide-react";
 import AppIcon from "../components/AppIcon";
@@ -37,7 +37,7 @@ function formatAt(value) {
     hour: "2-digit",
     minute: "2-digit",
   });
-  return `${date} � ${time}`;
+  return `${date} - ${time}`;
 }
 
 const page = {
@@ -55,11 +55,16 @@ export default function NotificationsScreen() {
 
   const backTo = useMemo(() => {
     if (role === "staff") return "/staff/tasks";
-    if (role === "admin") return "/app/home";
+    if (role === "admin" || role === "assignedadmin") return "/app/home";
     return "/app/progress";
   }, [role]);
 
-  const headingLabel = role === "staff" ?"Staff notifications" : "Notifications";
+  const headingLabel =
+    role === "staff"
+      ? "Staff notifications"
+      : role === "admin" || role === "assignedadmin"
+      ? "Admin notifications"
+      : "Notifications";
 
   const pageBg =
     "min-h-screen bg-gradient-to-b from-emerald-50/45 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
@@ -141,7 +146,7 @@ export default function NotificationsScreen() {
                 Inbox
               </div>
               <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                {items.length} {items.length === 1 ?"notification" : "notifications"} � {unreadCount} unread
+                {items.length} {items.length === 1 ?"notification" : "notifications"} - {unreadCount} unread
               </div>
             </div>
             <button
@@ -234,4 +239,5 @@ export default function NotificationsScreen() {
     </div>
   );
 }
+
 

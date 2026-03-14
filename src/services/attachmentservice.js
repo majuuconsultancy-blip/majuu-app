@@ -80,6 +80,44 @@ export async function createPendingAttachment({ requestId, file }) {
 }
 
 /**
+ * Creates a placeholder attachment doc from saved file metadata.
+ * This is used after flows like dummy payment where the live File object
+ * no longer exists but we still want the request's attachments subcollection
+ * to reflect what the user selected.
+ */
+export async function createPendingAttachmentFromMeta({ requestId, fileMeta } = {}) {
+  const user = requireUser();
+  const rid = requireRequestId(requestId);
+  const meta = fileMeta && typeof fileMeta === "object" ? fileMeta : {};
+
+  const name = safeStr(meta?.name || "document.pdf", 120) || "document.pdf";
+  const contentType = safeStr(meta?.type || meta?.contentType || "application/pdf", 80)
+    || "application/pdf";
+  const size = safeNum(meta?.size, 0, MAX_BYTES + 1);
+
+  if (!isPdfFile({ name, type: contentType })) {
+    throw new Error("Only PDF files are allowed");
+  }
+  if (size > MAX_BYTES) {
+    throw new Error(`PDF must be under ${MAX_PDF_MB}MB`);
+  }
+
+  const ref = collection(db, "serviceRequests", rid, "attachments");
+  const docRef = await addDoc(ref, {
+    uid: user.uid,
+    name,
+    size,
+    contentType,
+    status: "pending_upload",
+    source: "meta_restore",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  return docRef.id;
+}
+
+/**
  * ✅ NEW: create a LINK attachment (no file upload)
  * Useful when the "document" is a Drive link / Dropbox link / website link.
  *

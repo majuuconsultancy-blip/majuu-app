@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   Phone,
   Flag,
+  FileText,
   ChevronRight,
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
@@ -527,6 +528,33 @@ export default function ProfileScreen() {
               </div>
             </motion.button>
           ) : null}
+
+          <motion.button
+            type="button"
+            onClick={() => navigate("/app/legal")}
+            variants={floatCard}
+            initial="rest"
+            whileHover="hover"
+            whileTap="tap"
+            className={actionCard}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100/70 bg-emerald-50/70 text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
+                  <AppIcon size={ICON_MD} icon={FileText} />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    Legal & Policies
+                  </div>
+                  <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                    Terms, privacy, refunds, and escrow policies.
+                  </div>
+                </div>
+              </div>
+              <AppIcon size={ICON_MD} icon={ChevronRight} className="text-zinc-400 dark:text-zinc-500" />
+            </div>
+          </motion.button>
 
           <motion.button
             type="button"

@@ -481,6 +481,10 @@ export async function adminAcceptRequest({ requestId, note = "" }) {
 
   const req = snap.data() || {};
   assertRequestInActorScope(req, { actorUid: actingAdminUid, roleCtx });
+  const currentStatus = String(req?.status || "").trim().toLowerCase();
+  if (currentStatus === "new") {
+    throw new Error("Staff must start work before you can accept this request.");
+  }
   const uid = String(req?.uid || "").trim();
   const lockedAdminUid = String(
     req?.ownerLockedAdminUid || req?.currentAdminUid || actingAdminUid
@@ -505,6 +509,9 @@ export async function adminAcceptRequest({ requestId, note = "" }) {
       handledAtMs: nowMs,
       lockedOwnerAdminUid: lockedAdminUid || "",
     },
+    staffProgressPercent: 100,
+    staffProgressUpdatedAt: serverTimestamp(),
+    staffProgressUpdatedAtMs: nowMs,
     updatedAt: serverTimestamp(),
   });
 
@@ -556,6 +563,10 @@ export async function adminRejectRequest({ requestId, note = "" }) {
 
   const req = snap.data() || {};
   assertRequestInActorScope(req, { actorUid: actingAdminUid, roleCtx });
+  const currentStatus = String(req?.status || "").trim().toLowerCase();
+  if (currentStatus === "new") {
+    throw new Error("Staff must start work before you can reject this request.");
+  }
   const uid = String(req?.uid || "").trim();
   const lockedAdminUid = String(
     req?.ownerLockedAdminUid || req?.currentAdminUid || actingAdminUid

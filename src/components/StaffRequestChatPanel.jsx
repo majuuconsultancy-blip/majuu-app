@@ -1,10 +1,10 @@
-// âœ… src/components/StaffRequestChatPanel.jsx (FULL COPY-PASTE)
+﻿// src/components/StaffRequestChatPanel.jsx
 // Staff Chat (Portal modal, mobile-first, perfect overlay)
-// âœ… FIXED: file manager picker (no prompt())
-// âœ… FIXED: attach PDF meta like user panel (pickedPdf chip, not auto-send)
-// âœ… FIXED: supports sending BOTH text + pdf as ONE pending "bundle" (sendPendingBundle)
-// âœ… Supports rendering text/pdf/bundle for published + pending.
-// âœ… Marks read when opened.
+// Fixed: file manager picker (no prompt())
+// Fixed: attach PDF meta like user panel (pickedPdf chip, not auto-send)
+// Fixed: supports sending both text + pdf as one pending "bundle" (sendPendingBundle)
+// Supports rendering text/pdf/bundle for published + pending.
+// Marks read when opened.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -114,7 +114,7 @@ function roleLabel(role) {
   return "Admin";
 }
 
-/* âœ… Render helper: supports text/pdf/bundle */
+/* Render helper: supports text/pdf/bundle */
 function RenderMessageBody({ m, mine }) {
   const type = String(m?.type || "text").toLowerCase();
 
@@ -126,7 +126,7 @@ function RenderMessageBody({ m, mine }) {
         <div className="text-sm">
           {safeText(m?.pdfMeta?.name) || "document.pdf"}
           {m?.pdfMeta?.size ?(
-            <span className="text-xs opacity-80"> • {m.pdfMeta.size} bytes</span>
+            <span className="text-xs opacity-80"> - {m.pdfMeta.size} bytes</span>
           ) : null}
         </div>
       </div>
@@ -147,7 +147,7 @@ function RenderMessageBody({ m, mine }) {
             <div className="text-xs font-semibold opacity-90">PDF</div>
             <div className="text-xs opacity-90">
               {safeText(m?.pdfMeta?.name) || "document.pdf"}
-              {m?.pdfMeta?.size ?` • ${m.pdfMeta.size} bytes` : ""}
+              {m?.pdfMeta?.size ?` - ${m.pdfMeta.size} bytes` : ""}
             </div>
           </div>
         ) : null}
@@ -447,7 +447,7 @@ export default function StaffRequestChatPanel({ requestId }) {
 
     setSending(true);
     try {
-      // âœ… Best: use bundle when both exist (ONE pending doc)
+      // Best: use bundle when both exist (one pending doc)
       if (pdf && t) {
         try {
           await sendPendingBundle({
@@ -719,4 +719,6 @@ export default function StaffRequestChatPanel({ requestId }) {
     </>
   );
 }
+
+
 

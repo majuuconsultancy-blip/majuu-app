@@ -211,6 +211,9 @@ export async function createServiceRequest(payload) {
     ownerLockedAdminUid: "",
     markedInProgressAt: null,
     markedInProgressAtMs: 0,
+    staffProgressPercent: null,
+    staffProgressUpdatedAt: null,
+    staffProgressUpdatedAtMs: 0,
     escalationCount: 0,
     responseDeadlineAtMs: 0,
     routingMeta: {

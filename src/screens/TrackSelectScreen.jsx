@@ -40,7 +40,7 @@ export default function TrackSelectScreen() {
 
   const [isStaff, setIsStaff] = useState(false);
 
-  const [mounted, setMounted] = useState(false);
+  const [mounted, setMounted] = useState(true);
   const [bioPromptOpen, setBioPromptOpen] = useState(false);
   const [bioPromptBusy, setBioPromptBusy] = useState(false);
   const [bioPromptErr, setBioPromptErr] = useState("");
@@ -58,8 +58,10 @@ export default function TrackSelectScreen() {
     };
 
     const timer = setTimeout(() => {
+      if (cancelled) return;
       setSoftMsg("Taking longer than usual. Please check your connection.");
       setLoading(false);
+      setMounted(true);
     }, 7000);
 
     void (async () => {

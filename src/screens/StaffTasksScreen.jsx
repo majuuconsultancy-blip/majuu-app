@@ -327,6 +327,7 @@ export default function StaffTasksScreen() {
 
   // Global unread source-of-truth (driven by notifsV2Engine)
   const unreadByRequest = useNotifsV2Store((s) => s.unreadByRequest);
+  const unreadNotifCount = useNotifsV2Store((s) => Number(s.unreadNotifCount || 0) || 0);
 
   // ✅ entrance animation
   const [enter, setEnter] = useState(false);
@@ -814,6 +815,11 @@ export default function StaffTasksScreen() {
               >
                 <span className="relative inline-flex items-center">
                   <IconBell className="h-4 w-4" />
+                  {unreadNotifCount > 0 ? (
+                    <span className="absolute -top-2 -right-2 inline-flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold leading-none text-white shadow-[0_0_0_3px_rgba(244,63,94,0.14)]">
+                      {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
+                    </span>
+                  ) : null}
                 </span>
                 Notifications
               </button>

@@ -5,6 +5,7 @@ import {
   buildDummyTransactionReference,
   userPayAwaitingPayment,
 } from "../services/paymentservice";
+import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
 import {
   getDummyPaymentDraft,
   getDummyPaymentState,
@@ -230,6 +231,12 @@ export default function DummyPaymentScreen() {
   const [transactionReference, setTransactionReference] = useState(() =>
     String(storedPayment?.transactionReference || storedPayment?.ref || "").trim()
   );
+
+  const openLegalDoc = (docKey) => {
+    navigate(buildLegalDocRoute(docKey, { scope: "app" }), {
+      state: { backTo: `${location.pathname}${location.search}` },
+    });
+  };
 
   useEffect(() => {
     return () => {
@@ -555,6 +562,26 @@ export default function DummyPaymentScreen() {
               Continue
             </button>
           )}
+
+          <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-3 text-center text-xs text-zinc-500 dark:text-zinc-400">
+            Review{" "}
+            <button
+              type="button"
+              onClick={() => openLegalDoc(LEGAL_DOC_KEYS.ESCROW_POLICY)}
+              className="font-semibold text-emerald-700 transition hover:text-emerald-800"
+            >
+              Escrow Policy
+            </button>{" "}
+            and{" "}
+            <button
+              type="button"
+              onClick={() => openLegalDoc(LEGAL_DOC_KEYS.REFUND_POLICY)}
+              className="font-semibold text-emerald-700 transition hover:text-emerald-800"
+            >
+              Refund Policy
+            </button>{" "}
+            if you need payment handling details before continuing.
+          </div>
         </div>
       </div>
     </div>

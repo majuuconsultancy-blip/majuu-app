@@ -188,7 +188,7 @@ export async function scheduleForegroundLocalNotification({
           id: hashToInt(`${key}:${Date.now()}`),
           title: safeStr(title) || "Notification",
           body: safeStr(body) || "You have an update.",
-          channelId: "default",
+          channelId: "majuu_default",
           schedule: { at: new Date(Date.now() + 250) },
           extra: {
             route: safeStr(route),
@@ -224,11 +224,11 @@ async function ensureAndroidDefaultNotificationChannel() {
   if (!isAndroidNative()) return;
   try {
     await LocalNotifications.createChannel({
-      id: "default",
+      id: "majuu_default",
       name: "MAJUU",
       importance: 5,
     });
-    console.log("LocalNotifications channel ready: default");
+    console.log("LocalNotifications channel ready: majuu_default");
   } catch (error) {
     console.warn("LocalNotifications.createChannel failed:", error?.message || error);
   }

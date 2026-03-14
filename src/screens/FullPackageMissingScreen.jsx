@@ -3,7 +3,10 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import RequestModal from "../components/RequestModal";
-import { createPendingAttachment } from "../services/attachmentservice";
+import {
+  createPendingAttachment,
+  createPendingAttachmentFromMeta,
+} from "../services/attachmentservice";
 import {
   normalizeFullPackageItems,
   syncFullPackageItemStates,
@@ -449,9 +452,16 @@ export default function FullPackageMissingScreen() {
       console.warn("Failed to persist full package unlock payment record:", payError);
     }
 
-    const files = Array.isArray(dummyFiles) ?dummyFiles : [];
-    for (const file of files) {
-      await createPendingAttachment({ requestId, file });
+    const files = Array.isArray(dummyFiles) ? dummyFiles : [];
+    if (files.length > 0) {
+      for (const file of files) {
+        await createPendingAttachment({ requestId, file });
+      }
+    } else {
+      const metaFiles = Array.isArray(requestUploadMeta?.files) ? requestUploadMeta.files : [];
+      for (const fileMeta of metaFiles) {
+        await createPendingAttachmentFromMeta({ requestId, fileMeta });
+      }
     }
 
     await setActiveProcessDetails(uid, {
