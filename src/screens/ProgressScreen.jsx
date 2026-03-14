@@ -31,11 +31,16 @@ import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 
 import { auth, db } from "../firebase";
 import { useNotifsV2Store } from "../services/notifsV2Store";
-import { getUserState } from "../services/userservice";
+import { clearActiveProcess, getUserState } from "../services/userservice";
 import { getMyApplications } from "../services/progressservice";
 import { getResumeTarget } from "../resume/resumeEngine";
 import { buildFullPackageHubPath, toFullPackageItemKey } from "../services/fullpackageservice";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import {
+  extractRequestIdFromAppPath,
+  filterVisibleSubmittedRequests,
+  isUnsubmittedGhostRequest,
+} from "../utils/requestGhosts";
 
 const PERF_TAG = "[perf][ProgressScreen]";
 const REQUESTS_INITIAL_RENDER = 5;
@@ -73,7 +78,9 @@ function readProgressCache(uid) {
     if (!parsed || typeof parsed !== "object") return null;
     return {
       state: parsed?.state || null,
-      requests: Array.isArray(parsed?.requests) ?parsed.requests : [],
+      requests: filterVisibleSubmittedRequests(
+        Array.isArray(parsed?.requests) ?parsed.requests : []
+      ),
       apps: Array.isArray(parsed?.apps) ?parsed.apps : [],
       updatedAt: Number(parsed?.updatedAt || 0) || 0,
     };
@@ -87,7 +94,9 @@ function writeProgressCache(uid, payload) {
   try {
     const safe = {
       state: payload?.state || null,
-      requests: Array.isArray(payload?.requests) ?payload.requests : [],
+      requests: filterVisibleSubmittedRequests(
+        Array.isArray(payload?.requests) ?payload.requests : []
+      ),
       apps: Array.isArray(payload?.apps) ?payload.apps : [],
       updatedAt: Date.now(),
     };
@@ -361,7 +370,14 @@ export default function ProgressScreen() {
             }
             const mapSortTimer = `${PERF_TAG} transform:map+sort requests`;
             startPerf(mapSortTimer);
-            const data = snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
+            const allRows = snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
+            const hiddenGhostIds = new Set(
+              allRows
+                .filter((row) => isUnsubmittedGhostRequest(row))
+                .map((row) => String(row?.id || "").trim())
+                .filter(Boolean)
+            );
+            const data = filterVisibleSubmittedRequests(allRows);
             data.sort(
               (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
             );
@@ -382,6 +398,28 @@ export default function ProgressScreen() {
             if (filtered.join("|") !== currentPins.join("|")) {
               setPinnedIds(filtered);
               writePins(user.uid, filtered);
+            }
+
+            const activeRequestId = String(stateRef.current?.activeRequestId || "").trim();
+            if (activeRequestId && hiddenGhostIds.has(activeRequestId)) {
+              const nextState = {
+                ...(stateRef.current || {}),
+                hasActiveProcess: false,
+                activeTrack: null,
+                activeCountry: null,
+                activeHelpType: null,
+                activeRequestId: null,
+              };
+              stateRef.current = nextState;
+              setState(nextState);
+              writeProgressCache(user.uid, {
+                state: nextState,
+                requests: data,
+                apps: appsRef.current,
+              });
+              void clearActiveProcess(user.uid).catch((error) => {
+                console.warn("Failed to clear ghost active request:", error);
+              });
             }
           },
           (error) => {
@@ -421,11 +459,17 @@ export default function ProgressScreen() {
   const goContinue = async () => {
     const resumeTarget = await getResumeTarget();
     if (resumeTarget?.path) {
-      navigate(`${resumeTarget.path}${resumeTarget.search || ""}`, {
-        replace: true,
-        state: resumeTarget.state,
-      });
-      return;
+      const resumedRequestId = extractRequestIdFromAppPath(resumeTarget.path);
+      const isVisibleRequest =
+        resumedRequestId &&
+        requestsRef.current.some((row) => String(row?.id || "").trim() === resumedRequestId);
+      if (!resumedRequestId || isVisibleRequest) {
+        navigate(`${resumeTarget.path}${resumeTarget.search || ""}`, {
+          replace: true,
+          state: resumeTarget.state,
+        });
+        return;
+      }
     }
 
     const helpType = String(state?.activeHelpType || "").toLowerCase();

@@ -42,6 +42,7 @@ import {
 } from "../services/paymentservice";
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
+import { isUnsubmittedGhostRequest } from "../utils/requestGhosts";
 
 /* ---------------- Minimal icons ---------------- */
 function IconReceipt(props) {
@@ -348,6 +349,16 @@ export default function RequestStatusScreen() {
           }
 
           const data = normalizeTextDeep({ id: snap.id, ...snap.data() });
+          if (isUnsubmittedGhostRequest(data)) {
+            try {
+              await clearActiveProcess(user.uid);
+            } catch (e) {
+              console.error("clearActiveProcess failed for ghost request:", e);
+            }
+            navigate("/app/progress", { replace: true });
+            return;
+          }
+
           setReq(data);
           setLoading(false);
 
