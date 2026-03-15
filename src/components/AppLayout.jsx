@@ -63,6 +63,22 @@ function IconUser(props) {
   );
 }
 
+function IconNews(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M6 6.5h12a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 18 18.5H6A1.5 1.5 0 0 1 4.5 17V8A1.5 1.5 0 0 1 6 6.5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M8 10h8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M8 13h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M15.5 13.5h.01" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -130,7 +146,9 @@ export default function AppLayout() {
       if (typeof auth?.authStateReady === "function") {
         try {
           await auth.authStateReady();
-        } catch {}
+        } catch (error) {
+          void error;
+        }
       }
       if (cancelled) return;
 
@@ -217,13 +235,26 @@ export default function AppLayout() {
     return location.pathname === "/app/profile" || location.pathname.startsWith("/app/profile/");
   }, [location.pathname]);
 
+  const newsActive = useMemo(() => {
+    return location.pathname === "/app/news" || location.pathname.startsWith("/app/news/");
+  }, [location.pathname]);
+
+  const newsNavState = useMemo(() => {
+    const trackMatch = location.pathname.match(/^\/app\/(study|work|travel)(?:\/|$)/i);
+    const params = new URLSearchParams(location.search || "");
+    return {
+      trackContext: trackMatch?.[1] ? String(trackMatch[1]).toLowerCase() : "",
+      countryContext: params.get("country") || "",
+    };
+  }, [location.pathname, location.search]);
+
   const homeActive = useMemo(() => {
     return (
       location.pathname === "/dashboard" ||
       location.pathname === "/app/home" ||
-      (location.pathname.startsWith("/app/") && !progressActive && !profileActive)
+      (location.pathname.startsWith("/app/") && !progressActive && !newsActive && !profileActive)
     );
-  }, [location.pathname, progressActive, profileActive]);
+  }, [location.pathname, newsActive, progressActive, profileActive]);
 
   if (checkingAuth) {
     return (
@@ -232,7 +263,7 @@ export default function AppLayout() {
   }
 
   const itemBase =
-    "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition duration-150 t-fade active:scale-[0.99]";
+    "flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2.5 py-2 text-[13px] font-semibold transition duration-150 t-fade active:scale-[0.99]";
   const itemOn = "bg-emerald-600 text-white shadow-sm";
   const itemOff =
     "text-zinc-700 dark:text-zinc-300 hover:bg-emerald-50/70 dark:text-zinc-200 dark:hover:bg-zinc-900/60";
@@ -284,7 +315,7 @@ export default function AppLayout() {
               backdropFilter: "blur(10px)",
             }}
           >
-            <div className="flex items-center justify-between">
+            <div className="grid grid-cols-4 gap-1">
               <button onClick={goSmartHome} className={`${itemBase} ${homeActive ? itemOn : itemOff}`}>
                 <IconHome className="h-5 w-5" />
                 <span>Home</span>
@@ -308,6 +339,15 @@ export default function AppLayout() {
                 </span>
 
                 <span>Progress</span>
+              </NavLink>
+
+              <NavLink
+                to="/app/news"
+                state={newsNavState}
+                className={({ isActive }) => `${itemBase} ${isActive ? itemOn : itemOff}`}
+              >
+                <IconNews className="h-5 w-5" />
+                <span>News</span>
               </NavLink>
 
               <NavLink to="/app/profile" className={({ isActive }) => `${itemBase} ${isActive ? itemOn : itemOff}`}>

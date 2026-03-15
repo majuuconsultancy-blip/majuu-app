@@ -68,6 +68,11 @@ function webRemove(key) {
 }
 
 export async function getStoredValue(key) {
+  const webValue = webGet(key);
+  if (webValue != null) {
+    return webValue;
+  }
+
   const plugin = await resolvePreferencesPlugin();
   if (plugin) {
     try {
@@ -83,27 +88,53 @@ export async function getStoredValue(key) {
 }
 
 export async function setStoredValue(key, value) {
+  webSet(key, value);
+  void (async () => {
+    const plugin = await resolvePreferencesPlugin();
+    if (plugin) {
+      try {
+        await withTimeout(plugin.set({ key, value }).then(() => ({ ok: true })));
+      } catch {
+        // local storage is already updated
+      }
+    }
+  })();
+}
+
+export async function setStoredValueDurable(key, value) {
+  webSet(key, value);
   const plugin = await resolvePreferencesPlugin();
   if (plugin) {
     try {
-      const result = await withTimeout(plugin.set({ key, value }).then(() => ({ ok: true })));
-      if (!result?.__timedOut) return;
+      await withTimeout(plugin.set({ key, value }));
     } catch {
-      // fall back to web storage
+      // local storage is already updated
     }
   }
-  webSet(key, value);
 }
 
 export async function removeStoredValue(key) {
+  webRemove(key);
+  void (async () => {
+    const plugin = await resolvePreferencesPlugin();
+    if (plugin) {
+      try {
+        await withTimeout(plugin.remove({ key }).then(() => ({ ok: true })));
+      } catch {
+        // local storage is already updated
+      }
+    }
+  })();
+}
+
+export async function removeStoredValueDurable(key) {
+  webRemove(key);
   const plugin = await resolvePreferencesPlugin();
   if (plugin) {
     try {
-      const result = await withTimeout(plugin.remove({ key }).then(() => ({ ok: true })));
-      if (!result?.__timedOut) return;
+      await withTimeout(plugin.remove({ key }));
     } catch {
-      // fall back to web storage
+      // local storage is already updated
     }
   }
-  webRemove(key);
 }

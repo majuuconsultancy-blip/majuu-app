@@ -6,7 +6,10 @@ import {
   openExternalUrl,
   resolveSelfHelpResourceUrl,
 } from "./selfHelpLinking";
-import { recordSelfHelpActivity } from "./selfHelpProgressStore";
+import {
+  deleteSelfHelpMemoryItem,
+  recordSelfHelpActivity,
+} from "./selfHelpProgressStore";
 
 export const SELF_HELP_PROVIDER_META = {
   "direct-web": { label: "External web", supportsRedirect: true },
@@ -274,19 +277,36 @@ export async function openSelfHelpResourceGateway({
     resolved
   );
 
+  const progressPromise = uid
+    ? Promise.resolve(recordSelfHelpActivity(uid, activity, { fastLocal: true })).catch(
+        (error) => {
+          console.error("SelfHelp activity write failed:", error);
+          return null;
+        }
+      )
+    : null;
   const opened = openExternalUrl(activity.finalUrl);
+
   if (!opened) {
+    const persistedProgress = progressPromise ? await progressPromise : null;
+    const revertedProgress =
+      uid && persistedProgress
+        ? await deleteSelfHelpMemoryItem(uid, activity).catch((error) => {
+            console.error("SelfHelp activity rollback failed:", error);
+            return persistedProgress;
+          })
+        : persistedProgress;
     return {
       ok: false,
       errorMessage: "We could not open that resource right now.",
-      progress: null,
+      progress: revertedProgress,
       finalUrl: "",
     };
   }
 
-  void logGatewayAnalytics({ ...activity, uid: safeString(uid, 120) }, resource);
+  const progress = progressPromise ? await progressPromise : null;
 
-  const progress = uid ? await recordSelfHelpActivity(uid, activity) : null;
+  void logGatewayAnalytics({ ...activity, uid: safeString(uid, 120) }, resource);
 
   return {
     ok: true,
@@ -307,16 +327,6 @@ export async function reopenStoredSelfHelpGateway({
     return {
       ok: false,
       errorMessage: "This resource needs fresh details before it can reopen directly.",
-      progress: null,
-      finalUrl: "",
-    };
-  }
-
-  const opened = openExternalUrl(finalUrl);
-  if (!opened) {
-    return {
-      ok: false,
-      errorMessage: "We could not reopen that resource right now.",
       progress: null,
       finalUrl: "",
     };
@@ -355,9 +365,36 @@ export async function reopenStoredSelfHelpGateway({
     verifiedStepTitle: safeString(item?.verifiedStepTitle, 120),
   };
 
-  void logGatewayAnalytics({ ...activity, uid: safeString(uid, 120) }, resource);
+  const progressPromise = uid
+    ? Promise.resolve(recordSelfHelpActivity(uid, activity, { fastLocal: true })).catch(
+        (error) => {
+          console.error("SelfHelp reopen write failed:", error);
+          return null;
+        }
+      )
+    : null;
+  const opened = openExternalUrl(finalUrl);
 
-  const progress = uid ? await recordSelfHelpActivity(uid, activity) : null;
+  if (!opened) {
+    const persistedProgress = progressPromise ? await progressPromise : null;
+    const revertedProgress =
+      uid && persistedProgress
+        ? await deleteSelfHelpMemoryItem(uid, activity).catch((error) => {
+            console.error("SelfHelp reopen rollback failed:", error);
+            return persistedProgress;
+          })
+        : persistedProgress;
+    return {
+      ok: false,
+      errorMessage: "We could not reopen that resource right now.",
+      progress: revertedProgress,
+      finalUrl: "",
+    };
+  }
+
+  const progress = progressPromise ? await progressPromise : null;
+
+  void logGatewayAnalytics({ ...activity, uid: safeString(uid, 120) }, resource);
 
   return {
     ok: true,

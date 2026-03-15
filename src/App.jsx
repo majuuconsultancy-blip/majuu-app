@@ -26,6 +26,7 @@ import StudyScreen from "./screens/StudyScreen";
 import WorkScreen from "./screens/WorkScreen";
 import TravelScreen from "./screens/TravelScreen";
 import ProgressScreen from "./screens/ProgressScreen";
+import NewsScreen from "./screens/NewsScreen";
 import ProfileScreen from "./screens/ProfileScreen";
 import EditProfileScreen from "./screens/EditProfileScreen";
 
@@ -76,6 +77,8 @@ const AdminRequestDocumentsScreen = lazy(() => import("./screens/AdminRequestDoc
 const AdminManageStaffScreen = lazy(() => import("./screens/AdminManageStaffScreen"));
 const AdminAssignAdminScreen = lazy(() => import("./screens/AdminAssignAdminScreen"));
 const AdminManageAdminsScreen = lazy(() => import("./screens/AdminManageAdminsScreen"));
+const AdminSaccScreen = lazy(() => import("./screens/AdminSaccScreen"));
+const AdminNewsManagementScreen = lazy(() => import("./screens/AdminNewsManagementScreen"));
 
 // Staff
 const StaffHomeScreen = lazy(() => import("./screens/StaffHomeScreen"));
@@ -502,6 +505,7 @@ function AppRoutes() {
             <Route path="work" element={<WorkScreen />} />
             <Route path="travel" element={<TravelScreen />} />
             <Route path="progress" element={<ProgressScreen />} />
+            <Route path="news" element={<NewsScreen />} />
 
             <Route path="profile" element={<ProfileScreen />} />
             <Route path="profile/edit" element={<EditProfileScreen />} />
@@ -578,6 +582,22 @@ function AppRoutes() {
               element={
                 <AdminGate>
                   <AdminManageAdminsScreen />
+                </AdminGate>
+              }
+            />
+            <Route
+              path="admin/sacc"
+              element={
+                <AdminGate>
+                  <AdminSaccScreen />
+                </AdminGate>
+              }
+            />
+            <Route
+              path="admin/sacc/news"
+              element={
+                <AdminGate>
+                  <AdminNewsManagementScreen />
                 </AdminGate>
               }
             />

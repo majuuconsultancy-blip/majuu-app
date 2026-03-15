@@ -225,6 +225,11 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    match /news/{newsId} {
+      allow read: if isSuperAdmin() || (signedIn() && resource.data.isPublished == true);
+      allow create, update, delete: if isSuperAdmin();
+    }
+
     match /users/{uid} {
       allow read: if isAnyAdmin() || isSelf(uid);
       allow create: if isSuperAdmin() || isSafeSelfUserCreate(uid);
@@ -252,6 +257,49 @@ service cloud.firestore {
               && request.resource.data.diff(resource.data).changedKeys().hasOnly(["readAt"]));
 
         allow delete: if isAnyAdmin() || isSelf(uid);
+      }
+
+      match /selfHelp/{docId} {
+        allow read: if isAnyAdmin() || isSelf(uid);
+
+        allow create, update: if isSuperAdmin()
+          || (
+            isSelf(uid)
+            && docId == "memory"
+          );
+
+        allow delete: if false;
+      }
+
+      match /selfHelpRoutes/{routeId} {
+        allow read: if isAnyAdmin() || isSelf(uid);
+
+        allow create, update: if isSuperAdmin()
+          || (
+            isSelf(uid)
+            && request.resource.data.id == routeId
+            && request.resource.data.track in ["study", "work", "travel"]
+            && str(request.resource.data.country).size() > 0
+            && request.resource.data.completedStepIds is list
+            && request.resource.data.moneyTools is map
+          );
+
+        allow delete: if false;
+      }
+
+      match /selfHelpDocuments/{docId} {
+        allow read: if isAnyAdmin() || isSelf(uid);
+
+        allow create, update: if isSuperAdmin()
+          || (
+            isSelf(uid)
+            && request.resource.data.id == docId
+            && request.resource.data.track in ["study", "work", "travel"]
+            && str(request.resource.data.country).size() > 0
+            && str(request.resource.data.category).size() > 0
+          );
+
+        allow delete: if isSuperAdmin() || isSelf(uid);
       }
     }
 

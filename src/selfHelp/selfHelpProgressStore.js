@@ -1,13 +1,51 @@
-import { getStoredValue, setStoredValue } from "../resume/resumeStorage";
+import { collection, deleteDoc, doc, getDoc, getDocs, setDoc } from "firebase/firestore";
+import { db } from "../firebase";
+import {
+  getStoredValue,
+  setStoredValue,
+  setStoredValueDurable,
+} from "../resume/resumeStorage";
 
 const SCHEMA_VERSION = 3;
 const HISTORY_LIMIT = 14;
 const BOOKMARK_LIMIT = 20;
 const ROUTE_STATE_LIMIT = 10;
 const DOCUMENT_LIMIT = 80;
+const CLOUD_MEMORY_COLLECTION = "selfHelp";
+const CLOUD_MEMORY_DOC_ID = "memory";
+const CLOUD_ROUTE_COLLECTION = "selfHelpRoutes";
+const CLOUD_DOCUMENT_COLLECTION = "selfHelpDocuments";
+const CLOUD_READ_TIMEOUT_MS = 5000;
+const CLOUD_TIMEOUT_TOKEN = "__majuu_selfhelp_cloud_timeout__";
+const inMemoryState = new Map();
 
 function keyFor(uid) {
   return `majuu_selfhelp_progress_v1_${String(uid || "").trim()}`;
+}
+
+function readCachedRawValue(uid) {
+  if (!uid || typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(keyFor(uid));
+  } catch {
+    return null;
+  }
+}
+
+function withTimeout(promise, timeoutMs = CLOUD_READ_TIMEOUT_MS) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => {
+      setTimeout(() => resolve(CLOUD_TIMEOUT_TOKEN), timeoutMs);
+    }),
+  ]);
+}
+
+function rememberState(uid, state) {
+  if (!uid) return sanitizeState(state);
+  const safe = sanitizeState(state);
+  inMemoryState.set(uid, safe);
+  return safe;
 }
 
 function isObject(value) {
@@ -218,6 +256,30 @@ function routeStateId(track, country) {
   return safeTrack && safeCountry ? `${safeTrack}::${safeCountry}` : "";
 }
 
+function memoryDocRef(uid) {
+  return doc(db, "users", safeString(uid, 120), CLOUD_MEMORY_COLLECTION, CLOUD_MEMORY_DOC_ID);
+}
+
+function userDocRef(uid) {
+  return doc(db, "users", safeString(uid, 120));
+}
+
+function routeCollectionRef(uid) {
+  return collection(db, "users", safeString(uid, 120), CLOUD_ROUTE_COLLECTION);
+}
+
+function routeDocRef(uid, routeId) {
+  return doc(db, "users", safeString(uid, 120), CLOUD_ROUTE_COLLECTION, safeString(routeId, 160));
+}
+
+function documentCollectionRef(uid) {
+  return collection(db, "users", safeString(uid, 120), CLOUD_DOCUMENT_COLLECTION);
+}
+
+function documentDocRef(uid, docId) {
+  return doc(db, "users", safeString(uid, 120), CLOUD_DOCUMENT_COLLECTION, safeString(docId, 240));
+}
+
 function sanitizeRouteState(value) {
   if (!isObject(value)) return null;
 
@@ -372,13 +434,179 @@ function sanitizeState(value) {
   };
 }
 
+function mergeItemsById(localItems, cloudItems, updatedField, limit) {
+  const merged = new Map();
+
+  for (const item of [...(Array.isArray(localItems) ? localItems : []), ...(Array.isArray(cloudItems) ? cloudItems : [])]) {
+    if (!item?.id) continue;
+    const current = merged.get(item.id);
+    if (!current || safeNumber(item?.[updatedField]) >= safeNumber(current?.[updatedField])) {
+      merged.set(item.id, item);
+    }
+  }
+
+  return Array.from(merged.values())
+    .sort((left, right) => safeNumber(right?.[updatedField]) - safeNumber(left?.[updatedField]))
+    .slice(0, limit);
+}
+
+async function readLegacyCloudCollections(uid) {
+  if (!uid) return null;
+
+  try {
+    const [routeSnap, documentSnap] = await Promise.all([
+      withTimeout(getDocs(routeCollectionRef(uid))),
+      withTimeout(getDocs(documentCollectionRef(uid))),
+    ]);
+
+    if (routeSnap === CLOUD_TIMEOUT_TOKEN || documentSnap === CLOUD_TIMEOUT_TOKEN) {
+      return null;
+    }
+
+    return {
+      routeStates: routeSnap.docs
+        .map((docSnap) => sanitizeRouteState({ id: docSnap.id, ...docSnap.data() }))
+        .filter(Boolean),
+      documents: documentSnap.docs
+        .map((docSnap) => sanitizeDocumentRecord({ id: docSnap.id, ...docSnap.data() }))
+        .filter(Boolean),
+    };
+  } catch (error) {
+    console.error("SelfHelp legacy cloud read failed:", error);
+    return null;
+  }
+}
+
+async function readCloudMemory(uid) {
+  if (!uid) return null;
+
+  try {
+    const snapshot = await withTimeout(getDoc(memoryDocRef(uid)));
+    if (snapshot === CLOUD_TIMEOUT_TOKEN || !snapshot?.exists?.()) {
+      return null;
+    }
+    return sanitizeState(snapshot.data());
+  } catch (error) {
+    console.error("SelfHelp cloud memory read failed:", error);
+    return null;
+  }
+}
+
+function mergeCloudState(baseState, incomingState) {
+  const base = sanitizeState(baseState);
+  const incoming = sanitizeState(incomingState);
+
+  const routeStates = mergeItemsById(
+    base.routeStates,
+    incoming.routeStates,
+    "updatedAt",
+    ROUTE_STATE_LIMIT
+  )
+    .map(sanitizeRouteState)
+    .filter(Boolean);
+
+  const history = mergeItemsById(base.history, incoming.history, "openedAt", HISTORY_LIMIT)
+    .map(sanitizeHistoryItem)
+    .filter(Boolean);
+
+  const bookmarks = mergeItemsById(base.bookmarks, incoming.bookmarks, "savedAt", BOOKMARK_LIMIT)
+    .map(sanitizeBookmark)
+    .filter(Boolean);
+
+  const documents = mergeItemsById(base.documents, incoming.documents, "updatedAt", DOCUMENT_LIMIT)
+    .map(sanitizeDocumentRecord)
+    .filter(Boolean);
+
+  const baseContext = sanitizeContext(base.lastContext);
+  const incomingContext = sanitizeContext(incoming.lastContext);
+  const preferredContext =
+    safeNumber(incomingContext.lastVisitedAt) >= safeNumber(baseContext.lastVisitedAt)
+      ? incomingContext
+      : baseContext;
+  const contextRoute =
+    findRouteState(routeStates, preferredContext.track, preferredContext.country) ||
+    routeStates[0] ||
+    null;
+
+  return sanitizeState({
+    ...base,
+    ...incoming,
+    updatedAt: Math.max(safeNumber(base.updatedAt), safeNumber(incoming.updatedAt)),
+    routeStates,
+    history,
+    bookmarks,
+    documents,
+    lastContext: contextRoute ? toContext(contextRoute, preferredContext) : preferredContext,
+  });
+}
+
+function syncCloudWrite(promise, label) {
+  void promise.catch((error) => {
+    console.error(`SelfHelp cloud sync failed (${label}):`, error);
+  });
+}
+
+function syncStateToCloud(uid, state) {
+  if (!uid) return Promise.resolve();
+  const normalized = sanitizeState(state);
+  const updatedAt = safeNumber(normalized.updatedAt) || Date.now();
+  return Promise.all([
+    setDoc(memoryDocRef(uid), normalized, { merge: true }),
+    setDoc(
+      userDocRef(uid),
+      {
+        selfHelpUpdatedAt: updatedAt,
+        selfHelpSchemaVersion: SCHEMA_VERSION,
+      },
+      { merge: true }
+    ),
+  ]);
+}
+
+function syncRouteStateToCloud(uid, routeState) {
+  const normalized = sanitizeRouteState(routeState);
+  if (!uid || !normalized?.id) return Promise.resolve();
+  return setDoc(routeDocRef(uid, normalized.id), normalized, { merge: true });
+}
+
+function syncDocumentRecordToCloud(uid, record) {
+  const normalized = sanitizeDocumentRecord(record);
+  if (!uid || !normalized?.id) return Promise.resolve();
+  return setDoc(documentDocRef(uid, normalized.id), normalized, { merge: true });
+}
+
+function deleteDocumentRecordFromCloud(uid, id) {
+  if (!uid || !safeString(id, 240)) return Promise.resolve();
+  return deleteDoc(documentDocRef(uid, id));
+}
+
 async function readState(uid) {
   if (!uid) return defaultState();
 
+  if (inMemoryState.has(uid)) {
+    return sanitizeState(inMemoryState.get(uid));
+  }
+
   try {
     const raw = await getStoredValue(keyFor(uid));
+    const parsed = !raw ? defaultState() : sanitizeState(JSON.parse(raw));
+    return rememberState(uid, parsed);
+  } catch {
+    return defaultState();
+  }
+}
+
+function readCachedState(uid) {
+  if (!uid) return defaultState();
+
+  if (inMemoryState.has(uid)) {
+    return sanitizeState(inMemoryState.get(uid));
+  }
+
+  try {
+    const raw = readCachedRawValue(uid);
     if (!raw) return defaultState();
-    return sanitizeState(JSON.parse(raw));
+    return rememberState(uid, JSON.parse(raw));
   } catch {
     return defaultState();
   }
@@ -392,7 +620,37 @@ async function writeState(uid, state) {
     updatedAt: Date.now(),
   });
 
+  rememberState(uid, safe);
   await setStoredValue(keyFor(uid), JSON.stringify(safe));
+  syncCloudWrite(syncStateToCloud(uid, safe), "summary");
+  return safe;
+}
+
+async function writeStateDurable(uid, state) {
+  if (!uid) return defaultState();
+
+  const safe = sanitizeState({
+    ...state,
+    updatedAt: Date.now(),
+  });
+
+  rememberState(uid, safe);
+  await setStoredValueDurable(keyFor(uid), JSON.stringify(safe));
+  syncCloudWrite(syncStateToCloud(uid, safe), "summary");
+  return safe;
+}
+
+function writeStateSync(uid, state) {
+  if (!uid) return defaultState();
+
+  const safe = sanitizeState({
+    ...state,
+    updatedAt: Date.now(),
+  });
+
+  rememberState(uid, safe);
+  void setStoredValue(keyFor(uid), JSON.stringify(safe));
+  syncCloudWrite(syncStateToCloud(uid, safe), "summary");
   return safe;
 }
 
@@ -407,6 +665,31 @@ function mergeRouteState(routeStates, patch) {
   return [normalizedPatch, ...current.filter((item) => item.id !== normalizedPatch.id)]
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, ROUTE_STATE_LIMIT);
+}
+
+function refreshRouteStateAfterHistoryChange(routeStates, historyItems, track, country) {
+  const currentRoute = findRouteState(routeStates, track, country);
+  if (!currentRoute) {
+    return Array.isArray(routeStates) ? routeStates : [];
+  }
+
+  const latestEntry =
+    (Array.isArray(historyItems) ? historyItems : []).find(
+      (item) =>
+        safeString(item?.track, 20).toLowerCase() === safeString(track, 20).toLowerCase() &&
+        safeString(item?.country, 80) === safeString(country, 80)
+    ) || null;
+
+  return mergeRouteState(routeStates, {
+    ...currentRoute,
+    lastResourceId: latestEntry?.resourceId || "",
+    lastResourceTitle: latestEntry?.title || "",
+    lastVisitedAt: safeNumber(latestEntry?.openedAt),
+    routePath: latestEntry?.routePath || currentRoute.routePath,
+    routeSearch: latestEntry?.routeSearch || currentRoute.routeSearch,
+    lastExpandedSection: latestEntry?.sectionId || currentRoute.lastExpandedSection,
+    lastCategory: latestEntry?.category || currentRoute.lastCategory,
+  });
 }
 
 function toContext(routeState, fallback = {}) {
@@ -432,6 +715,14 @@ export function getSelfHelpMoneyToolsState(progress, track, country) {
   return getSelfHelpRouteState(progress, track, country)?.moneyTools || defaultMoneyToolsState();
 }
 
+export function cacheSelfHelpProgress(uid, progress) {
+  return writeStateSync(uid, progress);
+}
+
+export function peekSelfHelpProgress(uid) {
+  return readCachedState(uid);
+}
+
 export function getSelfHelpDocuments(progress, track, country) {
   const safeTrack = safeString(track, 20).toLowerCase();
   const safeCountry = safeString(country, 80);
@@ -447,7 +738,43 @@ export function getSelfHelpDocuments(progress, track, country) {
 }
 
 export async function getSelfHelpProgress(uid) {
-  return readState(uid);
+  const localPromise = readState(uid);
+  const cloudMemoryPromise = readCloudMemory(uid);
+  const legacyCloudPromise = readLegacyCloudCollections(uid);
+
+  const local = await localPromise;
+  const [cloudMemory, legacyCloud] = await Promise.all([
+    cloudMemoryPromise,
+    legacyCloudPromise,
+  ]);
+
+  let merged = mergeCloudState(local, cloudMemory || defaultState());
+
+  if (legacyCloud) {
+    merged = mergeCloudState(
+      merged,
+      sanitizeState({
+        ...defaultState(),
+        routeStates: legacyCloud.routeStates,
+        documents: legacyCloud.documents,
+        lastContext: toContext(legacyCloud.routeStates?.[0] || null, merged.lastContext),
+      })
+    );
+  }
+
+  if (JSON.stringify(merged) !== JSON.stringify(local)) {
+    await writeState(uid, merged);
+  } else if (uid) {
+    inMemoryState.set(uid, merged);
+  }
+
+  if (!cloudMemory) {
+    syncCloudWrite(syncStateToCloud(uid, merged), "ensure-memory-root");
+  } else if (uid && JSON.stringify(merged) !== JSON.stringify(cloudMemory || defaultState())) {
+    syncCloudWrite(syncStateToCloud(uid, merged), "hydrate");
+  }
+
+  return merged;
 }
 
 export async function setSelfHelpContext(uid, patch) {
@@ -475,15 +802,19 @@ export async function setSelfHelpContext(uid, patch) {
   });
   const nextRoute = findRouteState(routeStates, track, country);
 
-  return writeState(uid, {
+  const nextState = {
     ...current,
     routeStates,
     lastContext: toContext(nextRoute, current.lastContext),
-  });
+  };
+  const saved = await writeState(uid, nextState);
+  syncCloudWrite(Promise.all([syncStateToCloud(uid, saved), syncRouteStateToCloud(uid, nextRoute)]), "route-context");
+  return saved;
 }
 
-export async function recordSelfHelpActivity(uid, payload) {
-  const current = await readState(uid);
+export async function recordSelfHelpActivity(uid, payload, options = {}) {
+  const fastLocal = options?.fastLocal === true;
+  const current = fastLocal ? readCachedState(uid) : await readState(uid);
   const entry = sanitizeHistoryItem({
     ...payload,
     openedAt: Date.now(),
@@ -542,13 +873,23 @@ export async function recordSelfHelpActivity(uid, payload) {
     });
   });
 
-  return writeState(uid, {
+  const nextState = {
     ...current,
     history,
     bookmarks,
     routeStates,
     lastContext: toContext(nextRoute, current.lastContext),
-  });
+  };
+  const saved = fastLocal ? writeStateSync(uid, nextState) : await writeState(uid, nextState);
+  const syncTask = Promise.all([syncStateToCloud(uid, saved), syncRouteStateToCloud(uid, nextRoute)]);
+
+  if (fastLocal) {
+    syncCloudWrite(syncTask, "history");
+    return saved;
+  }
+
+  await syncTask;
+  return saved;
 }
 
 export async function toggleSelfHelpBookmark(uid, payload) {
@@ -568,10 +909,60 @@ export async function toggleSelfHelpBookmark(uid, payload) {
         BOOKMARK_LIMIT
       );
 
-  return writeState(uid, {
+  const saved = await writeState(uid, {
     ...current,
     bookmarks,
   });
+  await syncStateToCloud(uid, saved);
+  return saved;
+}
+
+export async function deleteSelfHelpMemoryItem(uid, payload) {
+  const current = await readState(uid);
+  const id = safeString(payload?.id, 240);
+  const resourceId = safeString(payload?.resourceId, 120);
+  const track = safeString(payload?.track, 20).toLowerCase();
+  const country = safeString(payload?.country, 80);
+
+  if (!id && !(resourceId && track && country)) return current;
+
+  const matchesItem = (item) => {
+    if (!item) return false;
+    if (id && safeString(item.id, 240) === id) return true;
+    return (
+      safeString(item.resourceId, 120) === resourceId &&
+      safeString(item.track, 20).toLowerCase() === track &&
+      safeString(item.country, 80) === country
+    );
+  };
+
+  const nextHistory = current.history.filter((item) => !matchesItem(item));
+  const nextRouteStates =
+    track && country
+      ? refreshRouteStateAfterHistoryChange(current.routeStates, nextHistory, track, country)
+      : current.routeStates;
+  const activeContextRoute =
+    findRouteState(
+      nextRouteStates,
+      safeString(current.lastContext?.track, 20).toLowerCase(),
+      safeString(current.lastContext?.country, 80)
+    ) ||
+    findRouteState(nextRouteStates, track, country) ||
+    null;
+
+  const nextState = sanitizeState({
+    ...current,
+    history: nextHistory,
+    bookmarks: current.bookmarks.filter((item) => !matchesItem(item)),
+    routeStates: nextRouteStates,
+    lastContext: activeContextRoute
+      ? toContext(activeContextRoute, current.lastContext)
+      : current.lastContext,
+  });
+
+  const saved = await writeState(uid, nextState);
+  await syncStateToCloud(uid, saved);
+  return saved;
 }
 
 export async function toggleSelfHelpStepCompletion(uid, payload) {
@@ -605,15 +996,18 @@ export async function toggleSelfHelpStepCompletion(uid, payload) {
   });
   const nextRoute = findRouteState(routeStates, track, country);
 
-  return writeState(uid, {
+  const nextState = {
     ...current,
     routeStates,
     lastContext: toContext(nextRoute, current.lastContext),
-  });
+  };
+  const saved = await writeStateDurable(uid, nextState);
+  await Promise.all([syncStateToCloud(uid, saved), syncRouteStateToCloud(uid, nextRoute)]);
+  return saved;
 }
 
-export async function saveSelfHelpChecklist(uid, payload) {
-  const current = await readState(uid);
+function buildChecklistState(currentState, payload) {
+  const current = sanitizeState(currentState);
   const track = safeString(payload?.track, 20).toLowerCase();
   const country = safeString(payload?.country, 80);
   const completedStepIds = sanitizeIdList(payload?.completedStepIds, 40, 80);
@@ -637,11 +1031,28 @@ export async function saveSelfHelpChecklist(uid, payload) {
   });
   const nextRoute = findRouteState(routeStates, track, country);
 
-  return writeState(uid, {
+  return sanitizeState({
     ...current,
     routeStates,
     lastContext: toContext(nextRoute, current.lastContext),
   });
+}
+
+export function previewSelfHelpChecklistProgress(progress, payload) {
+  return buildChecklistState(progress, payload);
+}
+
+export async function saveSelfHelpChecklist(uid, payload) {
+  const current = await readState(uid);
+  const nextState = buildChecklistState(current, payload);
+  const saved = await writeStateDurable(uid, nextState);
+  const nextRoute = findRouteState(
+    saved.routeStates,
+    safeString(payload?.track, 20).toLowerCase(),
+    safeString(payload?.country, 80)
+  );
+  await Promise.all([syncStateToCloud(uid, saved), syncRouteStateToCloud(uid, nextRoute)]);
+  return saved;
 }
 
 export async function saveSelfHelpMoneyToolsState(uid, payload) {
@@ -677,15 +1088,18 @@ export async function saveSelfHelpMoneyToolsState(uid, payload) {
   });
   const nextRoute = findRouteState(routeStates, track, country);
 
-  return writeState(uid, {
+  const nextState = {
     ...current,
     routeStates,
     lastContext: toContext(nextRoute, current.lastContext),
-  });
+  };
+  const saved = await writeState(uid, nextState);
+  await Promise.all([syncStateToCloud(uid, saved), syncRouteStateToCloud(uid, nextRoute)]);
+  return saved;
 }
 
-export async function saveSelfHelpDocumentRecord(uid, payload) {
-  const current = await readState(uid);
+function buildDocumentSaveState(currentState, payload) {
+  const current = sanitizeState(currentState);
   const record = sanitizeDocumentRecord({
     ...payload,
     addedAt: payload?.addedAt || Date.now(),
@@ -701,10 +1115,29 @@ export async function saveSelfHelpDocumentRecord(uid, payload) {
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, DOCUMENT_LIMIT);
 
-  return writeState(uid, {
+  return sanitizeState({
     ...current,
     documents,
   });
+}
+
+export function previewSelfHelpDocumentProgress(progress, payload) {
+  return buildDocumentSaveState(progress, payload);
+}
+
+export async function saveSelfHelpDocumentRecord(uid, payload) {
+  const current = await readState(uid);
+  const nextState = buildDocumentSaveState(current, payload);
+  const saved = await writeStateDurable(uid, nextState);
+  await Promise.all([
+    syncStateToCloud(uid, saved),
+    syncDocumentRecordToCloud(uid, {
+      ...payload,
+      addedAt: payload?.addedAt || Date.now(),
+      updatedAt: Date.now(),
+    }),
+  ]);
+  return saved;
 }
 
 export async function deleteSelfHelpDocumentRecord(uid, payload) {
@@ -712,8 +1145,10 @@ export async function deleteSelfHelpDocumentRecord(uid, payload) {
   const id = safeString(payload?.id, 240);
   if (!id) return current;
 
-  return writeState(uid, {
+  const saved = await writeStateDurable(uid, {
     ...current,
     documents: current.documents.filter((item) => item.id !== id),
   });
+  await Promise.all([syncStateToCloud(uid, saved), deleteDocumentRecordFromCloud(uid, id)]);
+  return saved;
 }

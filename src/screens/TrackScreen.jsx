@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
+import { APP_DESTINATION_COUNTRIES } from "../constants/migrationOptions";
 
 import { auth } from "../firebase";
 import { setActiveContext, setSelectedTrack } from "../services/userservice";
@@ -36,7 +37,7 @@ const TRACKS = {
   travel: { title: "Travel Abroad", Icon: Plane },
 };
 
-const COUNTRIES = ["Canada", "Australia", "UK", "Germany", "USA"];
+const COUNTRIES = APP_DESTINATION_COUNTRIES;
 
 /* ---------- Motion presets ---------- */
 const overlayMotion = {

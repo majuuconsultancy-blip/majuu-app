@@ -57,6 +57,7 @@ import {
   Trash2,
   Pin,
   PinOff,
+  Settings2,
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
@@ -303,6 +304,42 @@ function AssignedAdminAccessPanel() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function SaccEntryPanel() {
+  const navigate = useNavigate();
+
+  return (
+    <div className="mt-4">
+      <button
+        type="button"
+        onClick={() => navigate("/app/admin/sacc")}
+        className="w-full rounded-3xl border border-zinc-200 bg-white/70 px-4 py-4 text-left shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-emerald-50/50 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:bg-zinc-900/80"
+      >
+        <div className="flex items-center gap-3">
+          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+            <AppIcon size={ICON_MD} icon={Settings2} />
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                SACC
+              </div>
+              <span className="rounded-full border border-emerald-100 bg-emerald-50/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                Super Admin
+              </span>
+            </div>
+            <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+              Super Admin Control Center. Start with News Management and expand app-wide controls later.
+            </div>
+          </div>
+
+          <AppIcon size={ICON_MD} icon={ChevronRight} className="text-zinc-400" />
+        </div>
+      </button>
     </div>
   );
 }
@@ -1424,6 +1461,7 @@ export default function AdminRequestsScreen() {
         </div>
 
         {roleCtx?.isSuperAdmin ?<AssignedAdminAccessPanel /> : null}
+        {roleCtx?.isSuperAdmin ?<SaccEntryPanel /> : null}
         {roleCtx?.isSuperAdmin ?(
           <div className="mt-5">
             <div className="flex flex-wrap items-center gap-3">

@@ -211,14 +211,32 @@ export function openExternalUrl(url) {
   const safeUrl = safeString(url, 1200);
   if (!safeUrl || typeof window === "undefined") return false;
 
-  const anchor = window.document.createElement("a");
-  anchor.href = safeUrl;
-  anchor.target = "_blank";
-  anchor.rel = "noopener noreferrer";
-  window.document.body.appendChild(anchor);
-  anchor.click();
-  window.document.body.removeChild(anchor);
-  return true;
+  try {
+    const popup = window.open(safeUrl, "_blank", "noopener,noreferrer");
+    if (popup) {
+      try {
+        popup.opener = null;
+      } catch {
+        // ignore popup opener hardening issues
+      }
+      return true;
+    }
+  } catch {
+    // fall through to anchor fallback
+  }
+
+  try {
+    const anchor = window.document.createElement("a");
+    anchor.href = safeUrl;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    window.document.body.appendChild(anchor);
+    anchor.click();
+    window.document.body.removeChild(anchor);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function buildSelfHelpRouteTarget({ track, country, sectionId, stepId }) {

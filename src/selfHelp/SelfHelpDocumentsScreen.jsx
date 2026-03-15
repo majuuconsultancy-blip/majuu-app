@@ -28,10 +28,13 @@ import {
 } from "./selfHelpLinking";
 import SelfHelpDocumentDialog from "./SelfHelpDocumentDialog";
 import {
+  cacheSelfHelpProgress,
   deleteSelfHelpDocumentRecord,
   getSelfHelpDocuments,
   getSelfHelpProgress,
   getSelfHelpRouteState,
+  peekSelfHelpProgress,
+  previewSelfHelpDocumentProgress,
   saveSelfHelpDocumentRecord,
 } from "./selfHelpProgressStore";
 
@@ -137,6 +140,7 @@ export default function SelfHelpDocumentsScreen({ track }) {
       }
 
       setUid(user.uid);
+      setProgress(peekSelfHelpProgress(user.uid));
 
       try {
         const nextProgress = await getSelfHelpProgress(user.uid);
@@ -218,31 +222,35 @@ export default function SelfHelpDocumentsScreen({ track }) {
     if (!uid || !country) return;
 
     const step = stepById.get(safeString(values?.stepId, 80));
+    const payload = {
+      id: safeString(values?.id, 240),
+      track,
+      country,
+      category: safeString(values?.category, 40).toLowerCase(),
+      documentType: safeString(values?.documentType, 80),
+      stepId: step?.id || safeString(values?.stepId, 80),
+      stepTitle: step?.title || "",
+      fileName: safeString(values?.fileName, 180),
+      fileType: safeString(values?.fileType, 80),
+      fileSize: Number(values?.fileSize || 0) || 0,
+      localRef: safeString(values?.localRef, 320),
+      notes: safeString(values?.notes, 1200),
+    };
+    const optimisticProgress = previewSelfHelpDocumentProgress(progress, payload);
+
     setSaving(true);
     setStatusMsg("");
+    setProgress(optimisticProgress);
+    cacheSelfHelpProgress(uid, optimisticProgress);
+    closeDialog();
+    setSaving(false);
 
     try {
-      const next = await saveSelfHelpDocumentRecord(uid, {
-        id: safeString(values?.id, 240),
-        track,
-        country,
-        category: safeString(values?.category, 40).toLowerCase(),
-        documentType: safeString(values?.documentType, 80),
-        stepId: step?.id || safeString(values?.stepId, 80),
-        stepTitle: step?.title || "",
-        fileName: safeString(values?.fileName, 180),
-        fileType: safeString(values?.fileType, 80),
-        fileSize: Number(values?.fileSize || 0) || 0,
-        localRef: safeString(values?.localRef, 320),
-        notes: safeString(values?.notes, 1200),
-      });
+      const next = await saveSelfHelpDocumentRecord(uid, payload);
       setProgress(next);
-      closeDialog();
     } catch (error) {
       console.error("SelfHelp document save failed:", error);
-      setStatusMsg("We could not save that document record right now.");
-    } finally {
-      setSaving(false);
+      setStatusMsg("Document updated here, but we could not persist it for next time right now.");
     }
   };
 

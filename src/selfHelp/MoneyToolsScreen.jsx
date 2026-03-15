@@ -39,6 +39,7 @@ import {
   getSelfHelpMoneyToolsState,
   getSelfHelpProgress,
   getSelfHelpRouteState,
+  peekSelfHelpProgress,
   saveSelfHelpMoneyToolsState,
 } from "./selfHelpProgressStore";
 
@@ -947,6 +948,7 @@ export default function MoneyToolsScreen({ track }) {
 
       setUid(user.uid);
       setProfileCountry(readProfileCountryCache(user.uid));
+      setProgress(peekSelfHelpProgress(user.uid));
 
       try {
         const [userState, nextProgress] = await Promise.all([

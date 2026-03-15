@@ -19,6 +19,7 @@ import {
   ExternalLink,
   Pin,
   PinOff,
+  Search,
   Trash2,
 } from "lucide-react";
 import { motion as Motion } from "../utils/motionProxy";
@@ -40,22 +41,17 @@ import {
   isUnsubmittedGhostRequest,
 } from "../utils/requestGhosts";
 import {
-  getNextVerifiedStep,
-  getVerifiedPathForRoute,
-  getVerifiedProgressSummary,
-} from "../selfHelp/selfHelpPaths";
-import {
   buildSelfHelpRouteTarget,
   getResourceDomain,
-  getSelfHelpBadgeMeta,
 } from "../selfHelp/selfHelpLinking";
 import {
   reopenStoredSelfHelpGateway,
   resolveStoredSelfHelpUrl,
 } from "../selfHelp/selfHelpGateway";
 import {
+  deleteSelfHelpMemoryItem,
   getSelfHelpProgress,
-  getSelfHelpRouteState,
+  peekSelfHelpProgress,
   toggleSelfHelpBookmark,
 } from "../selfHelp/selfHelpProgressStore";
 
@@ -269,27 +265,84 @@ function buildSelfHelpBookmarkPayload(item, finalUrl) {
   };
 }
 
-function SelfHelpItemRow({
+function toTitleLabel(value) {
+  const raw = safeString(value, 80);
+  if (!raw) return "-";
+
+  return raw
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatTrackCountry(track, country) {
+  const parts = [toTitleLabel(track), safeString(country, 80)].filter(
+    (value) => value && value !== "-"
+  );
+  return parts.length ? parts.join(" · ") : "-";
+}
+
+function matchesSelfHelpSearch(item, query) {
+  const needle = safeString(query, 120).toLowerCase();
+  if (!needle) return true;
+
+  const haystack = [
+    item?.title,
+    item?.description,
+    item?.category,
+    item?.track,
+    item?.country,
+    getResourceDomain(resolveStoredSelfHelpUrl(item) || item?.finalUrl || ""),
+  ]
+    .map((value) => safeString(value, 200).toLowerCase())
+    .join(" ");
+
+  return haystack.includes(needle);
+}
+
+function LegacySelfHelpItemRow({
   item,
   isSaved,
-  busy,
-  showFallback,
+  busyOpen,
+  busySave,
   onOpen,
   onToggleSave,
 }) {
-  const badges = [...(item.labels || []), item.verifiedStepId ? "verified-step" : ""]
-    .map((label) => getSelfHelpBadgeMeta(label))
-    .filter(Boolean);
   const openUrl = resolveStoredSelfHelpUrl(item);
   const canOpenDirectly = Boolean(openUrl);
   const domain = getResourceDomain(openUrl || item.finalUrl || "");
   const timeLabel = formatRelativeTime(item.openedAt || item.savedAt || item.lastOpenedAt);
+  const isBusy = busyOpen || busySave;
+
+  const handleCardOpen = () => {
+    if (isBusy) return;
+    onOpen(item);
+  };
+  const badges = [];
+  const showFallback = false;
+  const busy = isBusy;
 
   return (
-    <div className="rounded-2xl border border-zinc-200/80 bg-white/75 p-4 dark:border-zinc-800 dark:bg-zinc-900/55">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
+    <div
+      role="button"
+      tabIndex={isBusy ? -1 : 0}
+      aria-disabled={isBusy}
+      onClick={handleCardOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          handleCardOpen();
+        }
+      }}
+      className={`group relative rounded-2xl border border-zinc-200/80 bg-white/80 p-3.5 text-left transition dark:border-zinc-800 dark:bg-zinc-900/55 ${
+        isBusy
+          ? "cursor-wait opacity-75"
+          : "cursor-pointer hover:border-emerald-200 hover:bg-white dark:hover:border-emerald-900/40 dark:hover:bg-zinc-900/75"
+      }`}
+    >
+      <div className="pr-12">
+        <div className="flex min-w-0 items-start gap-2.5">
             <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white/80 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-200">
               <AppIcon
                 size={ICON_SM}
@@ -346,8 +399,6 @@ function SelfHelpItemRow({
         >
           <AppIcon size={ICON_SM} icon={isSaved ? BookmarkCheck : Bookmark} />
         </button>
-      </div>
-
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
@@ -359,6 +410,109 @@ function SelfHelpItemRow({
           <AppIcon size={ICON_SM} icon={ChevronRight} />
         </button>
       </div>
+    </div>
+  );
+}
+
+void LegacySelfHelpItemRow;
+
+function SelfHelpItemRow({
+  item,
+  isSaved,
+  busyOpen,
+  busySave,
+  onOpen,
+  onDelete,
+  onToggleSave,
+}) {
+  const openUrl = resolveStoredSelfHelpUrl(item);
+  const canOpenDirectly = Boolean(openUrl);
+  const domain = getResourceDomain(openUrl || item.finalUrl || "");
+  const timeLabel = formatRelativeTime(item.openedAt || item.savedAt || item.lastOpenedAt);
+  const isBusy = busyOpen || busySave;
+
+  const handleCardOpen = () => {
+    if (isBusy) return;
+    onOpen(item);
+  };
+
+  return (
+    <div
+      role="button"
+      tabIndex={isBusy ? -1 : 0}
+      aria-disabled={isBusy}
+      onClick={handleCardOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          handleCardOpen();
+        }
+      }}
+      className={`group relative rounded-2xl border border-zinc-200/80 bg-white/80 p-3.5 text-left transition dark:border-zinc-800 dark:bg-zinc-900/55 ${
+        isBusy
+          ? "cursor-wait opacity-75"
+          : "cursor-pointer hover:border-emerald-200 hover:bg-white dark:hover:border-emerald-900/40 dark:hover:bg-zinc-900/75"
+      }`}
+    >
+      <div className="pr-12">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border border-zinc-200 bg-white/85 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-200">
+            <AppIcon size={ICON_SM} icon={canOpenDirectly ? ExternalLink : Compass} />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              {item.title}
+            </div>
+            <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+              {formatTrackCountry(item.track, item.country)} · {toTitleLabel(item.category)}
+            </div>
+          </div>
+        </div>
+
+        {item.description ? (
+          <p className="mt-2 pr-2 text-sm text-zinc-600 dark:text-zinc-300">{item.description}</p>
+        ) : null}
+
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+          {domain ? <span>{domain}</span> : null}
+          {timeLabel ? <span>{timeLabel}</span> : null}
+          {!canOpenDirectly ? <span>Needs fresh details</span> : null}
+        </div>
+      </div>
+
+      <div className="absolute right-3 top-3 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            void onToggleSave(item);
+          }}
+          disabled={isBusy}
+          title={isSaved ? "Remove saved resource" : "Save resource"}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white/80 text-zinc-700 transition hover:border-emerald-200 hover:text-emerald-800 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-200 dark:hover:border-emerald-900/40 dark:hover:text-emerald-200"
+          aria-label={isSaved ? "Remove saved resource" : "Save resource"}
+        >
+          <AppIcon size={ICON_SM} icon={isSaved ? BookmarkCheck : Bookmark} />
+        </button>
+
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            if (!isBusy) void onDelete(item);
+          }}
+          disabled={isBusy}
+          title="Delete resource memory"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white/80 text-zinc-700 transition hover:border-rose-200 hover:text-rose-700 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-200 dark:hover:border-rose-900/40 dark:hover:text-rose-200"
+          aria-label="Delete resource memory"
+        >
+          <AppIcon size={ICON_SM} icon={Trash2} />
+        </button>
+      </div>
+
+      <span className="pointer-events-none absolute bottom-3 right-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 transition group-hover:text-emerald-700 dark:text-zinc-500 dark:group-hover:text-emerald-300">
+        <AppIcon size={ICON_SM} icon={ChevronRight} />
+      </span>
     </div>
   );
 }
@@ -386,6 +540,7 @@ export default function ProgressScreen() {
   const [selfHelpProgress, setSelfHelpProgress] = useState(null);
   const [selfHelpBusyId, setSelfHelpBusyId] = useState("");
   const [selfHelpMessage, setSelfHelpMessage] = useState("");
+  const [recentResourceSearch, setRecentResourceSearch] = useState("");
 
   const pinnedIdsRef = useRef([]);
   const stateRef = useRef(null);
@@ -455,7 +610,15 @@ export default function ProgressScreen() {
       }
 
       setPinnedIds(readPins(user.uid).slice(0, 2));
+      setSelfHelpProgress(peekSelfHelpProgress(user.uid));
       setLoading(false);
+      void getSelfHelpProgress(user.uid)
+        .then((selfHelpState) => {
+          setSelfHelpProgress(selfHelpState);
+        })
+        .catch((error) => {
+          console.error("Progress SelfHelp load failed:", error);
+        });
 
       const requestQuery = query(collection(db, "serviceRequests"), where("uid", "==", user.uid));
       if (unsubRequests) unsubRequests();
@@ -519,39 +682,33 @@ export default function ProgressScreen() {
       );
 
       try {
-        const [userState, selfHelpState] = await Promise.all([
-          getUserState(user.uid),
-          getSelfHelpProgress(user.uid),
-        ]);
-
+        const userState = await getUserState(user.uid);
         const normalizedState = normalizeTextDeep(userState);
         setState(normalizedState);
-        setSelfHelpProgress(selfHelpState);
         writeProgressCache(user.uid, {
           state: normalizedState,
           requests: cached?.requests || [],
           apps: cached?.apps || [],
         });
-        setLoading(false);
-
-        void getMyApplications(user.uid, 25)
-          .then((latestApps) => {
-            setApps(latestApps);
-            writeProgressCache(user.uid, {
-              state: stateRef.current,
-              requests: requestsRef.current,
-              apps: latestApps,
-            });
-          })
-          .catch((appsError) => {
-            console.error("Progress apps load failed:", appsError);
-          });
       } catch (error) {
         console.error(error);
         setErr(error?.message || "Failed to load progress");
       } finally {
         setLoading(false);
       }
+
+      void getMyApplications(user.uid, 25)
+        .then((latestApps) => {
+          setApps(latestApps);
+          writeProgressCache(user.uid, {
+            state: stateRef.current,
+            requests: requestsRef.current,
+            apps: latestApps,
+          });
+        })
+        .catch((appsError) => {
+          console.error("Progress apps load failed:", appsError);
+        });
     });
 
     return () => {
@@ -638,6 +795,11 @@ export default function ProgressScreen() {
     return Array.isArray(selfHelpProgress?.history) ? selfHelpProgress.history.slice(0, 6) : [];
   }, [selfHelpProgress?.history]);
 
+  const filteredRecentSelfHelp = useMemo(
+    () => recentSelfHelp.filter((item) => matchesSelfHelpSearch(item, recentResourceSearch)),
+    [recentResourceSearch, recentSelfHelp]
+  );
+
   const savedSelfHelp = useMemo(() => {
     return Array.isArray(selfHelpProgress?.bookmarks) ? selfHelpProgress.bookmarks.slice(0, 6) : [];
   }, [selfHelpProgress?.bookmarks]);
@@ -651,50 +813,6 @@ export default function ProgressScreen() {
   }, [selfHelpProgress?.bookmarks]);
 
   const lastContext = selfHelpProgress?.lastContext || null;
-  const lastSelfHelpRouteState = useMemo(
-    () =>
-      getSelfHelpRouteState(
-        selfHelpProgress,
-        lastContext?.track || activeTrack,
-        lastContext?.country || activeCountry
-      ),
-    [activeCountry, activeTrack, lastContext?.country, lastContext?.track, selfHelpProgress]
-  );
-
-  const lastVerifiedSteps = useMemo(
-    () => {
-      const routeTrack = lastContext?.track || activeTrack;
-      const routeCountry = lastContext?.country || activeCountry;
-      if (!routeTrack || !routeCountry) return [];
-      return getVerifiedPathForRoute(routeTrack, routeCountry);
-    },
-    [activeCountry, activeTrack, lastContext?.country, lastContext?.track]
-  );
-
-  const verifiedSummary = useMemo(
-    () =>
-      getVerifiedProgressSummary(
-        lastVerifiedSteps,
-        lastSelfHelpRouteState?.completedStepIds || lastContext?.completedStepIds || []
-      ),
-    [lastContext?.completedStepIds, lastSelfHelpRouteState?.completedStepIds, lastVerifiedSteps]
-  );
-
-  const currentVerifiedStep = useMemo(
-    () =>
-      getNextVerifiedStep(
-        lastVerifiedSteps,
-        lastSelfHelpRouteState?.completedStepIds || lastContext?.completedStepIds || [],
-        lastSelfHelpRouteState?.currentStepId || lastContext?.currentStepId || ""
-      ),
-    [
-      lastContext?.completedStepIds,
-      lastContext?.currentStepId,
-      lastSelfHelpRouteState?.completedStepIds,
-      lastSelfHelpRouteState?.currentStepId,
-      lastVerifiedSteps,
-    ]
-  );
 
   const goToContinueSelfHelp = () => {
     if (!continueSelfHelpTarget) return;
@@ -826,6 +944,31 @@ export default function ProgressScreen() {
     } catch (error) {
       console.error("SelfHelp save toggle failed:", error);
       setSelfHelpMessage("We could not update that saved resource right now.");
+    } finally {
+      setSelfHelpBusyId("");
+    }
+  };
+
+  const deleteStoredSelfHelpItem = async (item) => {
+    const user = auth.currentUser;
+    if (!user?.uid) return;
+
+    const confirmed = window.confirm(`Remove ${item.title || "this resource"} from SelfHelp memory?`);
+    if (!confirmed) return;
+
+    setSelfHelpBusyId(`delete:${normalizeSelfHelpKey(item)}`);
+    setSelfHelpMessage("");
+    try {
+      const next = await deleteSelfHelpMemoryItem(user.uid, {
+        id: safeString(item?.id, 240),
+        resourceId: item?.resourceId,
+        track: item?.track,
+        country: item?.country,
+      });
+      setSelfHelpProgress(next);
+    } catch (error) {
+      console.error("SelfHelp delete failed:", error);
+      setSelfHelpMessage("We could not remove that resource memory right now.");
     } finally {
       setSelfHelpBusyId("");
     }
@@ -1279,62 +1422,40 @@ export default function ProgressScreen() {
             ) : (
               <div className="grid gap-4">
               <div className={cardBase}>
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-                      SelfHelp memory
-                    </h2>
-                    <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                      Recent resources reopen directly. Continue SelfHelp takes you back into browsing.
-                    </p>
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      {formatTrackCountry(
+                        lastContext?.track || activeTrack,
+                        lastContext?.country || activeCountry
+                      )}
+                    </div>
+                    <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-zinc-400 dark:text-zinc-500">
+                      Last section
+                    </div>
+                    <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-200">
+                      {toTitleLabel(lastContext?.lastExpandedSection)}
+                    </div>
+                    <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-zinc-400 dark:text-zinc-500">
+                      Last opened
+                    </div>
+                    <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                      {formatRelativeTime(lastContext?.lastVisitedAt) ||
+                        formatCreatedAt(lastContext?.lastVisitedAt) ||
+                        "-"}
+                    </div>
                   </div>
 
                   {continueSelfHelpTarget ? (
-                    <button type="button" onClick={goToContinueSelfHelp} className={primaryBtn}>
-                      Continue SelfHelp
+                    <button
+                      type="button"
+                      onClick={goToContinueSelfHelp}
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50/80 text-emerald-900 transition hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100 dark:hover:bg-emerald-950/45"
+                      aria-label="Continue SelfHelp"
+                    >
+                      <AppIcon size={ICON_SM} icon={ChevronRight} />
                     </button>
                   ) : null}
-                </div>
-
-                <div className="mt-4 grid gap-2 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 dark:text-zinc-400">Last track</span>
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {lastContext?.track || activeTrack || "-"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 dark:text-zinc-400">Destination</span>
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {lastContext?.country || activeCountry || "-"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 dark:text-zinc-400">Last section</span>
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {lastContext?.lastExpandedSection || "-"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 dark:text-zinc-400">Current step</span>
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {currentVerifiedStep?.title || lastContext?.currentStepTitle || "-"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 dark:text-zinc-400">Verified progress</span>
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {verifiedSummary.totalCount
-                        ? `${verifiedSummary.completedCount}/${verifiedSummary.totalCount}`
-                        : "-"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 dark:text-zinc-400">Last opened</span>
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {formatCreatedAt(lastContext?.lastVisitedAt) || "-"}
-                    </span>
-                  </div>
                 </div>
               </div>
 
@@ -1358,9 +1479,13 @@ export default function ProgressScreen() {
                         key={`saved-${item.id}`}
                         item={item}
                         isSaved
-                        busy={Boolean(selfHelpBusyId)}
-                        showFallback
+                        busyOpen={selfHelpBusyId === normalizeSelfHelpKey(item)}
+                        busySave={
+                          selfHelpBusyId === `save:${normalizeSelfHelpKey(item)}` ||
+                          selfHelpBusyId === `delete:${normalizeSelfHelpKey(item)}`
+                        }
                         onOpen={(nextItem) => void openStoredSelfHelpItem(nextItem, true)}
+                        onDelete={(nextItem) => void deleteStoredSelfHelpItem(nextItem)}
                         onToggleSave={(nextItem) => void toggleSavedSelfHelpItem(nextItem)}
                       />
                     ))}
@@ -1370,24 +1495,48 @@ export default function ProgressScreen() {
 
               {recentSelfHelp.length ? (
                 <div>
-                  <div className="flex items-end justify-between">
-                    <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">Recent resources</h3>
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                      {recentSelfHelp.length} recent
-                    </span>
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">Recent resources</h3>
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                        {filteredRecentSelfHelp.length}
+                        {recentResourceSearch.trim() ? ` of ${recentSelfHelp.length}` : ""}
+                        {" "}recent
+                      </span>
+                    </div>
+
+                    <label className="flex min-w-[210px] items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-3 py-2 text-sm text-zinc-500 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/55 dark:text-zinc-400">
+                      <AppIcon size={ICON_SM} icon={Search} />
+                      <input
+                        value={recentResourceSearch}
+                        onChange={(event) => setRecentResourceSearch(event.target.value)}
+                        placeholder="Search recent"
+                        className="w-full bg-transparent outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+                      />
+                    </label>
                   </div>
                   <div className="mt-3 grid gap-3">
-                    {recentSelfHelp.map((item) => (
+                    {filteredRecentSelfHelp.map((item) => (
                       <SelfHelpItemRow
                         key={`recent-${item.id}`}
                         item={item}
                         isSaved={savedKeySet.has(normalizeSelfHelpKey(item))}
-                        busy={Boolean(selfHelpBusyId)}
-                        showFallback={false}
+                        busyOpen={selfHelpBusyId === normalizeSelfHelpKey(item)}
+                        busySave={
+                          selfHelpBusyId === `save:${normalizeSelfHelpKey(item)}` ||
+                          selfHelpBusyId === `delete:${normalizeSelfHelpKey(item)}`
+                        }
                         onOpen={(nextItem) => void openStoredSelfHelpItem(nextItem, false)}
+                        onDelete={(nextItem) => void deleteStoredSelfHelpItem(nextItem)}
                         onToggleSave={(nextItem) => void toggleSavedSelfHelpItem(nextItem)}
                       />
                     ))}
+
+                    {!filteredRecentSelfHelp.length ? (
+                      <div className="rounded-2xl border border-dashed border-zinc-200/80 bg-white/60 px-4 py-5 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/45 dark:text-zinc-400">
+                        No recent resources match that search.
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ) : null}

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { App as CapacitorApp } from "@capacitor/app";
 import { onAuthStateChanged } from "firebase/auth";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -45,10 +46,12 @@ import {
 } from "./selfHelpPaths";
 import JourneyChecklistSheet from "./JourneyChecklistSheet";
 import {
+  cacheSelfHelpProgress,
   getSelfHelpProgress,
   getSelfHelpRouteState,
+  peekSelfHelpProgress,
+  previewSelfHelpChecklistProgress,
   saveSelfHelpChecklist,
-  setSelfHelpContext,
   toggleSelfHelpBookmark,
   toggleSelfHelpStepCompletion,
 } from "./selfHelpProgressStore";
@@ -263,7 +266,7 @@ function ProgressStrip({ percent, completedCount, totalCount, nextStepTitle }) {
 export default function SelfHelpHubScreen({ track }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const country = safeString(new URLSearchParams(location.search).get("country"), 80);
+  const requestedCountry = safeString(new URLSearchParams(location.search).get("country"), 80);
   const trackMeta = SELF_HELP_TRACK_META[track] || SELF_HELP_TRACK_META.study;
   const HeaderIcon = TRACK_ICONS[track] || GraduationCap;
   const [uid, setUid] = useState("");
@@ -277,8 +280,25 @@ export default function SelfHelpHubScreen({ track }) {
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [checklistSaving, setChecklistSaving] = useState(false);
   const [verifiedPathOpen, setVerifiedPathOpen] = useState(false);
-  const checklistHistoryOpenRef = useRef(false);
-  const suppressChecklistBackRef = useRef(false);
+
+  const fallbackCountry = useMemo(() => {
+    const lastContextCountry =
+      safeString(progress?.lastContext?.track, 20).toLowerCase() === track
+        ? safeString(progress?.lastContext?.country, 80)
+        : "";
+
+    if (lastContextCountry) return lastContextCountry;
+
+    return (
+      (Array.isArray(progress?.routeStates) ? progress.routeStates : []).find(
+        (item) =>
+          safeString(item?.track, 20).toLowerCase() === track &&
+          safeString(item?.country, 80)
+      )?.country || ""
+    );
+  }, [progress?.lastContext?.country, progress?.lastContext?.track, progress?.routeStates, track]);
+
+  const country = requestedCountry || fallbackCountry;
 
   const sections = useMemo(() => getSelfHelpSections(track, country), [country, track]);
   const routeState = useMemo(
@@ -371,6 +391,8 @@ export default function SelfHelpHubScreen({ track }) {
       }
 
       setUid(user.uid);
+      setProgress(peekSelfHelpProgress(user.uid));
+      setChecklistSaving(false);
 
       try {
         const nextProgress = await getSelfHelpProgress(user.uid);
@@ -389,66 +411,67 @@ export default function SelfHelpHubScreen({ track }) {
   }, [navigate]);
 
   useEffect(() => {
-    if (!uid || !country || !expandedSectionId) return;
-
-    void setSelfHelpContext(uid, {
-      track,
-      country,
-      routePath: `/app/${track}/self-help`,
-      routeSearch: buildRouteSearch(country),
-      lastExpandedSection: expandedSectionId,
-      lastCategory: expandedSectionId,
-      currentStepId: focusedStep?.id || nextActionStep?.id || "",
-      currentStepTitle: focusedStep?.title || nextActionStep?.title || "",
-      completedStepIds,
-    }).then((next) => setProgress(next));
-  }, [
-    completedStepIds,
-    completedStepKey,
-    country,
-    expandedSectionId,
-    focusedStep?.id,
-    focusedStep?.title,
-    nextActionStep?.id,
-    nextActionStep?.title,
-    track,
-    uid,
-  ]);
+    if (requestedCountry || !fallbackCountry) return;
+    navigate(`/app/${track}/self-help?country=${encodeURIComponent(fallbackCountry)}`, {
+      replace: true,
+      state: location.state,
+    });
+  }, [fallbackCountry, location.state, navigate, requestedCountry, track]);
 
   useEffect(() => {
-    const backTarget = country
-      ? `/app/${track}?country=${encodeURIComponent(country)}&from=choice`
-      : `/app/${track}`;
+    if (!uid) return undefined;
 
-    try {
-      window.history.pushState({ __majuu_selfhelp: true }, "", window.location.href);
-    } catch {
-      // ignore
-    }
+    let disposed = false;
+    let wasBackground = false;
+    let removeListener = null;
 
-    const onPopState = () => {
-      if (suppressChecklistBackRef.current) {
-        suppressChecklistBackRef.current = false;
-        return;
+    const refreshAfterReturn = async () => {
+      if (disposed || !wasBackground) return;
+      wasBackground = false;
+      setOpeningId("");
+      setPromptState(null);
+      setChecklistSaving(false);
+      setChecklistOpen(false);
+      setVerifiedPathOpen(false);
+
+      try {
+        const nextProgress = await getSelfHelpProgress(uid);
+        if (!disposed) setProgress(nextProgress);
+      } catch (error) {
+        console.error("SelfHelp resume refresh failed:", error);
       }
-
-      if (checklistOpen || checklistHistoryOpenRef.current) {
-        checklistHistoryOpenRef.current = false;
-        setChecklistOpen(false);
-        return;
-      }
-
-      if (verifiedPathOpen) {
-        setVerifiedPathOpen(false);
-        return;
-      }
-
-      navigate(backTarget, { replace: true });
     };
 
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [checklistOpen, country, navigate, track, verifiedPathOpen]);
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        wasBackground = true;
+        return;
+      }
+      void refreshAfterReturn();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+      if (!isActive) {
+        wasBackground = true;
+        return;
+      }
+      void refreshAfterReturn();
+    }).then((listener) => {
+      if (disposed) {
+        listener.remove();
+        return;
+      }
+      removeListener = () => listener.remove();
+    });
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (removeListener) removeListener();
+    };
+  }, [uid]);
 
   const goBack = () => {
     const backTarget = country
@@ -464,30 +487,12 @@ export default function SelfHelpHubScreen({ track }) {
   };
 
   const openChecklist = () => {
-    if (!checklistHistoryOpenRef.current) {
-      try {
-        window.history.pushState(
-          { ...(window.history.state || {}), __majuu_selfhelp_checklist: true },
-          "",
-          window.location.href
-        );
-      } catch {
-        // ignore
-      }
-      checklistHistoryOpenRef.current = true;
-    }
-
+    setChecklistSaving(false);
     setChecklistOpen(true);
   };
 
   const closeChecklist = () => {
     setChecklistOpen(false);
-
-    if (!checklistHistoryOpenRef.current) return;
-
-    suppressChecklistBackRef.current = true;
-    checklistHistoryOpenRef.current = false;
-    window.history.back();
   };
 
   const openDocuments = (options = {}) => {
@@ -638,6 +643,7 @@ export default function SelfHelpHubScreen({ track }) {
   };
 
   const browseStepSection = (step) => {
+    setVerifiedPathOpen(false);
     focusStep(step);
   };
 
@@ -669,38 +675,68 @@ export default function SelfHelpHubScreen({ track }) {
       .map((step) => step.id)
       .filter((stepId) => Array.isArray(selectedIds) && selectedIds.includes(stepId));
     const nextStep = getNextVerifiedStep(verifiedSteps, orderedIds);
+    const payload = {
+      track,
+      country,
+      routePath: `/app/${track}/self-help`,
+      routeSearch: buildRouteSearch(country),
+      sectionId: nextStep?.categoryId || "",
+      currentStepId: nextStep?.id || "",
+      currentStepTitle: nextStep?.title || "",
+      completedStepIds: orderedIds,
+    };
+    const optimisticProgress = previewSelfHelpChecklistProgress(progress, payload);
 
     setChecklistSaving(true);
     setStatusMsg("");
+    setProgress(optimisticProgress);
+    cacheSelfHelpProgress(uid, optimisticProgress);
+    setManualStepId(nextStep?.id || "");
+    setManualSectionId(CLOSED_SECTION_ID);
+    closeChecklist();
+    setChecklistSaving(false);
 
     try {
-      const next = await saveSelfHelpChecklist(uid, {
-        track,
-        country,
-        routePath: `/app/${track}/self-help`,
-        routeSearch: buildRouteSearch(country),
-        sectionId: nextStep?.categoryId || "",
-        currentStepId: nextStep?.id || "",
-        currentStepTitle: nextStep?.title || "",
-        completedStepIds: orderedIds,
-      });
+      const next = await saveSelfHelpChecklist(uid, payload);
       setProgress(next);
-      setManualStepId(nextStep?.id || "");
-      setManualSectionId(CLOSED_SECTION_ID);
-      closeChecklist();
     } catch (error) {
       console.error("SelfHelp checklist save failed:", error);
-      setStatusMsg("We could not save your journey checklist right now.");
-    } finally {
-      setChecklistSaving(false);
+      setStatusMsg("Checklist updated here, but we could not persist it for next time right now.");
+    }
+  };
+
+  const handleContinueBrowsing = () => {
+    const targetSectionId =
+      safeString(latestContextEntry?.sectionId, 40) ||
+      safeString(routeState?.lastExpandedSection, 40) ||
+      "";
+    const targetStepId =
+      safeString(latestContextEntry?.verifiedStepId, 80) ||
+      safeString(routeState?.currentStepId, 80) ||
+      "";
+
+    if (targetStepId) {
+      setManualStepId(targetStepId);
+    }
+
+    if (targetSectionId) {
+      setManualSectionId(targetSectionId);
+      setVerifiedPathOpen(false);
+      if (typeof window !== "undefined") {
+        window.requestAnimationFrame(() => {
+          window.document
+            ?.getElementById(`selfhelp-section-${targetSectionId}`)
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
     }
   };
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="min-h-screen bg-gradient-to-b from-emerald-50/55 via-white to-white pb-8 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
-        <div className="sticky top-0 z-40 border-b border-zinc-200/70 bg-white/78 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/80">
-          <div className="mx-auto max-w-3xl px-5 pb-3 pt-3">
+        <div className="mx-auto max-w-3xl px-5 py-6">
+          <div className="sticky top-0 z-30 -mx-5 px-5 pb-3 pt-2 bg-white/72 backdrop-blur supports-[backdrop-filter]:bg-white/50 dark:bg-zinc-950/72 dark:supports-[backdrop-filter]:bg-zinc-950/40">
             <div className="flex items-center justify-between gap-3">
               <button
                 type="button"
@@ -803,10 +839,10 @@ export default function SelfHelpHubScreen({ track }) {
                 </div>
               ) : null}
             </div>
-          </div>
-        </div>
 
-        <div className="mx-auto max-w-3xl px-5 pb-6 pt-5">
+            <div className="mt-4 h-px w-full bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent dark:via-zinc-700/70" />
+          </div>
+
           {latestContextEntry ? (
             <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-zinc-200/80 bg-white/75 px-4 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/55">
               <div className="min-w-0">
@@ -826,12 +862,7 @@ export default function SelfHelpHubScreen({ track }) {
               {continueTarget ? (
                 <button
                   type="button"
-                  onClick={() =>
-                    navigate(`${continueTarget.path}${continueTarget.search}`, {
-                      state: continueTarget.state,
-                      replace: true,
-                    })
-                  }
+                  onClick={handleContinueBrowsing}
                   className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 font-semibold text-emerald-900 transition hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-100"
                 >
                   Continue browsing
@@ -857,15 +888,17 @@ export default function SelfHelpHubScreen({ track }) {
               return (
                 <div
                   key={section.id}
+                  id={`selfhelp-section-${section.id}`}
                   className="rounded-3xl border border-zinc-200/80 bg-white/80 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/55"
                 >
                   <button
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      setVerifiedPathOpen(false);
                       setManualSectionId((current) =>
                         current === section.id || isOpen ? CLOSED_SECTION_ID : section.id
-                      )
-                    }
+                      );
+                    }}
                     className="flex w-full items-start justify-between gap-3 px-4 py-4 text-left"
                   >
                     <div className="min-w-0">
