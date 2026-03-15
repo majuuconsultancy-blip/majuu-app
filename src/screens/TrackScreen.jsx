@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { useNavigate, useLocation } from "react-router-dom";
-import { motion, AnimatePresence } from "../utils/motionProxy";
+import { motion as Motion, AnimatePresence } from "../utils/motionProxy";
 
 import {
   GraduationCap,
@@ -106,13 +106,17 @@ export default function TrackScreen({ track }) {
         { ...(window.history.state || {}), __majuu_track: true },
         ""
       );
-    } catch {}
+    } catch (error) {
+      void error;
+    }
 
     const onPopState = (e) => {
       // Force dashboard instead of returning to previous page
       try {
         e.preventDefault?.();
-      } catch {}
+      } catch (error) {
+        void error;
+      }
       navigate("/dashboard", { replace: true });
     };
 
@@ -205,10 +209,6 @@ export default function TrackScreen({ track }) {
 
       if (helpType === "self") {
         setSnapshot({
-          route: {
-            path: `/app/${safeTrack}/self-help`,
-            search: `?country=${qs}&from=choice`,
-          },
           trackSelect: {
             selectedTrack: safeTrack,
             destination: selectedCountry,
@@ -216,11 +216,6 @@ export default function TrackScreen({ track }) {
             category: safeTrack,
             subStep: "help-type-selected",
             helpType: "self",
-          },
-          selfHelp: {
-            track: safeTrack,
-            country: selectedCountry,
-            screenKey: `${safeTrack}:${selectedCountry}`,
           },
         });
         navigate(`/app/${safeTrack}/self-help?country=${qs}&from=choice`, {
@@ -292,13 +287,13 @@ export default function TrackScreen({ track }) {
           </button>
 
           {/* animated glow blob */}
-          <motion.div
+          <Motion.div
             aria-hidden="true"
             className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-emerald-300/25 blur-3xl dark:bg-emerald-400/10"
             animate={{ x: [0, -8, 0], y: [0, 10, 0] }}
             transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
           />
-          <motion.div
+          <Motion.div
             aria-hidden="true"
             className="pointer-events-none absolute -left-16 -bottom-16 h-44 w-44 rounded-full bg-emerald-200/25 blur-3xl dark:bg-emerald-500/10"
             animate={{ x: [0, 10, 0], y: [0, -8, 0] }}
@@ -348,14 +343,14 @@ export default function TrackScreen({ track }) {
             </span>
           </div>
 
-          <motion.div
+          <Motion.div
             className="mt-3 grid gap-3 sm:grid-cols-2"
             variants={listWrap}
             initial="hidden"
             animate="show"
           >
             {COUNTRIES.map((c) => (
-              <motion.button
+              <Motion.button
                 key={c}
                 type="button"
                 onClick={() => openCountry(c)}
@@ -388,16 +383,16 @@ export default function TrackScreen({ track }) {
                     </span>
                   </div>
                 </div>
-              </motion.button>
+              </Motion.button>
             ))}
-          </motion.div>
+          </Motion.div>
         </div>
       </div>
 
       {/* Modal (Animated) */}
       <AnimatePresence>
         {showModal && (
-          <motion.div
+          <Motion.div
             className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 app-overlay-safe motion-modal-backdrop"
             variants={overlayMotion}
             initial="hidden"
@@ -405,7 +400,7 @@ export default function TrackScreen({ track }) {
             exit="exit"
             onMouseDown={closeModal}
           >
-            <motion.div
+            <Motion.div
               className={[
                 "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 p-5 shadow-lg backdrop-blur motion-modal-panel",
                 "dark:border-zinc-800 dark:bg-zinc-900/70",
@@ -505,8 +500,8 @@ export default function TrackScreen({ track }) {
               <div className="mt-4 text-center text-xs text-zinc-500 dark:text-zinc-400">
                 Your progress is saved automatically.
               </div>
-            </motion.div>
-          </motion.div>
+            </Motion.div>
+          </Motion.div>
         )}
       </AnimatePresence>
     </div>

@@ -51,10 +51,16 @@ const DummyPaymentScreen = lazy(() => import("./screens/DummyPaymentScreen"));
 
 const StudySelfHelp = lazy(() => import("./screens/StudySelfHelp"));
 const StudyWeHelp = lazy(() => import("./screens/StudyWeHelp"));
+const StudyMoneyTools = lazy(() => import("./screens/StudyMoneyTools"));
+const StudySelfHelpDocuments = lazy(() => import("./screens/StudySelfHelpDocuments"));
 const WorkSelfHelp = lazy(() => import("./screens/WorkSelfHelp"));
 const WorkWeHelp = lazy(() => import("./screens/WorkWeHelp"));
+const WorkMoneyTools = lazy(() => import("./screens/WorkMoneyTools"));
+const WorkSelfHelpDocuments = lazy(() => import("./screens/WorkSelfHelpDocuments"));
 const TravelSelfHelp = lazy(() => import("./screens/TravelSelfHelp"));
 const TravelWeHelp = lazy(() => import("./screens/TravelWeHelp"));
+const TravelMoneyTools = lazy(() => import("./screens/TravelMoneyTools"));
+const TravelSelfHelpDocuments = lazy(() => import("./screens/TravelSelfHelpDocuments"));
 
 const FullPackageMissingScreen = lazy(() => import("./screens/FullPackageMissingScreen"));
 const SettingsScreen = lazy(() => import("./screens/SettingsScreen"));
@@ -96,10 +102,16 @@ function preloadCriticalScreens() {
   // LAZY ONLY
   import("./screens/StudySelfHelp");
   import("./screens/StudyWeHelp");
+  import("./screens/StudyMoneyTools");
+  import("./screens/StudySelfHelpDocuments");
   import("./screens/WorkSelfHelp");
   import("./screens/WorkWeHelp");
+  import("./screens/WorkMoneyTools");
+  import("./screens/WorkSelfHelpDocuments");
   import("./screens/TravelSelfHelp");
   import("./screens/TravelWeHelp");
+  import("./screens/TravelMoneyTools");
+  import("./screens/TravelSelfHelpDocuments");
 
   import("./screens/FullPackageMissingScreen");
   import("./screens/RequestStatusScreen");
@@ -505,10 +517,16 @@ function AppRoutes() {
             <Route path="full-package/:track" element={<FullPackageMissingScreen />} />
 
             <Route path="study/self-help" element={<StudySelfHelp />} />
+            <Route path="study/self-help/money-tools" element={<StudyMoneyTools />} />
+            <Route path="study/self-help/documents" element={<StudySelfHelpDocuments />} />
             <Route path="study/we-help" element={<StudyWeHelp />} />
             <Route path="work/self-help" element={<WorkSelfHelp />} />
+            <Route path="work/self-help/money-tools" element={<WorkMoneyTools />} />
+            <Route path="work/self-help/documents" element={<WorkSelfHelpDocuments />} />
             <Route path="work/we-help" element={<WorkWeHelp />} />
             <Route path="travel/self-help" element={<TravelSelfHelp />} />
+            <Route path="travel/self-help/money-tools" element={<TravelMoneyTools />} />
+            <Route path="travel/self-help/documents" element={<TravelSelfHelpDocuments />} />
             <Route path="travel/we-help" element={<TravelWeHelp />} />
 
             <Route path="settings" element={<SettingsScreen />} />

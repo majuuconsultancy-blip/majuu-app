@@ -25,7 +25,6 @@ const RESUMABLE_ROUTE_PATTERNS = [
   /^\/dashboard$/,
   /^\/app\/progress$/,
   /^\/app\/(study|work|travel)$/,
-  /^\/app\/(study|work|travel)\/self-help$/,
   /^\/app\/(study|work|travel)\/we-help$/,
   /^\/app\/full-package\/(study|work|travel)$/,
   /^\/app\/request\/[^/]+$/,
@@ -47,10 +46,6 @@ function safeSearch(value) {
   const text = safeString(value, 300);
   if (!text) return "";
   return text.startsWith("?") ? text : `?${text}`;
-}
-
-function isSelfHelpRoute(path) {
-  return /^\/app\/(study|work|travel)\/self-help$/.test(path);
 }
 
 function isWeHelpRoute(path) {
@@ -408,10 +403,6 @@ export async function getResumeTarget() {
 
   const search = safeSearch(snapshot?.route?.search);
   const state = { resumeFromSnapshot: true };
-
-  if (isSelfHelpRoute(path) && snapshot?.selfHelp?.pendingExternalLink?.url) {
-    state.resumePendingExternalLink = snapshot.selfHelp.pendingExternalLink;
-  }
 
   if (isWeHelpRoute(path)) {
     state.resumeWeHelp = snapshot.weHelp;
