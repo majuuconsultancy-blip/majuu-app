@@ -50,17 +50,15 @@ import {
   createPendingAttachment,
   createPendingAttachmentFromMeta,
 } from "../services/attachmentservice";
+import {
+  findRequestCatalogEntry,
+  listSingleRequestCatalogByTrack,
+} from "../constants/requestCatalog";
+import {
+  getRequestPricingQuote,
+  toRequestPricingSnapshot,
+} from "../services/pricingservice";
 import { setSnapshot } from "../resume/resumeEngine";
-
-/* ---------------- Data ---------------- */
-const SINGLE_SERVICES = [
-  { title: "Passport Application", note: "Guidance + document checklist", tag: "Docs" },
-  { title: "Visa Application", note: "Forms + appointment + submission support", tag: "Visa" },
-  { title: "IELTS Training", note: "Prep plan + resources + practice schedule", tag: "Test" },
-  { title: "SOP / Motivation Letter", note: "Writing + polishing", tag: "Writing" },
-  { title: "CV / Resume", note: "Professional formatting + improvements", tag: "CV" },
-  { title: "Document Review", note: "Verify missing items before submission", tag: "Docs" },
-];
 
 const FULL_PACKAGE = [
   "Consultation & country selection",
@@ -82,6 +80,21 @@ const floatCard = {
   hover: { y: -1, scale: 1.003, transition: { duration: 0.12 } },
   tap: { scale: 0.996 },
 };
+
+function buildSingleRequestMeta(serviceName) {
+  const fallbackName = String(serviceName || "").trim();
+  const entry = findRequestCatalogEntry({
+    track: "study",
+    requestType: "single",
+    serviceName: fallbackName,
+  });
+
+  return {
+    requestType: "single",
+    serviceName: entry?.serviceName || fallbackName,
+    pricingKey: entry?.pricingKey || "",
+  };
+}
 
 function Chip({ active, children, onClick }) {
   return (
@@ -114,7 +127,8 @@ function ServiceIcon({ tag, title }) {
 }
 
 function ServiceTile({ s, disabled, onClick }) {
-  const isDocReview = s.title === "Document Review";
+  const serviceName = s.serviceName || s.title;
+  const isDocReview = serviceName === "Document Review";
   return (
     <motion.button
       type="button"
@@ -135,7 +149,7 @@ function ServiceTile({ s, disabled, onClick }) {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-              <ServiceIcon tag={s.tag} title={s.title} />
+              <ServiceIcon tag={s.tag} title={serviceName} />
               {s.tag}
             </span>
 
@@ -147,7 +161,7 @@ function ServiceTile({ s, disabled, onClick }) {
             ) : null}
           </div>
 
-          <div className="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{s.title}</div>
+          <div className="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{serviceName}</div>
           <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{s.note}</div>
         </div>
 
@@ -277,10 +291,7 @@ export default function StudyWeHelp() {
         setToast("Complete your profile first - then you can submit this request.");
         setTimeout(() => setToast(""), 2600);
       } else {
-        setRequestMeta({
-          requestType: modalState.requestType || "single",
-          serviceName: modalState.serviceName,
-        });
+        setRequestMeta(buildSingleRequestMeta(modalState.serviceName));
         setModalResumeState(modalState);
         setModalOpen(true);
         setAutoOpened(true);
@@ -335,7 +346,7 @@ export default function StudyWeHelp() {
       return;
     }
 
-    setRequestMeta({ requestType: "single", serviceName: openService });
+    setRequestMeta(buildSingleRequestMeta(openService));
     setModalOpen(true);
     setAutoOpened(true);
   }, [autoOpened, shouldAutoOpen, openService, profileChecked, missing.length]);
@@ -350,7 +361,7 @@ export default function StudyWeHelp() {
   const openSingle = (serviceName) => {
     if (!canUseWeHelp) return;
     setModalResumeState(null);
-    setRequestMeta({ requestType: "single", serviceName });
+    setRequestMeta(buildSingleRequestMeta(serviceName));
     setModalOpen(true);
   };
 
@@ -364,17 +375,19 @@ export default function StudyWeHelp() {
 
   // ✅ Attachments on all single-package requests
   const enableAttachments = requestMeta?.requestType === "single";
+  const singleServices = useMemo(() => listSingleRequestCatalogByTrack("study"), []);
 
   const filteredSingles = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return SINGLE_SERVICES.filter((s) => {
+    return singleServices.filter((s) => {
+      const serviceName = s.serviceName || s.title;
       const chipOk = chip === "All" ? true : s.tag === chip;
       const qOk = !needle
         ? true
-        : `${s.title} ${s.note} ${s.tag}`.toLowerCase().includes(needle);
+        : `${serviceName} ${s.note} ${s.tag}`.toLowerCase().includes(needle);
       return chipOk && qOk;
     });
-  }, [q, chip]);
+  }, [singleServices, q, chip]);
   const hasActiveFilters = chip !== "All" || q.trim().length > 0;
 
   const submitRequest = async ({
@@ -420,6 +433,20 @@ export default function StudyWeHelp() {
     }
 
     try {
+      const pricingQuote = await getRequestPricingQuote({
+        pricingKey: requestMeta.pricingKey,
+        track: "study",
+        serviceName: requestMeta.serviceName,
+        requestType: requestMeta.requestType,
+      });
+      const appliedPricing = toRequestPricingSnapshot(pricingQuote, {
+        amount: unlockPaymentReceipt?.amount,
+        currency: unlockPaymentReceipt?.currency || pricingQuote?.currency,
+      });
+      if (!appliedPricing) {
+        throw new Error("Request pricing is unavailable right now. Please try again.");
+      }
+
       const requestId = await createServiceRequest({
         uid,
         email: String(formEmail || email || "").trim(),
@@ -436,6 +463,7 @@ export default function StudyWeHelp() {
         city: String(town || "").trim(),
         paid: Boolean(paid),
         paymentMeta: paymentMeta || null,
+        pricingSnapshot: appliedPricing,
         requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
       });
 
@@ -443,8 +471,8 @@ export default function StudyWeHelp() {
         await createUnlockPaymentForRequest({
           requestId,
           requestUid: uid,
-          amount: unlockPaymentReceipt?.amount || 10000,
-          currency: String(unlockPaymentReceipt?.currency || "KES"),
+          amount: unlockPaymentReceipt?.amount || appliedPricing.amount,
+          currency: String(unlockPaymentReceipt?.currency || appliedPricing.currency || "KES"),
           paymentLabel: "Unlock request payment",
           note: String(requestMeta?.serviceName || "").trim(),
           paidAtMs:
@@ -460,6 +488,7 @@ export default function StudyWeHelp() {
             flow: "wehelp",
             track: "study",
             serviceName: String(requestMeta?.serviceName || ""),
+            pricingKey: String(requestMeta?.pricingKey || ""),
           },
         });
       } catch (paymentError) {
@@ -693,7 +722,7 @@ export default function StudyWeHelp() {
               </p>
             </div>
             <span className="text-xs font-semibold text-zinc-500">
-              {SINGLE_SERVICES.length} options
+              {singleServices.length} options
             </span>
           </div>
 
@@ -786,10 +815,10 @@ export default function StudyWeHelp() {
             ) : (
               filteredSingles.map((s) => (
                 <ServiceTile
-                  key={s.title}
+                  key={s.pricingKey || s.serviceName}
                   s={s}
                   disabled={!canUseWeHelp}
-                  onClick={() => openSingle(s.title)}
+                  onClick={() => openSingle(s.serviceName)}
                 />
               ))
             )}
@@ -824,6 +853,7 @@ export default function StudyWeHelp() {
           track: "study",
           requestType: requestMeta?.requestType || "single",
           serviceName: requestMeta?.serviceName || "",
+          pricingKey: requestMeta?.pricingKey || "",
         }}
         initialState={modalResumeState?.formState || null}
         onStateChange={setModalResumeState}

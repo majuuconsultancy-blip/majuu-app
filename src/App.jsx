@@ -79,6 +79,7 @@ const AdminAssignAdminScreen = lazy(() => import("./screens/AdminAssignAdminScre
 const AdminManageAdminsScreen = lazy(() => import("./screens/AdminManageAdminsScreen"));
 const AdminSaccScreen = lazy(() => import("./screens/AdminSaccScreen"));
 const AdminNewsManagementScreen = lazy(() => import("./screens/AdminNewsManagementScreen"));
+const AdminPricingControlsScreen = lazy(() => import("./screens/AdminPricingControlsScreen"));
 
 // Staff
 const StaffHomeScreen = lazy(() => import("./screens/StaffHomeScreen"));
@@ -598,6 +599,14 @@ function AppRoutes() {
               element={
                 <AdminGate>
                   <AdminNewsManagementScreen />
+                </AdminGate>
+              }
+            />
+            <Route
+              path="admin/sacc/pricing"
+              element={
+                <AdminGate>
+                  <AdminPricingControlsScreen />
                 </AdminGate>
               }
             />

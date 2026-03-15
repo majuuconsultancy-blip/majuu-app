@@ -19,9 +19,9 @@ import {
   getDummyPaymentState,
   setDummyPaymentDraft,
 } from "../utils/dummyPayment";
+import { useRequestPricingEntry } from "../hooks/useRequestPricing";
 
 const STANDALONE = isStandalone();
-const DEFAULT_PAYMENT_AMOUNT = "KES 10,000";
 
 /* ---------------- Icons ---------------- */
 function IconX(props) {
@@ -392,10 +392,17 @@ export default function RequestModal({
     return Boolean(paymentContext?.unlockPaid || paymentContext?.unlockPaymentMeta);
   }, [paymentRequired, paymentContext]);
 
+  const liveRequestPricing = useRequestPricingEntry({
+    pricingKey: paymentContext?.pricingKey,
+    track: paymentContext?.track,
+    serviceName: paymentContext?.serviceName,
+    requestType: paymentContext?.requestType || "single",
+  });
+
   const resolvedPaymentAmount = useMemo(() => {
     const clean = String(paymentAmount || "").trim();
-    return clean || DEFAULT_PAYMENT_AMOUNT;
-  }, [paymentAmount]);
+    return clean || liveRequestPricing.amountText || "";
+  }, [paymentAmount, liveRequestPricing.amountText]);
 
   // Seed form state before paint on each open cycle to avoid visible field blink.
   useLayoutEffect(() => {
@@ -548,8 +555,15 @@ export default function RequestModal({
   }, [open, loading, handleClose]);
 
   const canPay = useMemo(() => {
-    return name.trim().length > 0 && phone.trim().length > 0 && isValidEmail(email) && !loading;
-  }, [name, phone, email, loading]);
+    const hasAmount = !paymentRequired || Boolean(resolvedPaymentAmount);
+    return (
+      name.trim().length > 0 &&
+      phone.trim().length > 0 &&
+      isValidEmail(email) &&
+      hasAmount &&
+      !loading
+    );
+  }, [name, phone, email, paymentRequired, resolvedPaymentAmount, loading]);
 
   const canSubmit = useMemo(() => {
     const hasPaymentGatePassed = paymentRequired ? paid : true;
@@ -573,6 +587,10 @@ export default function RequestModal({
     }
     if (!isValidEmail(email)) {
       setErr("Please enter a valid email address.");
+      return;
+    }
+    if (!resolvedPaymentAmount) {
+      setErr("Pricing is unavailable right now. Refresh and try again.");
       return;
     }
 
@@ -1036,6 +1054,12 @@ export default function RequestModal({
                 <div className="pt-2">
                   <div className={ctaWrapCls}>
                     <div className="grid gap-2">
+                      {paymentRequired && resolvedPaymentAmount ? (
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-center text-sm text-emerald-900">
+                          Unlock fee: <span className="font-semibold">{resolvedPaymentAmount}</span>
+                        </div>
+                      ) : null}
+
                       {paymentRequired ? (
                         <div className="grid grid-cols-2 gap-2">
                           <button

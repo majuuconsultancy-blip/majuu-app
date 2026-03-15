@@ -230,6 +230,11 @@ service cloud.firestore {
       allow create, update, delete: if isSuperAdmin();
     }
 
+    match /pricingRules/{pricingKey} {
+      allow read: if signedIn();
+      allow create, update, delete: if isSuperAdmin();
+    }
+
     match /users/{uid} {
       allow read: if isAnyAdmin() || isSelf(uid);
       allow create: if isSuperAdmin() || isSafeSelfUserCreate(uid);

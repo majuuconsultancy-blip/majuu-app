@@ -95,6 +95,29 @@ function cleanPaymentMeta(meta) {
   return hasAny ? cleaned : null;
 }
 
+function cleanPricingSnapshot(snapshot) {
+  const raw = snapshot && typeof snapshot === "object" ? snapshot : null;
+  if (!raw) return null;
+
+  const pricingKey = cleanStr(raw?.pricingKey, 180);
+  const amount = Number(raw?.amount || 0);
+  if (!pricingKey || !Number.isFinite(amount) || amount <= 0) return null;
+
+  return {
+    pricingKey,
+    scope: cleanStr(raw?.scope, 80),
+    requestType: cleanRequestType(raw?.requestType),
+    track: cleanTrack(raw?.track),
+    serviceName: cleanStr(raw?.serviceName || raw?.label, 120),
+    label: cleanStr(raw?.label || raw?.serviceName, 140),
+    tag: cleanStr(raw?.tag, 40),
+    amount: Math.round(amount),
+    defaultAmount: Math.max(0, Math.round(Number(raw?.defaultAmount || 0))),
+    currency: cleanStr(raw?.currency || "KES", 8).toUpperCase() || "KES",
+    updatedAtMs: Number(raw?.updatedAtMs || 0),
+  };
+}
+
 // Helpers for auth soft gate + safety
 function requireSignedInUser() {
   const user = auth.currentUser;
@@ -170,6 +193,7 @@ export async function createServiceRequest(payload) {
   const town = cleanStr(payload?.town || payload?.city, 80);
   const unlockPaymentId = cleanStr(payload?.unlockPaymentId, 180);
   const unlockPaymentRequestId = cleanStr(payload?.unlockPaymentRequestId, 180);
+  const pricingSnapshot = cleanPricingSnapshot(payload?.pricingSnapshot);
 
   const clean = {
     uid: user.uid,
@@ -200,6 +224,7 @@ export async function createServiceRequest(payload) {
 
     paid,
     paymentMeta,
+    pricingSnapshot,
     unlockPaymentId,
     unlockPaymentRequestId,
     requestUploadMeta,

@@ -12,9 +12,9 @@ import {
   markDummyPaymentPaid,
   setDummyPaymentState,
 } from "../utils/dummyPayment";
+import { useRequestPricingEntry } from "../hooks/useRequestPricing";
 
 const PROCESSING_DELAY_MS = 5000;
-const DEFAULT_PAYMENT_AMOUNT = "KES 10,000";
 
 function IconArrowLeft(props) {
   return (
@@ -186,6 +186,13 @@ export default function DummyPaymentScreen() {
 
   const isInProgressFlow = paymentFlow === "inprogresspayment";
 
+  const liveRequestPricing = useRequestPricingEntry({
+    pricingKey: paymentContext?.pricingKey,
+    track: paymentContext?.track,
+    serviceName: paymentContext?.serviceName,
+    requestType: paymentContext?.requestType || "single",
+  });
+
   const seedFormState = useMemo(() => {
     const fromState = normalizeContext(location.state?.draftForm);
     if (fromState) return fromState;
@@ -198,8 +205,8 @@ export default function DummyPaymentScreen() {
     const fromQuery = String(query.get("amount") || "").trim();
     if (fromQuery) return fromQuery;
     const fromDraft = String(storedDraft?.amount || "").trim();
-    return fromDraft || DEFAULT_PAYMENT_AMOUNT;
-  }, [location.state, query, storedDraft]);
+    return fromDraft || liveRequestPricing.amountText || "";
+  }, [location.state, query, storedDraft, liveRequestPricing.amountText]);
 
   const storedPayment = useMemo(() => {
     if (isInProgressFlow) return null;

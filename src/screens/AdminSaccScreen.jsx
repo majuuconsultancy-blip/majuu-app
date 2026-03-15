@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ChevronRight, Newspaper, Settings2 } from "lucide-react";
+import { ArrowLeft, ChevronRight, Coins, Newspaper, Settings2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import AppIcon from "../components/AppIcon";
@@ -53,7 +53,7 @@ export default function AdminSaccScreen() {
               Super Admin Control Center
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              A clean module list for app-wide controls, starting with News Management.
+              A clean module list for app-wide controls, starting with Pricing Controls and News Management.
             </p>
           </div>
 
@@ -87,6 +87,34 @@ export default function AdminSaccScreen() {
             </div>
 
             <div className="mt-4 grid gap-3">
+              <button
+                type="button"
+                onClick={() => navigate("/app/admin/sacc/pricing")}
+                className={`${card} w-full px-4 py-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50 active:scale-[0.99] dark:hover:bg-zinc-900/80`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                    <AppIcon icon={Coins} size={ICON_MD} />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                        Pricing Controls
+                      </div>
+                      <span className="rounded-full border border-emerald-100 bg-emerald-50/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                        Live
+                      </span>
+                    </div>
+                    <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                      View request pricing, edit amounts inline, and publish updates instantly across request checkout flows.
+                    </div>
+                  </div>
+
+                  <AppIcon icon={ChevronRight} size={ICON_MD} className="text-zinc-400" />
+                </div>
+              </button>
+
               <button
                 type="button"
                 onClick={() => navigate("/app/admin/sacc/news")}

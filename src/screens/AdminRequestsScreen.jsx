@@ -333,7 +333,7 @@ function SaccEntryPanel() {
               </span>
             </div>
             <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              Super Admin Control Center. Start with News Management and expand app-wide controls later.
+              Super Admin Control Center. Pricing Controls and News Management now live here, with room for more app-wide modules.
             </div>
           </div>
 
