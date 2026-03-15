@@ -2,6 +2,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocs,
   onSnapshot,
   query,
   serverTimestamp,
@@ -248,6 +249,20 @@ export function subscribePublishedNews({ trackType, country, onData, onError }) 
       onError?.(error);
     }
   );
+}
+
+export async function listPublishedNews({ trackType, country }) {
+  const safeTrack = normalizeTrackType(trackType);
+  const safeCountry = normalizeDestinationCountry(country) || APP_DESTINATION_COUNTRIES[0];
+  const snapshot = await getDocs(
+    query(collection(db, NEWS_COLLECTION), where("isPublished", "==", true))
+  );
+
+  const items = snapshot.docs
+    .map((row) => normalizeNewsRecord(row.id, row.data() || {}))
+    .filter((item) => item.trackType === safeTrack && item.country === safeCountry);
+
+  return sortNewsItemsByPriority(items);
 }
 
 export function subscribeAllNews({ onData, onError }) {

@@ -7,6 +7,7 @@ import {
   Globe2,
   Newspaper,
   Radio,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
@@ -25,6 +26,7 @@ import { auth, db } from "../firebase";
 import {
   getImpactLabel,
   getNewsTimestampMs,
+  listPublishedNews,
   pickBreakingNewsItem,
   subscribePublishedNews,
 } from "../services/newsservice";
@@ -161,12 +163,15 @@ export default function NewsScreen() {
       : "study";
 
   const [trackType, setTrackType] = useState(initialTrack);
-  const [selectedCountry, setSelectedCountry] = useState(routedCountryContext || "");
+  const [selectedCountry, setSelectedCountry] = useState(
+    routedCountryContext || APP_DESTINATION_COUNTRIES[0]
+  );
   const [feedItems, setFeedItems] = useState([]);
   const [loadingContext, setLoadingContext] = useState(true);
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [feedError, setFeedError] = useState("");
   const [pendingLink, setPendingLink] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const seededCountryRef = useRef(Boolean(routedCountryContext));
 
@@ -230,23 +235,54 @@ export default function NewsScreen() {
   }, [routedCountryContext, routedTrackContext]);
 
   useEffect(() => {
-    const safeCountry = normalizeDestinationCountry(selectedCountry);
-    if (!safeCountry) return undefined;
+    const safeTrack = normalizeTrackType(trackType);
+    const safeCountry =
+      normalizeDestinationCountry(selectedCountry) || APP_DESTINATION_COUNTRIES[0];
 
-    return subscribePublishedNews({
-      trackType,
-      country: safeCountry,
-      onData: (items) => {
-        setFeedItems(items);
+    let cancelled = false;
+    let unsubFeed = () => {};
+
+    void (async () => {
+      try {
+        const initialItems = await listPublishedNews({
+          trackType: safeTrack,
+          country: safeCountry,
+        });
+        if (cancelled) return;
+
+        setFeedItems(initialItems);
+        setFeedError("");
         setLoadingFeed(false);
-      },
-      onError: (error) => {
+
+        unsubFeed = subscribePublishedNews({
+          trackType: safeTrack,
+          country: safeCountry,
+          onData: (items) => {
+            if (cancelled) return;
+            setFeedItems(items);
+            setFeedError("");
+            setLoadingFeed(false);
+          },
+          onError: (error) => {
+            if (cancelled) return;
+            setFeedItems([]);
+            setFeedError(error?.message || "Failed to load news.");
+            setLoadingFeed(false);
+          },
+        });
+      } catch (error) {
+        if (cancelled) return;
         setFeedItems([]);
         setFeedError(error?.message || "Failed to load news.");
         setLoadingFeed(false);
-      },
-    });
-  }, [trackType, selectedCountry]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unsubFeed();
+    };
+  }, [refreshKey, selectedCountry, trackType]);
 
   const trackMeta = APP_TRACK_META[trackType] || APP_TRACK_META.study;
   const breakingItem = useMemo(() => pickBreakingNewsItem(feedItems), [feedItems]);
@@ -267,15 +303,36 @@ export default function NewsScreen() {
     setPendingLink("");
   };
 
+  const refreshFeed = () => {
+    setLoadingFeed(true);
+    setFeedError("");
+    setRefreshKey((current) => current + 1);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-emerald-50/45 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
       <div className="max-w-xl mx-auto px-5 py-6">
-        <div className="rounded-[28px] border border-emerald-100 bg-white/75 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className="relative rounded-[28px] border border-emerald-100 bg-white/75 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
+          <button
+            type="button"
+            onClick={refreshFeed}
+            disabled={loadingContext || loadingFeed}
+            className="absolute right-4 top-4 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 bg-white/85 text-zinc-700 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/80 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/80 dark:text-zinc-200"
+            aria-label="Refresh news"
+            title="Refresh news"
+          >
+            <AppIcon
+              icon={RefreshCw}
+              size={ICON_MD}
+              className={loadingFeed ? "animate-spin" : ""}
+            />
+          </button>
+
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/80 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
                 <AppIcon icon={Newspaper} size={ICON_SM} />
-                Migration News
+                MAJUU NEWS
               </div>
               <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 {trackMeta.label} News
