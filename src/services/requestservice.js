@@ -108,6 +108,7 @@ function cleanPricingSnapshot(snapshot) {
     scope: cleanStr(raw?.scope, 80),
     requestType: cleanRequestType(raw?.requestType),
     track: cleanTrack(raw?.track),
+    country: cleanStr(raw?.country, 120),
     serviceName: cleanStr(raw?.serviceName || raw?.label, 120),
     label: cleanStr(raw?.label || raw?.serviceName, 140),
     tag: cleanStr(raw?.tag, 40),

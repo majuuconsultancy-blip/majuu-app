@@ -82,11 +82,12 @@ const floatCard = {
   tap: { scale: 0.996 },
 };
 
-function buildSingleRequestMeta(serviceName) {
+function buildSingleRequestMeta(serviceName, country = "") {
   const fallbackName = String(serviceName || "").trim();
   const entry = findRequestCatalogEntry({
     track: "work",
     requestType: "single",
+    country,
     serviceName: fallbackName,
   });
 
@@ -291,7 +292,7 @@ export default function WorkWeHelp() {
         setToast("Complete your profile first - then you can submit this request.");
         setTimeout(() => setToast(""), 2600);
       } else {
-        setRequestMeta(buildSingleRequestMeta(modalState.serviceName));
+        setRequestMeta(buildSingleRequestMeta(modalState.serviceName, country));
         setModalResumeState(modalState);
         setModalOpen(true);
         setAutoOpened(true);
@@ -346,7 +347,7 @@ export default function WorkWeHelp() {
       return;
     }
 
-    setRequestMeta(buildSingleRequestMeta(openService));
+    setRequestMeta(buildSingleRequestMeta(openService, country));
     setModalOpen(true);
     setAutoOpened(true);
   }, [autoOpened, shouldAutoOpen, openService, profileChecked, missing.length]);
@@ -360,8 +361,12 @@ export default function WorkWeHelp() {
 
   const openSingle = (serviceName) => {
     if (!canUseWeHelp) return;
+    if (!country || country === "Not selected") {
+      alert("Pick a destination country first so we can load the correct request price.");
+      return;
+    }
     setModalResumeState(null);
-    setRequestMeta(buildSingleRequestMeta(serviceName));
+    setRequestMeta(buildSingleRequestMeta(serviceName, country));
     setModalOpen(true);
   };
 
@@ -435,6 +440,7 @@ export default function WorkWeHelp() {
       const pricingQuote = await getRequestPricingQuote({
         pricingKey: requestMeta.pricingKey,
         track: "work",
+        country,
         serviceName: requestMeta.serviceName,
         requestType: requestMeta.requestType,
       });
@@ -850,6 +856,7 @@ export default function WorkWeHelp() {
         paymentContext={{
           flow: "weHelp",
           track: "work",
+          country,
           requestType: requestMeta?.requestType || "single",
           serviceName: requestMeta?.serviceName || "",
           pricingKey: requestMeta?.pricingKey || "",

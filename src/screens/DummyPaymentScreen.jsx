@@ -189,6 +189,7 @@ export default function DummyPaymentScreen() {
   const liveRequestPricing = useRequestPricingEntry({
     pricingKey: paymentContext?.pricingKey,
     track: paymentContext?.track,
+    country: paymentContext?.country,
     serviceName: paymentContext?.serviceName,
     requestType: paymentContext?.requestType || "single",
   });

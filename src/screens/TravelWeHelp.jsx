@@ -81,11 +81,12 @@ const floatCard = {
   tap: { scale: 0.996 },
 };
 
-function buildSingleRequestMeta(serviceName) {
+function buildSingleRequestMeta(serviceName, country = "") {
   const fallbackName = String(serviceName || "").trim();
   const entry = findRequestCatalogEntry({
     track: "travel",
     requestType: "single",
+    country,
     serviceName: fallbackName,
   });
 
@@ -294,7 +295,7 @@ export default function TravelWeHelp() {
         setToast("Complete your profile first - then you can submit this request.");
         setTimeout(() => setToast(""), 2600);
       } else {
-        setRequestMeta(buildSingleRequestMeta(modalState.serviceName));
+        setRequestMeta(buildSingleRequestMeta(modalState.serviceName, country));
         setModalResumeState(modalState);
         setModalOpen(true);
         setAutoOpened(true);
@@ -349,7 +350,7 @@ export default function TravelWeHelp() {
       return;
     }
 
-    setRequestMeta(buildSingleRequestMeta(openService));
+    setRequestMeta(buildSingleRequestMeta(openService, country));
     setModalOpen(true);
     setAutoOpened(true);
   }, [autoOpened, shouldAutoOpen, openService, profileChecked, missing.length]);
@@ -363,8 +364,12 @@ export default function TravelWeHelp() {
 
   const openSingle = (serviceName) => {
     if (!canUseWeHelp) return;
+    if (!country || country === "Not selected") {
+      alert("Pick a destination country first so we can load the correct request price.");
+      return;
+    }
     setModalResumeState(null);
-    setRequestMeta(buildSingleRequestMeta(serviceName));
+    setRequestMeta(buildSingleRequestMeta(serviceName, country));
     setModalOpen(true);
   };
 
@@ -438,6 +443,7 @@ export default function TravelWeHelp() {
       const pricingQuote = await getRequestPricingQuote({
         pricingKey: requestMeta.pricingKey,
         track: "travel",
+        country,
         serviceName: requestMeta.serviceName,
         requestType: requestMeta.requestType,
       });
@@ -853,6 +859,7 @@ export default function TravelWeHelp() {
         paymentContext={{
           flow: "weHelp",
           track: "travel",
+          country,
           requestType: requestMeta?.requestType || "single",
           serviceName: requestMeta?.serviceName || "",
           pricingKey: requestMeta?.pricingKey || "",

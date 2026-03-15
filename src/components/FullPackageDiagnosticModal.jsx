@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { listFullPackageItemCatalogByTrack } from "../constants/requestCatalog";
 import { auth } from "../firebase";
+import { useFullPackagePricingList } from "../hooks/useRequestPricing";
 import {
   buildFullPackageHubPath,
   createFullPackageDraft,
@@ -8,6 +10,7 @@ import {
   normalizeFullPackageItems,
   syncFullPackageSelection,
 } from "../services/fullpackageservice";
+import { formatPricingMoney } from "../services/pricingservice";
 import {
   clearDummyPaymentDraft,
   clearDummyPaymentState,
@@ -17,33 +20,30 @@ import {
   setDummyPaymentDraft,
 } from "../utils/dummyPayment";
 
-const CHECKLIST = [
-  "Passport",
-  "SOP / Motivation Letter",
-  "IELTS",
-  "CV / Resume",
-  "Offer Letter",
-  "Proof of Funds",
-];
-
-const BASE_PRICE = 9999;
-const MIN_PRICE = 3999;
-const ITEM_CREDITS = {
-  Passport: 1700,
-  "SOP / Motivation Letter": 1400,
-  IELTS: 2200,
-  "CV / Resume": 900,
-  "Offer Letter": 1600,
-  "Proof of Funds": 1400,
-};
-
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
-function formatKES(n) {
-  const x = Math.round(Number(n) || 0);
-  return `KES ${x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+function toFallbackChecklistRows(track, country) {
+  return listFullPackageItemCatalogByTrack(track).map((item) => ({
+    pricingKey: "",
+    scope: "full_package_item",
+    requestType: "full",
+    track: String(track || "").trim().toLowerCase(),
+    country: String(country || "").trim(),
+    serviceName: item.serviceName,
+    label: item.label,
+    note: item.note,
+    tag: item.tag,
+    amount: Number(item.defaultAmount || 0),
+    defaultAmount: Number(item.defaultAmount || 0),
+    currency: "KES",
+    sortOrder: Number(item.sortOrder || 0),
+  }));
+}
+
+function buildItemListKey(items) {
+  return normalizeFullPackageItems(items).slice().sort().join("||");
 }
 
 function lockBodyScrollFixed() {
@@ -121,6 +121,8 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
   const location = useLocation();
   const listScrollRef = useRef(null);
   const resumeApplyRef = useRef("");
+  const normalizedTrack = String(track || "").trim().toLowerCase();
+  const normalizedCountry = String(country || "").trim();
 
   const [checked, setChecked] = useState({});
   const [pricePulse, setPricePulse] = useState(false);
@@ -130,6 +132,26 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
   const [depositPaymentMeta, setDepositPaymentMeta] = useState(null);
   const [depositDraftId, setDepositDraftId] = useState("");
   const [fullPackageId, setFullPackageId] = useState("");
+  const [paidSelectionKey, setPaidSelectionKey] = useState("");
+  const [paidGateAmount, setPaidGateAmount] = useState(0);
+  const {
+    rows: livePricingRows,
+    loading: pricingLoading,
+    error: pricingError,
+  } = useFullPackagePricingList({
+    track: normalizedTrack,
+    country: normalizedCountry,
+  });
+
+  const checklistRows = useMemo(() => {
+    if (livePricingRows.length) return livePricingRows;
+    return toFallbackChecklistRows(normalizedTrack, normalizedCountry);
+  }, [livePricingRows, normalizedCountry, normalizedTrack]);
+
+  const checklistItemNames = useMemo(
+    () => checklistRows.map((row) => row.serviceName).filter(Boolean),
+    [checklistRows]
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -142,6 +164,8 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     setDepositPaymentMeta(null);
     setDepositDraftId("");
     setFullPackageId("");
+    setPaidSelectionKey("");
+    setPaidGateAmount(0);
   }, [open]);
 
   useEffect(() => {
@@ -178,14 +202,22 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
-  const total = CHECKLIST.length;
+  const total = checklistRows.length;
   const haveCount = useMemo(
-    () => CHECKLIST.reduce((a, i) => a + (checked[i] ? 1 : 0), 0),
-    [checked]
+    () => checklistItemNames.reduce((a, item) => a + (checked[item] ? 1 : 0), 0),
+    [checklistItemNames, checked]
   );
-  const missingItems = useMemo(() => CHECKLIST.filter((i) => !checked[i]), [checked]);
+  const missingRows = useMemo(
+    () => checklistRows.filter((row) => !checked[row.serviceName]),
+    [checklistRows, checked]
+  );
+  const missingItems = useMemo(
+    () => missingRows.map((row) => row.serviceName),
+    [missingRows]
+  );
+  const missingItemsKey = useMemo(() => buildItemListKey(missingItems), [missingItems]);
   const readiness = useMemo(
-    () => clamp(Math.round((haveCount / total) * 100), 0, 100),
+    () => (total > 0 ? clamp(Math.round((haveCount / total) * 100), 0, 100) : 0),
     [haveCount, total]
   );
   const readinessLabel = useMemo(() => {
@@ -194,21 +226,18 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     return { text: "Strong", cls: "bg-emerald-50 border-emerald-200 text-emerald-900" };
   }, [readiness]);
 
-  const discount = useMemo(
+  const totalPrice = useMemo(
     () =>
-      CHECKLIST.reduce(
-        (acc, item) => acc + (checked[item] ? ITEM_CREDITS[item] || 0 : 0),
-        0
-      ),
-    [checked]
+      checklistRows.reduce((acc, row) => acc + Math.max(0, Number(row.amount || 0)), 0),
+    [checklistRows]
   );
-  const livePrice = useMemo(() => clamp(BASE_PRICE - discount, MIN_PRICE, BASE_PRICE), [discount]);
-  const saved = useMemo(() => clamp(BASE_PRICE - livePrice, 0, BASE_PRICE), [livePrice]);
-  const saveText = saved > 0 ? `Save ${formatKES(saved)}` : "Best value";
-  const depositAmount = useMemo(
-    () => clamp(Math.round(livePrice * 0.3), 1500, 3500),
-    [livePrice]
+  const livePrice = useMemo(
+    () => missingRows.reduce((acc, row) => acc + Math.max(0, Number(row.amount || 0)), 0),
+    [missingRows]
   );
+  const saved = useMemo(() => Math.max(0, totalPrice - livePrice), [livePrice, totalPrice]);
+  const saveText = saved > 0 ? `Saved ${formatPricingMoney(saved, "KES")}` : "Live package total";
+  const gateAmount = livePrice;
 
   useEffect(() => {
     if (!open) return;
@@ -217,16 +246,22 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     return () => clearTimeout(t);
   }, [livePrice, open]);
 
-  const isCountryValid = Boolean(country && country !== "Not selected");
-  const recommended = missingItems.length >= 3;
-  const canPayDeposit = isCountryValid && recommended && !depositLoading;
-  const canProceed = canPayDeposit && depositPaid && Boolean(fullPackageId);
+  const isCountryValid = Boolean(normalizedCountry && normalizedCountry !== "Not selected");
+  const canPayDeposit = isCountryValid && gateAmount > 0 && !depositLoading;
+  const isPaidForCurrentSelection =
+    gateAmount <= 0 ||
+    (depositPaid && paidGateAmount === gateAmount && paidSelectionKey === missingItemsKey);
+  const canProceed =
+    isCountryValid &&
+    !depositLoading &&
+    (gateAmount <= 0 ? true : isPaidForCurrentSelection) &&
+    (gateAmount <= 0 ? true : Boolean(fullPackageId));
 
   const helperText = !isCountryValid
-    ? "Pick a country first."
-    : recommended
-      ? "Great fit for 3+ missing items."
-      : "Best when 3+ items are missing.";
+    ? "Pick a country first to load the exact package price."
+    : gateAmount <= 0
+      ? "Everything is already covered."
+      : `${missingItems.length} item${missingItems.length === 1 ? "" : "s"} remaining in your package.`;
 
   useEffect(() => {
     if (!open) return;
@@ -255,7 +290,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     if (selectedItems.length > 0) {
       const set = new Set(selectedItems);
       const restoredChecked = {};
-      for (const item of CHECKLIST) restoredChecked[item] = !set.has(item);
+      for (const item of checklistItemNames) restoredChecked[item] = !set.has(item);
       queueMicrotask(() => setChecked(restoredChecked));
     }
 
@@ -270,7 +305,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
       status: "paid",
       method: String(storedPayment?.method || "dummy"),
       paidAt: Number(storedPayment?.paidAt || storedPayment?.confirmedAt || Date.now()),
-      amount: Number(context?.unlockAmount || context?.depositAmount || depositAmount),
+      amount: Number(context?.unlockAmount || context?.depositAmount || gateAmount),
       currency: "KES",
       ref: String(storedPayment?.ref || storedPayment?.reference || ""),
     };
@@ -280,12 +315,16 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     markFullPackageUnlockPaid({
       fullPackageId: ctxFullPackageId,
       selectedItems: selectedItems.length ? selectedItems : missingItems,
-      unlockAmount: Number(context?.unlockAmount || context?.depositAmount || depositAmount),
+      unlockAmount: Number(context?.unlockAmount || context?.depositAmount || gateAmount),
       unlockPaymentMeta: paymentMeta,
     })
       .then(() => {
         setDepositPaid(true);
         setDepositPaymentMeta(paymentMeta);
+        setPaidGateAmount(Number(paymentMeta.amount || 0));
+        setPaidSelectionKey(
+          buildItemListKey(selectedItems.length ? selectedItems : missingItems)
+        );
       })
       .catch((error) => {
         if (String(error?.code || "").toLowerCase().includes("permission-denied")) {
@@ -297,7 +336,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
         }
       })
       .finally(() => setDepositLoading(false));
-  }, [open, location.state, location.search, depositAmount, missingItems]);
+  }, [open, location.state, location.search, gateAmount, missingItems, checklistItemNames]);
 
   const handlePayDeposit = async () => {
     if (!canPayDeposit) return;
@@ -315,10 +354,10 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
         id = await createFullPackageDraft({
           uid: user.uid,
           email: user.email || "",
-          track,
-          country,
+          track: normalizedTrack,
+          country: normalizedCountry,
           selectedItems: missingItems,
-          unlockAmount: depositAmount,
+          unlockAmount: gateAmount,
         });
         setFullPackageId(id);
       } else {
@@ -328,13 +367,13 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
       const draftId = createRequestDraftId();
       const paymentContext = {
         flow: "fullPackageUnlock",
-        track: String(track || "").trim().toLowerCase(),
-        country: String(country || "").trim(),
+        track: normalizedTrack,
+        country: normalizedCountry,
         fullPackageId: id,
         selectedItems: missingItems,
-        unlockAmount: depositAmount,
+        unlockAmount: gateAmount,
       };
-      const amountText = formatKES(depositAmount);
+      const amountText = formatPricingMoney(gateAmount, "KES");
 
       setDepositDraftId(draftId);
       setDummyPaymentDraft(draftId, {
@@ -371,31 +410,54 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
   const handleProceed = async () => {
     if (!canProceed) return;
-    const hubPath = buildFullPackageHubPath({ fullPackageId, track });
+    let nextFullPackageId = fullPackageId;
+
+    if (!nextFullPackageId) {
+      const user = auth.currentUser;
+      if (!user?.uid) {
+        setDepositError("Please sign in again before continuing.");
+        return;
+      }
+
+      try {
+        nextFullPackageId = await createFullPackageDraft({
+          uid: user.uid,
+          email: user.email || "",
+          track: normalizedTrack,
+          country: normalizedCountry,
+          selectedItems: missingItems,
+          unlockAmount: 0,
+        });
+        setFullPackageId(nextFullPackageId);
+      } catch (error) {
+        setDepositError(error?.message || "Failed to open your full package.");
+        return;
+      }
+    }
+
+    const hubPath = buildFullPackageHubPath({ fullPackageId: nextFullPackageId, track: normalizedTrack });
     if (!hubPath) return;
 
     try {
-      await syncFullPackageSelection({ fullPackageId, selectedItems: missingItems });
+      await syncFullPackageSelection({ fullPackageId: nextFullPackageId, selectedItems: missingItems });
     } catch (error) {
       setDepositError(error?.message || "Failed to sync selected items.");
       return;
     }
 
     const qs = new URLSearchParams();
-    qs.set("track", String(track || "").trim());
-    qs.set("country", String(country || "").trim());
-    qs.set("fullPackageId", fullPackageId);
+    qs.set("country", normalizedCountry);
 
-      navigate(`${hubPath}&${qs.toString()}`, {
-        state: {
-          fullPackageId,
-          missingItems,
-          unlockPaid: true,
-          unlockPaymentMeta: depositPaymentMeta || null,
-          depositPaid: true,
-          depositPaymentMeta: depositPaymentMeta || null,
-        },
-      });
+    navigate(`${hubPath}&${qs.toString()}`, {
+      state: {
+        fullPackageId: nextFullPackageId,
+        missingItems,
+        unlockPaid: gateAmount <= 0 ? true : depositPaid,
+        unlockPaymentMeta: depositPaymentMeta || null,
+        depositPaid: gateAmount <= 0 ? true : depositPaid,
+        depositPaymentMeta: depositPaymentMeta || null,
+      },
+    });
 
     if (depositDraftId) {
       clearDummyPaymentState(depositDraftId);
@@ -450,9 +512,12 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
               <div className="min-w-0">
                 <div className="text-[10.5px] font-semibold text-zinc-600">Price</div>
                 <div className={["mt-0.5 text-[18px] font-semibold text-zinc-900 tabular-nums leading-none", pricePulse ? "scale-[1.02]" : "scale-100", "transition-transform duration-150 ease-out"].join(" ")}>
-                  {formatKES(livePrice)}
+                  {formatPricingMoney(livePrice, "KES")}
                 </div>
                 <div className="mt-0.5 text-[10.5px] font-semibold text-emerald-900/70">{saveText}</div>
+                <div className="mt-1 text-[10.5px] text-zinc-600">
+                  Full package total: {formatPricingMoney(totalPrice, "KES")}
+                </div>
               </div>
               <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-900">
                 <IconShieldCheck className="h-4 w-4" />
@@ -477,10 +542,21 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
         <div className="flex-1 min-h-0 px-5 pt-3 pb-4">
           <div ref={listScrollRef} className="h-full overflow-y-auto overscroll-contain">
+            {pricingLoading && !livePricingRows.length ? (
+              <div className="mb-3 rounded-2xl border border-zinc-200 bg-white/80 px-3 py-2 text-xs text-zinc-600">
+                Loading exact pricing...
+              </div>
+            ) : null}
+            {pricingError ? (
+              <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                {pricingError}
+              </div>
+            ) : null}
             <div className="grid gap-3">
-              {CHECKLIST.map((item) => {
+              {checklistRows.map((row) => {
+                const item = row.serviceName;
                 const isOn = !!checked[item];
-                const credit = ITEM_CREDITS[item] || 0;
+                const credit = Number(row.amount || 0);
                 return (
                   <button key={item} type="button" aria-pressed={isOn} onClick={() => toggle(item)} className={["w-full text-left rounded-3xl border px-4 py-3 transition active:scale-[0.99] shadow-[0_6px_16px_rgba(0,0,0,0.05)] min-h-[78px]", isOn ? "border-emerald-200 bg-white/55" : "border-white/35 bg-white/40 hover:bg-white/50 hover:border-emerald-200/60"].join(" ")}>
                     <div className="flex items-center justify-between gap-3">
@@ -490,11 +566,13 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                         </span>
                         <div className="min-w-0">
                           <div className="font-semibold text-zinc-900">{item}</div>
-                          <div className="mt-0.5 text-xs text-zinc-500">Tap to {isOn ? "undo" : "mark ready"}</div>
+                          <div className="mt-0.5 text-xs text-zinc-500">
+                            {row.note || `Tap to ${isOn ? "undo" : "mark ready"}`}
+                          </div>
                         </div>
                       </div>
                       <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-900">
-                        -{formatKES(credit)}
+                        -{formatPricingMoney(credit, row.currency)}
                       </span>
                     </div>
                   </button>
@@ -504,11 +582,15 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
             <div className="mt-4 rounded-3xl border border-white/35 bg-white/45 p-4">
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 px-3 py-3">
-                <div className="text-sm font-semibold text-emerald-900">Unlock payment required for your Full Package</div>
-                <div className="mt-1 text-xs text-emerald-800">Pay this unlock request fee before entering your full package hub.</div>
-                <div className="mt-2 text-sm font-semibold text-zinc-900">Unlock amount: {formatKES(depositAmount)}</div>
-                <button type="button" onClick={handlePayDeposit} disabled={!canPayDeposit || depositPaid || depositLoading} className={["mt-3 w-full rounded-xl border px-3 py-2.5 text-sm font-semibold transition active:scale-[0.99]", depositPaid ? "border-emerald-200 bg-emerald-600 text-white cursor-default" : canPayDeposit ? "border-emerald-200 bg-white text-emerald-900 hover:bg-emerald-100" : "border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed"].join(" ")}>
-                  {depositPaid ? "Unlock Paid" : depositLoading ? "Processing..." : "Pay Unlock"}
+                <div className="text-sm font-semibold text-emerald-900">Payment gate for your Full Package</div>
+                <div className="mt-1 text-xs text-emerald-800">
+                  The payment gate uses the remaining package total after subtracting what the client already has.
+                </div>
+                <div className="mt-2 text-sm font-semibold text-zinc-900">
+                  Remaining total: {formatPricingMoney(gateAmount, "KES")}
+                </div>
+                <button type="button" onClick={handlePayDeposit} disabled={!canPayDeposit || isPaidForCurrentSelection || depositLoading} className={["mt-3 w-full rounded-xl border px-3 py-2.5 text-sm font-semibold transition active:scale-[0.99]", isPaidForCurrentSelection ? "border-emerald-200 bg-emerald-600 text-white cursor-default" : canPayDeposit ? "border-emerald-200 bg-white text-emerald-900 hover:bg-emerald-100" : "border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed"].join(" ")}>
+                  {isPaidForCurrentSelection ? "Payment Gate Paid" : depositLoading ? "Processing..." : depositPaid ? "Pay Updated Total" : "Pay Remaining Total"}
                 </button>
                 {depositError ? <div className="mt-2 rounded-xl border border-rose-100 bg-rose-50 px-2.5 py-2 text-xs text-rose-700">{depositError}</div> : null}
               </div>
