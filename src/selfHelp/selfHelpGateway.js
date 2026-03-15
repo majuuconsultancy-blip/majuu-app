@@ -1,6 +1,5 @@
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
-import { getSelfHelpResourceById } from "./selfHelpCatalog";
 import {
   getResourceDomain,
   openExternalUrl,
@@ -10,6 +9,10 @@ import {
   deleteSelfHelpMemoryItem,
   recordSelfHelpActivity,
 } from "./selfHelpProgressStore";
+import {
+  getSelfHelpRuntimeResourceById,
+  incrementSelfHelpResourceClick,
+} from "../services/selfHelpResourceService";
 
 export const SELF_HELP_PROVIDER_META = {
   "direct-web": { label: "External web", supportsRedirect: true },
@@ -209,19 +212,19 @@ export function getSelfHelpProviderMeta(providerKey) {
 }
 
 export function resolveStoredSelfHelpUrl(item) {
-  const direct = safeString(item?.finalUrl, 1000);
-  if (direct) return direct;
+  const resource = getSelfHelpRuntimeResourceById(item?.resourceId);
+  if (resource) {
+    const resolved = resolveOutboundUrls(resource, {
+      track: safeString(item?.track, 20).toLowerCase(),
+      country: safeString(item?.country, 80),
+      smartParams: item?.smartParams || null,
+    });
 
-  const resource = getSelfHelpResourceById(item?.resourceId);
-  if (!resource) return "";
+    const managedUrl = safeString(resolved.finalUrl, 1000);
+    if (managedUrl) return managedUrl;
+  }
 
-  const resolved = resolveOutboundUrls(resource, {
-    track: safeString(item?.track, 20).toLowerCase(),
-    country: safeString(item?.country, 80),
-    smartParams: item?.smartParams || null,
-  });
-
-  return safeString(resolved.finalUrl, 1000);
+  return safeString(item?.finalUrl, 1000);
 }
 
 export async function openSelfHelpResourceGateway({
@@ -306,6 +309,7 @@ export async function openSelfHelpResourceGateway({
 
   const progress = progressPromise ? await progressPromise : null;
 
+  void incrementSelfHelpResourceClick(resource.id);
   void logGatewayAnalytics({ ...activity, uid: safeString(uid, 120) }, resource);
 
   return {
@@ -332,7 +336,7 @@ export async function reopenStoredSelfHelpGateway({
     };
   }
 
-  const resource = getSelfHelpResourceById(item?.resourceId);
+  const resource = getSelfHelpRuntimeResourceById(item?.resourceId);
   const activity = {
     resourceId: safeString(item?.resourceId, 120),
     title: safeString(item?.title, 180),
@@ -394,6 +398,9 @@ export async function reopenStoredSelfHelpGateway({
 
   const progress = progressPromise ? await progressPromise : null;
 
+  if (resource?.id) {
+    void incrementSelfHelpResourceClick(resource.id);
+  }
   void logGatewayAnalytics({ ...activity, uid: safeString(uid, 120) }, resource);
 
   return {

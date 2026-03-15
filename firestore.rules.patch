@@ -235,6 +235,26 @@ service cloud.firestore {
       allow create, update, delete: if isSuperAdmin();
     }
 
+    match /selfHelpLinks/{resourceId} {
+      allow read: if signedIn();
+      allow create, delete: if isSuperAdmin();
+
+      allow update: if isSuperAdmin()
+        || (
+          signedIn()
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            "clickCount",
+            "lastClickedAt",
+            "updatedAt",
+            "updatedAtMs"
+          ])
+          && request.resource.data.clickCount is number
+          && resource.data.clickCount is number
+          && request.resource.data.clickCount == resource.data.clickCount + 1
+        );
+    }
+
     match /users/{uid} {
       allow read: if isAnyAdmin() || isSelf(uid);
       allow create: if isSuperAdmin() || isSafeSelfUserCreate(uid);

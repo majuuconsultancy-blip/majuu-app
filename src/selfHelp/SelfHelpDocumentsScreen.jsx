@@ -37,6 +37,10 @@ import {
   previewSelfHelpDocumentProgress,
   saveSelfHelpDocumentRecord,
 } from "./selfHelpProgressStore";
+import {
+  mergeSelfHelpRuntimeResources,
+  subscribeRuntimeSelfHelpResources,
+} from "../services/selfHelpResourceService";
 
 const TRACK_ICONS = {
   study: GraduationCap,
@@ -90,6 +94,7 @@ export default function SelfHelpDocumentsScreen({ track }) {
 
   const [uid, setUid] = useState("");
   const [progress, setProgress] = useState(null);
+  const [resourceRecords, setResourceRecords] = useState([]);
   const [statusMsg, setStatusMsg] = useState("");
   const [dialogState, setDialogState] = useState({
     open: false,
@@ -105,7 +110,14 @@ export default function SelfHelpDocumentsScreen({ track }) {
     () => getSelfHelpRouteState(progress, track, country),
     [country, progress, track]
   );
-  const steps = useMemo(() => getJourneyStepsForRoute(track, country), [country, track]);
+  const runtimeResources = useMemo(
+    () => mergeSelfHelpRuntimeResources(resourceRecords),
+    [resourceRecords]
+  );
+  const steps = useMemo(
+    () => getJourneyStepsForRoute(track, country, runtimeResources),
+    [country, runtimeResources, track]
+  );
   const stepById = useMemo(
     () => new Map(steps.map((step) => [step.id, step])),
     [steps]
@@ -121,8 +133,8 @@ export default function SelfHelpDocumentsScreen({ track }) {
   );
 
   const preferredStep =
-    getJourneyStepById(track, country, stepParam) ||
-    getJourneyStepById(track, country, routeState?.currentStepId || "");
+    getJourneyStepById(track, country, stepParam, runtimeResources) ||
+    getJourneyStepById(track, country, routeState?.currentStepId || "", runtimeResources);
   const preferredCategoryId =
     categoryParam ||
     preferredStep?.documentCategoryId ||
@@ -159,6 +171,19 @@ export default function SelfHelpDocumentsScreen({ track }) {
       unsub();
     };
   }, [navigate]);
+
+  useEffect(() => {
+    if (!uid) return undefined;
+
+    return subscribeRuntimeSelfHelpResources({
+      onData: (rows) => {
+        setResourceRecords(rows);
+      },
+      onError: (error) => {
+        console.error("SelfHelp document resources load failed:", error);
+      },
+    });
+  }, [uid]);
 
   useEffect(() => {
     if (!createParam || autoOpenedRef.current) return;

@@ -22,7 +22,7 @@ import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { auth } from "../firebase";
 import {
-  getSelfHelpSections,
+  getSelfHelpSectionsFromList,
   SELF_HELP_TRACK_META,
 } from "./selfHelpCatalog";
 import SmartStayDialog from "./SmartStayDialog";
@@ -55,6 +55,10 @@ import {
   toggleSelfHelpBookmark,
   toggleSelfHelpStepCompletion,
 } from "./selfHelpProgressStore";
+import {
+  mergeSelfHelpRuntimeResources,
+  subscribeRuntimeSelfHelpResources,
+} from "../services/selfHelpResourceService";
 
 const TRACK_ICONS = {
   study: GraduationCap,
@@ -271,6 +275,7 @@ export default function SelfHelpHubScreen({ track }) {
   const HeaderIcon = TRACK_ICONS[track] || GraduationCap;
   const [uid, setUid] = useState("");
   const [progress, setProgress] = useState(null);
+  const [resourceRecords, setResourceRecords] = useState([]);
   const [manualSectionId, setManualSectionId] = useState("");
   const [manualStepId, setManualStepId] = useState("");
   const [openingId, setOpeningId] = useState("");
@@ -299,15 +304,22 @@ export default function SelfHelpHubScreen({ track }) {
   }, [progress?.lastContext?.country, progress?.lastContext?.track, progress?.routeStates, track]);
 
   const country = requestedCountry || fallbackCountry;
+  const runtimeResources = useMemo(
+    () => mergeSelfHelpRuntimeResources(resourceRecords),
+    [resourceRecords]
+  );
 
-  const sections = useMemo(() => getSelfHelpSections(track, country), [country, track]);
+  const sections = useMemo(
+    () => getSelfHelpSectionsFromList(track, country, runtimeResources),
+    [country, runtimeResources, track]
+  );
   const routeState = useMemo(
     () => getSelfHelpRouteState(progress, track, country),
     [country, progress, track]
   );
   const verifiedSteps = useMemo(
-    () => getVerifiedPathForRoute(track, country),
-    [country, track]
+    () => getVerifiedPathForRoute(track, country, { resources: runtimeResources }),
+    [country, runtimeResources, track]
   );
 
   const history = Array.isArray(progress?.history) ? progress.history : [];
@@ -417,6 +429,19 @@ export default function SelfHelpHubScreen({ track }) {
       state: location.state,
     });
   }, [fallbackCountry, location.state, navigate, requestedCountry, track]);
+
+  useEffect(() => {
+    if (!uid) return undefined;
+
+    return subscribeRuntimeSelfHelpResources({
+      onData: (rows) => {
+        setResourceRecords(rows);
+      },
+      onError: (error) => {
+        console.error("SelfHelp resources load failed:", error);
+      },
+    });
+  }, [uid]);
 
   useEffect(() => {
     if (!uid) return undefined;

@@ -4,8 +4,8 @@ import {
   getNextJourneyStep,
 } from "./selfHelpJourney";
 
-export function getVerifiedPathForRoute(track, country) {
-  return getJourneyStepsForRoute(track, country);
+export function getVerifiedPathForRoute(track, country, options = {}) {
+  return getJourneyStepsForRoute(track, country, options?.resources || null);
 }
 
 export function getVerifiedProgressSummary(steps, completedStepIds) {

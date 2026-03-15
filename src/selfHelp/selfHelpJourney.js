@@ -1,4 +1,7 @@
-import { getSelfHelpResourcesForCategory } from "./selfHelpCatalog";
+import {
+  getSelfHelpResourcesForCategory,
+  getSelfHelpResourcesForCategoryFromList,
+} from "./selfHelpCatalog";
 
 function safeString(value, max = 160) {
   return String(value || "").trim().slice(0, max);
@@ -139,17 +142,26 @@ export function getJourneyDocumentCategoryMeta(categoryId) {
   return DOCUMENT_CATEGORIES.find((item) => item.id === safeCategoryId) || null;
 }
 
-export function getJourneyStepsForRoute(track, country) {
+export function getJourneyStepsForRoute(track, country, resources = null) {
   const safeTrack = safeString(track, 20).toLowerCase();
   const templates = JOURNEY_TEMPLATES[safeTrack] || JOURNEY_TEMPLATES.study;
   const safeCountry = safeString(country, 80);
+  const getResourcesForCategory = Array.isArray(resources)
+    ? (categoryId) =>
+        getSelfHelpResourcesForCategoryFromList(
+          safeTrack,
+          safeCountry,
+          safeString(categoryId, 40),
+          resources
+        )
+    : (categoryId) =>
+        getSelfHelpResourcesForCategory(safeTrack, safeCountry, safeString(categoryId, 40));
 
   return templates.map((step, index) => {
-    const resources = getSelfHelpResourcesForCategory(
-      safeTrack,
-      safeCountry,
-      safeString(step.categoryId, 40)
-    ).slice(0, Math.max(1, Number(step.resourceCount || 1)));
+    const categoryResources = getResourcesForCategory(step.categoryId).slice(
+      0,
+      Math.max(1, Number(step.resourceCount || 1))
+    );
 
     return {
       id: safeString(step.id, 80),
@@ -157,8 +169,8 @@ export function getJourneyStepsForRoute(track, country) {
       title: safeString(step.title, 100),
       description: buildDescription(step, safeTrack, safeCountry),
       categoryId: safeString(step.categoryId, 40),
-      resourceIds: resources.map((resource) => resource.id),
-      primaryResourceId: resources[0]?.id || "",
+      resourceIds: categoryResources.map((resource) => resource.id),
+      primaryResourceId: categoryResources[0]?.id || "",
       documentCategoryId: safeString(step.documentCategoryId, 40),
       supportsDocument: Boolean(step.documentCategoryId),
       documentCtaLabel: step.documentCategoryId ? "Add document record" : "",
@@ -204,8 +216,10 @@ export function getNextJourneyStep(steps, completedStepIds, preferredStepId = ""
   return safeSteps.find((step) => !completed.has(step.id)) || safeSteps[0] || null;
 }
 
-export function getJourneyStepById(track, country, stepId) {
+export function getJourneyStepById(track, country, stepId, resources = null) {
   const safeStepId = safeString(stepId, 80);
   if (!safeStepId) return null;
-  return getJourneyStepsForRoute(track, country).find((step) => step.id === safeStepId) || null;
+  return getJourneyStepsForRoute(track, country, resources).find(
+    (step) => step.id === safeStepId
+  ) || null;
 }

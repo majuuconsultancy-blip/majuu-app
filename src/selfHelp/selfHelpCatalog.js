@@ -65,6 +65,11 @@ export const SELF_HELP_CATEGORY_META = {
       title: "Documents / Checklist",
       description: "Admissions and document-prep resources to keep your file clean.",
     },
+    {
+      id: "other",
+      title: "Other Resources",
+      description: "Extra links that do not fit the main study sections yet.",
+    },
   ],
   work: [
     {
@@ -107,6 +112,11 @@ export const SELF_HELP_CATEGORY_META = {
       title: "Settlement",
       description: "Cost-of-living and relocation resources to help you land smoothly.",
     },
+    {
+      id: "other",
+      title: "Other Resources",
+      description: "Extra links that do not fit the main work sections yet.",
+    },
   ],
   travel: [
     {
@@ -138,6 +148,11 @@ export const SELF_HELP_CATEGORY_META = {
       id: "currency",
       title: "Currency / Travel Prep",
       description: "Rates, transfers, and light prep resources before takeoff.",
+    },
+    {
+      id: "other",
+      title: "Other Resources",
+      description: "Extra links that do not fit the main travel sections yet.",
     },
   ],
 };
@@ -1057,7 +1072,8 @@ resources.push(
   })
 );
 
-export const SELF_HELP_RESOURCES = resources;
+export const BUNDLED_SELF_HELP_RESOURCES = resources;
+export const SELF_HELP_RESOURCES = BUNDLED_SELF_HELP_RESOURCES;
 
 export function getSelfHelpCountries() {
   return [...ALL_COUNTRIES];
@@ -1102,12 +1118,23 @@ function byPriority(a, b) {
   return String(a.title || "").localeCompare(String(b.title || ""));
 }
 
-export function getSelfHelpResourceById(resourceId) {
-  return SELF_HELP_RESOURCES.find((resource) => resource.id === resourceId) || null;
+export function getSelfHelpResourceByIdFromList(resourceId, resourceList = SELF_HELP_RESOURCES) {
+  return (Array.isArray(resourceList) ? resourceList : SELF_HELP_RESOURCES).find(
+    (resource) => resource.id === resourceId
+  ) || null;
 }
 
-export function getSelfHelpResourcesForCategory(track, country, categoryId) {
-  return SELF_HELP_RESOURCES.filter(
+export function getSelfHelpResourceById(resourceId) {
+  return getSelfHelpResourceByIdFromList(resourceId, SELF_HELP_RESOURCES);
+}
+
+export function getSelfHelpResourcesForCategoryFromList(
+  track,
+  country,
+  categoryId,
+  resourceList = SELF_HELP_RESOURCES
+) {
+  return (Array.isArray(resourceList) ? resourceList : SELF_HELP_RESOURCES).filter(
     (resource) =>
       resource.category === categoryId &&
       isTrackMatch(resource, track) &&
@@ -1115,13 +1142,26 @@ export function getSelfHelpResourcesForCategory(track, country, categoryId) {
   ).sort(byPriority);
 }
 
-export function getSelfHelpSections(track, country) {
+export function getSelfHelpResourcesForCategory(track, country, categoryId) {
+  return getSelfHelpResourcesForCategoryFromList(track, country, categoryId, SELF_HELP_RESOURCES);
+}
+
+export function getSelfHelpSectionsFromList(track, country, resourceList = SELF_HELP_RESOURCES) {
   const categories = SELF_HELP_CATEGORY_META[track] || [];
 
   return categories
     .map((category) => ({
       ...category,
-      resources: getSelfHelpResourcesForCategory(track, country, category.id),
+      resources: getSelfHelpResourcesForCategoryFromList(
+        track,
+        country,
+        category.id,
+        resourceList
+      ),
     }))
     .filter((category) => category.resources.length > 0);
+}
+
+export function getSelfHelpSections(track, country) {
+  return getSelfHelpSectionsFromList(track, country, SELF_HELP_RESOURCES);
 }
