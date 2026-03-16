@@ -20,6 +20,10 @@ import {
   setDummyPaymentDraft,
 } from "../utils/dummyPayment";
 import { useRequestPricingEntry } from "../hooks/useRequestPricing";
+import {
+  buildRequestDefinitionKey,
+  fetchRequestDefinitionByKey,
+} from "../services/requestDefinitionService";
 
 const STANDALONE = isStandalone();
 
@@ -196,6 +200,60 @@ function normalizeUnlockPaymentReceipt(input) {
       .trim()
       .slice(0, 120),
   };
+}
+
+function stripModalTitlePrefix(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text
+    .replace(/^request:\s*/i, "")
+    .replace(/^continue:\s*/i, "")
+    .trim();
+}
+
+function normalizeExtraFieldSnapshot(input) {
+  if (!input || typeof input !== "object") return {};
+
+  const out = {};
+  Object.entries(input).forEach(([fieldId, entry]) => {
+    const id = String(fieldId || "").trim().slice(0, 80);
+    if (!id) return;
+
+    const value = String(entry?.value || "").trim().slice(0, 2000);
+    const fileMetas = Array.isArray(entry?.fileMetas)
+      ? entry.fileMetas.map(normalizeFileMeta).filter(Boolean)
+      : [];
+
+    if (!value && fileMetas.length === 0) return;
+
+    out[id] = {
+      value,
+      fileMetas,
+      files: [],
+    };
+  });
+
+  return out;
+}
+
+function serializeExtraFieldSnapshot(values) {
+  const out = {};
+  const source = values && typeof values === "object" ? values : {};
+
+  Object.entries(source).forEach(([fieldId, entry]) => {
+    const id = String(fieldId || "").trim().slice(0, 80);
+    if (!id) return;
+
+    const value = String(entry?.value || "").trim().slice(0, 2000);
+    const fileMetas = Array.isArray(entry?.fileMetas)
+      ? entry.fileMetas.map(normalizeFileMeta).filter(Boolean)
+      : [];
+
+    if (!value && fileMetas.length === 0) return;
+    out[id] = { value, fileMetas };
+  });
+
+  return out;
 }
 
 // Best-practice body lock for Android PWA keyboard stability
@@ -378,6 +436,10 @@ export default function RequestModal({
   const [note, setNote] = useState("");
   const [requestDraftId, setRequestDraftId] = useState("");
 
+  const [requestDefinition, setRequestDefinition] = useState(null);
+  const [definitionLoading, setDefinitionLoading] = useState(false);
+  const [extraFieldValues, setExtraFieldValues] = useState({});
+
   const [pickedFiles, setPickedFiles] = useState([]);
   const [pickedFileMetas, setPickedFileMetas] = useState([]);
   const [paid, setPaid] = useState(false);
@@ -392,6 +454,47 @@ export default function RequestModal({
     return Boolean(paymentContext?.unlockPaid || paymentContext?.unlockPaymentMeta);
   }, [paymentRequired, paymentContext]);
 
+  const definitionTitle = useMemo(() => {
+    const direct = String(
+      paymentContext?.requestDefinitionTitle ||
+        paymentContext?.serviceName ||
+        paymentContext?.selectedItem ||
+        ""
+    ).trim();
+    if (direct) return direct;
+    return stripModalTitlePrefix(title);
+  }, [paymentContext, title]);
+
+  const definitionKey = useMemo(() => {
+    return buildRequestDefinitionKey({
+      title: definitionTitle,
+      trackType: paymentContext?.track,
+      country: paymentContext?.country,
+    });
+  }, [definitionTitle, paymentContext?.track, paymentContext?.country]);
+
+  // Optional fallback: allow track+country "default" definitions like "Study Australia".
+  // This keeps strict matching by serviceName, but enables a safe, predictable fallback
+  // when no service-specific definition exists.
+  const fallbackDefinitionTitle = useMemo(() => {
+    const track = String(paymentContext?.track || "").trim().toLowerCase();
+    const country = String(paymentContext?.country || "").trim();
+    if (!track || !country) return "";
+    const trackLabel =
+      track === "work" ? "Work" : track === "travel" ? "Travel" : track === "study" ? "Study" : "";
+    if (!trackLabel) return "";
+    return `${trackLabel} ${country}`.trim();
+  }, [paymentContext?.track, paymentContext?.country]);
+
+  const fallbackDefinitionKey = useMemo(() => {
+    if (!fallbackDefinitionTitle) return "";
+    return buildRequestDefinitionKey({
+      title: fallbackDefinitionTitle,
+      trackType: paymentContext?.track,
+      country: paymentContext?.country,
+    });
+  }, [fallbackDefinitionTitle, paymentContext?.track, paymentContext?.country]);
+
   const liveRequestPricing = useRequestPricingEntry({
     pricingKey: paymentContext?.pricingKey,
     track: paymentContext?.track,
@@ -404,6 +507,78 @@ export default function RequestModal({
     const clean = String(paymentAmount || "").trim();
     return clean || liveRequestPricing.amountText || "";
   }, [paymentAmount, liveRequestPricing.amountText]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    if (!definitionKey) {
+      setRequestDefinition(null);
+      setDefinitionLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setDefinitionLoading(true);
+
+    (async () => {
+      try {
+        const primary = await fetchRequestDefinitionByKey(definitionKey);
+        if (cancelled) return;
+
+        if (primary) {
+          setRequestDefinition(primary);
+          return;
+        }
+
+        if (fallbackDefinitionKey && fallbackDefinitionKey !== definitionKey) {
+          const fallback = await fetchRequestDefinitionByKey(fallbackDefinitionKey);
+          if (cancelled) return;
+          setRequestDefinition(fallback || null);
+          return;
+        }
+
+        setRequestDefinition(null);
+      } catch (error) {
+        if (cancelled) return;
+        console.warn("request definition lookup failed:", error?.message || error);
+        setRequestDefinition(null);
+      } finally {
+        if (!cancelled) setDefinitionLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, definitionKey, fallbackDefinitionKey]);
+
+  const resolvedDefinition = useMemo(() => {
+    if (!requestDefinition || requestDefinition?.isActive === false) return null;
+    return requestDefinition;
+  }, [requestDefinition]);
+
+  const activeExtraFields = useMemo(() => {
+    const fields = Array.isArray(resolvedDefinition?.extraFields)
+      ? resolvedDefinition.extraFields
+      : [];
+    return fields
+      .filter((field) => field?.isActive !== false)
+      .sort((a, b) => Number(a?.sortOrder || 0) - Number(b?.sortOrder || 0));
+  }, [resolvedDefinition]);
+
+  const extraRequiredReady = useMemo(() => {
+    if (!activeExtraFields.length) return true;
+    return activeExtraFields.every((field) => {
+      if (!field?.required) return true;
+      const entry = extraFieldValues?.[field.id] || {};
+      if (String(field?.type || "").toLowerCase() === "document") {
+        const docCount =
+          (Array.isArray(entry?.files) ? entry.files.length : 0) ||
+          (Array.isArray(entry?.fileMetas) ? entry.fileMetas.length : 0);
+        return docCount > 0;
+      }
+      return String(entry?.value || "").trim().length > 0;
+    });
+  }, [activeExtraFields, extraFieldValues]);
 
   // Seed form state before paint on each open cycle to avoid visible field blink.
   useLayoutEffect(() => {
@@ -430,6 +605,7 @@ export default function RequestModal({
     const restoredMetas = (seededMetasRaw.length ? seededMetasRaw : storedMetasRaw)
       .map(normalizeFileMeta)
       .filter(Boolean);
+    const seededExtraRaw = seeded?.extraFieldValues ?? storedForm?.extraFieldValues ?? {};
     const storedPayment = getDummyPaymentState(draftId);
     const paidFromStorage = String(storedPayment?.status || "").toLowerCase() === "paid";
 
@@ -444,6 +620,7 @@ export default function RequestModal({
     );
     setTown(seeded?.town ?? seeded?.city ?? storedForm?.town ?? storedForm?.city ?? defaultTown ?? "");
     setNote(seeded?.note ?? storedForm?.note ?? "");
+    setExtraFieldValues(normalizeExtraFieldSnapshot(seededExtraRaw));
     setPickedFiles([]);
     setPickedFileMetas(restoredMetas);
     setPaid(Boolean(forcePaid || seeded?.paid || storedForm?.paid || paidFromStorage));
@@ -456,12 +633,34 @@ export default function RequestModal({
   }, [open, defaultName, defaultPhone, defaultEmail, defaultCounty, defaultTown, initialState, queryDraftId, forcePaid]);
 
   useEffect(() => {
+    if (!open) return;
+    if (!activeExtraFields.length) {
+      setExtraFieldValues((prev) => (Object.keys(prev || {}).length ? {} : prev));
+      return;
+    }
+
+    setExtraFieldValues((prev) => {
+      const next = {};
+      activeExtraFields.forEach((field) => {
+        const existing = prev?.[field.id];
+        if (existing) {
+          next[field.id] = existing;
+        } else {
+          next[field.id] = { value: "", fileMetas: [], files: [] };
+        }
+      });
+      return next;
+    });
+  }, [open, activeExtraFields]);
+
+  useEffect(() => {
     if (!open) {
       lastStateEmitRef.current = "";
       return;
     }
     if (typeof onStateChange !== "function") return;
 
+    const extraFieldSnapshot = serializeExtraFieldSnapshot(extraFieldValues);
     const payload = {
       open: Boolean(open),
       step: forcePaid || paid ? "submit" : "form",
@@ -474,6 +673,7 @@ export default function RequestModal({
         city: String(town || ""),
         note: String(note || ""),
         fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        extraFieldValues: extraFieldSnapshot,
         paid: Boolean(forcePaid || paid),
         requestDraftId: String(requestDraftId || ""),
       },
@@ -489,12 +689,27 @@ export default function RequestModal({
     }, 90);
 
     return () => clearTimeout(timer);
-  }, [onStateChange, open, paid, forcePaid, name, phone, email, county, town, note, pickedFileMetas, requestDraftId]);
+  }, [
+    onStateChange,
+    open,
+    paid,
+    forcePaid,
+    name,
+    phone,
+    email,
+    county,
+    town,
+    note,
+    pickedFileMetas,
+    requestDraftId,
+    extraFieldValues,
+  ]);
 
   useEffect(() => {
     if (!open) return;
     if (!requestDraftId) return;
 
+    const extraFieldSnapshot = serializeExtraFieldSnapshot(extraFieldValues);
     setDummyPaymentDraft(requestDraftId, {
       requestDraftId: String(requestDraftId || ""),
       formState: {
@@ -506,6 +721,7 @@ export default function RequestModal({
         city: String(town || ""),
         note: String(note || ""),
         fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        extraFieldValues: extraFieldSnapshot,
         paid: Boolean(forcePaid || paid),
         requestDraftId: String(requestDraftId || ""),
       },
@@ -527,6 +743,7 @@ export default function RequestModal({
     forcePaid,
     paymentContext,
     resolvedPaymentAmount,
+    extraFieldValues,
   ]);
 
   // lock body scroll (ANDROID SAFE)
@@ -574,9 +791,21 @@ export default function RequestModal({
       isValidEmail(email) &&
       String(county || "").trim().length > 0 &&
       hasPaymentGatePassed &&
+      extraRequiredReady &&
+      !definitionLoading &&
       !loading
     );
-  }, [name, phone, email, county, paid, paymentRequired, loading]);
+  }, [
+    name,
+    phone,
+    email,
+    county,
+    paid,
+    paymentRequired,
+    loading,
+    extraRequiredReady,
+    definitionLoading,
+  ]);
 
   if (!open) return null;
 
@@ -619,6 +848,7 @@ export default function RequestModal({
     const returnTo = qs.toString() ? `${location.pathname}?${qs.toString()}` : location.pathname;
     const amountText = resolvedPaymentAmount;
 
+    const extraFieldSnapshot = serializeExtraFieldSnapshot(extraFieldValues);
     setRequestDraftId(draftId);
     setDummyPaymentDraft(draftId, {
       requestDraftId: draftId,
@@ -631,6 +861,7 @@ export default function RequestModal({
         city: String(town || ""),
         note: String(note || ""),
         fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        extraFieldValues: extraFieldSnapshot,
         paid: Boolean(forcePaid || paid),
         requestDraftId: draftId,
       },
@@ -666,6 +897,7 @@ export default function RequestModal({
           city: String(town || ""),
           note: String(note || ""),
           fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+          extraFieldValues: extraFieldSnapshot,
         },
       },
     });
@@ -675,6 +907,171 @@ export default function RequestModal({
     navigate(buildLegalDocRoute(docKey, { scope: "app" }), {
       state: { backTo: `${location.pathname}${location.search}` },
     });
+  };
+
+  const updateExtraFieldValue = (fieldId, patch) => {
+    if (!fieldId) return;
+    setExtraFieldValues((prev) => ({
+      ...(prev || {}),
+      [fieldId]: {
+        ...(prev?.[fieldId] || {}),
+        ...(patch || {}),
+      },
+    }));
+  };
+
+  const handleExtraFieldChange = (field, nextValue) => {
+    const safeField = field || {};
+    const raw = String(nextValue || "");
+    const shouldDigitsOnly =
+      String(safeField.type || "").toLowerCase() === "number" || safeField.digitsOnly;
+    let cleaned = shouldDigitsOnly ? raw.replace(/[^\d]/g, "") : raw;
+    const maxLength = Number(safeField.maxLength || 0);
+    if (maxLength > 0) cleaned = cleaned.slice(0, maxLength);
+    updateExtraFieldValue(safeField.id, { value: cleaned });
+  };
+
+  const handleExtraDocumentChange = (field, fileList) => {
+    const safeField = field || {};
+    const files = Array.isArray(fileList)
+      ? fileList.slice(0, 1)
+      : Array.from(fileList || []).slice(0, 1);
+    updateExtraFieldValue(safeField.id, {
+      files,
+      fileMetas: files.map(fileToMeta),
+    });
+  };
+
+  const clearExtraDocument = (fieldId) => {
+    updateExtraFieldValue(fieldId, { files: [], fileMetas: [] });
+  };
+
+  const validateExtraFields = () => {
+    if (!activeExtraFields.length) return "";
+
+    const maxBytes = maxPdfMb * 1024 * 1024;
+    for (const field of activeExtraFields) {
+      const entry = extraFieldValues?.[field.id] || {};
+      const type = String(field?.type || "").toLowerCase();
+
+      if (type === "document") {
+        const files = Array.isArray(entry?.files) ? entry.files : [];
+        const metas = Array.isArray(entry?.fileMetas) ? entry.fileMetas : [];
+        const docCount = files.length || metas.length;
+
+        if (field.required && docCount === 0) {
+          return `Please upload ${field.label || "the required document"}.`;
+        }
+
+        const badType = files.find((f) => !isPdfFile(f));
+        if (badType) {
+          return `${field.label || "Document"} must be a PDF file.`;
+        }
+
+        const tooBig = files.find((f) => (f?.size || 0) > maxBytes);
+        if (tooBig) {
+          return `${field.label || "Document"} is too large. Max size is ${maxPdfMb}MB.`;
+        }
+
+        continue;
+      }
+
+      const value = String(entry?.value || "").trim();
+      if (field.required && !value) {
+        return `${field.label || "This field"} is required.`;
+      }
+      if (!value) continue;
+
+      if (field.digitsOnly && /[^\d]/.test(value)) {
+        return `${field.label || "This field"} must contain digits only.`;
+      }
+
+      const minLength = Number(field.minLength || 0);
+      if (minLength > 0 && value.length < minLength) {
+        return `${field.label || "This field"} must be at least ${minLength} characters.`;
+      }
+
+      const maxLength = Number(field.maxLength || 0);
+      if (maxLength > 0 && value.length > maxLength) {
+        return `${field.label || "This field"} must be ${maxLength} characters or fewer.`;
+      }
+    }
+
+    return "";
+  };
+
+  const buildExtraFieldPayload = () => {
+    if (!resolvedDefinition || !activeExtraFields.length) {
+      return { extraFieldAnswers: null, extraDocFiles: [], extraDocMetas: [] };
+    }
+
+    const answers = [];
+    const extraDocFiles = [];
+    const extraDocMetas = [];
+
+    activeExtraFields.forEach((field) => {
+      const entry = extraFieldValues?.[field.id] || {};
+      const type = String(field?.type || "").toLowerCase();
+      const label = String(field?.label || "").trim();
+      const value = type === "document" ? "" : String(entry?.value || "").trim();
+      const fileMetas = Array.isArray(entry?.fileMetas)
+        ? entry.fileMetas.map(normalizeFileMeta).filter(Boolean)
+        : [];
+      const files = Array.isArray(entry?.files) ? entry.files.filter(Boolean) : [];
+
+      if (type === "document") {
+        if (files.length) {
+          files.forEach((file) => {
+            if (!file) return;
+            extraDocFiles.push({
+              file,
+              fieldId: String(field?.id || "").trim(),
+              fieldLabel: label,
+              kind: "extra_field_document",
+            });
+          });
+        }
+        if (fileMetas.length) {
+          fileMetas.forEach((meta) => {
+            extraDocMetas.push({
+              ...meta,
+              fieldId: String(field?.id || "").trim(),
+              fieldLabel: label,
+              kind: "extra_field_document",
+            });
+          });
+        }
+      }
+
+      const hasValue = value.length > 0;
+      const hasDocs = type === "document" && fileMetas.length > 0;
+      if (!hasValue && !hasDocs) return;
+
+      answers.push({
+        id: String(field?.id || "").trim(),
+        label,
+        type: type || "text",
+        required: Boolean(field?.required),
+        value: hasValue ? value : "",
+        fileMetas: hasDocs ? fileMetas : [],
+        sortOrder: Number(field?.sortOrder || 0),
+      });
+    });
+
+    const definitionMeta = {
+      definitionId: String(resolvedDefinition?.id || ""),
+      definitionKey: String(resolvedDefinition?.definitionKey || definitionKey || ""),
+      title: String(resolvedDefinition?.title || definitionTitle || ""),
+      trackType: String(resolvedDefinition?.trackType || paymentContext?.track || ""),
+      country: String(resolvedDefinition?.country || paymentContext?.country || ""),
+      answers,
+    };
+
+    return {
+      extraFieldAnswers: definitionMeta,
+      extraDocFiles,
+      extraDocMetas,
+    };
   };
 
   const submit = async () => {
@@ -692,8 +1089,16 @@ export default function RequestModal({
     if (!isValidEmail(cleanEmail)) return setErr("Please enter a valid email address.");
     if (!cleanCounty) return setErr("Please select your county.");
     if (paymentRequired && !paid) return setErr("Please press Pay first to unlock sending.");
+    if (definitionLoading) return setErr("Please wait for additional fields to load.");
+
+    const extraFieldError = validateExtraFields();
+    if (extraFieldError) return setErr(extraFieldError);
+
+    const { extraFieldAnswers, extraDocFiles, extraDocMetas } =
+      buildExtraFieldPayload();
 
     let fileMetas = [];
+    let attachmentFiles = [];
     if (enableAttachments) {
       const maxBytes = maxPdfMb * 1024 * 1024;
 
@@ -705,10 +1110,14 @@ export default function RequestModal({
 
       const liveMetas = Array.isArray(pickedFiles) ? pickedFiles.map(fileToMeta) : [];
       fileMetas = liveMetas.length ? liveMetas : (Array.isArray(pickedFileMetas) ? pickedFileMetas : []);
+      attachmentFiles = Array.isArray(pickedFiles) ? pickedFiles : [];
     } else {
       if (pickedFiles.length) setPickedFiles([]);
       if (pickedFileMetas.length) setPickedFileMetas([]);
     }
+
+    const mergedFileMetas = [...fileMetas, ...(extraDocMetas || [])];
+    const mergedFiles = [...attachmentFiles, ...(extraDocFiles || [])];
 
     setLoading(true);
     try {
@@ -726,16 +1135,17 @@ export default function RequestModal({
         city: cleanTown,
         note: String(note || "").trim(),
 
-        dummyFiles: enableAttachments ? pickedFiles : [],
+        dummyFiles: mergedFiles,
 
         requestUploadMeta:
-          enableAttachments && fileMetas.length > 0
+          mergedFileMetas.length > 0
             ? {
-                count: fileMetas.length,
-                files: fileMetas,
+                count: mergedFileMetas.length,
+                files: mergedFileMetas,
                 note: "User selected PDF files (metadata only).",
               }
             : null,
+        extraFieldAnswers: extraFieldAnswers || null,
 
         paid: Boolean(paymentRequired ? paid : true),
         paymentMeta: unlockPaymentReceipt
@@ -986,6 +1396,146 @@ export default function RequestModal({
                     />
                   </div>
                 </div>
+
+                {definitionLoading ? (
+                  <div className="rounded-2xl border border-zinc-200 bg-white/70 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+                    Loading additional fields...
+                  </div>
+                ) : null}
+
+                {activeExtraFields.length ? (
+                  <>
+                    <div className="pt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      Additional details
+                    </div>
+                    {activeExtraFields.map((field) => {
+                      const fieldId = String(field?.id || "").trim();
+                      const type = String(field?.type || "text").toLowerCase();
+                      const label = String(field?.label || "Field").trim();
+                      const helperText = String(field?.helperText || "").trim();
+                      const placeholder = String(field?.placeholder || "").trim();
+                      const required = Boolean(field?.required);
+                      const minLength = Number(field?.minLength || 0);
+                      const maxLength = Number(field?.maxLength || 0);
+                      const entry = extraFieldValues?.[fieldId] || {};
+                      const digitsOnly = type === "number" || field?.digitsOnly;
+
+                      if (type === "textarea") {
+                        return (
+                          <div key={fieldId}>
+                            <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                              {label}
+                              {required ? <span className="text-rose-600"> *</span> : null}
+                            </label>
+                            <div className={fieldWrap + " items-start"}>
+                              <IconNote className="h-5 w-5 text-zinc-500 mt-0.5" />
+                              <textarea
+                                className={inputBase + " min-h-[112px] resize-none"}
+                                value={entry?.value || ""}
+                                onChange={(e) => handleExtraFieldChange(field, e.target.value)}
+                                placeholder={placeholder || "Enter details..."}
+                                disabled={loading}
+                                minLength={minLength > 0 ? minLength : undefined}
+                                maxLength={maxLength > 0 ? maxLength : undefined}
+                                {...textareaFocusProps}
+                              />
+                            </div>
+                            {helperText ? (
+                              <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                {helperText}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      }
+
+                      if (type === "document") {
+                        const fileMetas = Array.isArray(entry?.fileMetas) && entry.fileMetas.length
+                          ? entry.fileMetas
+                          : Array.isArray(entry?.files)
+                            ? entry.files.map(fileToMeta)
+                            : [];
+                        const inputKey = `${fieldId}-${fileMetas.length}`;
+
+                        return (
+                          <div key={fieldId}>
+                            <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                              {label}
+                              {required ? <span className="text-rose-600"> *</span> : null}
+                            </label>
+                            <div className="mt-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+                              <input
+                                key={inputKey}
+                                type="file"
+                                accept="application/pdf"
+                                disabled={loading}
+                                onChange={(e) => handleExtraDocumentChange(field, e.target.files)}
+                                className="w-full text-sm text-zinc-900 dark:text-zinc-100"
+                              />
+                              {helperText ? (
+                                <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                                  {helperText}
+                                </div>
+                              ) : null}
+                              <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                                PDFs only. Max {maxPdfMb}MB each.
+                              </div>
+                              {fileMetas.length ? (
+                                <div className="mt-3 grid gap-2">
+                                  {fileMetas.map((f, idx) => (
+                                    <div
+                                      key={`${fieldId}-${f.name}-${idx}`}
+                                      className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
+                                    >
+                                      {f.name} - {Math.round((f.size || 0) / 1024)} KB
+                                    </div>
+                                  ))}
+                                  <button
+                                    type="button"
+                                    onClick={() => clearExtraDocument(fieldId)}
+                                    disabled={loading}
+                                    className="text-left text-xs font-semibold text-rose-600 transition hover:text-rose-700 disabled:opacity-60"
+                                  >
+                                    Remove document
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div key={fieldId}>
+                          <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                            {label}
+                            {required ? <span className="text-rose-600"> *</span> : null}
+                          </label>
+                          <div className={fieldWrap}>
+                            <input
+                              className={inputBase}
+                              value={entry?.value || ""}
+                              onChange={(e) => handleExtraFieldChange(field, e.target.value)}
+                              placeholder={placeholder || "Enter value"}
+                              disabled={loading}
+                              inputMode={digitsOnly ? "numeric" : "text"}
+                              pattern={digitsOnly ? "[0-9]*" : undefined}
+                              minLength={minLength > 0 ? minLength : undefined}
+                              maxLength={maxLength > 0 ? maxLength : undefined}
+                              enterKeyHint="next"
+                              {...focusProps}
+                            />
+                          </div>
+                          {helperText ? (
+                            <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                              {helperText}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : null}
 
                 {/* Upload PDFs */}
                 {enableAttachments ? (

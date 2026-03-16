@@ -366,6 +366,9 @@ export async function updatePricing({
   requestType = "",
   amount,
   currency = "KES",
+  label = "",
+  note = "",
+  tag = "",
 } = {}) {
   const nextAmount = normalizePricingAmountValue(amount, 0);
   if (nextAmount <= 0) {
@@ -387,6 +390,9 @@ export async function updatePricing({
     track,
     country,
     serviceName,
+    label,
+    note,
+    tag,
     amount: nextAmount,
     currency,
   });

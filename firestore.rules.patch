@@ -38,9 +38,14 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      return signedIn()
-        && request.auth.token.email != null
-        && lower(request.auth.token.email) == "brioneroo@gmail.com";
+      return signedIn() && (
+        (
+          request.auth.token.email != null
+          && lower(request.auth.token.email) == "brioneroo@gmail.com"
+        ) ||
+        userRole(authUid()) == "superadmin" ||
+        userRole(authUid()) == "super_admin"
+      );
     }
 
     function isAssignedAdmin() {
@@ -231,6 +236,11 @@ service cloud.firestore {
     }
 
     match /pricingRules/{pricingKey} {
+      allow read: if signedIn();
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /requestDefinitions/{definitionId} {
       allow read: if signedIn();
       allow create, update, delete: if isSuperAdmin();
     }

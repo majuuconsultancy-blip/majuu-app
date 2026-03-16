@@ -42,6 +42,12 @@ function safeBoolean(value) {
   return Boolean(value);
 }
 
+function safeNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, n));
+}
+
 function safeSearch(value) {
   const text = safeString(value, 300);
   if (!text) return "";
@@ -175,6 +181,43 @@ function sanitizePendingExternalLink(value) {
   };
 }
 
+function sanitizeFileMetas(input, { maxItems = 12 } = {}) {
+  const list = Array.isArray(input) ? input : [];
+  const out = [];
+
+  for (const meta of list) {
+    const name = safeString(meta?.name, 120);
+    if (!name) continue;
+    out.push({
+      name,
+      size: safeNumber(meta?.size, 0, 50 * 1024 * 1024),
+      type: safeString(meta?.type, 80),
+      lastModified: safeNumber(meta?.lastModified, 0, Number.MAX_SAFE_INTEGER),
+    });
+    if (out.length >= maxItems) break;
+  }
+
+  return out;
+}
+
+function sanitizeExtraFieldValues(input) {
+  if (!isObject(input)) return null;
+  const out = {};
+  const entries = Object.entries(input);
+
+  for (const [fieldId, entry] of entries) {
+    const id = safeString(fieldId, 80);
+    if (!id) continue;
+    const value = safeString(entry?.value, 2000);
+    const fileMetas = sanitizeFileMetas(entry?.fileMetas, { maxItems: 6 });
+    if (!value && fileMetas.length === 0) continue;
+    out[id] = { value, fileMetas };
+    if (Object.keys(out).length >= 40) break;
+  }
+
+  return Object.keys(out).length ? out : null;
+}
+
 function sanitizeRequestModal(value) {
   if (!isObject(value)) {
     return {
@@ -196,9 +239,14 @@ function sanitizeRequestModal(value) {
           name: safeString(value.formState.name, 140),
           phone: safeString(value.formState.phone, 60),
           email: safeString(value.formState.email, 140),
+          county: safeString(value.formState.county, 80),
+          town: safeString(value.formState.town, 80),
           city: safeString(value.formState.city, 80),
           note: safeString(value.formState.note, 600),
+          fileMetas: sanitizeFileMetas(value.formState.fileMetas, { maxItems: 12 }),
+          extraFieldValues: sanitizeExtraFieldValues(value.formState.extraFieldValues),
           paid: safeBoolean(value.formState.paid),
+          requestDraftId: safeString(value.formState.requestDraftId, 140),
         }
       : null,
   };

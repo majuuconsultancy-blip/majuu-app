@@ -52,6 +52,7 @@ import {
   createPendingAttachmentFromMeta,
 } from "../services/attachmentservice";
 import {
+  buildRequestPricingKey,
   findRequestCatalogEntry,
   listSingleRequestCatalogByTrack,
 } from "../constants/requestCatalog";
@@ -59,6 +60,7 @@ import {
   getRequestPricingQuote,
   toRequestPricingSnapshot,
 } from "../services/pricingservice";
+import { subscribeActiveRequestDefinitions } from "../services/requestDefinitionService";
 import { setSnapshot } from "../resume/resumeEngine";
 
 const FULL_PACKAGE = [
@@ -94,7 +96,16 @@ function buildSingleRequestMeta(serviceName, country = "") {
   return {
     requestType: "single",
     serviceName: entry?.serviceName || fallbackName,
-    pricingKey: entry?.pricingKey || "",
+    pricingKey:
+      entry?.pricingKey ||
+      buildRequestPricingKey({
+        track: "work",
+        requestType: "single",
+        country,
+        serviceName: entry?.serviceName || fallbackName,
+      }) ||
+      "",
+    isCustom: !entry,
   };
 }
 
@@ -216,6 +227,10 @@ export default function WorkWeHelp() {
   const [fullPackageDetailsOpen, setFullPackageDetailsOpen] = useState(false);
   const [toast, setToast] = useState("");
 
+  const [activeDefinitions, setActiveDefinitions] = useState([]);
+  const [definitionsLoading, setDefinitionsLoading] = useState(false);
+  const [definitionsErr, setDefinitionsErr] = useState("");
+
   const canUseWeHelp = missing.length === 0 && profileChecked;
 
   // ✅ TrackScreen destination
@@ -273,6 +288,34 @@ export default function WorkWeHelp() {
 
     return () => unsub();
   }, [navigate]);
+
+  useEffect(() => {
+    if (!uid) return undefined;
+    if (!country || country === "Not selected") {
+      setActiveDefinitions([]);
+      setDefinitionsErr("");
+      setDefinitionsLoading(false);
+      return undefined;
+    }
+
+    setDefinitionsLoading(true);
+    setDefinitionsErr("");
+
+    return subscribeActiveRequestDefinitions({
+      trackType: "work",
+      country,
+      onData: (rows) => {
+        setActiveDefinitions(Array.isArray(rows) ? rows : []);
+        setDefinitionsLoading(false);
+      },
+      onError: (error) => {
+        console.error("active request definitions subscription failed:", error);
+        setActiveDefinitions([]);
+        setDefinitionsErr(error?.message || "Failed to load request definitions.");
+        setDefinitionsLoading(false);
+      },
+    });
+  }, [uid, country]);
 
   useEffect(() => {
     if (resumeRestoreAppliedRef.current) return;
@@ -370,6 +413,44 @@ export default function WorkWeHelp() {
     setModalOpen(true);
   };
 
+  const openDefinition = async (definition) => {
+    const title = String(definition?.title || definition || "").trim();
+    if (!title) return;
+    if (!canUseWeHelp) return;
+    if (!country || country === "Not selected") {
+      alert("Pick a destination country first so we can load the correct request price.");
+      return;
+    }
+
+    const meta = buildSingleRequestMeta(title, country);
+
+    if (meta?.isCustom) {
+      try {
+        const quote = await getRequestPricingQuote({
+          pricingKey: meta.pricingKey,
+          track: "work",
+          country,
+          serviceName: meta.serviceName,
+          requestType: meta.requestType,
+        });
+        if (!quote) {
+          alert(
+            "This request is configured in SACC but is not live yet: pricing is not set for it."
+          );
+          return;
+        }
+      } catch (error) {
+        console.warn("pricing quote check failed:", error);
+        alert("Failed to verify pricing for this request. Try again.");
+        return;
+      }
+    }
+
+    setModalResumeState(null);
+    setRequestMeta(meta);
+    setModalOpen(true);
+  };
+
   const openFull = () => {
     if (!canUseWeHelp) return;
     setDiagnosticOpen(true);
@@ -380,6 +461,23 @@ export default function WorkWeHelp() {
   // ✅ Attachments on all single-package requests
   const enableAttachments = requestMeta?.requestType === "single";
   const singleServices = useMemo(() => listSingleRequestCatalogByTrack("work"), []);
+
+  const visibleDefinitions = useMemo(() => {
+    const builtInTitles = new Set(
+      singleServices
+        .map((service) => String(service?.serviceName || service?.title || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+    const defs = Array.isArray(activeDefinitions) ? activeDefinitions : [];
+    return defs
+      .filter((def) => {
+        const title = String(def?.title || "").trim();
+        if (!title) return false;
+        return !builtInTitles.has(title.toLowerCase());
+      })
+      .sort((a, b) => String(a?.title || "").localeCompare(String(b?.title || "")));
+  }, [activeDefinitions, singleServices]);
 
   const filteredSingles = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -400,6 +498,7 @@ export default function WorkWeHelp() {
     note,
     dummyFiles,
     requestUploadMeta,
+    extraFieldAnswers,
     email: formEmail,
     county,
     town,
@@ -470,6 +569,7 @@ export default function WorkWeHelp() {
         paymentMeta: paymentMeta || null,
         pricingSnapshot: appliedPricing,
         requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
+        extraFieldAnswers: extraFieldAnswers || null,
       });
 
       try {
@@ -716,6 +816,57 @@ export default function WorkWeHelp() {
             </div>
           ) : null}
         </motion.div>
+
+        {/* Requests configured in SACC (per track/country) */}
+        <div className="mt-6">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+                Requests
+              </h2>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                Requests configured in SACC for Work {country}. Built-in single packages stay
+                below.
+              </p>
+            </div>
+            <span className="text-xs font-semibold text-zinc-500">
+              {visibleDefinitions.length} configured
+            </span>
+          </div>
+
+          {definitionsErr ? (
+            <div className="mt-4 rounded-3xl border border-rose-200 bg-rose-50/70 p-5 text-sm text-rose-700 shadow-sm backdrop-blur dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-200">
+              {definitionsErr}
+            </div>
+          ) : definitionsLoading && visibleDefinitions.length === 0 ? (
+            <div className="mt-4 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 text-sm text-zinc-600 dark:text-zinc-300 shadow-sm backdrop-blur">
+              Loading request definitions...
+            </div>
+          ) : visibleDefinitions.length === 0 ? (
+            <div className="mt-4 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 text-sm text-zinc-600 dark:text-zinc-300 shadow-sm backdrop-blur">
+              No custom requests configured yet for this route.
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3">
+              {visibleDefinitions.map((def) => {
+                const count = Number(def?.activeExtraFieldCount || 0);
+                const note = count > 0 ? `${count} extra fields` : "No extra fields configured yet";
+                return (
+                  <ServiceTile
+                    key={def.definitionKey || def.id}
+                    s={{
+                      serviceName: def.title,
+                      note,
+                      tag: "SACC",
+                    }}
+                    disabled={!canUseWeHelp}
+                    onClick={() => void openDefinition(def)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Single services */}
         <div className="mt-6">

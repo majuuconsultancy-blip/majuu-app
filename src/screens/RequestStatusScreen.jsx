@@ -20,6 +20,7 @@ import {
 import { motion, AnimatePresence } from "../utils/motionProxy";
 import RequestChatLauncher from "../components/RequestChatLauncher";
 import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
+import RequestExtraDetailsSection from "../components/RequestExtraDetailsSection";
 
 import { auth, db } from "../firebase";
 import { clearActiveProcess } from "../services/userservice";
@@ -895,6 +896,8 @@ export default function RequestStatusScreen() {
                     <div className="mt-2 text-sm text-zinc-800 whitespace-pre-wrap">{req.note}</div>
                   </div>
                 ) : null}
+
+                <RequestExtraDetailsSection request={req} title="Extra details" />
               </div>
 
               {(st === "rejected" || st === "closed" || st === "contacted") && adminNote ?(

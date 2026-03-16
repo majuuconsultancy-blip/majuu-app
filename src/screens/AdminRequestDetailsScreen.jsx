@@ -25,6 +25,7 @@ import { ArrowLeft, FileText, Check, X, ChevronRight, ChevronDown, Link2, Trash2
 import AssignStaffPanel from "../components/AssignStaffPanel";
 import AdminRequestChatLauncher from "../components/AdminRequestChatLauncher";
 import AppIcon from "../components/AppIcon";
+import RequestExtraDetailsSection from "../components/RequestExtraDetailsSection";
 import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { smartBack } from "../utils/navBack";
@@ -892,7 +893,7 @@ export default function AdminRequestDetailsScreen() {
                   <option value="">Auto best route</option>
                   {assignedAdminRows.map((row) => (
                     <option key={row.uid} value={row.uid}>
-                      {`${String(row?.email || "No email")} · ${String(row?.uid || "")}`}
+                      {`${String(row?.email || "No email")} - ${String(row?.uid || "")}`}
                     </option>
                   ))}
                 </select>
@@ -1257,6 +1258,8 @@ export default function AdminRequestDetailsScreen() {
                 No note provided.
               </div>
             )}
+
+            <RequestExtraDetailsSection request={req} title="Extra details" />
           </div>
         </CollapsibleSectionCard>
 

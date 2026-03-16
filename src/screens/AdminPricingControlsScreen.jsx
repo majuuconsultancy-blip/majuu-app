@@ -16,11 +16,13 @@ import {
   APP_TRACK_META,
   APP_TRACK_OPTIONS,
 } from "../constants/migrationOptions";
+import { buildRequestPricingKey, findRequestCatalogEntry } from "../constants/requestCatalog";
 import {
   useFullPackagePricingList,
   useRequestPricingList,
 } from "../hooks/useRequestPricing";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
+import { subscribeAllRequestDefinitions } from "../services/requestDefinitionService";
 import {
   formatPricingMoney,
   normalizePricingAmountValue,
@@ -150,7 +152,9 @@ function PricingRowsTable({
                 <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
                   Current:{" "}
                   <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                    {formatPricingMoney(row.amount, row.currency)}
+                    {Number(row.amount || 0) > 0
+                      ? formatPricingMoney(row.amount, row.currency)
+                      : "Not set"}
                   </span>
                 </div>
               </div>
@@ -190,6 +194,10 @@ export default function AdminPricingControlsScreen() {
   const navigate = useNavigate();
   const [checkingRole, setCheckingRole] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  const [requestDefinitions, setRequestDefinitions] = useState([]);
+  const [definitionsLoading, setDefinitionsLoading] = useState(false);
+  const [definitionsErr, setDefinitionsErr] = useState("");
 
   const [search, setSearch] = useState("");
   const [fullOpen, setFullOpen] = useState(true);
@@ -236,9 +244,123 @@ export default function AdminPricingControlsScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isSuperAdmin) return undefined;
+
+    setDefinitionsLoading(true);
+    setDefinitionsErr("");
+
+    return subscribeAllRequestDefinitions({
+      onData: (rows) => {
+        setRequestDefinitions(Array.isArray(rows) ? rows : []);
+        setDefinitionsLoading(false);
+      },
+      onError: (error) => {
+        console.error(error);
+        setRequestDefinitions([]);
+        setDefinitionsErr(error?.message || "Failed to load request definitions.");
+        setDefinitionsLoading(false);
+      },
+    });
+  }, [isSuperAdmin]);
+
+  const customDefinitionRows = useMemo(() => {
+    const existingKeys = new Set(
+      (Array.isArray(singlePricing.rows) ? singlePricing.rows : [])
+        .map((row) => safeString(row?.pricingKey, 200))
+        .filter(Boolean)
+    );
+
+    const trackFilter = safeString(singleTrack, 20).toLowerCase();
+    const countryFilter = safeString(singleCountry, 120);
+
+    const defs = Array.isArray(requestDefinitions) ? requestDefinitions : [];
+
+    return defs
+      .filter((def) => {
+        const title = safeString(def?.title, 140);
+        const track = safeString(def?.trackType, 20).toLowerCase();
+        const country = safeString(def?.country, 120);
+        if (!title || !track || !country) return false;
+
+        if (trackFilter && track !== trackFilter) return false;
+        if (countryFilter && country !== countryFilter) return false;
+
+        const builtInEntry = findRequestCatalogEntry({
+          track,
+          requestType: "single",
+          country,
+          serviceName: title,
+        });
+        if (builtInEntry) return false;
+
+        const pricingKey = buildRequestPricingKey({
+          track,
+          requestType: "single",
+          country,
+          serviceName: title,
+        });
+        if (!pricingKey) return false;
+        if (existingKeys.has(pricingKey)) return false;
+
+        return true;
+      })
+      .map((def) => {
+        const title = safeString(def?.title, 140);
+        const track = safeString(def?.trackType, 20).toLowerCase();
+        const country = safeString(def?.country, 120);
+        const pricingKey = buildRequestPricingKey({
+          track,
+          requestType: "single",
+          country,
+          serviceName: title,
+        });
+
+        const extraCount = Number(def?.activeExtraFieldCount ?? def?.extraFieldCount ?? 0);
+        const extraNote = extraCount > 0 ? `${extraCount} extra fields` : "No extra fields";
+        const activeNote = def?.isActive === false ? "Inactive definition" : "";
+        const note = ["SACC request", extraNote, activeNote].filter(Boolean).join(" • ");
+
+        return {
+          pricingKey,
+          scope: "single_request",
+          requestType: "single",
+          track,
+          country,
+          serviceName: title,
+          label: title,
+          note,
+          tag: "SACC",
+          currency: "KES",
+          amount: 0,
+          defaultAmount: 0,
+          source: "definition",
+        };
+      })
+      .sort((a, b) => {
+        const trackGap = safeString(a?.track, 20).localeCompare(safeString(b?.track, 20));
+        if (trackGap !== 0) return trackGap;
+        const countryGap = safeString(a?.country, 120).localeCompare(safeString(b?.country, 120));
+        if (countryGap !== 0) return countryGap;
+        return safeString(a?.serviceName, 160).localeCompare(safeString(b?.serviceName, 160));
+      });
+  }, [requestDefinitions, singleCountry, singlePricing.rows, singleTrack]);
+
+  const combinedSingleRows = useMemo(() => {
+    const base = Array.isArray(singlePricing.rows) ? singlePricing.rows : [];
+    const custom = Array.isArray(customDefinitionRows) ? customDefinitionRows : [];
+    return [...base, ...custom].sort((a, b) => {
+      const trackGap = safeString(a?.track, 20).localeCompare(safeString(b?.track, 20));
+      if (trackGap !== 0) return trackGap;
+      const countryGap = safeString(a?.country, 120).localeCompare(safeString(b?.country, 120));
+      if (countryGap !== 0) return countryGap;
+      return safeString(a?.serviceName, 160).localeCompare(safeString(b?.serviceName, 160));
+    });
+  }, [customDefinitionRows, singlePricing.rows]);
+
   const allRows = useMemo(
-    () => [...singlePricing.rows, ...fullPricing.rows],
-    [singlePricing.rows, fullPricing.rows]
+    () => [...combinedSingleRows, ...fullPricing.rows],
+    [combinedSingleRows, fullPricing.rows]
   );
 
   useEffect(() => {
@@ -257,8 +379,8 @@ export default function AdminPricingControlsScreen() {
 
   const searchValue = safeString(search, 120);
   const filteredSingleRows = useMemo(
-    () => singlePricing.rows.filter((row) => matchesSearch(row, searchValue)),
-    [searchValue, singlePricing.rows]
+    () => combinedSingleRows.filter((row) => matchesSearch(row, searchValue)),
+    [combinedSingleRows, searchValue]
   );
   const filteredFullRows = useMemo(() => {
     if (!fullTrack || !fullCountry) return [];
@@ -330,6 +452,9 @@ export default function AdminPricingControlsScreen() {
         country: row.country,
         serviceName: row.serviceName,
         requestType: row.requestType,
+        label: row.label,
+        note: row.note,
+        tag: row.tag,
         amount: nextAmount,
         currency: row.currency,
       });

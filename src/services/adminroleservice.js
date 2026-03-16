@@ -79,8 +79,8 @@ export function resolveRoleFromUserDoc({
     return "superAdmin";
   }
 
-  // Everyone else stays in assigned-admin or lower roles.
-  if (normalizedRole === "superAdmin") return "assignedAdmin";
+  // Role-based super admin (stored in users/{uid}.role) for additional super admins.
+  if (normalizedRole === "superAdmin") return "superAdmin";
   if (normalizedRole === "assignedAdmin") return "assignedAdmin";
 
   // Recovery path: if role is stale but admin scope clearly looks assigned-admin managed,

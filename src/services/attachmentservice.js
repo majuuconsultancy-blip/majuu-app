@@ -52,21 +52,29 @@ export async function createPendingAttachment({ requestId, file }) {
 
   if (!file) throw new Error("Missing file");
 
-  if (!isPdfFile(file)) {
+  // Support "wrapped" files so we can preserve request-definition document metadata.
+  const wrapper = file && typeof file === "object" && file?.file ? file : null;
+  const actualFile = wrapper?.file || file;
+
+  if (!isPdfFile(actualFile)) {
     throw new Error("Only PDF files are allowed");
   }
 
-  const size = safeNum(file?.size, 0, MAX_BYTES + 1);
+  const size = safeNum(actualFile?.size, 0, MAX_BYTES + 1);
   if (size > MAX_BYTES) {
     throw new Error(`PDF must be under ${MAX_PDF_MB}MB`);
   }
 
-  const name = safeStr(file?.name || "document.pdf", 120) || "document.pdf";
-  const contentType = safeStr(file?.type || "application/pdf", 80) || "application/pdf";
+  const name = safeStr(actualFile?.name || "document.pdf", 120) || "document.pdf";
+  const contentType = safeStr(actualFile?.type || "application/pdf", 80) || "application/pdf";
+
+  const fieldId = safeStr(wrapper?.fieldId, 80);
+  const fieldLabel = safeStr(wrapper?.fieldLabel, 140);
+  const kind = safeStr(wrapper?.kind, 60);
 
   const ref = collection(db, "serviceRequests", rid, "attachments");
 
-  const docRef = await addDoc(ref, {
+  const payload = {
     uid: user.uid,
     name,
     size,
@@ -74,7 +82,16 @@ export async function createPendingAttachment({ requestId, file }) {
     status: "pending_upload", // Storage comes later
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
+  };
+
+  if (fieldId) payload.fieldId = fieldId;
+  if (fieldLabel) {
+    payload.fieldLabel = fieldLabel;
+    payload.label = fieldLabel;
+  }
+  if (kind) payload.kind = kind;
+
+  const docRef = await addDoc(ref, payload);
 
   return docRef.id;
 }
@@ -94,6 +111,9 @@ export async function createPendingAttachmentFromMeta({ requestId, fileMeta } = 
   const contentType = safeStr(meta?.type || meta?.contentType || "application/pdf", 80)
     || "application/pdf";
   const size = safeNum(meta?.size, 0, MAX_BYTES + 1);
+  const fieldId = safeStr(meta?.fieldId, 80);
+  const fieldLabel = safeStr(meta?.fieldLabel || meta?.label, 140);
+  const kind = safeStr(meta?.kind, 60);
 
   if (!isPdfFile({ name, type: contentType })) {
     throw new Error("Only PDF files are allowed");
@@ -103,7 +123,7 @@ export async function createPendingAttachmentFromMeta({ requestId, fileMeta } = 
   }
 
   const ref = collection(db, "serviceRequests", rid, "attachments");
-  const docRef = await addDoc(ref, {
+  const payload = {
     uid: user.uid,
     name,
     size,
@@ -112,7 +132,16 @@ export async function createPendingAttachmentFromMeta({ requestId, fileMeta } = 
     source: "meta_restore",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
+  };
+
+  if (fieldId) payload.fieldId = fieldId;
+  if (fieldLabel) {
+    payload.fieldLabel = fieldLabel;
+    payload.label = fieldLabel;
+  }
+  if (kind) payload.kind = kind;
+
+  const docRef = await addDoc(ref, payload);
 
   return docRef.id;
 }

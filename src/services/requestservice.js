@@ -27,6 +27,8 @@ function cleanRequestType(x) {
   return t === "full" ? "full" : "single";
 }
 
+const EXTRA_FIELD_TYPES = new Set(["text", "textarea", "number", "document"]);
+
 function cleanItemKey(x) {
   const raw = cleanStr(x, 120).toLowerCase();
   if (!raw) return "";
@@ -58,25 +60,117 @@ function cleanUploadMeta(meta) {
 
   const cleanedFiles = files
     .slice(0, 20)
-    .map((f) => ({
-      name: cleanStr(f?.name, 120) || "file",
-      size: Number(f?.size || 0),
-      type: cleanStr(f?.type, 80),
-      lastModified: Number(f?.lastModified || 0),
-    }))
+    .map((f) => {
+      const name = cleanStr(f?.name, 120) || "file";
+      const size = Number(f?.size || 0);
+      const type = cleanStr(f?.type || f?.contentType, 80);
+      const lastModified = Number(f?.lastModified || 0);
+
+      // Preserve optional per-file metadata used for request definition document fields.
+      const fieldId = cleanStr(f?.fieldId, 80);
+      const fieldLabel = cleanStr(f?.fieldLabel, 140);
+      const kind = cleanStr(f?.kind, 60);
+
+      const payload = { name, size, type, lastModified };
+      if (fieldId) payload.fieldId = fieldId;
+      if (fieldLabel) payload.fieldLabel = fieldLabel;
+      if (kind) payload.kind = kind;
+      return payload;
+    })
     .filter((f) => f.name);
 
-  const count =
-    typeof raw?.count === "number"
-      ? Math.max(0, Math.min(20, raw.count))
-      : cleanedFiles.length;
+  // Normalize count from the cleaned file list so we never drop valid file metadata.
+  const count = cleanedFiles.length;
 
   const note = cleanStr(raw?.note, 200);
 
   // ✅ keep DB clean: store null if nothing was selected
-  if (count <= 0 || cleanedFiles.length === 0) return null;
+  if (count <= 0) return null;
 
   return { count, files: cleanedFiles, note };
+}
+
+function cleanFileMetaList(input, { maxItems = 10 } = {}) {
+  const files = Array.isArray(input) ? input : [];
+  const cleaned = [];
+
+  for (const f of files) {
+    const name = cleanStr(f?.name, 120) || "file";
+    if (!name) continue;
+    cleaned.push({
+      name,
+      size: Number(f?.size || 0),
+      type: cleanStr(f?.type, 80),
+      lastModified: Number(f?.lastModified || 0),
+    });
+    if (cleaned.length >= maxItems) break;
+  }
+
+  return cleaned;
+}
+
+function cleanExtraFieldType(value) {
+  const raw = cleanStr(value, 20).toLowerCase();
+  return EXTRA_FIELD_TYPES.has(raw) ? raw : "text";
+}
+
+function cleanExtraFieldAnswers(input) {
+  const raw = input && typeof input === "object" ? input : null;
+  if (!raw) return null;
+
+  const answersRaw = Array.isArray(raw?.answers) ? raw.answers : [];
+  const answers = answersRaw
+    .map((item) => {
+      const entry = item && typeof item === "object" ? item : null;
+      if (!entry) return null;
+
+      const id = cleanStr(entry?.id, 80);
+      const label = cleanStr(entry?.label, 120);
+      const type = cleanExtraFieldType(entry?.type);
+      const required = Boolean(entry?.required);
+      const sortOrder = Number(entry?.sortOrder || 0);
+
+      const value = type === "document" ? "" : cleanStr(entry?.value, 2000);
+      const fileMetas = type === "document"
+        ? cleanFileMetaList(entry?.fileMetas, { maxItems: 6 })
+        : [];
+
+      const hasValue = Boolean(value);
+      const hasFiles = fileMetas.length > 0;
+      if (!hasValue && !hasFiles) return null;
+
+      return {
+        id,
+        label,
+        type,
+        required,
+        value,
+        fileMetas,
+        sortOrder,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 40);
+
+  const definitionId = cleanStr(raw?.definitionId, 140);
+  const definitionKey = cleanStr(raw?.definitionKey, 200);
+  const title = cleanStr(raw?.title, 140);
+  const trackType = raw?.trackType ? cleanTrack(raw?.trackType) : "";
+  const country = cleanStr(raw?.country, 80);
+
+  const hasMeta = Boolean(definitionId || definitionKey || title || trackType || country);
+  const hasAnswers = answers.length > 0;
+
+  if (!hasMeta && !hasAnswers) return null;
+
+  return {
+    definitionId,
+    definitionKey,
+    title,
+    trackType,
+    country,
+    answers,
+  };
 }
 
 function cleanPaymentMeta(meta) {
@@ -190,6 +284,7 @@ export async function createServiceRequest(payload) {
   const paymentMeta = paid ? paymentMetaRaw : null;
 
   const requestUploadMeta = cleanUploadMeta(payload?.requestUploadMeta);
+  const extraFieldAnswers = cleanExtraFieldAnswers(payload?.extraFieldAnswers);
   const county = cleanRequiredCounty(payload?.county);
   const town = cleanStr(payload?.town || payload?.city, 80);
   const unlockPaymentId = cleanStr(payload?.unlockPaymentId, 180);
@@ -229,6 +324,7 @@ export async function createServiceRequest(payload) {
     unlockPaymentId,
     unlockPaymentRequestId,
     requestUploadMeta,
+    extraFieldAnswers,
 
     status: "new",
     currentAdminUid: "",

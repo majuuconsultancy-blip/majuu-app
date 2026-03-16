@@ -80,6 +80,9 @@ const AdminManageAdminsScreen = lazy(() => import("./screens/AdminManageAdminsSc
 const AdminSaccScreen = lazy(() => import("./screens/AdminSaccScreen"));
 const AdminNewsManagementScreen = lazy(() => import("./screens/AdminNewsManagementScreen"));
 const AdminPricingControlsScreen = lazy(() => import("./screens/AdminPricingControlsScreen"));
+const AdminRequestManagementScreen = lazy(() =>
+  import("./screens/AdminRequestManagementScreen")
+);
 const AdminSelfHelpLinksManagementScreen = lazy(() =>
   import("./screens/AdminSelfHelpLinksManagementScreen")
 );
@@ -130,6 +133,7 @@ function preloadCriticalScreens() {
   import("./screens/LegalDocumentScreen");
   import("./screens/ServicePartnerOnboardingScreen");
   import("./screens/AdminSelfHelpLinksManagementScreen");
+  import("./screens/AdminRequestManagementScreen");
 }
 
 function runWhenIdle(fn) {
@@ -595,6 +599,14 @@ function AppRoutes() {
               element={
                 <AdminGate>
                   <AdminSaccScreen />
+                </AdminGate>
+              }
+            />
+            <Route
+              path="admin/sacc/request-management"
+              element={
+                <AdminGate>
+                  <AdminRequestManagementScreen />
                 </AdminGate>
               }
             />

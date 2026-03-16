@@ -37,6 +37,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { auth, db } from "../firebase";
 
 import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
+import RequestExtraDetailsSection from "../components/RequestExtraDetailsSection";
 import StaffRequestChatPanel from "../components/StaffRequestChatPanel";
 import { smartBack } from "../utils/navBack";
 import { normalizeTextDeep } from "../utils/textNormalizer";
@@ -943,6 +944,8 @@ export default function StaffRequestDetailsScreen() {
                 ) : (
                   <div className={warnBox}>No note provided.</div>
                 )}
+
+                <RequestExtraDetailsSection request={req} title="Extra details" />
               </div>
             </StaffCollapsibleSectionCard>
 
