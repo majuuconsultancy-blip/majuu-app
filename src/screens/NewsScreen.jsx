@@ -21,6 +21,7 @@ import {
   normalizeDestinationCountry,
   normalizeTrackType,
 } from "../constants/migrationOptions";
+import { useManagedDestinationCountries } from "../hooks/useManagedDestinationCountries";
 import { NEWS_SOURCE_TYPE_LABELS } from "../constants/news";
 import { auth, db } from "../firebase";
 import {
@@ -30,6 +31,7 @@ import {
   pickBreakingNewsItem,
   subscribePublishedNews,
 } from "../services/newsservice";
+import { trackNewsRouteView } from "../services/analyticsService";
 
 function safeString(value, max = 300) {
   return String(value || "").trim().slice(0, max);
@@ -174,6 +176,33 @@ export default function NewsScreen() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const seededCountryRef = useRef(Boolean(routedCountryContext));
+  const lastAnalyticsKeyRef = useRef("");
+  const { countries: availableCountries } = useManagedDestinationCountries({ trackType });
+
+  const effectiveCountry = useMemo(() => {
+    const safeCurrent =
+      normalizeDestinationCountry(selectedCountry) || safeString(selectedCountry, 80);
+
+    if (safeCurrent && availableCountries.includes(safeCurrent)) return safeCurrent;
+    return availableCountries?.[0] || safeCurrent || APP_DESTINATION_COUNTRIES[0];
+  }, [availableCountries, selectedCountry]);
+
+  useEffect(() => {
+    if (loadingContext) return;
+    const safeTrack = normalizeTrackType(trackType);
+    const safeCountry = normalizeDestinationCountry(effectiveCountry) || APP_DESTINATION_COUNTRIES[0];
+    if (!safeTrack || !safeCountry) return;
+
+    const key = `${safeTrack}:${safeCountry}`;
+    if (lastAnalyticsKeyRef.current === key) return;
+    lastAnalyticsKeyRef.current = key;
+
+    void trackNewsRouteView({
+      trackType: safeTrack,
+      country: safeCountry,
+      sourceScreen: "NewsScreen",
+    });
+  }, [effectiveCountry, loadingContext, trackType]);
 
   useEffect(() => {
     let unsubUserDoc = null;
@@ -237,7 +266,7 @@ export default function NewsScreen() {
   useEffect(() => {
     const safeTrack = normalizeTrackType(trackType);
     const safeCountry =
-      normalizeDestinationCountry(selectedCountry) || APP_DESTINATION_COUNTRIES[0];
+      normalizeDestinationCountry(effectiveCountry) || APP_DESTINATION_COUNTRIES[0];
 
     let cancelled = false;
     let unsubFeed = () => {};
@@ -282,7 +311,7 @@ export default function NewsScreen() {
       cancelled = true;
       unsubFeed();
     };
-  }, [refreshKey, selectedCountry, trackType]);
+  }, [refreshKey, effectiveCountry, trackType]);
 
   const trackMeta = APP_TRACK_META[trackType] || APP_TRACK_META.study;
   const breakingItem = useMemo(() => pickBreakingNewsItem(feedItems), [feedItems]);
@@ -365,7 +394,7 @@ export default function NewsScreen() {
               </span>
               <select
                 className="w-full rounded-2xl border border-zinc-200 bg-white/90 px-3.5 py-3 text-sm font-semibold text-zinc-900 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-4 focus:ring-emerald-100/60 dark:border-zinc-700 dark:bg-zinc-900/80 dark:text-zinc-100 dark:focus:ring-emerald-500/10"
-                value={selectedCountry}
+                value={effectiveCountry}
                 onChange={(event) => {
                   setLoadingFeed(true);
                   setFeedError("");
@@ -373,7 +402,7 @@ export default function NewsScreen() {
                 }}
                 disabled={loadingContext}
               >
-                {APP_DESTINATION_COUNTRIES.map((country) => (
+                {availableCountries.map((country) => (
                   <option key={country} value={country}>
                     {country}
                   </option>
@@ -439,7 +468,7 @@ export default function NewsScreen() {
           <div className="flex items-center justify-between gap-3 border-b border-zinc-200/80 px-4 py-3 dark:border-zinc-800 sm:px-5">
             <div>
               <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                {trackMeta.label} updates for {selectedCountry || APP_DESTINATION_COUNTRIES[0]}
+                {trackMeta.label} updates for {effectiveCountry || APP_DESTINATION_COUNTRIES[0]}
               </div>
               <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                 Importance first, then newer updates for ties.
@@ -465,7 +494,7 @@ export default function NewsScreen() {
                 <AppIcon icon={Newspaper} size={ICON_MD} />
               </div>
               <div className="mt-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                No published news yet for {trackMeta.label.toLowerCase()} in {selectedCountry}.
+                No published news yet for {trackMeta.label.toLowerCase()} in {effectiveCountry}.
               </div>
               <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
                 Try another destination country or publish items from SACC News Management.

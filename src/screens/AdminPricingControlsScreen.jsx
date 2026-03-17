@@ -11,8 +11,8 @@ import { useNavigate } from "react-router-dom";
 
 import AppIcon from "../components/AppIcon";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
+import { useManagedDestinationCountries } from "../hooks/useManagedDestinationCountries";
 import {
-  APP_DESTINATION_COUNTRIES,
   APP_TRACK_META,
   APP_TRACK_OPTIONS,
 } from "../constants/migrationOptions";
@@ -196,8 +196,6 @@ export default function AdminPricingControlsScreen() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   const [requestDefinitions, setRequestDefinitions] = useState([]);
-  const [definitionsLoading, setDefinitionsLoading] = useState(false);
-  const [definitionsErr, setDefinitionsErr] = useState("");
 
   const [search, setSearch] = useState("");
   const [fullOpen, setFullOpen] = useState(true);
@@ -211,6 +209,8 @@ export default function AdminPricingControlsScreen() {
   const [busyKey, setBusyKey] = useState("");
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
+
+  const { countries: managedCountries } = useManagedDestinationCountries();
 
   const singlePricing = useRequestPricingList({
     track: singleTrack,
@@ -247,19 +247,13 @@ export default function AdminPricingControlsScreen() {
   useEffect(() => {
     if (!isSuperAdmin) return undefined;
 
-    setDefinitionsLoading(true);
-    setDefinitionsErr("");
-
     return subscribeAllRequestDefinitions({
       onData: (rows) => {
         setRequestDefinitions(Array.isArray(rows) ? rows : []);
-        setDefinitionsLoading(false);
       },
       onError: (error) => {
         console.error(error);
         setRequestDefinitions([]);
-        setDefinitionsErr(error?.message || "Failed to load request definitions.");
-        setDefinitionsLoading(false);
       },
     });
   }, [isSuperAdmin]);
@@ -404,12 +398,12 @@ export default function AdminPricingControlsScreen() {
   const countryOptions = useMemo(
     () => [
       { value: "", label: "All countries" },
-      ...APP_DESTINATION_COUNTRIES.map((country) => ({
+      ...managedCountries.map((country) => ({
         value: country,
         label: country,
       })),
     ],
-    []
+    [managedCountries]
   );
   const fullCountryOptions = useMemo(
     () => [{ value: "", label: "Select country" }, ...countryOptions.slice(1)],

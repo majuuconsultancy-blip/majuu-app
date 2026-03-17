@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { auth } from "../firebase";
 import { sendEmailVerification } from "firebase/auth";
 import { smartBack } from "../utils/navBack";
+import { getUserState } from "../services/userservice";
+import { resolveLandingPathFromUserState } from "../journey/journeyLanding";
 
 export default function VerifyEmailScreen() {
   const navigate = useNavigate();
@@ -55,7 +57,13 @@ export default function VerifyEmailScreen() {
     try {
       await user.reload();
       if (user.emailVerified) {
-        navigate("/dashboard", { replace: true });
+        try {
+          const state = await getUserState(user.uid, user.email || "");
+          navigate(resolveLandingPathFromUserState(state || {}), { replace: true });
+        } catch (error) {
+          void error;
+          navigate("/dashboard", { replace: true });
+        }
       } else {
         setMsg("Still not verified yet. Open the email link then try again.");
       }
@@ -124,5 +132,4 @@ export default function VerifyEmailScreen() {
     </div>
   );
 }
-
 

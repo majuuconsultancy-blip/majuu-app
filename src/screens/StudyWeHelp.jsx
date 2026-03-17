@@ -32,6 +32,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
+import JourneyBanner from "../components/JourneyBanner";
 import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
 
 import { auth } from "../firebase";
@@ -61,6 +62,9 @@ import {
 } from "../services/pricingservice";
 import { subscribeActiveRequestDefinitions } from "../services/requestDefinitionService";
 import { setSnapshot } from "../resume/resumeEngine";
+import { normalizeJourney } from "../journey/journeyModel";
+import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
+import { logAnalyticsEvent } from "../services/analyticsService";
 
 const FULL_PACKAGE = [
   "Consultation & country selection",
@@ -202,6 +206,7 @@ export default function StudyWeHelp() {
   const [userState, setUserState] = useState(null);
   const [missing, setMissing] = useState([]);
   const [pageErr, setPageErr] = useState("");
+  const journey = useMemo(() => normalizeJourney(userState?.journey), [userState]);
 
   // Autofill for modal
   const [defaultName, setDefaultName] = useState("");
@@ -216,6 +221,7 @@ export default function StudyWeHelp() {
   const [autoOpened, setAutoOpened] = useState(false);
   const [profileChecked, setProfileChecked] = useState(false);
   const resumeRestoreAppliedRef = useRef(false);
+  const weHelpOpenKeyRef = useRef("");
 
   // Full Package diagnostic state
   const [diagnosticOpen, setDiagnosticOpen] = useState(false);
@@ -232,6 +238,24 @@ export default function StudyWeHelp() {
   const [definitionsErr, setDefinitionsErr] = useState("");
 
   const canUseWeHelp = missing.length === 0 && profileChecked;
+
+  useEffect(() => {
+    if (!uid) return;
+    const analyticsCountry = String(
+      new URLSearchParams(location.search).get("country") || ""
+    ).trim();
+    const key = `study:${analyticsCountry}`;
+    if (weHelpOpenKeyRef.current === key) return;
+    weHelpOpenKeyRef.current = key;
+
+    void logAnalyticsEvent({
+      uid,
+      eventType: ANALYTICS_EVENT_TYPES.WEHELP_OPENED,
+      trackType: "study",
+      country: analyticsCountry,
+      sourceScreen: "StudyWeHelp",
+    });
+  }, [location.search, uid]);
 
   // ✅ TrackScreen destination (NOT TrackSelectScreen)
   const backUrl = `/app/study?country=${encodeURIComponent(country)}&from=choice`;
@@ -683,6 +707,8 @@ export default function StudyWeHelp() {
 
           <div className="shrink-0 h-12 w-12 rounded-3xl border border-emerald-100 bg-emerald-50/80 shadow-sm" />
         </div>
+
+        <JourneyBanner journey={journey} track="study" country={country} />
 
         {/* Toast */}
         <AnimatePresence>

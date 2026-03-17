@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
@@ -19,6 +19,29 @@ import { authPersistenceReady } from "../firebase";
 
 const VALID_TRACKS = new Set(["study", "work", "travel"]);
 const AUTH_NULL_GRACE_MS = 1200;
+const TAB_RESET_DOUBLE_TAP_MS = 650;
+
+function matchTrackFromPath(pathname) {
+  const match = String(pathname || "").match(/^\/app\/(study|work|travel)(?:\/|$)/i);
+  return match?.[1] ? String(match[1]).toLowerCase() : "";
+}
+
+function tabKeyFromPathname(pathname) {
+  const path = String(pathname || "");
+  if (path.startsWith("/app/progress")) return "progress";
+  if (path.startsWith("/app/news")) return "news";
+
+  if (
+    path.startsWith("/app/profile") ||
+    path.startsWith("/app/settings") ||
+    path.startsWith("/app/notifications") ||
+    path.startsWith("/app/legal")
+  ) {
+    return "profile";
+  }
+
+  return "home";
+}
 
 function IconHome(props) {
   return (
@@ -92,9 +115,20 @@ export default function AppLayout() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [uid, setUid] = useState(null);
   const [activeTrack, setActiveTrack] = useState(null);
+  const [selectedTrack, setSelectedTrack] = useState(null);
+  const [journeyTrack, setJourneyTrack] = useState(null);
   const [hasActiveProcess, setHasActiveProcess] = useState(false);
   const unreadNotifCount = useNotifsV2Store((s) => Number(s.unreadNotifCount || 0) || 0);
   const [scrollY, setScrollY] = useState(0);
+
+  const tabMemoryRef = useRef({
+    home: null,
+    progress: null,
+    news: null,
+    profile: null,
+  });
+
+  const lastTabTapRef = useRef({ key: "", at: 0 });
 
   const rafRef = useRef(null);
   useEffect(() => {
@@ -193,14 +227,20 @@ export default function AppLayout() {
           (snap) => {
             const state = snap.exists() ? snap.data() : null;
             const active = String(state?.activeTrack || "").toLowerCase();
+            const selected = String(state?.selectedTrack || "").toLowerCase();
+            const journey = String(state?.journey?.track || "").toLowerCase();
 
             setHasActiveProcess(Boolean(state?.hasActiveProcess));
             setActiveTrack(VALID_TRACKS.has(active) ? active : null);
+            setSelectedTrack(VALID_TRACKS.has(selected) ? selected : null);
+            setJourneyTrack(VALID_TRACKS.has(journey) ? journey : null);
             setCheckingAuth(false);
           },
           () => {
             setHasActiveProcess(false);
             setActiveTrack(null);
+            setSelectedTrack(null);
+            setJourneyTrack(null);
             setCheckingAuth(false);
           }
         );
@@ -219,42 +259,80 @@ export default function AppLayout() {
     };
   }, [navigate]);
 
-  const goSmartHome = () => {
-    if (hasActiveProcess && activeTrack) {
-      navigate(`/app/${activeTrack}`, { replace: true });
-      return;
-    }
-    navigate("/dashboard", { replace: true });
+  const activeTabKey = useMemo(() => tabKeyFromPathname(location.pathname), [location.pathname]);
+
+  useEffect(() => {
+    const tabKey = tabKeyFromPathname(location.pathname);
+    tabMemoryRef.current[tabKey] = {
+      pathname: location.pathname,
+      search: location.search || "",
+      hash: location.hash || "",
+      state: location.state,
+    };
+  }, [location.hash, location.key, location.pathname, location.search, location.state]);
+
+  const resolveHomeRootPath = () => {
+    const preferred = journeyTrack || activeTrack || selectedTrack || matchTrackFromPath(location.pathname);
+    if (preferred && VALID_TRACKS.has(preferred)) return `/app/${preferred}`;
+    return "/app/home";
   };
 
-  const progressActive = useMemo(() => {
-    return location.pathname === "/app/progress" || location.pathname.startsWith("/app/progress/");
-  }, [location.pathname]);
+  const tabRoot = (tabKey) => {
+    if (tabKey === "progress") return { pathname: "/app/progress", search: "", hash: "", state: undefined };
+    if (tabKey === "news") return { pathname: "/app/news", search: "", hash: "", state: newsNavState };
+    if (tabKey === "profile") return { pathname: "/app/profile", search: "", hash: "", state: undefined };
+    return { pathname: resolveHomeRootPath(), search: "", hash: "", state: undefined };
+  };
 
-  const profileActive = useMemo(() => {
-    return location.pathname === "/app/profile" || location.pathname.startsWith("/app/profile/");
-  }, [location.pathname]);
+  const navigateStored = (stored, options = {}) => {
+    const target = stored && typeof stored === "object" ? stored : null;
+    const pathname = String(target?.pathname || "");
+    const search = String(target?.search || "");
+    const hash = String(target?.hash || "");
+    const state = typeof target?.state !== "undefined" ? target.state : undefined;
+    if (!pathname) return;
+    navigate(`${pathname}${search}${hash}`, {
+      replace: Boolean(options.replace),
+      state,
+    });
+  };
 
-  const newsActive = useMemo(() => {
-    return location.pathname === "/app/news" || location.pathname.startsWith("/app/news/");
-  }, [location.pathname]);
+  const handleTabPress = (tabKey, event) => {
+    const key = String(tabKey || "");
+    if (!key) return;
 
-  const newsNavState = useMemo(() => {
-    const trackMatch = location.pathname.match(/^\/app\/(study|work|travel)(?:\/|$)/i);
-    const params = new URLSearchParams(location.search || "");
-    return {
-      trackContext: trackMatch?.[1] ? String(trackMatch[1]).toLowerCase() : "",
-      countryContext: params.get("country") || "",
-    };
-  }, [location.pathname, location.search]);
+    const now = Math.round(Number(event?.timeStamp || 0));
+    const sameTab = activeTabKey === key;
+    const wasSameTabRecently =
+      now > 0 &&
+      lastTabTapRef.current.at > 0 &&
+      lastTabTapRef.current.key === key &&
+      now - lastTabTapRef.current.at <= TAB_RESET_DOUBLE_TAP_MS;
 
-  const homeActive = useMemo(() => {
-    return (
-      location.pathname === "/dashboard" ||
-      location.pathname === "/app/home" ||
-      (location.pathname.startsWith("/app/") && !progressActive && !newsActive && !profileActive)
-    );
-  }, [location.pathname, newsActive, progressActive, profileActive]);
+    lastTabTapRef.current = { key, at: now };
+
+    if (sameTab && wasSameTabRecently) {
+      navigateStored(tabRoot(key), { replace: true });
+      return;
+    }
+
+    const stored = tabMemoryRef.current[key] || tabRoot(key);
+
+    if (sameTab) return;
+    navigateStored(stored, { replace: false });
+  };
+
+  const trackMatch = location.pathname.match(/^\/app\/(study|work|travel)(?:\/|$)/i);
+  const newsParams = new URLSearchParams(location.search || "");
+  const newsNavState = {
+    trackContext: trackMatch?.[1] ? String(trackMatch[1]).toLowerCase() : "",
+    countryContext: newsParams.get("country") || "",
+  };
+
+  const progressActive = activeTabKey === "progress";
+  const newsActive = activeTabKey === "news";
+  const profileActive = activeTabKey === "profile";
+  const homeActive = activeTabKey === "home";
 
   if (checkingAuth) {
     return (
@@ -316,14 +394,19 @@ export default function AppLayout() {
             }}
           >
             <div className="grid grid-cols-4 gap-1">
-              <button onClick={goSmartHome} className={`${itemBase} ${homeActive ? itemOn : itemOff}`}>
+              <button
+                type="button"
+                onClick={(event) => handleTabPress("home", event)}
+                className={`${itemBase} ${homeActive ? itemOn : itemOff}`}
+              >
                 <IconHome className="h-5 w-5" />
                 <span>Home</span>
               </button>
 
-              <NavLink
-                to="/app/progress"
-                className={({ isActive }) => `${itemBase} ${isActive ? itemOn : itemOff} relative`}
+              <button
+                type="button"
+                onClick={(event) => handleTabPress("progress", event)}
+                className={`${itemBase} ${progressActive ? itemOn : itemOff} relative`}
               >
                 <span className="relative">
                   <IconProgress className="h-5 w-5" />
@@ -339,21 +422,25 @@ export default function AppLayout() {
                 </span>
 
                 <span>Progress</span>
-              </NavLink>
+              </button>
 
-              <NavLink
-                to="/app/news"
-                state={newsNavState}
-                className={({ isActive }) => `${itemBase} ${isActive ? itemOn : itemOff}`}
+              <button
+                type="button"
+                onClick={(event) => handleTabPress("news", event)}
+                className={`${itemBase} ${newsActive ? itemOn : itemOff}`}
               >
                 <IconNews className="h-5 w-5" />
                 <span>News</span>
-              </NavLink>
+              </button>
 
-              <NavLink to="/app/profile" className={({ isActive }) => `${itemBase} ${isActive ? itemOn : itemOff}`}>
+              <button
+                type="button"
+                onClick={(event) => handleTabPress("profile", event)}
+                className={`${itemBase} ${profileActive ? itemOn : itemOff}`}
+              >
                 <IconUser className="h-5 w-5" />
                 <span>Profile</span>
-              </NavLink>
+              </button>
             </div>
           </div>
         </div>

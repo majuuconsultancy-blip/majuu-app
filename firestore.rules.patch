@@ -230,6 +230,113 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    match /analytics_customCountryDemand/{id} {
+      allow create: if signedIn()
+        && request.resource.data.uid == authUid()
+        && request.resource.data.track in ["study", "work", "travel", ""]
+        && str(request.resource.data.country).size() > 0
+        && str(request.resource.data.countryKey).size() > 0;
+
+      allow read: if isSuperAdmin();
+      allow update, delete: if false;
+    }
+
+    match /analytics_customCountryDemandCounts/{countryKey} {
+      allow read: if isSuperAdmin();
+      allow create, update, delete: if false;
+
+      match /users/{uid} {
+        allow read: if isSuperAdmin();
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /analytics_events/{id} {
+      allow create: if signedIn()
+        && request.resource.data.uid == authUid()
+        && str(request.resource.data.eventType).size() > 0;
+
+      allow read: if isSuperAdmin();
+      allow update, delete: if false;
+    }
+
+    match /analytics_countryDemand/{id} {
+      allow create: if signedIn()
+        && request.resource.data.uid == authUid()
+        && request.resource.data.track in ["study", "work", "travel", ""]
+        && str(request.resource.data.country).size() > 0
+        && str(request.resource.data.countryKey).size() > 0;
+
+      allow read: if isSuperAdmin();
+      allow update, delete: if false;
+    }
+
+    match /analytics_countryDemandCounts/{countryKey} {
+      allow read: if isSuperAdmin();
+      allow create, update, delete: if false;
+
+      match /users/{uid} {
+        allow read: if isSuperAdmin();
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /analytics_newsRouteViews/{id} {
+      allow create: if signedIn()
+        && request.resource.data.uid == authUid()
+        && request.resource.data.track in ["study", "work", "travel"]
+        && str(request.resource.data.country).size() > 0
+        && str(request.resource.data.countryKey).size() > 0
+        && str(request.resource.data.routeKey).size() > 0;
+
+      allow read: if isSuperAdmin();
+      allow update, delete: if false;
+    }
+
+    match /analytics_newsRouteViewCounts/{routeKey} {
+      allow read: if isSuperAdmin();
+      allow create, update, delete: if false;
+
+      match /users/{uid} {
+        allow read: if isSuperAdmin();
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /analytics_newsCountryViewCounts/{countryKey} {
+      allow read: if isSuperAdmin();
+      allow create, update, delete: if false;
+
+      match /users/{uid} {
+        allow read: if isSuperAdmin();
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /analytics_selfHelpLinkClicks/{id} {
+      allow create: if signedIn()
+        && request.resource.data.uid == authUid()
+        && request.resource.data.track in ["study", "work", "travel"]
+        && str(request.resource.data.country).size() > 0;
+
+      allow read: if isSuperAdmin();
+      allow update, delete: if false;
+    }
+
+    match /analytics_selfHelpLinkClickCounts/{bucket} {
+      allow read: if isSuperAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /analytics_selfHelpOutbounds/{id} {
+      allow create: if signedIn()
+        && request.resource.data.uid == authUid()
+        && str(request.resource.data.resourceId).size() > 0;
+
+      allow read: if isSuperAdmin();
+      allow update, delete: if false;
+    }
+
     match /news/{newsId} {
       allow read: if isSuperAdmin() || (signedIn() && resource.data.isPublished == true);
       allow create, update, delete: if isSuperAdmin();
@@ -241,6 +348,11 @@ service cloud.firestore {
     }
 
     match /requestDefinitions/{definitionId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /countries/{countryId} {
       allow read: if signedIn();
       allow create, update, delete: if isSuperAdmin();
     }

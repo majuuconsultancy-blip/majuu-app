@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   collection,
   deleteDoc,
@@ -527,6 +527,7 @@ const pageIn = {
 
 export default function ProgressScreen() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [loading, setLoading] = useState(true);
   const [state, setState] = useState(null);
@@ -536,7 +537,6 @@ export default function ProgressScreen() {
   const [deletingId, setDeletingId] = useState("");
   const [pinnedIds, setPinnedIds] = useState([]);
   const [visibleCount, setVisibleCount] = useState(REQUESTS_INITIAL_RENDER);
-  const [activeTab, setActiveTab] = useState("wehelp");
   const [selfHelpProgress, setSelfHelpProgress] = useState(null);
   const [selfHelpBusyId, setSelfHelpBusyId] = useState("");
   const [selfHelpMessage, setSelfHelpMessage] = useState("");
@@ -546,7 +546,29 @@ export default function ProgressScreen() {
   const stateRef = useRef(null);
   const appsRef = useRef([]);
   const requestsRef = useRef([]);
-  const manualTabSelectionRef = useRef(false);
+
+  const activeTab = useMemo(() => {
+    const params = new URLSearchParams(location.search || "");
+    const tab = String(params.get("tab") || "").trim().toLowerCase();
+    return tab === "selfhelp" ? "selfhelp" : "wehelp";
+  }, [location.search]);
+
+  const setProgressTab = (nextTab) => {
+    const key = String(nextTab || "").trim().toLowerCase();
+    const params = new URLSearchParams(location.search || "");
+
+    if (key === "selfhelp") {
+      params.set("tab", "selfhelp");
+    } else {
+      params.delete("tab");
+    }
+
+    const nextSearch = params.toString();
+    navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : ""}`, {
+      replace: true,
+      state: location.state,
+    });
+  };
 
   const unreadNotifCount = useNotifsV2Store((store) => Number(store.unreadNotifCount || 0) || 0);
   const unreadByRequest = useNotifsV2Store((store) => store.unreadByRequest || {});
@@ -716,31 +738,6 @@ export default function ProgressScreen() {
       if (unsubRequests) unsubRequests();
     };
   }, [navigate]);
-
-  useEffect(() => {
-    if (loading || manualTabSelectionRef.current) return;
-
-    if (requests.length > 0) {
-      setActiveTab("wehelp");
-      return;
-    }
-
-    if (
-      String(state?.activeHelpType || "").toLowerCase() === "self" ||
-      selfHelpProgress?.history?.length ||
-      selfHelpProgress?.bookmarks?.length
-    ) {
-      setActiveTab("selfhelp");
-      return;
-    }
-    setActiveTab("wehelp");
-  }, [
-    loading,
-    requests.length,
-    selfHelpProgress?.bookmarks?.length,
-    selfHelpProgress?.history?.length,
-    state?.activeHelpType,
-  ]);
 
   const hasActive = Boolean(state?.hasActiveProcess);
   const activeTrack = safeString(state?.activeTrack, 20).toLowerCase();
@@ -1119,8 +1116,7 @@ export default function ProgressScreen() {
               <button
                 type="button"
                 onClick={() => {
-                  manualTabSelectionRef.current = true;
-                  setActiveTab("wehelp");
+                  setProgressTab("wehelp");
                 }}
                 className={`rounded-full px-4 py-2 font-semibold transition ${
                   activeTab === "wehelp"
@@ -1133,8 +1129,7 @@ export default function ProgressScreen() {
               <button
                 type="button"
                 onClick={() => {
-                  manualTabSelectionRef.current = true;
-                  setActiveTab("selfhelp");
+                  setProgressTab("selfhelp");
                 }}
                 className={`rounded-full px-4 py-2 font-semibold transition ${
                   activeTab === "selfhelp"

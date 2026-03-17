@@ -2,6 +2,8 @@
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { sendPushToAdmin } from "./pushServerClient";
+import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
+import { logAnalyticsEvent } from "./analyticsService";
 
 function cleanStr(x, max = 500) {
   return String(x || "").trim().slice(0, max);
@@ -356,6 +358,23 @@ export async function createServiceRequest(payload) {
   };
 
   const docRef = await addDoc(ref, clean);
+
+  void logAnalyticsEvent({
+    uid: user.uid,
+    eventType: ANALYTICS_EVENT_TYPES.REQUEST_SUBMITTED,
+    trackType: clean.track,
+    country: clean.country,
+    requestId: docRef.id,
+    requestTitle: clean.serviceName,
+    sourceScreen: "requestservice.createServiceRequest",
+    metadata: {
+      requestType: clean.requestType,
+      isFullPackage: Boolean(clean.isFullPackage),
+      fullPackageId: clean.fullPackageId || "",
+      paid: Boolean(clean.paid),
+    },
+  });
+
   try {
     await sendPushToAdmin({
       title: "New request",

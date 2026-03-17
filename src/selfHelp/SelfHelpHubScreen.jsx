@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { App as CapacitorApp } from "@capacitor/app";
 import { onAuthStateChanged } from "firebase/auth";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -45,6 +45,10 @@ import {
   getVerifiedProgressSummary,
 } from "./selfHelpPaths";
 import JourneyChecklistSheet from "./JourneyChecklistSheet";
+import JourneyBanner from "../components/JourneyBanner";
+import { useUserJourney } from "../hooks/useUserJourney";
+import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
+import { logAnalyticsEvent } from "../services/analyticsService";
 import {
   cacheSelfHelpProgress,
   getSelfHelpProgress,
@@ -270,6 +274,7 @@ function ProgressStrip({ percent, completedCount, totalCount, nextStepTitle }) {
 export default function SelfHelpHubScreen({ track }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { journey } = useUserJourney();
   const requestedCountry = safeString(new URLSearchParams(location.search).get("country"), 80);
   const trackMeta = SELF_HELP_TRACK_META[track] || SELF_HELP_TRACK_META.study;
   const HeaderIcon = TRACK_ICONS[track] || GraduationCap;
@@ -285,6 +290,8 @@ export default function SelfHelpHubScreen({ track }) {
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [checklistSaving, setChecklistSaving] = useState(false);
   const [verifiedPathOpen, setVerifiedPathOpen] = useState(false);
+
+  const lastOpenedKeyRef = useRef("");
 
   const fallbackCountry = useMemo(() => {
     const lastContextCountry =
@@ -304,6 +311,26 @@ export default function SelfHelpHubScreen({ track }) {
   }, [progress?.lastContext?.country, progress?.lastContext?.track, progress?.routeStates, track]);
 
   const country = requestedCountry || fallbackCountry;
+
+  useEffect(() => {
+    if (!uid) return;
+    const safeTrack = safeString(track, 20).toLowerCase();
+    const safeCountry = safeString(country, 80);
+    if (!safeTrack || !safeCountry) return;
+
+    const key = `${safeTrack}:${safeCountry}`;
+    if (lastOpenedKeyRef.current === key) return;
+    lastOpenedKeyRef.current = key;
+
+    void logAnalyticsEvent({
+      uid,
+      eventType: ANALYTICS_EVENT_TYPES.SELFHELP_OPENED,
+      trackType: safeTrack,
+      country: safeCountry,
+      sourceScreen: "SelfHelpHubScreen",
+    });
+  }, [country, track, uid]);
+
   const runtimeResources = useMemo(
     () => mergeSelfHelpRuntimeResources(resourceRecords),
     [resourceRecords]
@@ -818,6 +845,8 @@ export default function SelfHelpHubScreen({ track }) {
                 {verifiedSummary.completedCount}/{verifiedSummary.totalCount} verified
               </span>
             </div>
+
+            <JourneyBanner journey={journey} track={track} country={country} />
 
             <ProgressStrip
               percent={verifiedSummary.percent}

@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 
 import AppIcon from "../components/AppIcon";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
+import { useManagedDestinationCountries } from "../hooks/useManagedDestinationCountries";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import {
   createEmptySelfHelpResourceDraft,
@@ -23,8 +24,9 @@ import {
   getSelfHelpResourceCategoryLabel,
   getSelfHelpResourceTrackLabel,
   importBundledSelfHelpResources,
+  SELF_HELP_RESOURCE_ALL_TRACKS,
   SELF_HELP_RESOURCE_CATEGORY_OPTIONS,
-  SELF_HELP_RESOURCE_COUNTRY_OPTIONS,
+  SELF_HELP_RESOURCE_GLOBAL_COUNTRY,
   SELF_HELP_RESOURCE_TRACK_OPTIONS,
   setSelfHelpResourceActiveState,
   subscribeAllSelfHelpResources,
@@ -87,6 +89,34 @@ export default function AdminSelfHelpLinksManagementScreen() {
   const [editingId, setEditingId] = useState("");
   const [draft, setDraft] = useState(createEmptySelfHelpResourceDraft());
   const [busy, setBusy] = useState("");
+
+  const trackTypeForCountries =
+    safeString(draft?.trackType, 40) === SELF_HELP_RESOURCE_ALL_TRACKS ? "" : draft?.trackType || "";
+  const { countries: managedCountriesForTrack, hasManagedDocs: hasManagedCountries } =
+    useManagedDestinationCountries({ trackType: trackTypeForCountries });
+
+  const countryOptions = useMemo(() => {
+    const baseCountries = [
+      SELF_HELP_RESOURCE_GLOBAL_COUNTRY,
+      ...(Array.isArray(managedCountriesForTrack) ? managedCountriesForTrack : []),
+    ];
+    const seen = new Set(baseCountries.map((country) => safeString(country, 120).toLowerCase()));
+
+    const currentCountry = safeString(draft?.country, 120);
+    const needsLegacyOption =
+      currentCountry && !seen.has(safeString(currentCountry, 120).toLowerCase());
+
+    const legacyOption = needsLegacyOption
+      ? [{ value: currentCountry, label: `${currentCountry} (legacy/inactive)` }]
+      : [];
+    const activeOptions = baseCountries.map((country) => ({
+      value: country,
+      label: country,
+    }));
+
+    if (!hasManagedCountries) return activeOptions;
+    return [...legacyOption, ...activeOptions];
+  }, [draft?.country, hasManagedCountries, managedCountriesForTrack]);
 
   useEffect(() => {
     let cancelled = false;
@@ -404,9 +434,9 @@ export default function AdminSelfHelpLinksManagementScreen() {
                     <label className="grid gap-1.5">
                       <span className={label}>Country</span>
                       <select className={input} value={draft.country} onChange={(event) => updateDraft({ country: event.target.value })}>
-                        {SELF_HELP_RESOURCE_COUNTRY_OPTIONS.map((country) => (
-                          <option key={country} value={country}>
-                            {country}
+                        {countryOptions.map((country) => (
+                          <option key={country.value} value={country.value}>
+                            {country.label}
                           </option>
                         ))}
                       </select>

@@ -1,6 +1,9 @@
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { normalizeCountyLower, normalizeCountyName } from "../constants/kenyaCounties";
+import { createDefaultUserOnboarding, createEmptyJourney } from "../journey/journeyModel";
+import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
+import { buildTrackEventKey, logAnalyticsEvent } from "./analyticsService";
 
 /* ----------------- helpers ----------------- */
 function onlyDigits(s) {
@@ -92,9 +95,15 @@ function validateProfilePayload({ name, phone, countryOfResidence }) {
  * - If doc missing: create it
  * - If doc exists: ONLY fill missing fields, NEVER overwrite existing values
  */
-export async function ensureUserDoc({ uid, email }) {
+export async function ensureUserDoc({
+  uid,
+  email,
+  displayName = "",
+  provider = "",
+} = {}) {
   const ref = doc(db, "users", uid);
   const snap = await getDoc(ref);
+  const didCreate = !snap.exists();
 
   const base = {
     email: email || "",
@@ -112,6 +121,8 @@ export async function ensureUserDoc({ uid, email }) {
     activeCountry: null,
     activeHelpType: null,
     activeRequestId: null,
+    journey: createEmptyJourney(),
+    onboarding: createDefaultUserOnboarding({ profileJourneySetupCompleted: false }),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -119,6 +130,16 @@ export async function ensureUserDoc({ uid, email }) {
   if (!snap.exists()) {
     // Create fresh
     await setDoc(ref, base, { merge: true });
+
+    void logAnalyticsEvent({
+      uid,
+      eventType: ANALYTICS_EVENT_TYPES.SIGNUP_COMPLETED,
+      sourceScreen: "userservice.ensureUserDoc",
+      metadata: {
+        provider: String(provider || "").trim(),
+        hasDisplayName: Boolean(String(displayName || "").trim()),
+      },
+    });
   } else {
     // Repair only missing fields (do NOT wipe anything)
     const d = snap.data() || {};
@@ -144,6 +165,9 @@ export async function ensureUserDoc({ uid, email }) {
     setIfMissing("activeCountry", null);
     setIfMissing("activeHelpType", null);
     setIfMissing("activeRequestId", null);
+    setIfMissing("journey", createEmptyJourney());
+    // Backward compatibility: do NOT force existing users into setup.
+    setIfMissing("onboarding", createDefaultUserOnboarding({ profileJourneySetupCompleted: true }));
 
     // NOTE: do NOT overwrite createdAt unless missing
     setIfMissing("createdAt", serverTimestamp());
@@ -155,7 +179,11 @@ export async function ensureUserDoc({ uid, email }) {
   }
 
   const latest = await getDoc(ref);
-  return latest.exists() ? latest.data() : null;
+  const state = latest.exists() ? latest.data() : null;
+  if (!state) return null;
+  return didCreate
+    ? { ...state, __ensureMeta: { created: true } }
+    : { ...state, __ensureMeta: { created: false } };
 }
 
 // Read user state (✅ auto-heal if missing)
@@ -183,6 +211,14 @@ export async function setSelectedTrack(uid, track) {
   await updateDoc(ref, {
     selectedTrack: track,
     updatedAt: serverTimestamp(),
+  });
+
+  void logAnalyticsEvent({
+    uid,
+    eventType: ANALYTICS_EVENT_TYPES.JOURNEY_TRACK_SELECTED,
+    eventKey: buildTrackEventKey(ANALYTICS_EVENT_TYPES.JOURNEY_TRACK_SELECTED, track),
+    trackType: track,
+    sourceScreen: "userservice.setSelectedTrack",
   });
 }
 

@@ -15,13 +15,14 @@ import { useNavigate } from "react-router-dom";
 
 import AppIcon from "../components/AppIcon";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
-import { APP_DESTINATION_COUNTRIES, APP_TRACK_META } from "../constants/migrationOptions";
+import { APP_TRACK_META, normalizeDestinationCountry } from "../constants/migrationOptions";
 import {
   NEWS_SOURCE_TYPE_LABELS,
   NEWS_SOURCE_TYPE_OPTIONS,
   NEWS_TAG_OPTIONS,
   normalizeNewsTag,
 } from "../constants/news";
+import { useManagedDestinationCountries } from "../hooks/useManagedDestinationCountries";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import {
   createEmptyNewsDraft,
@@ -99,6 +100,30 @@ export default function AdminNewsManagementScreen() {
   const [draft, setDraft] = useState(createEmptyNewsDraft());
   const [busy, setBusy] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
+
+  const { countries: managedCountriesForTrack, hasManagedDocs: hasManagedCountries } =
+    useManagedDestinationCountries({ trackType: draft.trackType });
+
+  const countryOptions = useMemo(() => {
+    const activeList = Array.isArray(managedCountriesForTrack) ? managedCountriesForTrack : [];
+    const activeSet = new Set(activeList.map((country) => safeString(country, 120).toLowerCase()));
+
+    const currentCountry =
+      normalizeDestinationCountry(draft.country) || safeString(draft.country, 120);
+    const needsLegacyOption =
+      currentCountry && !activeSet.has(safeString(currentCountry, 120).toLowerCase());
+
+    const legacyOption = needsLegacyOption
+      ? [{ value: currentCountry, label: `${currentCountry} (legacy/inactive)` }]
+      : [];
+    const activeOptions = activeList.map((country) => ({
+      value: country,
+      label: country,
+    }));
+
+    if (!hasManagedCountries) return activeOptions;
+    return [...legacyOption, ...activeOptions];
+  }, [draft.country, hasManagedCountries, managedCountriesForTrack]);
 
   useEffect(() => {
     let cancelled = false;
@@ -419,9 +444,9 @@ export default function AdminNewsManagementScreen() {
                         value={draft.country}
                         onChange={(event) => updateDraft({ country: event.target.value })}
                       >
-                        {APP_DESTINATION_COUNTRIES.map((country) => (
-                          <option key={country} value={country}>
-                            {country}
+                        {countryOptions.map((country) => (
+                          <option key={country.value} value={country.value}>
+                            {country.label}
                           </option>
                         ))}
                       </select>

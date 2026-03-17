@@ -31,6 +31,7 @@ export function normalizeDestinationCountry(value) {
   if (!raw) return "";
 
   const lowered = raw.toLowerCase();
+  if (lowered === "not selected") return "";
   if (lowered === "united kingdom" || lowered === "uk") return "UK";
   if (
     lowered === "united states" ||
@@ -43,5 +44,7 @@ export function normalizeDestinationCountry(value) {
   }
 
   const direct = APP_DESTINATION_COUNTRIES.find((country) => country.toLowerCase() === lowered);
-  return direct || "";
+  if (direct) return direct;
+
+  return raw;
 }

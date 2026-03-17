@@ -20,6 +20,7 @@ import {
   Phone,
   Flag,
   FileText,
+  MapPinned,
   ChevronRight,
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
@@ -33,6 +34,7 @@ import {
   resolveRoleFromUserDoc,
 } from "../services/adminroleservice";
 import ThemeToggle from "../components/ThemeToggle";
+import { journeyDisplayCountry, normalizeJourney, normalizeJourneyTrack } from "../journey/journeyModel";
 
 const PERF_TAG = "[perf][ProfileScreen]";
 const PROFILE_CACHE_PREFIX = "majuu_profile_cache_";
@@ -124,6 +126,7 @@ export default function ProfileScreen() {
 
   // ✅ for back target
   const [activeTrack, setActiveTrack] = useState(""); // "study" | "work" | "travel" | ""
+  const [journey, setJourney] = useState(() => normalizeJourney(null));
 
   const [busy, setBusy] = useState("");
 
@@ -142,6 +145,19 @@ export default function ProfileScreen() {
     const second = parts[1]?.[0] || "";
     return (first + second).toUpperCase();
   }, [name, email]);
+
+  const journeyTrackLabel = useMemo(() => {
+    const t = normalizeJourneyTrack(journey?.track);
+    return t ? `${t.slice(0, 1).toUpperCase()}${t.slice(1)}` : "";
+  }, [journey?.track]);
+
+  const journeyCountryLabel = useMemo(() => journeyDisplayCountry(journey), [journey]);
+
+  const journeySummary = useMemo(() => {
+    if (!journeyTrackLabel) return "Not set";
+    const base = journeyCountryLabel ? `${journeyTrackLabel} \u2192 ${journeyCountryLabel}` : journeyTrackLabel;
+    return journey?.stage ? `${base} \u00b7 ${journey.stage}` : base;
+  }, [journey?.stage, journeyCountryLabel, journeyTrackLabel]);
 
   useEffect(() => {
     if (firstPaintLoggedRef.current) return;
@@ -216,6 +232,7 @@ export default function ProfileScreen() {
         setCounty(countyValue);
         setTown(townValue);
         setRole(roleValue);
+        setJourney(normalizeJourney(s?.journey));
 
         const t = String(s?.activeTrack || s?.selectedTrack || "").toLowerCase();
         if (t === "study" || t === "work" || t === "travel") setActiveTrack(t);
@@ -528,6 +545,33 @@ export default function ProfileScreen() {
               </div>
             </motion.button>
           ) : null}
+
+          <motion.button
+            type="button"
+            onClick={() => navigate("/app/profile/journey")}
+            variants={floatCard}
+            initial="rest"
+            whileHover="hover"
+            whileTap="tap"
+            className={actionCard}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100/70 bg-emerald-50/70 text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
+                  <AppIcon size={ICON_MD} icon={MapPinned} />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Journey</div>
+                  <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                    {journeySummary === "Not set"
+                      ? "Set your track and country for faster routing."
+                      : journeySummary}
+                  </div>
+                </div>
+              </div>
+              <AppIcon size={ICON_MD} icon={ChevronRight} className="text-zinc-400 dark:text-zinc-500" />
+            </div>
+          </motion.button>
 
           <motion.button
             type="button"

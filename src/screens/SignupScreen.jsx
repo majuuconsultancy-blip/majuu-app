@@ -15,8 +15,9 @@ import {
 } from "firebase/auth";
 import { auth, authPersistenceReady, googleProvider } from "../firebase";
 import { ensureUserDoc } from "../services/userservice";
-import { isLikelyFirstSignIn, setBiometricPromptPending } from "../services/biometricLockService";
+
 import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
+import { resolveLandingPathFromUserState } from "../journey/journeyLanding";
 
 /* ---------------- Icons ---------------- */
 function IconMail(props) {
@@ -211,7 +212,7 @@ export default function SignupScreen() {
   }, [email, password, confirm, passwordOk, matchOk, loading]);
 
   async function finishLogin(user) {
-    await ensureUserDoc({
+    const state = await ensureUserDoc({
       uid: user.uid,
       email: user.email,
       displayName: user.displayName || "",
@@ -219,13 +220,7 @@ export default function SignupScreen() {
       provider: (user.providerData?.[0]?.providerId || "").toString(),
       lastLoginAt: Date.now(),
     });
-    try {
-      if (isLikelyFirstSignIn(user)) {
-        await setBiometricPromptPending(user.uid, true);
-      }
-    } catch (error) {
-      void error;
-    }
+    return state;
   }
 
   const handleGoogle = async () => {
@@ -239,8 +234,8 @@ export default function SignupScreen() {
     try {
       await authPersistenceReady.catch(() => {});
       const res = await signInWithPopup(auth, googleProvider);
-      await finishLogin(res.user);
-      navigate("/dashboard", { replace: true });
+      const state = await finishLogin(res.user);
+      navigate(resolveLandingPathFromUserState(state || {}), { replace: true });
     } catch (err) {
       const code = String(err?.code || "").toLowerCase();
       if (

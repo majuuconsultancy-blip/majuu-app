@@ -2,7 +2,6 @@
 // CHANGE ONLY:
 // - Removed country icon (Globe2) because per-country map silhouettes aren't practical with Lucide
 // - All other icons remain Lucide
-// - ✅ NEW: Android/browser back button now always goes to /dashboard
 // - ✅ UPDATED: Removed the huge bottom “Go to Tracks” dock button
 // - ✅ UPDATED: Added a small “Tracks” button at the top-right of the header card
 // Backend untouched (setSelectedTrack + setActiveContext + URL behavior)
@@ -24,11 +23,19 @@ import {
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
-import { APP_DESTINATION_COUNTRIES } from "../constants/migrationOptions";
+import {
+  APP_DESTINATION_COUNTRIES,
+  normalizeDestinationCountry,
+} from "../constants/migrationOptions";
 
 import { auth } from "../firebase";
+import { useManagedDestinationCountries } from "../hooks/useManagedDestinationCountries";
+import { useUserJourney } from "../hooks/useUserJourney";
+import { journeyShouldHighlightCountry } from "../journey/journeyMatchers";
 import { setActiveContext, setSelectedTrack } from "../services/userservice";
 import { setSnapshot } from "../resume/resumeEngine";
+import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
+import { logAnalyticsEvent, trackManagedCountryTap } from "../services/analyticsService";
 
 /* ---------- Track config ---------- */
 const TRACKS = {
@@ -36,8 +43,6 @@ const TRACKS = {
   work: { title: "Work Abroad", Icon: Briefcase },
   travel: { title: "Travel Abroad", Icon: Plane },
 };
-
-const COUNTRIES = APP_DESTINATION_COUNTRIES;
 
 /* ---------- Motion presets ---------- */
 const overlayMotion = {
@@ -80,8 +85,17 @@ const listItem = {
 export default function TrackScreen({ track }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { journey } = useUserJourney();
 
   const safeTrack = useMemo(() => (TRACKS[track] ? track : "study"), [track]);
+  const {
+    countries: managedCountriesForTrack,
+    hasManagedDocs: hasManagedCountries,
+    loading: countriesLoading,
+  } = useManagedDestinationCountries({
+    trackType: safeTrack,
+    fallbackCountries: APP_DESTINATION_COUNTRIES,
+  });
 
   const [uid, setUid] = useState(null);
 
@@ -92,6 +106,11 @@ export default function TrackScreen({ track }) {
   const [statusMsg, setStatusMsg] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const visibleCountries = useMemo(() => {
+    if (countriesLoading) return [];
+    return hasManagedCountries ? managedCountriesForTrack : APP_DESTINATION_COUNTRIES;
+  }, [countriesLoading, hasManagedCountries, managedCountriesForTrack]);
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       setUid(user ? user.uid : null);
@@ -99,31 +118,15 @@ export default function TrackScreen({ track }) {
     return () => unsub();
   }, []);
 
-  // ✅ NEW: Android/browser back button should go to Dashboard from TrackScreen
   useEffect(() => {
-    // Make TrackScreen the current history entry (so back triggers popstate cleanly)
-    try {
-      window.history.replaceState(
-        { ...(window.history.state || {}), __majuu_track: true },
-        ""
-      );
-    } catch (error) {
-      void error;
-    }
-
-    const onPopState = (e) => {
-      // Force dashboard instead of returning to previous page
-      try {
-        e.preventDefault?.();
-      } catch (error) {
-        void error;
-      }
-      navigate("/dashboard", { replace: true });
-    };
-
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [navigate]);
+    if (!uid) return;
+    void logAnalyticsEvent({
+      uid,
+      eventType: ANALYTICS_EVENT_TYPES.TRACK_SCREEN_OPENED,
+      trackType: safeTrack,
+      sourceScreen: "TrackScreen",
+    });
+  }, [uid, safeTrack]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -131,7 +134,7 @@ export default function TrackScreen({ track }) {
     const from = params.get("from");
 
     if (country && from === "choice") {
-      setSelectedCountry(country);
+      setSelectedCountry(normalizeDestinationCountry(country) || country);
       setShowModal(true);
     }
   }, [location.search]);
@@ -168,10 +171,16 @@ export default function TrackScreen({ track }) {
   }, [showModal, saving]);
 
   const openCountry = (country) => {
-    setSelectedCountry(country);
+    setSelectedCountry(normalizeDestinationCountry(country) || country);
     setShowModal(true);
     setStatusMsg("");
     setStartingType("");
+
+    void trackManagedCountryTap({
+      trackType: safeTrack,
+      country,
+      sourceScreen: "TrackScreen",
+    });
   };
 
   const closeModal = () => {
@@ -190,7 +199,8 @@ export default function TrackScreen({ track }) {
       navigate("/login", { replace: true });
       return;
     }
-    if (!selectedCountry || saving) return;
+    const canonicalCountry = normalizeDestinationCountry(selectedCountry) || selectedCountry;
+    if (!canonicalCountry || saving) return;
 
     setStartingType(helpType);
     setSaving(true);
@@ -202,18 +212,18 @@ export default function TrackScreen({ track }) {
       await setActiveContext(uid, {
         hasActiveProcess: true,
         activeTrack: safeTrack,
-        activeCountry: selectedCountry,
+        activeCountry: canonicalCountry,
         activeHelpType: helpType, // "self" | "we"
       });
 
-      const qs = encodeURIComponent(selectedCountry);
+      const qs = encodeURIComponent(canonicalCountry);
 
       if (helpType === "self") {
         setSnapshot({
           trackSelect: {
             selectedTrack: safeTrack,
-            destination: selectedCountry,
-            country: selectedCountry,
+            destination: canonicalCountry,
+            country: canonicalCountry,
             category: safeTrack,
             subStep: "help-type-selected",
             helpType: "self",
@@ -230,15 +240,15 @@ export default function TrackScreen({ track }) {
           },
           trackSelect: {
             selectedTrack: safeTrack,
-            destination: selectedCountry,
-            country: selectedCountry,
+            destination: canonicalCountry,
+            country: canonicalCountry,
             category: safeTrack,
             subStep: "help-type-selected",
             helpType: "we",
           },
           weHelp: {
             track: safeTrack,
-            country: selectedCountry,
+            country: canonicalCountry,
           },
         });
         navigate(`/app/${safeTrack}/we-help?country=${qs}&from=choice`, {
@@ -268,6 +278,8 @@ export default function TrackScreen({ track }) {
     "border-zinc-200 dark:border-zinc-800 hover:border-emerald-200 hover:bg-white hover:shadow-md active:scale-[0.99] hover:-translate-y-[1px]";
   const countryCardDark =
     "dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:bg-zinc-900";
+  const countryCardHighlight =
+    "border-emerald-200 bg-emerald-50/70 shadow-md dark:border-emerald-900/40 dark:bg-emerald-950/18";
 
   return (
     <div className={`min-h-screen ${topBg}`}>
@@ -281,10 +293,10 @@ export default function TrackScreen({ track }) {
             onClick={goToTrackSelect}
             disabled={saving}
             className="absolute right-4 top-4 z-20 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 dark:bg-zinc-950/30 dark:hover:bg-zinc-950/45"
-            title="Back to track selection"
+            title="Go to Tracks"
           >
             <AppIcon size={ICON_SM} icon={ArrowLeft} aria-hidden="true" />
-            Back
+            Go to Tracks
           </button>
 
           {/* animated glow blob */}
@@ -340,53 +352,78 @@ export default function TrackScreen({ track }) {
               Countries
             </h2>
             <span className="text-xs text-zinc-500 dark:text-zinc-400">
-              {COUNTRIES.length} options
+              {countriesLoading ? "Loading..." : `${visibleCountries.length} options`}
             </span>
           </div>
 
-          <Motion.div
-            className="mt-3 grid gap-3 sm:grid-cols-2"
-            variants={listWrap}
-            initial="hidden"
-            animate="show"
-          >
-            {COUNTRIES.map((c) => (
-              <Motion.button
-                key={c}
-                type="button"
-                onClick={() => openCountry(c)}
-                variants={listItem}
-                whileHover={{ y: -2 }}
-                whileTap={{ scale: 0.99 }}
-                className={`${countryCard} ${countryCardHover} ${countryCardDark}`}
-              >
-                <div className="relative">
-                  {/* subtle shimmer */}
-                  <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl"
-                  >
-                    <div className="absolute -left-20 top-0 h-full w-24 rotate-12 bg-white/40 dark:bg-zinc-900/60 blur-xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 dark:bg-white/10" />
-                  </div>
+          {!countriesLoading && hasManagedCountries && visibleCountries.length === 0 ? (
+            <div className="mt-3 rounded-3xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-600 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+              No active countries are available for this track right now.
+            </div>
+          ) : (
+            <Motion.div
+              className="mt-3 grid gap-3 sm:grid-cols-2"
+              variants={listWrap}
+              initial="hidden"
+              animate="show"
+            >
+              {visibleCountries.map((c) => {
+                const highlighted = journeyShouldHighlightCountry(journey, {
+                  track: safeTrack,
+                  country: c,
+                });
 
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        {c}
+                return (
+                  <Motion.button
+                    key={c}
+                    type="button"
+                    onClick={() => openCountry(c)}
+                    variants={listItem}
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.99 }}
+                    className={[
+                      countryCard,
+                      countryCardHover,
+                      countryCardDark,
+                      highlighted ? countryCardHighlight : "",
+                    ].join(" ")}
+                  >
+                    <div className="relative">
+                      {/* subtle shimmer */}
+                      <div
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl"
+                      >
+                        <div className="absolute -left-20 top-0 h-full w-24 rotate-12 bg-white/40 blur-xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 dark:bg-white/10" />
                       </div>
-                      <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                        Tap to choose help mode
+
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                            {c}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2">
+                            <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                              Tap to choose help mode
+                            </div>
+                            {highlighted ? (
+                              <span className="rounded-full border border-emerald-200 bg-white/60 px-2 py-0.5 text-[10px] font-semibold text-emerald-900 dark:border-emerald-900/40 dark:bg-zinc-950/25 dark:text-emerald-100">
+                                Continue journey
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/50 text-zinc-700 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/70 group-hover:text-emerald-800 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200 dark:group-hover:border-emerald-900/40 dark:group-hover:bg-emerald-950/25 dark:group-hover:text-emerald-200">
+                          <AppIcon size={ICON_MD} icon={ChevronRight} />
+                        </span>
                       </div>
                     </div>
-
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/70 group-hover:text-emerald-800 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200 dark:group-hover:border-emerald-900/40 dark:group-hover:bg-emerald-950/25 dark:group-hover:text-emerald-200">
-                      <AppIcon size={ICON_MD} icon={ChevronRight} />
-                    </span>
-                  </div>
-                </div>
-              </Motion.button>
-            ))}
-          </Motion.div>
+                  </Motion.button>
+                );
+              })}
+            </Motion.div>
+          )}
         </div>
       </div>
 

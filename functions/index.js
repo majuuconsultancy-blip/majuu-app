@@ -1288,3 +1288,274 @@ exports.onStaffTaskAssignedPush = onDocumentCreated(
     ]);
   }
 );
+
+exports.onCustomCountryDemand = onDocumentCreated(
+  {
+    region: REGION,
+    document: "analytics_customCountryDemand/{eventId}",
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap?.exists) return;
+
+    if (!(await claimEventLock(event.id, "custom_country_demand"))) return;
+
+    const data = snap.data() || {};
+    const uid = safeStr(data?.uid);
+    const rawKey = safeStr(data?.countryKey) || lower(data?.countryLower) || lower(data?.country);
+    const countryKey = safeStr(rawKey)
+      .toLowerCase()
+      .replace(/['’]/g, "")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 80);
+
+    if (!uid || !countryKey) return;
+
+    const nowMs = Date.now();
+    const countRef = db.collection("analytics_customCountryDemandCounts").doc(countryKey);
+    const userRef = countRef.collection("users").doc(uid);
+
+    let isNewUser = false;
+    try {
+      await userRef.create({
+        uid,
+        createdAt: FieldValue.serverTimestamp(),
+        createdAtMs: nowMs,
+      });
+      isNewUser = true;
+    } catch (error) {
+      const code = error?.code;
+      const already =
+        code === 6 ||
+        code === "already-exists" ||
+        /already exists/i.test(String(error?.message || ""));
+      if (!already) throw error;
+    }
+
+    const countryDisplay = safeStr(data?.countryDisplay) || safeStr(data?.country) || countryKey;
+    const countryLower = lower(data?.countryLower) || lower(countryDisplay);
+    const lastTrack = safeStr(data?.track);
+
+    await countRef.set(
+      {
+        countryKey,
+        countryLower,
+        countryDisplay,
+        lastTrack,
+        uniqueUserCount: FieldValue.increment(isNewUser ? 1 : 0),
+        totalSubmissions: FieldValue.increment(1),
+        updatedAt: FieldValue.serverTimestamp(),
+        updatedAtMs: nowMs,
+      },
+      { merge: true }
+    );
+  }
+);
+
+exports.onCountryDemand = onDocumentCreated(
+  {
+    region: REGION,
+    document: "analytics_countryDemand/{eventId}",
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap?.exists) return;
+
+    if (!(await claimEventLock(event.id, "country_demand"))) return;
+
+    const data = snap.data() || {};
+    const uid = safeStr(data?.uid);
+    const rawKey = safeStr(data?.countryKey) || lower(data?.countryLower) || lower(data?.country);
+    const countryKey = safeStr(rawKey)
+      .toLowerCase()
+      .replace(/['â€™]/g, "")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 80);
+
+    if (!uid || !countryKey) return;
+
+    const nowMs = Date.now();
+    const countRef = db.collection("analytics_countryDemandCounts").doc(countryKey);
+    const userRef = countRef.collection("users").doc(uid);
+
+    let isNewUser = false;
+    try {
+      await userRef.create({
+        uid,
+        createdAt: FieldValue.serverTimestamp(),
+        createdAtMs: nowMs,
+      });
+      isNewUser = true;
+    } catch (error) {
+      const code = error?.code;
+      const already =
+        code === 6 ||
+        code === "already-exists" ||
+        /already exists/i.test(String(error?.message || ""));
+      if (!already) throw error;
+    }
+
+    const countryDisplay = safeStr(data?.countryDisplay) || safeStr(data?.country) || countryKey;
+    const countryLower = lower(data?.countryLower) || lower(countryDisplay);
+    const track = lower(data?.track);
+    const safeTrack = track === "study" || track === "work" || track === "travel" ? track : "";
+
+    const update = {
+      countryKey,
+      countryLower,
+      countryDisplay,
+      lastTrack: safeTrack,
+      uniqueUserCount: FieldValue.increment(isNewUser ? 1 : 0),
+      totalTaps: FieldValue.increment(1),
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedAtMs: nowMs,
+    };
+
+    if (safeTrack) {
+      update[`trackCounts.${safeTrack}`] = FieldValue.increment(1);
+    }
+
+    await countRef.set(update, { merge: true });
+  }
+);
+
+exports.onNewsRouteView = onDocumentCreated(
+  {
+    region: REGION,
+    document: "analytics_newsRouteViews/{eventId}",
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap?.exists) return;
+
+    if (!(await claimEventLock(event.id, "news_route_view"))) return;
+
+    const data = snap.data() || {};
+    const uid = safeStr(data?.uid);
+    const track = lower(data?.track);
+    const safeTrack = track === "study" || track === "work" || track === "travel" ? track : "";
+    const rawCountryKey = safeStr(data?.countryKey) || lower(data?.countryLower) || lower(data?.country);
+    const countryKey = safeStr(rawCountryKey)
+      .toLowerCase()
+      .replace(/['â€™]/g, "")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 80);
+
+    const rawRouteKey = safeStr(data?.routeKey);
+    const routeKey = safeStr(rawRouteKey || (safeTrack && countryKey ? `${safeTrack}_${countryKey}` : ""))
+      .toLowerCase()
+      .replace(/['â€™]/g, "")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 120);
+
+    if (!uid || !safeTrack || !countryKey || !routeKey) return;
+
+    const nowMs = Date.now();
+
+    const countryDisplay = safeStr(data?.country) || countryKey;
+    const countryLower = lower(data?.countryLower) || lower(countryDisplay);
+
+    const routeRef = db.collection("analytics_newsRouteViewCounts").doc(routeKey);
+    const routeUserRef = routeRef.collection("users").doc(uid);
+    const countryRef = db.collection("analytics_newsCountryViewCounts").doc(countryKey);
+    const countryUserRef = countryRef.collection("users").doc(uid);
+
+    let isNewRouteUser = false;
+    try {
+      await routeUserRef.create({ uid, createdAt: FieldValue.serverTimestamp(), createdAtMs: nowMs });
+      isNewRouteUser = true;
+    } catch (error) {
+      const code = error?.code;
+      const already =
+        code === 6 ||
+        code === "already-exists" ||
+        /already exists/i.test(String(error?.message || ""));
+      if (!already) throw error;
+    }
+
+    let isNewCountryUser = false;
+    try {
+      await countryUserRef.create({ uid, createdAt: FieldValue.serverTimestamp(), createdAtMs: nowMs });
+      isNewCountryUser = true;
+    } catch (error) {
+      const code = error?.code;
+      const already =
+        code === 6 ||
+        code === "already-exists" ||
+        /already exists/i.test(String(error?.message || ""));
+      if (!already) throw error;
+    }
+
+    await Promise.all([
+      routeRef.set(
+        {
+          routeKey,
+          track: safeTrack,
+          countryKey,
+          countryLower,
+          countryDisplay,
+          uniqueUserCount: FieldValue.increment(isNewRouteUser ? 1 : 0),
+          totalViews: FieldValue.increment(1),
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedAtMs: nowMs,
+        },
+        { merge: true }
+      ),
+      countryRef.set(
+        {
+          countryKey,
+          countryLower,
+          countryDisplay,
+          lastTrack: safeTrack,
+          uniqueUserCount: FieldValue.increment(isNewCountryUser ? 1 : 0),
+          totalViews: FieldValue.increment(1),
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedAtMs: nowMs,
+          [`trackCounts.${safeTrack}`]: FieldValue.increment(1),
+        },
+        { merge: true }
+      ),
+    ]);
+  }
+);
+
+exports.onSelfHelpLinkClick = onDocumentCreated(
+  {
+    region: REGION,
+    document: "analytics_selfHelpLinkClicks/{eventId}",
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap?.exists) return;
+
+    if (!(await claimEventLock(event.id, "selfhelp_link_click"))) return;
+
+    const data = snap.data() || {};
+    const uid = safeStr(data?.uid);
+    if (!uid) return;
+
+    const bucket = data?.isAffiliate === true ? "affiliate" : "other";
+    const track = lower(data?.track);
+    const safeTrack = track === "study" || track === "work" || track === "travel" ? track : "";
+
+    const nowMs = Date.now();
+    const ref = db.collection("analytics_selfHelpLinkClickCounts").doc(bucket);
+
+    const update = {
+      bucket,
+      totalClicks: FieldValue.increment(1),
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedAtMs: nowMs,
+    };
+
+    if (safeTrack) {
+      update[`trackCounts.${safeTrack}`] = FieldValue.increment(1);
+    }
+
+    await ref.set(update, { merge: true });
+  }
+);

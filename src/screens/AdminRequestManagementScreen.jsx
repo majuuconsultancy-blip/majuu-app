@@ -17,7 +17,8 @@ import { useNavigate } from "react-router-dom";
 
 import AppIcon from "../components/AppIcon";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
-import { APP_DESTINATION_COUNTRIES, APP_TRACK_META } from "../constants/migrationOptions";
+import { APP_TRACK_META, normalizeDestinationCountry } from "../constants/migrationOptions";
+import { useManagedDestinationCountries } from "../hooks/useManagedDestinationCountries";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import {
   createEmptyRequestDefinitionDraft,
@@ -108,6 +109,9 @@ export default function AdminRequestManagementScreen() {
   const [fieldDraft, setFieldDraft] = useState(createEmptyRequestExtraFieldDraft());
   const [fieldErr, setFieldErr] = useState("");
 
+  const { countries: managedCountriesForTrack, hasManagedDocs: hasManagedCountries } =
+    useManagedDestinationCountries({ trackType: draft.trackType });
+
   useEffect(() => {
     let cancelled = false;
 
@@ -158,6 +162,27 @@ export default function AdminRequestManagementScreen() {
     () => definitions.filter((definition) => definition.isActive).length,
     [definitions]
   );
+
+  const countryOptions = useMemo(() => {
+    const activeList = Array.isArray(managedCountriesForTrack) ? managedCountriesForTrack : [];
+    const activeSet = new Set(activeList.map((country) => safeString(country, 120).toLowerCase()));
+
+    const currentCountry =
+      normalizeDestinationCountry(draft.country) || safeString(draft.country, 120);
+    const needsLegacyOption =
+      currentCountry && !activeSet.has(safeString(currentCountry, 120).toLowerCase());
+
+    const legacyOption = needsLegacyOption
+      ? [{ value: currentCountry, label: `${currentCountry} (legacy/inactive)` }]
+      : [];
+    const activeOptions = activeList.map((country) => ({
+      value: country,
+      label: country,
+    }));
+
+    if (!hasManagedCountries) return activeOptions;
+    return [...legacyOption, ...activeOptions];
+  }, [draft.country, hasManagedCountries, managedCountriesForTrack]);
 
   const pageBg =
     "min-h-screen bg-gradient-to-b from-emerald-50/35 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
@@ -540,9 +565,9 @@ export default function AdminRequestManagementScreen() {
                         value={draft.country}
                         onChange={(event) => updateDraft({ country: event.target.value })}
                       >
-                        {APP_DESTINATION_COUNTRIES.map((country) => (
-                          <option key={country} value={country}>
-                            {country}
+                        {countryOptions.map((country) => (
+                          <option key={country.value} value={country.value}>
+                            {country.label}
                           </option>
                         ))}
                       </select>

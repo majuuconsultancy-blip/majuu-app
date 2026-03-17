@@ -13,6 +13,7 @@ import {
   getSelfHelpRuntimeResourceById,
   incrementSelfHelpResourceClick,
 } from "../services/selfHelpResourceService";
+import { trackSelfHelpLinkClick } from "../services/analyticsService";
 
 export const SELF_HELP_PROVIDER_META = {
   "direct-web": { label: "External web", supportsRedirect: true },
@@ -311,6 +312,15 @@ export async function openSelfHelpResourceGateway({
 
   void incrementSelfHelpResourceClick(resource.id);
   void logGatewayAnalytics({ ...activity, uid: safeString(uid, 120) }, resource);
+  void trackSelfHelpLinkClick({
+    trackType: activity.track,
+    country: activity.country,
+    isAffiliate: Boolean(resource?.isAffiliate),
+    resourceId: resource?.id || activity.resourceId,
+    category: activity.category,
+    providerKey: activity.providerKey,
+    sourceScreen: "selfHelpGateway.openSelfHelpResourceGateway",
+  });
 
   return {
     ok: true,
@@ -402,6 +412,15 @@ export async function reopenStoredSelfHelpGateway({
     void incrementSelfHelpResourceClick(resource.id);
   }
   void logGatewayAnalytics({ ...activity, uid: safeString(uid, 120) }, resource);
+  void trackSelfHelpLinkClick({
+    trackType: activity.track,
+    country: activity.country,
+    isAffiliate: Boolean(resource?.isAffiliate),
+    resourceId: resource?.id || activity.resourceId,
+    category: activity.category,
+    providerKey: activity.providerKey,
+    sourceScreen: "selfHelpGateway.reopenStoredSelfHelpGateway",
+  });
 
   return {
     ok: true,

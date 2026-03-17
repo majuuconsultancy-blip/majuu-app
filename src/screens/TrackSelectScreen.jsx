@@ -16,13 +16,6 @@ import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { getUserState, setSelectedTrack } from "../services/userservice";
 import { getResumeTarget, setSnapshot } from "../resume/resumeEngine";
 import { waitForAuthRestore } from "../utils/authRestore";
-import {
-  enableBiometricLockForUser,
-  getBiometricCapability,
-  getBiometricLockEnabled,
-  isBiometricPromptPending,
-  setBiometricPromptPending,
-} from "../services/biometricLockService";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import { isStaffAccessEnabled } from "../services/staffaccessservice";
 
@@ -41,9 +34,6 @@ export default function TrackSelectScreen() {
   const [isStaff, setIsStaff] = useState(false);
 
   const [mounted, setMounted] = useState(true);
-  const [bioPromptOpen, setBioPromptOpen] = useState(false);
-  const [bioPromptBusy, setBioPromptBusy] = useState(false);
-  const [bioPromptErr, setBioPromptErr] = useState("");
 
   useEffect(() => {
     let unsub = () => {};
@@ -127,32 +117,6 @@ export default function TrackSelectScreen() {
             }, 40);
           }
         }
-
-        try {
-          const [pendingPrompt, lockEnabled, capability] = await Promise.all([
-            isBiometricPromptPending(user.uid),
-            getBiometricLockEnabled(user.uid),
-            getBiometricCapability(),
-          ]);
-
-          if (cancelled) return;
-          if (pendingPrompt && lockEnabled) {
-            await setBiometricPromptPending(user.uid, false);
-            return;
-          }
-
-          if (
-            pendingPrompt &&
-            !lockEnabled &&
-            capability.supported &&
-            (capability.available || capability.deviceSecure)
-          ) {
-            setBioPromptErr("");
-            setBioPromptOpen(true);
-          }
-        } catch (error) {
-          void error;
-        }
       });
     })();
 
@@ -210,7 +174,7 @@ export default function TrackSelectScreen() {
     } catch (error) {
       console.error("setSelectedTrack error:", error);
     } finally {
-      navigate(`/app/${track}`);
+      navigate(`/app/${track}`, { replace: true });
     }
   };
 
@@ -231,45 +195,14 @@ export default function TrackSelectScreen() {
     const track = String(userState?.activeTrack || "").toLowerCase();
 
     if (helpType === "we" && requestId) {
-      navigate(`/app/request/${requestId}`);
+      navigate(`/app/request/${requestId}`, { replace: true });
       return;
     }
     if (track) {
-      navigate(`/app/${track}`);
+      navigate(`/app/${track}`, { replace: true });
       return;
     }
-    navigate("/app/progress");
-  };
-
-  const skipBiometricPrompt = async () => {
-    if (!uid) {
-      setBioPromptOpen(false);
-      return;
-    }
-    setBioPromptBusy(true);
-    setBioPromptErr("");
-    try {
-      await setBiometricPromptPending(uid, false);
-      setBioPromptOpen(false);
-    } finally {
-      setBioPromptBusy(false);
-    }
-  };
-
-  const turnOnBiometricPrompt = async () => {
-    if (!uid) return;
-    setBioPromptBusy(true);
-    setBioPromptErr("");
-    try {
-      const result = await enableBiometricLockForUser(uid, "Turn on secure app unlock");
-      if (result.ok) {
-        setBioPromptOpen(false);
-        return;
-      }
-      setBioPromptErr(result.message || "Could not turn on biometric unlock.");
-    } finally {
-      setBioPromptBusy(false);
-    }
+    navigate("/app/progress", { replace: true });
   };
 
   if (loading) {
@@ -449,46 +382,6 @@ export default function TrackSelectScreen() {
           <div className="h-6" />
         </div>
       </div>
-
-      {bioPromptOpen ? (
-        <div className="fixed inset-0 z-50 bg-zinc-950/45 backdrop-blur-[1px] app-overlay-safe">
-          <div className="mx-auto flex min-h-screen w-full max-w-xl items-center px-5 py-6">
-            <div className="w-full rounded-3xl border border-zinc-200 bg-white p-5 shadow-lg">
-              <h2 className="text-base font-semibold tracking-tight text-zinc-900">
-                Turn on biometric unlock?
-              </h2>
-              <p className="mt-1 text-sm text-zinc-600">
-                Keep your account signed in and protect app reopen with fingerprint, face, or device lock.
-              </p>
-
-              {bioPromptErr ? (
-                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  {bioPromptErr}
-                </div>
-              ) : null}
-
-              <div className="mt-4 grid gap-2">
-                <button
-                  type="button"
-                  onClick={turnOnBiometricPrompt}
-                  disabled={bioPromptBusy}
-                  className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
-                >
-                  {bioPromptBusy ? "Please wait..." : "Turn on"}
-                </button>
-                <button
-                  type="button"
-                  onClick={skipBiometricPrompt}
-                  disabled={bioPromptBusy}
-                  className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 disabled:opacity-60"
-                >
-                  Not now
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

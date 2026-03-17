@@ -16,8 +16,9 @@ import {
 } from "firebase/auth";
 import { auth, authPersistenceReady, googleProvider } from "../firebase";
 import { ensureUserDoc } from "../services/userservice";
-import { isLikelyFirstSignIn, setBiometricPromptPending } from "../services/biometricLockService";
+
 import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
+import { resolveLandingPathFromUserState } from "../journey/journeyLanding";
 
 /* ---------------- Icons ---------------- */
 function IconMail(props) {
@@ -275,22 +276,41 @@ export default function LoginScreen() {
   const lastAttemptRef = useRef(null); // { type: "email"|"google", payload: {...} }
 
   useEffect(() => {
-    // Do not block redirect listener behind persistence resolution.
-    const unsub = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        navigate("/dashboard", { replace: true });
+    let cancelled = false;
+    let redirected = false;
+
+    const redirectIfSignedIn = async (user) => {
+      if (!user || redirected || cancelled) return;
+      redirected = true;
+      try {
+        const state = await ensureUserDoc({
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName || "",
+          photoURL: user.photoURL || "",
+          provider: (user.providerData?.[0]?.providerId || "").toString(),
+          lastLoginAt: Date.now(),
+        });
+        if (cancelled) return;
+        navigate(resolveLandingPathFromUserState(state || {}), { replace: true });
+      } catch (error) {
+        void error;
+        if (!cancelled) navigate("/dashboard", { replace: true });
       }
+    };
+
+    const unsub = onAuthStateChanged(auth, (user) => {
+      void redirectIfSignedIn(user);
     });
 
     // Fast path when user is already restored.
-    if (auth.currentUser) {
-      navigate("/dashboard", { replace: true });
-    }
+    void redirectIfSignedIn(auth.currentUser);
 
     // Keep background init for other flows, but don't await it.
     authPersistenceReady.catch(() => {});
 
     return () => {
+      cancelled = true;
       unsub();
     };
   }, [navigate]);
@@ -325,7 +345,7 @@ export default function LoginScreen() {
   }, [email, password, loading]);
 
   async function finishLogin(user) {
-    await ensureUserDoc({
+    const state = await ensureUserDoc({
       uid: user.uid,
       email: user.email,
       displayName: user.displayName || "",
@@ -333,14 +353,8 @@ export default function LoginScreen() {
       provider: (user.providerData?.[0]?.providerId || "").toString(),
       lastLoginAt: Date.now(),
     });
-    try {
-      if (isLikelyFirstSignIn(user)) {
-        await setBiometricPromptPending(user.uid, true);
-      }
-    } catch (error) {
-      void error;
-    }
-    navigate("/dashboard", { replace: true });
+
+    navigate(resolveLandingPathFromUserState(state || {}), { replace: true });
   }
 
   const handleLogin = async (e) => {

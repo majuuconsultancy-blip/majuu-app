@@ -40,6 +40,8 @@ export default function SmartHome() {
         const helpType = String(state?.activeHelpType || "").toLowerCase();
         const requestId = String(state?.activeRequestId || "").trim();
         const track = String(state?.activeTrack || "").toLowerCase();
+        const selected = String(state?.selectedTrack || "").toLowerCase();
+        const journey = String(state?.journey?.track || "").toLowerCase();
 
         // ✅ If We-Help + requestId → go to request status
         if (hasActive && helpType === "we" && requestId) {
@@ -47,9 +49,21 @@ export default function SmartHome() {
           return;
         }
 
+        // ✅ If journey track exists → go to that track home
+        if (VALID_TRACKS.has(journey)) {
+          navigate(`/app/${journey}`, { replace: true });
+          return;
+        }
+
         // ✅ Else go to active track if valid
         if (hasActive && VALID_TRACKS.has(track)) {
           navigate(`/app/${track}`, { replace: true });
+          return;
+        }
+
+        // ✅ Else go to the last selected track (if any)
+        if (VALID_TRACKS.has(selected)) {
+          navigate(`/app/${selected}`, { replace: true });
           return;
         }
 

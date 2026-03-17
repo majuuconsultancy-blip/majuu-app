@@ -18,6 +18,7 @@ import LoginScreen from "./screens/LoginScreen";
 import SignupScreen from "./screens/SignupScreen";
 import VerifyEmailScreen from "./screens/VerifyEmailScreen";
 import TrackSelectScreen from "./screens/TrackSelectScreen";
+import SetupProfileJourneyScreen from "./screens/SetupProfileJourneyScreen";
 
 // App shell + core screens (non-lazy)
 import AppLayout from "./components/AppLayout";
@@ -29,6 +30,7 @@ import ProgressScreen from "./screens/ProgressScreen";
 import NewsScreen from "./screens/NewsScreen";
 import ProfileScreen from "./screens/ProfileScreen";
 import EditProfileScreen from "./screens/EditProfileScreen";
+import EditJourneyScreen from "./screens/EditJourneyScreen";
 
 // Gates
 import AdminGate from "./components/AdminGate";
@@ -44,6 +46,11 @@ import { hasSeenIntro } from "./utils/introFlag";
 import { isResumableRoute, setSnapshot } from "./resume/resumeEngine";
 import { waitForAuthRestore } from "./utils/authRestore";
 import BiometricAppLock from "./components/BiometricAppLock";
+import { getUserState } from "./services/userservice";
+import { resolveLandingPathFromUserState } from "./journey/journeyLanding";
+import { normalizeJourney } from "./journey/journeyModel";
+import { ANALYTICS_EVENT_TYPES } from "./constants/analyticsEvents";
+import { logAnalyticsEvent } from "./services/analyticsService";
 
 /* ---------------- Lazy screens ---------------- */
 // Main user flows
@@ -78,8 +85,12 @@ const AdminManageStaffScreen = lazy(() => import("./screens/AdminManageStaffScre
 const AdminAssignAdminScreen = lazy(() => import("./screens/AdminAssignAdminScreen"));
 const AdminManageAdminsScreen = lazy(() => import("./screens/AdminManageAdminsScreen"));
 const AdminSaccScreen = lazy(() => import("./screens/AdminSaccScreen"));
+const AdminAnalyticsScreen = lazy(() => import("./screens/AdminAnalyticsScreen"));
 const AdminNewsManagementScreen = lazy(() => import("./screens/AdminNewsManagementScreen"));
 const AdminPricingControlsScreen = lazy(() => import("./screens/AdminPricingControlsScreen"));
+const AdminCountryManagementScreen = lazy(() =>
+  import("./screens/AdminCountryManagementScreen")
+);
 const AdminRequestManagementScreen = lazy(() =>
   import("./screens/AdminRequestManagementScreen")
 );
@@ -97,7 +108,15 @@ const StaffStartWorkModalScreen = lazy(() => import("./screens/StaffStartWorkMod
 const ServicePartnerOnboardingScreen = lazy(() => import("./screens/ServicePartnerOnboardingScreen"));
 
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
-const ROOT_EXIT_PATHS = new Set(["/app/home", "/dashboard", "/staff", "/staff/tasks"]);
+const ROOT_EXIT_PATHS = new Set([
+  "/app/home",
+  "/app/study",
+  "/app/work",
+  "/app/travel",
+  "/dashboard",
+  "/staff",
+  "/staff/tasks",
+]);
 const SAFE_FALLBACK_PATH = "/app/home";
 const SCROLL_RESET_EXCLUDED_ROUTES = [/^\/staff\/request\/[^/]+\/start$/];
 
@@ -134,6 +153,7 @@ function preloadCriticalScreens() {
   import("./screens/ServicePartnerOnboardingScreen");
   import("./screens/AdminSelfHelpLinksManagementScreen");
   import("./screens/AdminRequestManagementScreen");
+  import("./screens/AdminCountryManagementScreen");
 }
 
 function runWhenIdle(fn) {
@@ -153,10 +173,12 @@ function StartupRoute() {
 
   useEffect(() => {
     let cancelled = false;
+    let settled = false;
     let timeoutId = null;
 
     const finalize = (next) => {
-      if (cancelled) return;
+      if (cancelled || settled) return;
+      settled = true;
       if (timeoutId) {
         window.clearTimeout(timeoutId);
         timeoutId = null;
@@ -178,7 +200,35 @@ function StartupRoute() {
 
     void (async () => {
       const restoredUser = await waitForAuthRestore(8000);
-      finalize(restoredUser ? "/dashboard" : "/login");
+      if (!restoredUser) {
+        finalize("/login");
+        return;
+      }
+
+      try {
+        const state = await getUserState(restoredUser.uid, restoredUser.email || "");
+        const landing = resolveLandingPathFromUserState(state || {});
+
+        const journey = normalizeJourney(state?.journey);
+        const didHaveSavedJourney = Boolean(journey?.track);
+        void logAnalyticsEvent({
+          uid: restoredUser.uid,
+          eventType: didHaveSavedJourney
+            ? ANALYTICS_EVENT_TYPES.APP_LAUNCH_WITH_SAVED_JOURNEY
+            : ANALYTICS_EVENT_TYPES.APP_LAUNCH_WITHOUT_SAVED_JOURNEY,
+          trackType: journey.track,
+          country: journey.country,
+          countryType: journey.countryType,
+          countryCustom: journey.countryCustom,
+          sourceScreen: "StartupRoute",
+          metadata: { landing },
+        });
+
+        finalize(landing);
+      } catch (error) {
+        void error;
+        finalize("/dashboard");
+      }
     })();
 
     return () => {
@@ -433,6 +483,7 @@ function AppRoutes() {
           <Route path="/login" element={<LoginScreen />} />
           <Route path="/signup" element={<SignupScreen />} />
           <Route path="/verify-email" element={<VerifyEmailScreen />} />
+          <Route path="/setup" element={<SetupProfileJourneyScreen />} />
           <Route path="/legal" element={<LegalPortalScreen />} />
           <Route path="/legal/:docKey" element={<LegalDocumentScreen />} />
 
@@ -518,6 +569,7 @@ function AppRoutes() {
 
             <Route path="profile" element={<ProfileScreen />} />
             <Route path="profile/edit" element={<EditProfileScreen />} />
+            <Route path="profile/journey" element={<EditJourneyScreen />} />
             <Route path="legal" element={<LegalPortalScreen mode="app" />} />
             <Route path="legal/:docKey" element={<LegalDocumentScreen />} />
 
@@ -603,6 +655,14 @@ function AppRoutes() {
               }
             />
             <Route
+              path="admin/sacc/analytics"
+              element={
+                <AdminGate>
+                  <AdminAnalyticsScreen />
+                </AdminGate>
+              }
+            />
+            <Route
               path="admin/sacc/request-management"
               element={
                 <AdminGate>
@@ -631,6 +691,14 @@ function AppRoutes() {
               element={
                 <AdminGate>
                   <AdminSelfHelpLinksManagementScreen />
+                </AdminGate>
+              }
+            />
+            <Route
+              path="admin/sacc/countries"
+              element={
+                <AdminGate>
+                  <AdminCountryManagementScreen />
                 </AdminGate>
               }
             />
