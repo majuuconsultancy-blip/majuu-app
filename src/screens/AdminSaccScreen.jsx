@@ -9,6 +9,7 @@ import {
   Link2,
   Newspaper,
   Settings2,
+  ShieldCheck,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -62,9 +63,6 @@ export default function AdminSaccScreen() {
             <h1 className="mt-3 text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Super Admin Control Center
             </h1>
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              A clean module list for app-wide controls, including Country Management, Request Management, Pricing Controls, News Management, and SelfHelp Links Management.
-            </p>
           </div>
 
           <button
@@ -91,9 +89,6 @@ export default function AdminSaccScreen() {
               <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 Control Modules
               </div>
-              <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                More modules can be added here later without changing the overall screen structure.
-              </div>
             </div>
 
             <div className="mt-4 grid gap-3">
@@ -108,13 +103,8 @@ export default function AdminSaccScreen() {
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        Request Management
-                      </div>
-                      <span className="rounded-full border border-zinc-200 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200">
-                        New
-                      </span>
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      Request Management
                     </div>
                     <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                       Manage request definitions by title, track, country, and extra request-specific fields while leaving the current core request flow untouched.
@@ -136,13 +126,8 @@ export default function AdminSaccScreen() {
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        Analytics
-                      </div>
-                      <span className="rounded-full border border-zinc-200 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200">
-                        New
-                      </span>
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      Analytics
                     </div>
                     <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                       View high-signal product metrics like signups, journey demand, SelfHelp/WeHelp usage, top countries, and request outcomes.
@@ -164,16 +149,34 @@ export default function AdminSaccScreen() {
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        Country Management
-                      </div>
-                      <span className="rounded-full border border-zinc-200 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200">
-                        New
-                      </span>
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      Country Management
                     </div>
                     <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                       Create, edit, activate/deactivate countries, set supported tracks, and assign currency context for downstream modules.
+                    </div>
+                  </div>
+
+                  <AppIcon icon={ChevronRight} size={ICON_MD} className="text-zinc-400" />
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate("/app/admin/sacc/partnerships")}
+                className={`${card} w-full px-4 py-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50 active:scale-[0.99] dark:hover:bg-zinc-900/80`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                    <AppIcon icon={Link2} size={ICON_MD} />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      Partnerships
+                    </div>
+                    <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                      Onboard partners, manage status, configure track and geographic coverage, and feed admin partner binding plus preferred-agent routing.
                     </div>
                   </div>
 
@@ -202,6 +205,29 @@ export default function AdminSaccScreen() {
                     </div>
                     <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                       View request pricing, edit amounts inline, and publish updates instantly across request checkout flows.
+                    </div>
+                  </div>
+
+                  <AppIcon icon={ChevronRight} size={ICON_MD} className="text-zinc-400" />
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate("/app/admin/sacc/finances")}
+                className={`${card} w-full px-4 py-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50 active:scale-[0.99] dark:hover:bg-zinc-900/80`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                    <AppIcon icon={ShieldCheck} size={ICON_MD} />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      Finances
+                    </div>
+                    <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                      Configure provider readiness, partner financial profiles, payout queue rules, settlement visibility, and finance audit evidence without mixing them into pricing.
                     </div>
                   </div>
 
@@ -248,13 +274,8 @@ export default function AdminSaccScreen() {
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        SelfHelp Links Management
-                      </div>
-                      <span className="rounded-full border border-zinc-200 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200">
-                        New
-                      </span>
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      SelfHelp Links Management
                     </div>
                     <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                       Control SelfHelp resource links, partner flags, countries, track routing, and click counts from SACC.

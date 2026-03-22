@@ -12,12 +12,17 @@ import {
 import { db, auth } from "../firebase";
 import { getCurrentUserRoleContext } from "./adminroleservice";
 import {
+  buildRequestHistoryPayload,
+  buildSystemChatMessagePayload,
+} from "./requestcontinuityservice";
+import {
   getSpecialityLabel,
   inferRequestSpeciality,
   normalizeSpecialities,
   normalizeSpecialityKey,
 } from "../constants/staffSpecialities";
 import { createStaffNotification, createUserNotification } from "./notificationDocs";
+import { buildRequestContinuityPatch, REQUEST_BACKEND_STATUSES } from "../utils/requestLifecycle";
 
 const ACTIVE_TASK_STATUSES = new Set(["assigned", "active"]);
 
@@ -215,6 +220,8 @@ export async function assignRequestToStaff({
     const reqSnap = await transaction.get(reqRef);
     if (!reqSnap.exists()) throw new Error("Request not found");
     const reqData = reqSnap.data() || {};
+    const adminPartnerId = String(roleCtx?.adminScope?.partnerId || "").trim();
+    const requestPartnerId = String(reqData?.assignedPartnerId || "").trim();
 
     const staffSnap = await transaction.get(staffRef);
     if (!staffSnap.exists()) throw new Error("Staff record not found");
@@ -231,6 +238,9 @@ export async function assignRequestToStaff({
       const effectiveOwnerUid = lockAdminUid || requestAdminUid;
       if (effectiveOwnerUid && effectiveOwnerUid !== admin.uid) {
         throw new Error("You can only assign staff for requests routed to your admin account.");
+      }
+      if (requestPartnerId && adminPartnerId && requestPartnerId !== adminPartnerId) {
+        throw new Error("You can only assign staff for requests under your partner.");
       }
     }
 
@@ -333,13 +343,68 @@ export async function assignRequestToStaff({
         reassignFromStaffUid: deleteField(),
         staffStartReminder3hSentAt: deleteField(),
         staffStartReminder3hSentAtMs: deleteField(),
+        updatedAt: serverTimestamp(),
+        ...buildRequestContinuityPatch(reqData, {
+          assignedTo: safeStaffUid,
+          staffStatus: "assigned",
+          backendStatus: REQUEST_BACKEND_STATUSES.ASSIGNED,
+          userStatus: "in_progress",
+          everAssigned: true,
+        }),
       },
       { merge: true }
     );
 
+    if (previousAssignee && previousAssignee !== safeStaffUid) {
+      const systemMessageRef = doc(collection(db, "serviceRequests", safeRequestId, "messages"));
+      transaction.set(
+        systemMessageRef,
+        buildSystemChatMessagePayload({
+          requestId: safeRequestId,
+          kind: "request_reassigned",
+          previousStaffUid: previousAssignee,
+          nextStaffUid: safeStaffUid,
+          actorUid: admin.uid,
+        })
+      );
+
+      const historyRef = doc(collection(db, "serviceRequests", safeRequestId, "requestHistory"));
+      transaction.set(
+        historyRef,
+        buildRequestHistoryPayload({
+          requestId: safeRequestId,
+          action: "reassigned",
+          staffId: safeStaffUid,
+          previousStaffUid: previousAssignee,
+          nextStaffUid: safeStaffUid,
+          actorUid: admin.uid,
+          details: {
+            speciality: String(safeSpeciality || "").trim().toLowerCase() || "",
+            track: String(track || "").trim().toLowerCase() || "",
+          },
+        })
+      );
+    } else {
+      const historyRef = doc(collection(db, "serviceRequests", safeRequestId, "requestHistory"));
+      transaction.set(
+        historyRef,
+        buildRequestHistoryPayload({
+          requestId: safeRequestId,
+          action: "assigned",
+          staffId: safeStaffUid,
+          nextStaffUid: safeStaffUid,
+          actorUid: admin.uid,
+          details: {
+            speciality: String(safeSpeciality || "").trim().toLowerCase() || "",
+            track: String(track || "").trim().toLowerCase() || "",
+          },
+        })
+      );
+    }
+
     const auditRef = doc(collection(db, "serviceRequests", safeRequestId, "assignmentAudit"));
     transaction.set(auditRef, {
-      action: "assign",
+      action: previousAssignee && previousAssignee !== safeStaffUid ? "reassign" : "assign",
       requestId: safeRequestId,
       fromStaffUid: previousAssignee || null,
       toStaffUid: safeStaffUid,
@@ -404,6 +469,8 @@ export async function unassignRequest({ requestId, staffUid, reason = "Manual un
     const reqSnap = await transaction.get(reqRef);
     if (!reqSnap.exists()) throw new Error("Request not found");
     const reqData = reqSnap.data() || {};
+    const adminPartnerId = String(roleCtx?.adminScope?.partnerId || "").trim();
+    const requestPartnerId = String(reqData?.assignedPartnerId || "").trim();
 
     const currentAssignedUid = String(reqData?.assignedTo || "").trim();
     const targetUid = requestedUid || currentAssignedUid;
@@ -415,6 +482,9 @@ export async function unassignRequest({ requestId, staffUid, reason = "Manual un
       const effectiveOwnerUid = lockAdminUid || requestAdminUid;
       if (effectiveOwnerUid && effectiveOwnerUid !== admin.uid) {
         throw new Error("You can only unassign staff on requests in your admin scope.");
+      }
+      if (requestPartnerId && adminPartnerId && requestPartnerId !== adminPartnerId) {
+        throw new Error("You can only unassign staff for requests under your partner.");
       }
     }
 
@@ -456,8 +526,39 @@ export async function unassignRequest({ requestId, staffUid, reason = "Manual un
         reassignFromStaffUid: deleteField(),
         staffStartReminder3hSentAt: deleteField(),
         staffStartReminder3hSentAtMs: deleteField(),
+        updatedAt: serverTimestamp(),
+        ...buildRequestContinuityPatch(reqData, {
+          backendStatus: REQUEST_BACKEND_STATUSES.NEW,
+          everAssigned: true,
+        }),
       },
       { merge: true }
+    );
+
+    const systemMessageRef = doc(collection(db, "serviceRequests", safeRequestId, "messages"));
+    transaction.set(
+      systemMessageRef,
+      buildSystemChatMessagePayload({
+        requestId: safeRequestId,
+        kind: "request_unassigned",
+        previousStaffUid: targetUid,
+        actorUid: admin.uid,
+      })
+    );
+
+    const historyRef = doc(collection(db, "serviceRequests", safeRequestId, "requestHistory"));
+    transaction.set(
+      historyRef,
+      buildRequestHistoryPayload({
+        requestId: safeRequestId,
+        action: "unassigned",
+        staffId: targetUid,
+        previousStaffUid: targetUid,
+        actorUid: admin.uid,
+        details: {
+          reason: String(reason || "").trim() || "Manual unassign",
+        },
+      })
     );
 
     const auditRef = doc(collection(db, "serviceRequests", safeRequestId, "assignmentAudit"));

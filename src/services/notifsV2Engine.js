@@ -10,6 +10,7 @@ import {
 import { db } from "../firebase";
 import { getReadStateDocRef } from "../utils/unreadChat";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import { isUnsubmittedGhostRequest } from "../utils/requestGhosts";
 import { safeText } from "../utils/safeText";
 import { notifsV2Store } from "./notifsV2Store";
 import { clearPushBridgeDedupe, scheduleForegroundLocalNotification } from "./pushBridge";
@@ -125,10 +126,14 @@ function createChatUnreadTracker({ requestId, role, uid }) {
     cleanup() {
       try {
         unsubMessages?.();
-      } catch {}
+      } catch {
+        // ignore listener cleanup issues
+      }
       try {
         unsubReadState?.();
-      } catch {}
+      } catch {
+        // ignore listener cleanup issues
+      }
     },
   };
 }
@@ -163,7 +168,9 @@ function createNotificationsListener({ role, uid }) {
               requestId: item.requestId || "",
               route: item.route || "",
             },
-          }).catch(() => {});
+          }).catch(() => {
+            // ignore foreground notification scheduling failures
+          });
         });
       } else {
         initialized = true;
@@ -180,9 +187,17 @@ function createAdminForegroundPushWatchers({ role, uid }) {
   const safeRole = safeStr(role).toLowerCase();
   const safeUid = safeStr(uid);
   const unsubs = [];
-  const seenRequestKeys = new Set();
+  const requestStateByKey = new Map();
   let requestsInitialized = false;
   let pendingInitialized = false;
+
+  const isForegroundNotifiableRequest = (requestData) => {
+    const data = normalizeTextDeep(requestData || {});
+    const status = safeStr(data?.status).toLowerCase();
+    if (!status || status === "payment_pending") return false;
+    if (isUnsubmittedGhostRequest(data)) return false;
+    return true;
+  };
 
   const requestQueries = [];
   if (safeRole === "assignedadmin") {
@@ -213,25 +228,46 @@ function createAdminForegroundPushWatchers({ role, uid }) {
         (snap) => {
           if (!requestsInitialized) {
             snap.docs.forEach((docSnap) => {
-              seenRequestKeys.add(`${index}:${safeStr(docSnap.id)}`);
+              const rid = safeStr(docSnap.id);
+              if (!rid) return;
+              requestStateByKey.set(`${index}:${rid}`, {
+                requestId: rid,
+                notifiable: isForegroundNotifiableRequest(docSnap.data() || {}),
+              });
             });
             if (index === requestQueries.length - 1) requestsInitialized = true;
             return;
           }
 
           snap.docChanges().forEach((change) => {
-            if (change.type !== "added") return;
             const rid = safeStr(change.doc.id);
             const dedupeKey = `${index}:${rid}`;
-            if (!rid || seenRequestKeys.has(dedupeKey)) return;
-            seenRequestKeys.add(dedupeKey);
+            if (!rid) return;
+
+            if (change.type === "removed") {
+              requestStateByKey.delete(dedupeKey);
+              return;
+            }
+
+            const nextNotifiable = isForegroundNotifiableRequest(change.doc.data() || {});
+            const previous = requestStateByKey.get(dedupeKey) || null;
+            requestStateByKey.set(dedupeKey, { requestId: rid, notifiable: nextNotifiable });
+
+            const shouldNotify =
+              nextNotifiable &&
+              (change.type === "added" || (change.type === "modified" && previous?.notifiable !== true));
+
+            if (!shouldNotify) return;
+
             scheduleForegroundLocalNotification({
               dedupeKey: `admin:new_request:${rid}`,
               title: "New request",
               body: "A new service request was submitted.",
               route: `/app/admin/request/${encodeURIComponent(rid)}`,
               extra: { type: "NEW_REQUEST", requestId: rid },
-            }).catch(() => {});
+            }).catch(() => {
+              // ignore foreground notification scheduling failures
+            });
           });
         },
         (error) => {
@@ -258,7 +294,9 @@ function createAdminForegroundPushWatchers({ role, uid }) {
                 body: "A user or staff message is waiting for admin review.",
                 route: `/app/admin/request/${encodeURIComponent(rid)}?openChat=1`,
                 extra: { type: "ADMIN_NEW_MESSAGE", requestId: rid, pendingId: mid },
-              }).catch(() => {});
+              }).catch(() => {
+                // ignore foreground notification scheduling failures
+              });
             });
           } else {
             pendingInitialized = true;
@@ -275,7 +313,9 @@ function createAdminForegroundPushWatchers({ role, uid }) {
     unsubs.forEach((fn) => {
       try {
         fn?.();
-      } catch {}
+      } catch {
+        // ignore watcher cleanup issues
+      }
     });
   };
 }
@@ -285,7 +325,9 @@ let activeEngineCleanup = null;
 export function stopNotifsV2Engine() {
   try {
     activeEngineCleanup?.();
-  } catch {}
+  } catch {
+    // ignore engine cleanup issues
+  }
   activeEngineCleanup = null;
   clearPushBridgeDedupe();
   notifsV2Store.reset();
@@ -315,7 +357,9 @@ export function startNotifsV2Engine({ role, uid }) {
       if (allowed.has(rid)) return;
       try {
         requestTrackers.get(rid)?.cleanup?.();
-      } catch {}
+      } catch {
+        // ignore tracker cleanup issues
+      }
       requestTrackers.delete(rid);
       notifsV2Store.setUnreadForRequest(rid, {
         unread: false,
@@ -371,17 +415,25 @@ export function startNotifsV2Engine({ role, uid }) {
   const cleanup = () => {
     try {
       rootUnsub?.();
-    } catch {}
+    } catch {
+      // ignore root listener cleanup issues
+    }
     try {
       notificationsUnsub?.();
-    } catch {}
+    } catch {
+      // ignore notification listener cleanup issues
+    }
     try {
       adminPushCleanup?.();
-    } catch {}
+    } catch {
+      // ignore admin watcher cleanup issues
+    }
     Array.from(requestTrackers.values()).forEach((tracker) => {
       try {
         tracker?.cleanup?.();
-      } catch {}
+      } catch {
+        // ignore tracker cleanup issues
+      }
     });
     requestTrackers.clear();
   };

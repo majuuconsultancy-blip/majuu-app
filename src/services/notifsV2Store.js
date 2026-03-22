@@ -1,5 +1,12 @@
 import { useSyncExternalStore } from "react";
-import { collection, doc, serverTimestamp, updateDoc, writeBatch } from "firebase/firestore";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  serverTimestamp,
+  updateDoc,
+  writeBatch,
+} from "firebase/firestore";
 import { db } from "../firebase";
 import { markChatRead as writeChatRead } from "../utils/unreadChat";
 import { safeText } from "../utils/safeText";
@@ -364,6 +371,78 @@ async function markRequestNotificationsRead(requestId) {
   }
 }
 
+async function deleteNotification(notificationOrId) {
+  const snapshot = getState();
+  const role = safeStr(snapshot?.session?.role).toLowerCase();
+  const uid = safeStr(snapshot?.session?.uid);
+  if (!uid) return { ok: false };
+
+  const nid =
+    typeof notificationOrId === "string"
+      ? safeStr(notificationOrId)
+      : safeStr(notificationOrId?.id);
+  if (!nid) return { ok: false };
+
+  const ref = notificationDocRef({ role, uid, notificationId: nid });
+  if (!ref) return { ok: false };
+  const previousRows = Array.isArray(snapshot.notifications) ? [...snapshot.notifications] : [];
+
+  setState((next) => {
+    next.notifications = (next.notifications || []).filter((row) => row?.id !== nid);
+    return next;
+  });
+
+  try {
+    await deleteDoc(ref);
+    return { ok: true, id: nid };
+  } catch (error) {
+    console.error("notifsV2Store.deleteNotification failed:", error);
+    setState((next) => {
+      next.notifications = previousRows;
+      return next;
+    });
+    return { ok: false, error };
+  }
+}
+
+async function deleteNotifications(notificationIds = []) {
+  const snapshot = getState();
+  const role = safeStr(snapshot?.session?.role).toLowerCase();
+  const uid = safeStr(snapshot?.session?.uid);
+  if (!uid) return { ok: false };
+
+  const ids = Array.from(
+    new Set((Array.isArray(notificationIds) ? notificationIds : []).map((id) => safeStr(id)).filter(Boolean))
+  );
+  if (ids.length === 0) return { ok: true, count: 0 };
+
+  const colRef = notificationsCollectionRef({ role, uid });
+  if (!colRef) return { ok: false };
+  const previousRows = Array.isArray(snapshot.notifications) ? [...snapshot.notifications] : [];
+
+  setState((next) => {
+    const blocked = new Set(ids);
+    next.notifications = (next.notifications || []).filter((row) => !blocked.has(row?.id));
+    return next;
+  });
+
+  try {
+    const batch = writeBatch(db);
+    ids.forEach((id) => {
+      batch.delete(doc(colRef, id));
+    });
+    await batch.commit();
+    return { ok: true, count: ids.length };
+  } catch (error) {
+    console.error("notifsV2Store.deleteNotifications failed:", error);
+    setState((next) => {
+      next.notifications = previousRows;
+      return next;
+    });
+    return { ok: false, error };
+  }
+}
+
 export const notifsV2Store = {
   subscribe,
   getState,
@@ -376,6 +455,8 @@ export const notifsV2Store = {
   markNotificationRead,
   markAllNotificationsRead,
   markRequestNotificationsRead,
+  deleteNotification,
+  deleteNotifications,
 };
 
 export function useNotifsV2Store(selector = (s) => s) {

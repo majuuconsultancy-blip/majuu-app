@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
-import { motion } from "../utils/motionProxy";
+import { motion as Motion } from "../utils/motionProxy";
 
 import {
   Mail,
@@ -42,13 +42,17 @@ const PROFILE_CACHE_PREFIX = "majuu_profile_cache_";
 function startPerf(label) {
   try {
     console.time(label);
-  } catch {}
+  } catch {
+    // ignore console timer issues
+  }
 }
 
 function endPerf(label) {
   try {
     console.timeEnd(label);
-  } catch {}
+  } catch {
+    // ignore console timer issues
+  }
 }
 
 function profileCacheKey(uid) {
@@ -90,7 +94,9 @@ function writeProfileCache(uid, payload) {
       updatedAt: Date.now(),
     };
     window.localStorage.setItem(profileCacheKey(uid), JSON.stringify(safe));
-  } catch {}
+  } catch {
+    // ignore cache write issues
+  }
 }
 
 /* ---------- Motion ---------- */
@@ -114,7 +120,6 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  const [uid, setUid] = useState(null);
   const [email, setEmail] = useState("");
 
   const [name, setName] = useState("");
@@ -133,10 +138,14 @@ export default function ProfileScreen() {
   const isAdmin = useMemo(() => isAnyAdminRole(role), [role]);
   const adminBadgeLabel = useMemo(() => {
     const normalized = normalizeUserRole(role);
-    if (normalized === "superAdmin") return "Super Admin";
+    if (normalized === "superAdmin") return "Superadmin";
     if (normalized === "assignedAdmin") return "Assigned Admin";
     return "Admin";
   }, [role]);
+  const showElevatedAdminTag = useMemo(
+    () => adminBadgeLabel === "Superadmin" || adminBadgeLabel === "Assigned Admin",
+    [adminBadgeLabel]
+  );
 
   const initials = useMemo(() => {
     const base = (name || email || "U").trim();
@@ -180,7 +189,6 @@ export default function ProfileScreen() {
       if (lastHydratedUidRef.current === uidNow) return;
 
       lastHydratedUidRef.current = uidNow;
-      setUid(uidNow);
       setEmail(user.email || "");
       setErr("");
 
@@ -285,12 +293,16 @@ export default function ProfileScreen() {
         { ...(window.history.state || {}), __majuu_profile: true },
         ""
       );
-    } catch {}
+    } catch {
+      // ignore history state issues
+    }
 
     const onPopState = (e) => {
       try {
         e.preventDefault?.();
-      } catch {}
+      } catch {
+        // ignore preventDefault issues
+      }
 
       const t = activeTrack || "study";
       navigate(`/app/track/${t}`, { replace: true });
@@ -351,7 +363,7 @@ export default function ProfileScreen() {
 
   return (
     <div className={`min-h-screen ${topBg}`}>
-      <motion.div
+      <Motion.div
         variants={pageIn}
         initial="hidden"
         animate="show"
@@ -359,12 +371,17 @@ export default function ProfileScreen() {
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-lg font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
               Profile
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
               Your details, preferences, and quick actions.
             </p>
+            {showElevatedAdminTag ? (
+              <span className="mt-2 inline-flex rounded-full border border-rose-200/70 bg-rose-50/80 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:border-rose-900/45 dark:bg-rose-950/30 dark:text-rose-200">
+                {adminBadgeLabel}
+              </span>
+            ) : null}
           </div>
           <div className="flex items-center justify-end gap-2">
             <ThemeToggle />
@@ -378,7 +395,7 @@ export default function ProfileScreen() {
         ) : null}
 
         {/* Hero */}
-        <motion.div
+        <Motion.div
           className={`mt-6 rounded-3xl ${glass} p-5`}
           initial={{ opacity: 0, y: 4 }}
           animate={{
@@ -393,11 +410,6 @@ export default function ProfileScreen() {
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-100/70 bg-emerald-50/70 text-lg font-bold text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
                   {initials}
                 </div>
-                {isAdmin ? (
-                  <span className="absolute -bottom-2 -right-2 rounded-full border border-emerald-200/70 bg-emerald-50/80 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:border-emerald-900/45 dark:bg-emerald-950/30 dark:text-emerald-200">
-                    {adminBadgeLabel}
-                  </span>
-                ) : null}
               </div>
 
               <div className="min-w-0">
@@ -412,21 +424,23 @@ export default function ProfileScreen() {
               </div>
             </div>
 
-            <motion.button
-              type="button"
-              onClick={openEdit}
-              whileTap={{ scale: 0.995 }}
-              className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
-            >
-              <AppIcon size={ICON_MD} icon={Pencil} />
-              Edit
-            </motion.button>
+            <div className="flex flex-col items-end gap-2">
+              <Motion.button
+                type="button"
+                onClick={openEdit}
+                whileTap={{ scale: 0.995 }}
+                className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+              >
+                <AppIcon size={ICON_MD} icon={Pencil} />
+                Edit
+              </Motion.button>
+            </div>
           </div>
-        </motion.div>
+        </Motion.div>
 
         {/* Info tiles (saved values) */}
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <motion.div
+          <Motion.div
             variants={floatCard}
             initial="rest"
             whileHover="hover"
@@ -446,9 +460,9 @@ export default function ProfileScreen() {
                 </div>
               </div>
             </div>
-          </motion.div>
+          </Motion.div>
 
-          <motion.div
+          <Motion.div
             variants={floatCard}
             initial="rest"
             whileHover="hover"
@@ -468,9 +482,9 @@ export default function ProfileScreen() {
                 </div>
               </div>
             </div>
-          </motion.div>
+          </Motion.div>
 
-          <motion.div
+          <Motion.div
             variants={floatCard}
             initial="rest"
             whileHover="hover"
@@ -490,9 +504,9 @@ export default function ProfileScreen() {
                 </div>
               </div>
             </div>
-          </motion.div>
+          </Motion.div>
 
-          <motion.div
+          <Motion.div
             variants={floatCard}
             initial="rest"
             whileHover="hover"
@@ -512,13 +526,13 @@ export default function ProfileScreen() {
                 </div>
               </div>
             </div>
-          </motion.div>
+          </Motion.div>
         </div>
 
         {/* Quick actions */}
         <div className="mt-4 grid gap-2">
           {isAdmin ? (
-            <motion.button
+            <Motion.button
               type="button"
               onClick={() => navigate("/app/admin")}
               variants={floatCard}
@@ -543,10 +557,10 @@ export default function ProfileScreen() {
                 </div>
                 <AppIcon size={ICON_MD} icon={ChevronRight} className="text-emerald-700/70 dark:text-emerald-200/80" />
               </div>
-            </motion.button>
+            </Motion.button>
           ) : null}
 
-          <motion.button
+          <Motion.button
             type="button"
             onClick={() => navigate("/app/profile/journey")}
             variants={floatCard}
@@ -571,9 +585,9 @@ export default function ProfileScreen() {
               </div>
               <AppIcon size={ICON_MD} icon={ChevronRight} className="text-zinc-400 dark:text-zinc-500" />
             </div>
-          </motion.button>
+          </Motion.button>
 
-          <motion.button
+          <Motion.button
             type="button"
             onClick={() => navigate("/app/legal")}
             variants={floatCard}
@@ -598,9 +612,9 @@ export default function ProfileScreen() {
               </div>
               <AppIcon size={ICON_MD} icon={ChevronRight} className="text-zinc-400 dark:text-zinc-500" />
             </div>
-          </motion.button>
+          </Motion.button>
 
-          <motion.button
+          <Motion.button
             type="button"
             onClick={() => navigate("/app/settings")}
             variants={floatCard}
@@ -625,9 +639,9 @@ export default function ProfileScreen() {
               </div>
               <AppIcon size={ICON_MD} icon={ChevronRight} className="text-zinc-400 dark:text-zinc-500" />
             </div>
-          </motion.button>
+          </Motion.button>
 
-          <motion.button
+          <Motion.button
             type="button"
             onClick={logout}
             disabled={busy === "logout"}
@@ -653,9 +667,9 @@ export default function ProfileScreen() {
               </div>
               <AppIcon size={ICON_MD} icon={ChevronRight} className="text-rose-400 dark:text-rose-300" />
             </div>
-          </motion.button>
+          </Motion.button>
         </div>
-      </motion.div>
+      </Motion.div>
     </div>
   );
 }

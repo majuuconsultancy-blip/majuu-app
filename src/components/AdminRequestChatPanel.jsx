@@ -22,6 +22,7 @@ import {
 } from "../services/chatservice";
 import useKeyboardInset from "../hooks/useKeyboardInset";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import { getSystemChatMessageLabel, isSystemChatMessage } from "../utils/chatSystemMessages";
 import { safeText } from "../utils/safeText";
 
 /* ---------------- helpers ---------------- */
@@ -67,13 +68,6 @@ function formatDayLabel(ms) {
 
 function pickCreatedAt(docu) {
   return docu?.createdAt || docu?.approvedAt || docu?.editedAt || docu?.rejectedAt || null;
-}
-
-function roleLabel(role) {
-  const r = String(role || "").toLowerCase();
-  if (r === "user") return "User";
-  if (r === "staff") return "Staff";
-  return "Admin";
 }
 
 function msgPreview(m) {
@@ -252,15 +246,18 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
       const arr = JSON.parse(raw);
       if (!Array.isArray(arr)) return;
       setOptimisticNoActions(new Set(arr.map((x) => String(x))));
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    } catch {
+      // ignore session storage parse issues
+    }
   }, [noActionsKey]);
 
   useEffect(() => {
     if (!noActionsKey) return;
     try {
       sessionStorage.setItem(noActionsKey, JSON.stringify([...optimisticNoActions]));
-    } catch {}
+    } catch {
+      // ignore session storage write issues
+    }
   }, [noActionsKey, optimisticNoActions]);
 
   /* ---------- scroll helper ---------- */
@@ -425,7 +422,6 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
   useEffect(() => {
     scrollToBottom();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeline.length, err]);
 
   useEffect(() => {
@@ -434,7 +430,6 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
       scrollToBottom();
     }, 48);
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [composerFocused, keyboardInset, timeline.length]);
 
   /* ---------- optimistic helpers ---------- */
@@ -704,6 +699,18 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
               const item = row.item;
               const m = item.data || {};
+              if (isSystemChatMessage(m)) {
+                return (
+                  <div key={item.id} className="flex justify-center py-1.5">
+                    <div className="flex w-full items-center gap-3 text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
+                      <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+                      <span>{getSystemChatMessageLabel(m, "admin")}</span>
+                      <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+                    </div>
+                  </div>
+                );
+              }
+
               const fromRole = String(m.fromRole || "").toLowerCase();
               const isLeft = fromRole === "user";
               const bubbleCls = isLeft ?bubbleLeft : bubbleRight;

@@ -1,24 +1,40 @@
 import {
-  addDoc,
   collection,
   doc,
   getDoc,
   getDocs,
   limit,
   query,
-  runTransaction,
   serverTimestamp,
   setDoc,
-  updateDoc,
   where,
 } from "firebase/firestore";
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { createElement } from "react";
+import { createRoot } from "react-dom/client";
+
 import { auth, db } from "../firebase";
-import {
-  createAdminNotification,
-  createStaffNotification,
-  createUserNotification,
-} from "./notificationDocs";
+import DemoPaystackCheckoutModal from "../components/DemoPaystackCheckoutModal";
+import { resolveFullPackageCoverageState } from "./fullpackageservice";
 import { getRequestStartedAtMs } from "../utils/requestWorkProgress";
+
+const functions = getFunctions(undefined, "us-central1");
+const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
+const IS_NATIVE_ANDROID =
+  Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+const LOCAL_PAYMENT_BACKEND_BASE_URL = resolvePaymentBackendBaseUrl();
+const PAYMENT_MODE = lower(import.meta.env.VITE_PAYMENT_MODE || "", 40);
+const PAYMENT_CHECKOUT_START_ERROR = "payment checkout could not start right now";
+const PAYMENT_VERIFY_ERROR = "We could not confirm this payment yet.";
+const PAYMENT_DEBUG = String(import.meta.env.VITE_PAYMENT_DEBUG || "").trim().toLowerCase() === "true";
+const VERIFIED_PAYMENT_STATUSES = new Set([
+  "success",
+  "paid",
+  "held",
+  "payout_ready",
+  "settled",
+]);
 
 export const PAYMENT_TYPES = {
   UNLOCK_REQUEST: "unlock_request",
@@ -26,98 +42,101 @@ export const PAYMENT_TYPES = {
 };
 
 export const PAYMENT_STATUSES = {
-  PENDING_ADMIN_APPROVAL: "pending_admin_approval",
-  AWAITING_USER_PAYMENT: "awaiting_user_payment",
+  DRAFT: "draft",
+  PROMPTED: "prompted",
+  ADMIN_REVIEW: "admin_review",
+  APPROVED: "approved",
+  PAYABLE: "payable",
+  PAYMENT_SESSION_CREATED: "payment_session_created",
+  AWAITING_PAYMENT: "awaiting_payment",
   PAID: "paid",
-  REJECTED: "rejected",
-  AUTO_REFUNDED: "auto_refunded",
+  HELD: "held",
+  PAYOUT_READY: "payout_ready",
+  SETTLED: "settled",
+  REFUND_REQUESTED: "refund_requested",
+  REFUND_UNDER_REVIEW: "refund_under_review",
   REFUNDED: "refunded",
+  REVOKED: "revoked",
+  EXPIRED: "expired",
+  FAILED: "failed",
+  AUTO_REFUNDED: "auto_refunded",
 };
 
 export const REFUND_STATUSES = {
-  PENDING: "pending",
+  REQUESTED: "requested",
+  UNDER_REVIEW: "under_review",
   APPROVED: "approved",
   REJECTED: "rejected",
-  AUTO_REFUNDED: "auto_refunded",
   REFUNDED: "refunded",
+  FAILED: "failed",
+  AUTO_REFUNDED: "auto_refunded",
 };
 
 export const UNLOCK_AUTO_REFUND_WINDOW_MS = 48 * 60 * 60 * 1000;
 
-function cleanStr(value, max = 300) {
+function cleanStr(value, max = 400) {
   return String(value || "").trim().slice(0, max);
 }
 
-function normalizePaymentTypeValue(value) {
-  const raw = cleanStr(value, 80).toLowerCase();
-  if (!raw) return "";
-  if (
-    raw === PAYMENT_TYPES.UNLOCK_REQUEST ||
-    raw === "unlock" ||
-    raw === "unlockrequest" ||
-    raw === "unlock_request_payment" ||
-    raw === "unlock-payment"
-  ) {
-    return PAYMENT_TYPES.UNLOCK_REQUEST;
-  }
-  if (
-    raw === PAYMENT_TYPES.IN_PROGRESS ||
-    raw === "inprogress" ||
-    raw === "in_progress_payment" ||
-    raw === "in-progress" ||
-    raw === "progress_payment"
-  ) {
-    return PAYMENT_TYPES.IN_PROGRESS;
-  }
-  return raw;
+function lower(value, max = 400) {
+  return cleanStr(value, max).toLowerCase();
 }
 
-function normalizePaymentStatusValue(value) {
-  const raw = cleanStr(value, 80).toLowerCase();
-  if (!raw) return "";
-  if (
-    raw === PAYMENT_STATUSES.PENDING_ADMIN_APPROVAL ||
-    raw === "pending_admin" ||
-    raw === "staff_proposed" ||
-    raw === "proposal_pending"
-  ) {
-    return PAYMENT_STATUSES.PENDING_ADMIN_APPROVAL;
+function trimTrailingSlash(value) {
+  return cleanStr(value, 1000).replace(/\/+$/, "");
+}
+
+function paymentDebugLog(label, payload) {
+  if (!PAYMENT_DEBUG) return;
+  if (payload === undefined) {
+    console.log(`[payment-debug] ${label}`);
+    return;
   }
-  if (
-    raw === PAYMENT_STATUSES.AWAITING_USER_PAYMENT ||
-    raw === "awaiting_payment" ||
-    raw === "approved" ||
-    raw === "published_to_user" ||
-    raw === "awaiting-user-payment"
-  ) {
-    return PAYMENT_STATUSES.AWAITING_USER_PAYMENT;
+  console.log(`[payment-debug] ${label}`, payload);
+}
+
+function resolvePaymentBackendBaseUrl() {
+  const configured = trimTrailingSlash(import.meta.env.VITE_PAYMENT_API_BASE_URL);
+  if (configured) return configured;
+
+  const host =
+    typeof window !== "undefined" ? cleanStr(window.location.hostname, 200) : "";
+  if (host) {
+    return `http://${host}:5000`;
   }
-  if (raw === PAYMENT_STATUSES.PAID || raw === "successful" || raw === "completed") {
-    return PAYMENT_STATUSES.PAID;
-  }
-  if (raw === PAYMENT_STATUSES.REJECTED || raw === "declined") {
-    return PAYMENT_STATUSES.REJECTED;
-  }
-  if (raw === PAYMENT_STATUSES.AUTO_REFUNDED || raw === "auto_refund" || raw === "auto-refunded") {
-    return PAYMENT_STATUSES.AUTO_REFUNDED;
-  }
-  if (raw === PAYMENT_STATUSES.REFUNDED || raw === "manual_refunded" || raw === "refund_paid") {
-    return PAYMENT_STATUSES.REFUNDED;
-  }
-  return raw;
+
+  return "http://127.0.0.1:5000";
+}
+
+function resolveFrontendAppBaseUrl(value) {
+  const configured = trimTrailingSlash(import.meta.env.VITE_APP_BASE_URL);
+  if (configured) return configured;
+  return trimTrailingSlash(value);
 }
 
 function cleanAmount(value) {
-  const source =
-    typeof value === "string" ? value.replace(/[^0-9.]+/g, "") : value;
-  const n = Number(source || 0);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.round(n);
+  const source = typeof value === "string" ? value.replace(/[^0-9.]+/g, "") : value;
+  const num = Number(source || 0);
+  if (!Number.isFinite(num) || num <= 0) return 0;
+  return Math.round(num);
 }
 
 function cleanCurrency(value) {
-  const c = cleanStr(value || "KES", 8).toUpperCase();
-  return c || "KES";
+  return cleanStr(value || "KES", 8).toUpperCase() || "KES";
+}
+
+function cleanStringList(values, maxItems = 60, maxLen = 160) {
+  if (!Array.isArray(values)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const value of values) {
+    const next = cleanStr(value, maxLen);
+    if (!next || seen.has(next)) continue;
+    seen.add(next);
+    out.push(next);
+    if (out.length >= maxItems) break;
+  }
+  return out;
 }
 
 function toMillis(value) {
@@ -136,6 +155,890 @@ function toMillis(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function paymentCallable(name) {
+  return httpsCallable(functions, name);
+}
+
+function resolveCheckoutEmail(...candidates) {
+  for (const candidate of candidates) {
+    const email = lower(candidate, 160);
+    if (email && email.includes("@")) return email;
+  }
+  return "";
+}
+
+function compactMetadata(source = {}) {
+  const data = source && typeof source === "object" ? source : {};
+  const out = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (Array.isArray(value)) {
+      const next = cleanStringList(value, 60, 160);
+      if (next.length) out[key] = next;
+      continue;
+    }
+    if (typeof value === "boolean") {
+      out[key] = value;
+      continue;
+    }
+    if (typeof value === "number") {
+      if (Number.isFinite(value) && value !== 0) out[key] = value;
+      continue;
+    }
+    const next = cleanStr(value, 600);
+    if (next) out[key] = next;
+  }
+  return out;
+}
+
+function buildHostedPaymentMetadata({
+  flowType,
+  paymentType,
+  requestId,
+  paymentId,
+  draftId,
+  returnTo,
+  shareToken,
+  appBaseUrl,
+  fullPackageId,
+  track,
+  country,
+  requestType,
+  serviceName,
+  paymentLabel,
+  payerMode,
+  currency,
+  selectedItems,
+  metadata,
+} = {}) {
+  const extra = metadata && typeof metadata === "object" ? metadata : {};
+  return compactMetadata({
+    source: "majuu_web",
+    callbackPath: "/payment/callback",
+    flowType,
+    paymentType,
+    requestId,
+    paymentId,
+    draftId,
+    returnTo,
+    shareToken,
+    appBaseUrl,
+    fullPackageId,
+    track,
+    country,
+    requestType,
+    serviceName,
+    paymentLabel,
+    payerMode,
+    currency,
+    selectedItems: cleanStringList(selectedItems, 60, 120),
+    ...extra,
+  });
+}
+
+function appendDemoQueryParam(params, key, value) {
+  const next = cleanStr(value, 600);
+  if (next) params.set(key, next);
+}
+
+function isDemoPaymentMode() {
+  return PAYMENT_MODE === "demo";
+}
+
+function isDemoPaymentReference(reference = "") {
+  return cleanStr(reference, 160).toUpperCase().startsWith("DEMO-");
+}
+
+function buildDemoCallbackUrl({ reference, metadata } = {}) {
+  const data = compactMetadata(metadata);
+  const baseUrl = resolveFrontendAppBaseUrl(
+    data.appBaseUrl || (typeof window !== "undefined" ? window.location.origin : "")
+  );
+  const callbackPath = cleanStr(data.callbackPath || "/payment/callback", 240) || "/payment/callback";
+  if (!baseUrl) return "";
+
+  const params = new URLSearchParams();
+  appendDemoQueryParam(params, "reference", reference);
+  appendDemoQueryParam(params, "requestId", data.requestId);
+  appendDemoQueryParam(params, "paymentId", data.paymentId);
+  appendDemoQueryParam(params, "returnTo", data.returnTo);
+  appendDemoQueryParam(params, "draft", data.draftId);
+  appendDemoQueryParam(params, "share", data.shareToken);
+  appendDemoQueryParam(params, "fullPackageId", data.fullPackageId);
+
+  if (IS_NATIVE_PLATFORM && !/^https?:\/\//i.test(callbackPath)) {
+    const routePath = callbackPath.startsWith("/") ? callbackPath : `/${callbackPath}`;
+    const query = params.toString();
+    return `${trimTrailingSlash(baseUrl)}/#${routePath}${query ? `?${query}` : ""}`;
+  }
+
+  try {
+    const url = /^https?:\/\//i.test(callbackPath)
+      ? new URL(callbackPath)
+      : new URL(`${trimTrailingSlash(baseUrl)}${callbackPath.startsWith("/") ? "" : "/"}${callbackPath}`);
+    params.forEach((value, key) => {
+      url.searchParams.set(key, value);
+    });
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function buildDemoInlinePaymentReceipt({
+  reference,
+  amount,
+  currency,
+  requestId,
+  paymentId,
+  demoResult,
+} = {}) {
+  const method = lower(demoResult?.method, 80);
+  const provider = lower(demoResult?.provider, 80);
+  const phone = cleanStr(demoResult?.phone, 40);
+  const receiptMethod = cleanStr(
+    [method, provider].filter(Boolean).join("_") || "demo",
+    80
+  );
+
+  return {
+    status: "paid",
+    method: receiptMethod,
+    amount: cleanAmount(amount),
+    currency: cleanCurrency(currency),
+    paidAtMs: Date.now(),
+    transactionReference: cleanStr(reference, 120),
+    requestId: cleanStr(requestId, 180),
+    paymentId: cleanStr(paymentId, 180),
+    provider: cleanStr(provider, 80),
+    phone,
+  };
+}
+
+function openDemoPaystackCheckoutModal(options = {}) {
+  if (typeof document === "undefined") {
+    return Promise.reject(new Error("Demo checkout is unavailable right now."));
+  }
+
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      window.setTimeout(() => {
+        root.unmount();
+        host.remove();
+      }, 20);
+    };
+
+    const handleResolve = (payload) => {
+      cleanup();
+      resolve(payload);
+    };
+
+    const handleReject = (error) => {
+      cleanup();
+      reject(error instanceof Error ? error : new Error("Demo checkout cancelled."));
+    };
+
+    root.render(
+      createElement(DemoPaystackCheckoutModal, {
+        email: options?.email,
+        amount: options?.amount,
+        currency: options?.currency,
+        reference: options?.reference,
+        metadata: options?.metadata,
+        onResolve: handleResolve,
+        onReject: handleReject,
+      })
+    );
+  });
+}
+
+async function initializeDemoHostedCheckout({
+  email,
+  amount,
+  reference,
+  currency,
+  metadata,
+} = {}) {
+  const result = await openDemoPaystackCheckoutModal({
+    email,
+    amount,
+    currency,
+    reference,
+    metadata,
+  });
+  const demoReference = cleanStr(result?.reference, 120) || `DEMO-${Date.now()}`;
+  const authorizationUrl = buildDemoCallbackUrl({
+    reference: demoReference,
+    metadata,
+  });
+
+  paymentDebugLog("demo_checkout_success", {
+    status: cleanStr(result?.status, 80) || "success",
+    reference: demoReference,
+    authorizationUrl,
+  });
+
+  if (!authorizationUrl) {
+    throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+  }
+
+  return {
+    payload: {
+      ok: true,
+      success: true,
+      demo: true,
+      provider: "demo_paystack",
+      status: "success",
+      reference: demoReference,
+      data: {
+        authorization_url: authorizationUrl,
+        reference: demoReference,
+      },
+    },
+    authorizationUrl,
+    reference: demoReference,
+    demoResult: result && typeof result === "object" ? result : null,
+  };
+}
+
+async function readBackendPayload(response) {
+  try {
+    return await response.json();
+  } catch {
+    try {
+      const text = await response.text();
+      return text ? { message: cleanStr(text, 400) } : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function normalizeBackendPayload(payload) {
+  if (payload == null) return null;
+  if (typeof payload === "string") {
+    const text = cleanStr(payload, 4000);
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { message: cleanStr(text, 400) };
+    }
+  }
+  return payload;
+}
+
+function extractBackendMessage(payload, fallback) {
+  return (
+    cleanStr(
+      payload?.message ||
+        payload?.error ||
+        payload?.data?.message ||
+        payload?.data?.error ||
+        payload?.details?.message,
+      400
+    ) || fallback
+  );
+}
+
+function shouldUseNativeAndroidHttp(url) {
+  const target = cleanStr(url, 2000);
+  if (!IS_NATIVE_ANDROID || !target) return false;
+  return /^http:\/\//i.test(target);
+}
+
+function finalizeBackendResponse({
+  path,
+  method,
+  transport,
+  status,
+  payload,
+  fallbackMessage,
+} = {}) {
+  const ok = Number(status) >= 200 && Number(status) < 300;
+  paymentDebugLog("backend_response", {
+    path,
+    method,
+    transport,
+    ok,
+    status: Number.isFinite(Number(status)) ? Number(status) : null,
+    payload,
+  });
+
+  if (!ok) {
+    const nextError = new Error(extractBackendMessage(payload, fallbackMessage));
+    nextError.details = payload;
+    nextError.status = Number.isFinite(Number(status)) ? Number(status) : null;
+    throw nextError;
+  }
+
+  return payload;
+}
+
+async function callLocalPaymentBackend(path, { method = "GET", body } = {}, fallbackMessage) {
+  const url = `${LOCAL_PAYMENT_BACKEND_BASE_URL}${path}`;
+  const transport = shouldUseNativeAndroidHttp(url) ? "capacitor_http" : "fetch";
+  paymentDebugLog("backend_request", {
+    baseUrl: LOCAL_PAYMENT_BACKEND_BASE_URL,
+    url,
+    path,
+    method,
+    transport,
+    body: body || null,
+  });
+
+  if (transport === "capacitor_http") {
+    let response = null;
+    try {
+      response = await CapacitorHttp.request({
+        url,
+        method,
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        data: body,
+        responseType: "json",
+      });
+    } catch (error) {
+      const details = normalizeBackendPayload(
+        error?.response?.data || error?.data || error?.result || null
+      );
+      paymentDebugLog("backend_native_http_error", {
+        path,
+        method,
+        url,
+        message: error?.message || String(error),
+        status: Number(error?.response?.status || error?.status || 0) || null,
+        details,
+      });
+      console.error(`Local payment backend native HTTP request failed: ${path}`, error);
+      const nextError = new Error(extractBackendMessage(details, fallbackMessage));
+      nextError.cause = error;
+      nextError.details = details;
+      nextError.status = Number(error?.response?.status || error?.status || 0) || null;
+      throw nextError;
+    }
+
+    const payload = normalizeBackendPayload(response?.data);
+    return finalizeBackendResponse({
+      path,
+      method,
+      transport,
+      status: response?.status,
+      payload,
+      fallbackMessage,
+    });
+  }
+
+  let response = null;
+  try {
+    response = await fetch(url, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (error) {
+    console.error(`Local payment backend request failed: ${path}`, error);
+    const nextError = new Error(fallbackMessage);
+    nextError.cause = error;
+    throw nextError;
+  }
+
+  const payload = normalizeBackendPayload(await readBackendPayload(response));
+  return finalizeBackendResponse({
+    path,
+    method,
+    status: response.status,
+    payload,
+    transport,
+    fallbackMessage,
+  });
+}
+
+function extractAuthorizationUrl(payload) {
+  return cleanStr(
+    payload?.data?.authorization_url ||
+      payload?.data?.authorizationUrl ||
+      payload?.authorization_url ||
+      payload?.authorizationUrl ||
+      payload?.redirectUrl ||
+      payload?.data?.redirectUrl,
+    1000
+  );
+}
+
+function isVerifiedPaymentStatus(status) {
+  return VERIFIED_PAYMENT_STATUSES.has(lower(status, 80));
+}
+
+function normalizeVerificationResponse(payload, fallbackReference = "") {
+  const root = payload && typeof payload === "object" ? payload : {};
+  const nested = root?.data && typeof root.data === "object" ? root.data : null;
+  const merged = { ...root, ...(nested || {}) };
+  const status = lower(
+    merged?.status || merged?.paymentStatus || merged?.transactionStatus || "",
+    80
+  );
+  return {
+    ...merged,
+    raw: root,
+    ok:
+      root?.ok === true ||
+      root?.success === true ||
+      nested?.ok === true ||
+      nested?.success === true ||
+      isVerifiedPaymentStatus(status),
+    status,
+    message: extractBackendMessage(root, ""),
+    reference: cleanStr(merged?.reference || fallbackReference, 120),
+  };
+}
+
+async function initializeHostedCheckout({
+  email,
+  amount,
+  reference,
+  currency,
+  metadata,
+} = {}) {
+  const payerEmail = resolveCheckoutEmail(email);
+  const payableAmount = cleanAmount(amount);
+  const txReference = cleanStr(reference, 120) || buildDummyTransactionReference();
+  const payCurrency = cleanCurrency(currency);
+  if (!payerEmail || payableAmount <= 0 || !txReference) {
+    paymentDebugLog("initialize_checkout_invalid_payload", {
+      payerEmail,
+      payableAmount,
+      txReference,
+      payCurrency,
+    });
+    throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+  }
+
+  let payload = null;
+  const initBody = {
+    email: payerEmail,
+    amount: payableAmount,
+    currency: payCurrency,
+    reference: txReference,
+    metadata: metadata && typeof metadata === "object" ? metadata : {},
+  };
+  paymentDebugLog("initialize_checkout_payload", initBody);
+  if (isDemoPaymentMode()) {
+    return initializeDemoHostedCheckout(initBody);
+  }
+  try {
+    payload = await callLocalPaymentBackend(
+      "/paystack/initialize",
+      {
+        method: "POST",
+        body: initBody,
+      },
+      PAYMENT_CHECKOUT_START_ERROR
+    );
+  } catch (error) {
+    paymentDebugLog("initialize_checkout_error", {
+      message: error?.message || String(error),
+      details: error?.details || null,
+      causeMessage: error?.cause?.message || null,
+      causeDetails: error?.cause?.details || null,
+      stack: error?.stack || null,
+    });
+    if (PAYMENT_DEBUG) {
+      throw error;
+    }
+    const nextError = new Error(
+      extractBackendMessage(error?.details || error?.cause?.details || null, PAYMENT_CHECKOUT_START_ERROR)
+    );
+    nextError.details = error?.details || error?.cause?.details || null;
+    nextError.cause = error;
+    throw nextError;
+  }
+
+  paymentDebugLog("initialize_checkout_success", payload);
+  const authorizationUrl = extractAuthorizationUrl(payload);
+  if (!authorizationUrl) {
+    paymentDebugLog("initialize_checkout_missing_authorization_url", payload);
+    throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+  }
+
+  return {
+    payload,
+    authorizationUrl,
+    reference: cleanStr(
+      payload?.data?.reference || payload?.reference || txReference,
+      120
+    ),
+  };
+}
+
+async function activatePreparedUnlockRequestDemo({
+  requestId,
+  unlockPaymentReceipt,
+} = {}) {
+  const safeRequestId = cleanStr(requestId, 180);
+  if (!safeRequestId) {
+    throw new Error("Request details are not ready yet.");
+  }
+
+  const requestRef = doc(db, "serviceRequests", safeRequestId);
+  const requestSnap = await getDoc(requestRef);
+  if (!requestSnap.exists()) {
+    throw new Error("This request could not be found.");
+  }
+
+  const requestData = requestSnap.data() || {};
+  const currentStatus = lower(requestData?.status, 80);
+  if (lower(requestData?.paymentFlowType, 80) === "full_package_unlock") {
+    throw new Error("Full package unlocks are completed from the full package flow.");
+  }
+
+  const unlockPaymentId =
+    cleanStr(requestData?.unlockPaymentId, 180) ||
+    cleanStr(unlockPaymentReceipt?.paymentId, 180) ||
+    "unlock_request_payment";
+
+  if (currentStatus !== "payment_pending") {
+    if (
+      requestData?.paid === true &&
+      new Set(["new", "contacted", "closed", "rejected"]).has(currentStatus)
+    ) {
+      return {
+        ok: true,
+        requestId: safeRequestId,
+        paymentId: unlockPaymentId,
+        status: currentStatus,
+        alreadyActivated: true,
+        demo: true,
+      };
+    }
+    throw new Error("This request is not waiting for unlock activation.");
+  }
+
+  const transactionReference = cleanStr(
+    unlockPaymentReceipt?.transactionReference || unlockPaymentReceipt?.reference,
+    180
+  );
+  if (!transactionReference) {
+    throw new Error("Unlock payment is not verified yet.");
+  }
+
+  const paidAtMs =
+    Number(unlockPaymentReceipt?.paidAtMs || unlockPaymentReceipt?.paidAt || 0) || Date.now();
+  const paymentMethod =
+    lower(unlockPaymentReceipt?.method, 80) || "demo_paystack";
+
+  await syncDemoUnlockPaymentRecord({
+    requestId: safeRequestId,
+    paymentId: unlockPaymentId,
+    requestData,
+    amount: unlockPaymentReceipt?.amount,
+    currency: unlockPaymentReceipt?.currency || requestData?.pricingSnapshot?.currency,
+    status: PAYMENT_STATUSES.PAID,
+    reference: transactionReference,
+    method: paymentMethod,
+    paidAtMs,
+  });
+
+  await setDoc(
+    requestRef,
+    {
+      paid: true,
+      status: "new",
+      routingStatus: "awaiting_route",
+      paymentMeta: {
+        status: "paid",
+        method: paymentMethod,
+        paidAt: paidAtMs,
+        ref: transactionReference,
+        requestId: safeRequestId,
+        paymentId: unlockPaymentId,
+      },
+      unlockPaymentId,
+      unlockPaymentRequestId: safeRequestId,
+      updatedAt: serverTimestamp(),
+      updatedAtMs: Date.now(),
+    },
+    { merge: true }
+  );
+
+  return {
+    ok: true,
+    requestId: safeRequestId,
+    paymentId: unlockPaymentId,
+    status: "new",
+    demo: true,
+  };
+}
+
+async function syncDemoUnlockPaymentRecord({
+  requestId,
+  paymentId,
+  requestData,
+  amount,
+  currency,
+  status = PAYMENT_STATUSES.PAYMENT_SESSION_CREATED,
+  reference = "",
+  method = "",
+  paidAtMs = 0,
+} = {}) {
+  const safeRequestId = cleanStr(requestId, 180);
+  const safePaymentId = cleanStr(paymentId, 180) || "unlock_request_payment";
+  if (!safeRequestId) {
+    throw new Error("Request details are not ready yet.");
+  }
+
+  const normalizedRequest = requestData && typeof requestData === "object" ? requestData : {};
+  const normalizedStatus = lower(status, 80) || PAYMENT_STATUSES.PAYMENT_SESSION_CREATED;
+  const nowMs = Date.now();
+  const paymentRef = doc(db, "serviceRequests", safeRequestId, "payments", safePaymentId);
+  const basePayload = {
+    requestId: safeRequestId,
+    requestUid:
+      cleanStr(normalizedRequest?.uid, 160) || cleanStr(auth.currentUser?.uid, 160),
+    paymentType: PAYMENT_TYPES.UNLOCK_REQUEST,
+    paymentLabel:
+      cleanStr(
+        normalizedRequest?.pricingSnapshot?.label ||
+          normalizedRequest?.serviceName ||
+          "Unlock payment",
+        180
+      ) || "Unlock payment",
+    amount: cleanAmount(amount || normalizedRequest?.pricingSnapshot?.amount || 0),
+    currency: cleanCurrency(currency || normalizedRequest?.pricingSnapshot?.currency || "KES"),
+    updatedAt: serverTimestamp(),
+    updatedAtMs: nowMs,
+  };
+
+  if (normalizedStatus === PAYMENT_STATUSES.PAID) {
+    const existingSnap = await getDoc(paymentRef);
+    if (!existingSnap.exists()) {
+      await setDoc(
+        paymentRef,
+        {
+          ...basePayload,
+          status: PAYMENT_STATUSES.PAYMENT_SESSION_CREATED,
+          createdAt: serverTimestamp(),
+          createdAtMs: nowMs,
+        },
+        { merge: true }
+      );
+    }
+
+    await setDoc(
+      paymentRef,
+      {
+        ...basePayload,
+        status: PAYMENT_STATUSES.PAID,
+        transactionReference: cleanStr(reference, 160),
+        providerReference: cleanStr(reference, 160),
+        paymentMethod: cleanStr(method, 80) || "demo_paystack",
+        paidAt: paidAtMs || nowMs,
+        paidAtMs: paidAtMs || nowMs,
+        latestReference: cleanStr(reference, 160),
+      },
+      { merge: true }
+    );
+    return safePaymentId;
+  }
+
+  await setDoc(
+    paymentRef,
+    {
+      ...basePayload,
+      status:
+        normalizedStatus === PAYMENT_STATUSES.AWAITING_PAYMENT
+          ? PAYMENT_STATUSES.AWAITING_PAYMENT
+          : PAYMENT_STATUSES.PAYMENT_SESSION_CREATED,
+      createdAt: serverTimestamp(),
+      createdAtMs: nowMs,
+    },
+    { merge: true }
+  );
+  return safePaymentId;
+}
+
+async function loadRequestCheckoutContext(requestId = "") {
+  const safeRequestId = cleanStr(requestId, 180);
+  if (!safeRequestId) throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+
+  const requestSnap = await getDoc(doc(db, "serviceRequests", safeRequestId));
+  if (!requestSnap.exists()) {
+    throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+  }
+
+  const requestData = requestSnap.data() || {};
+  const amount = cleanAmount(
+    requestData?.pricingSnapshot?.amount || requestData?.paymentExpectedAmount || 0
+  );
+  const currency = cleanCurrency(
+    requestData?.pricingSnapshot?.currency || requestData?.paymentExpectedCurrency || "KES"
+  );
+  const email = resolveCheckoutEmail(requestData?.email, auth.currentUser?.email);
+  const paymentId = cleanStr(requestData?.unlockPaymentId, 180) || "unlock_request_payment";
+
+  if (!email || amount <= 0) {
+    throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+  }
+
+  return {
+    requestId: safeRequestId,
+    requestData,
+    amount,
+    currency,
+    email,
+    paymentId,
+  };
+}
+
+async function loadExistingPaymentCheckoutContext({
+  requestId,
+  paymentId,
+} = {}) {
+  const safeRequestId = cleanStr(requestId, 180);
+  const safePaymentId = cleanStr(paymentId, 180);
+  if (!safeRequestId || !safePaymentId) {
+    throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+  }
+
+  const [requestSnap, paymentSnap] = await Promise.all([
+    getDoc(doc(db, "serviceRequests", safeRequestId)),
+    getDoc(doc(db, "serviceRequests", safeRequestId, "payments", safePaymentId)),
+  ]);
+
+  if (!requestSnap.exists() || !paymentSnap.exists()) {
+    throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+  }
+
+  const requestData = requestSnap.data() || {};
+  const paymentData = normalizePaymentDoc({
+    id: paymentSnap.id,
+    ...(paymentSnap.data() || {}),
+  });
+  const email = resolveCheckoutEmail(requestData?.email, auth.currentUser?.email);
+  if (!email || paymentData.amount <= 0) {
+    throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+  }
+
+  return {
+    requestId: safeRequestId,
+    paymentId: safePaymentId,
+    requestData,
+    paymentData,
+    payerMode: "direct_user",
+    email,
+    amount: paymentData.amount,
+    currency: cleanCurrency(paymentData.currency),
+  };
+}
+
+async function loadSharedPaymentCheckoutContext({
+  shareToken,
+  email,
+} = {}) {
+  const safeShareToken = cleanStr(shareToken, 400);
+  if (!safeShareToken) {
+    throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+  }
+
+  const result = await resolveSharedPaymentLink({ shareToken: safeShareToken });
+  if (result?.valid !== true || !result?.payment) {
+    throw new Error("This payment link is no longer valid.");
+  }
+
+  const paymentData = normalizePaymentDoc({
+    id: cleanStr(result?.paymentId || result?.payment?.id, 180),
+    ...(result?.payment || {}),
+  });
+  const payerEmail = resolveCheckoutEmail(email);
+  if (!payerEmail || paymentData.amount <= 0) {
+    throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+  }
+
+  return {
+    requestId: cleanStr(result?.requestId, 180),
+    paymentId: cleanStr(result?.paymentId || result?.payment?.id, 180),
+    paymentData,
+    payerMode: "shared_full_link",
+    email: payerEmail,
+    amount: paymentData.amount,
+    currency: cleanCurrency(paymentData.currency),
+    shareToken: safeShareToken,
+  };
+}
+
+async function loadFullPackageCheckoutContext({
+  fullPackageId,
+  selectedItems,
+} = {}) {
+  const safeFullPackageId = cleanStr(fullPackageId, 180);
+  if (!safeFullPackageId) {
+    throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+  }
+
+  const fullPackageSnap = await getDoc(doc(db, "fullPackages", safeFullPackageId));
+  if (!fullPackageSnap.exists()) {
+    throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+  }
+
+  const fullPackage = fullPackageSnap.data() || {};
+  const coverage = resolveFullPackageCoverageState(fullPackage, selectedItems);
+  const amount = cleanAmount(fullPackage?.unlockAmount || fullPackage?.depositAmount || 0);
+  const email = resolveCheckoutEmail(fullPackage?.email, auth.currentUser?.email);
+
+  return {
+    fullPackageId: safeFullPackageId,
+    fullPackage,
+    amount,
+    email,
+    currency: "KES",
+    selectedItems: coverage.selectedItems,
+    coveredItems: coverage.coveredItems,
+    payableItems: coverage.outstandingItems,
+    alreadyCovered:
+      fullPackage?.unlockPaid === true || coverage.isCovered || coverage.outstandingItems.length === 0,
+  };
+}
+
+function extractFinanceErrorMessage(error, fallback = "Something went wrong. Please try again.") {
+  const code = cleanStr(error?.code, 120).toLowerCase();
+  const message = cleanStr(error?.message, 400);
+  const detailMessage = cleanStr(
+    error?.details?.message || error?.details?.error || error?.details,
+    400
+  );
+
+  if (detailMessage && detailMessage.toLowerCase() !== "internal") return detailMessage;
+  if (message && message.toLowerCase() !== "internal") return message;
+
+  if (code.includes("internal")) {
+    return fallback;
+  }
+  if (code.includes("failed-precondition")) {
+    return message || detailMessage || fallback;
+  }
+
+  return message || detailMessage || fallback;
+}
+
+async function callFinance(name, payload = {}) {
+  try {
+    const callable = paymentCallable(name);
+    const result = await callable(payload);
+    return result?.data ?? null;
+  } catch (error) {
+    console.error(`Finance callable failed: ${name}`, error);
+    const nextError = new Error(
+      extractFinanceErrorMessage(error, "Payment checkout could not start right now. Please try again.")
+    );
+    nextError.code = cleanStr(error?.code, 120) || "functions/internal";
+    nextError.details = error?.details ?? null;
+    nextError.cause = error;
+    throw nextError;
+  }
+}
+
 export function buildDummyTransactionReference(nowMs = Date.now()) {
   const d = new Date(nowMs);
   const yyyy = d.getUTCFullYear();
@@ -145,201 +1048,66 @@ export function buildDummyTransactionReference(nowMs = Date.now()) {
   return `MJ-PAY-${yyyy}${mm}${dd}-${rand}`;
 }
 
-function formatMoneyText(amount, currency = "KES") {
-  const value = cleanAmount(amount);
-  if (!value) return "";
-  return `${cleanCurrency(currency)} ${value.toLocaleString()}`;
-}
-
-function requestRoutePath(requestId, role = "user") {
-  const rid = cleanStr(requestId, 180);
-  if (!rid) return "";
-  const safeRole = cleanStr(role, 40).toLowerCase();
-  if (safeRole === "staff") return `/staff/request/${encodeURIComponent(rid)}`;
-  if (safeRole === "admin" || safeRole === "assignedadmin") {
-    return `/app/admin/request/${encodeURIComponent(rid)}`;
-  }
-  return `/app/request/${encodeURIComponent(rid)}`;
-}
-
-function requestAdminUidFromData(requestData) {
-  return cleanStr(
-    requestData?.ownerLockedAdminUid || requestData?.currentAdminUid || "",
-    160
-  );
-}
-
-function requestAssignedStaffUidFromData(requestData) {
-  return cleanStr(requestData?.assignedTo, 160);
-}
-
-async function safeCreateUserNotification(payload) {
-  try {
-    return await createUserNotification(payload);
-  } catch (error) {
-    console.warn("Failed to create user notification:", error?.message || error);
-    return null;
-  }
-}
-
-async function safeCreateStaffNotification(payload) {
-  try {
-    return await createStaffNotification(payload);
-  } catch (error) {
-    console.warn("Failed to create staff notification:", error?.message || error);
-    return null;
-  }
-}
-
-async function safeCreateAdminNotification(payload) {
-  try {
-    return await createAdminNotification(payload);
-  } catch (error) {
-    console.warn("Failed to create admin notification:", error?.message || error);
-    return null;
-  }
-}
-
-async function safeNotifyAdminForRequest(requestId, requestData, payload) {
-  const adminUid = requestAdminUidFromData(requestData);
-  if (!adminUid) return null;
-  return safeCreateAdminNotification({
-    uid: adminUid,
-    requestId,
-    ...payload,
-  });
-}
-
-export function paymentStatusUi(status) {
-  const s = normalizePaymentStatusValue(status);
-  if (s === PAYMENT_STATUSES.PENDING_ADMIN_APPROVAL) {
-    return {
-      label: "Pending admin approval",
-      cls: "border border-amber-200 bg-amber-50 text-amber-900",
-    };
-  }
-  if (s === PAYMENT_STATUSES.AWAITING_USER_PAYMENT) {
-    return {
-      label: "Awaiting payment",
-      cls: "border border-blue-200 bg-blue-50 text-blue-900",
-    };
-  }
-  if (s === PAYMENT_STATUSES.PAID) {
-    return {
-      label: "Paid",
-      cls: "border border-emerald-200 bg-emerald-50 text-emerald-900",
-    };
-  }
-  if (s === PAYMENT_STATUSES.REJECTED) {
-    return {
-      label: "Rejected",
-      cls: "border border-rose-200 bg-rose-50 text-rose-800",
-    };
-  }
-  if (s === PAYMENT_STATUSES.AUTO_REFUNDED) {
-    return {
-      label: "Auto refunded",
-      cls: "border border-purple-200 bg-purple-50 text-purple-900",
-    };
-  }
-  if (s === PAYMENT_STATUSES.REFUNDED) {
-    return {
-      label: "Refunded",
-      cls: "border border-zinc-200 bg-zinc-100 text-zinc-800",
-    };
-  }
-  return {
-    label: s || "Unknown",
-    cls: "border border-zinc-200 bg-zinc-100 text-zinc-700",
-  };
-}
-
-export function refundStatusUi(status) {
-  const s = cleanStr(status, 40).toLowerCase();
-  if (s === REFUND_STATUSES.PENDING) {
-    return {
-      label: "Pending",
-      cls: "border border-amber-200 bg-amber-50 text-amber-900",
-    };
-  }
-  if (s === REFUND_STATUSES.APPROVED) {
-    return {
-      label: "Approved",
-      cls: "border border-blue-200 bg-blue-50 text-blue-900",
-    };
-  }
-  if (s === REFUND_STATUSES.REJECTED) {
-    return {
-      label: "Rejected",
-      cls: "border border-rose-200 bg-rose-50 text-rose-800",
-    };
-  }
-  if (s === REFUND_STATUSES.AUTO_REFUNDED) {
-    return {
-      label: "Auto Refunded",
-      cls: "border border-purple-200 bg-purple-50 text-purple-900",
-    };
-  }
-  if (s === REFUND_STATUSES.REFUNDED) {
-    return {
-      label: "Refunded",
-      cls: "border border-zinc-200 bg-zinc-100 text-zinc-800",
-    };
-  }
-  return {
-    label: s || "Unknown",
-    cls: "border border-zinc-200 bg-zinc-100 text-zinc-700",
-  };
-}
-
-function requireActorUid() {
-  const uid = cleanStr(auth.currentUser?.uid, 120);
-  if (!uid) throw new Error("Not signed in.");
-  return uid;
-}
-
 export function normalizePaymentDoc(row) {
   const data = row && typeof row === "object" ? row : {};
-  const amount = cleanAmount(data.amount);
-  const paymentType = normalizePaymentTypeValue(data.paymentType);
-  const status = normalizePaymentStatusValue(data.status);
   return {
     ...data,
     id: cleanStr(data.id, 180),
     requestId: cleanStr(data.requestId, 180),
-    paymentType,
-    paymentLabel: cleanStr(data.paymentLabel, 120) || (paymentType === PAYMENT_TYPES.UNLOCK_REQUEST ? "Unlock request payment" : "In-progress payment"),
-    amount,
+    requestUid: cleanStr(data.requestUid, 160),
+    paymentType: lower(data.paymentType, 80),
+    paymentLabel: cleanStr(data.paymentLabel, 180) || "Payment",
+    amount: cleanAmount(data.amount),
     currency: cleanCurrency(data.currency),
-    status,
+    status: lower(data.status, 80),
+    note: cleanStr(data.note, 2000),
+    rejectionReason: cleanStr(
+      data.rejectionReason || data?.revocationMeta?.reason || "",
+      2000
+    ),
+    transactionReference: cleanStr(
+      data.transactionReference || data.providerReference || data.reference || "",
+      160
+    ),
+    createdByStaffUid: cleanStr(data.createdByStaffUid, 160),
+    approvedByAdminUid: cleanStr(
+      data?.approvalMeta?.approvedByUid || data.approvedByAdminUid || "",
+      160
+    ),
     createdAtMs: Number(data.createdAtMs || 0) || toMillis(data.createdAt),
     approvedAtMs: Number(data.approvedAtMs || 0) || toMillis(data.approvedAt),
     paidAtMs: Number(data.paidAtMs || 0) || toMillis(data.paidAt),
-    transactionReference: cleanStr(data.transactionReference || data.reference || data.ref, 120),
-    note: cleanStr(data.note, 1200),
-    rejectionReason: cleanStr(data.rejectionReason, 1200),
-    createdByStaffUid: cleanStr(data.createdByStaffUid, 160),
-    approvedByAdminUid: cleanStr(data.approvedByAdminUid, 160),
-    requestUid: cleanStr(data.requestUid, 160),
+    refundedAtMs: Number(data.refundedAtMs || 0) || toMillis(data.refundedAt),
     unlockAutoRefundEligibleAtMs: Number(data.unlockAutoRefundEligibleAtMs || 0),
+    breakdown: data?.breakdown && typeof data.breakdown === "object" ? data.breakdown : null,
+    financialSnapshot:
+      data?.financialSnapshot && typeof data.financialSnapshot === "object"
+        ? data.financialSnapshot
+        : null,
+    latestAttempt:
+      data?.latestAttempt && typeof data.latestAttempt === "object" ? data.latestAttempt : null,
+    payoutState:
+      data?.payoutState && typeof data.payoutState === "object" ? data.payoutState : null,
+    refundState:
+      data?.refundState && typeof data.refundState === "object" ? data.refundState : null,
+    shareLink:
+      data?.shareLink && typeof data.shareLink === "object" ? data.shareLink : null,
   };
 }
 
 export function normalizeRefundDoc(row) {
   const data = row && typeof row === "object" ? row : {};
-  const id = cleanStr(data.id, 180);
   return {
     ...data,
-    id,
-    refundId: cleanStr(data.refundId, 180) || id,
+    id: cleanStr(data.id, 180),
+    refundId: cleanStr(data.refundId || data.id, 180),
     requestId: cleanStr(data.requestId, 180),
     paymentId: cleanStr(data.paymentId, 180),
-    paymentLabel: cleanStr(data.paymentLabel, 120),
-    paymentType: cleanStr(data.paymentType, 80).toLowerCase(),
+    paymentType: lower(data.paymentType, 80),
+    paymentLabel: cleanStr(data.paymentLabel, 180),
     amount: cleanAmount(data.amount),
     currency: cleanCurrency(data.currency),
-    status: cleanStr(data.status, 60).toLowerCase(),
-    uid: cleanStr(data.uid, 160),
+    status: lower(data.status, 80),
     userReason: cleanStr(data.userReason, 2000),
     adminExplanation: cleanStr(data.adminExplanation, 2000),
     expectedRefundPeriodText: cleanStr(data.expectedRefundPeriodText, 300),
@@ -349,40 +1117,43 @@ export function normalizeRefundDoc(row) {
   };
 }
 
-function requireRefundLinks(refund, expectedRequestId = "") {
-  const source = refund && typeof refund === "object" ? refund : {};
-  const refundId = cleanStr(source.refundId || source.id, 180);
-  const requestId = cleanStr(source.requestId, 180);
-  const paymentId = cleanStr(source.paymentId, 180);
-
-  if (!refundId || !requestId || !paymentId) {
-    throw new Error("Refund record is missing required references.");
-  }
-  if (expectedRequestId && requestId !== expectedRequestId) {
-    throw new Error("Refund request linkage mismatch.");
-  }
-
-  return { refundId, requestId, paymentId };
+export function paymentStatusUi(status) {
+  const s = lower(status, 80);
+  const map = {
+    admin_review: ["Awaiting admin review", "border border-amber-200 bg-amber-50 text-amber-900"],
+    payable: ["Payable", "border border-emerald-200 bg-emerald-50 text-emerald-900"],
+    payment_session_created: ["Checkout created", "border border-blue-200 bg-blue-50 text-blue-900"],
+    awaiting_payment: ["Awaiting payment", "border border-blue-200 bg-blue-50 text-blue-900"],
+    paid: ["Paid", "border border-emerald-200 bg-emerald-50 text-emerald-900"],
+    held: ["Held by MAJUU", "border border-sky-200 bg-sky-50 text-sky-900"],
+    payout_ready: ["Payout ready", "border border-indigo-200 bg-indigo-50 text-indigo-900"],
+    settled: ["Settled", "border border-zinc-200 bg-zinc-100 text-zinc-800"],
+    refund_requested: ["Refund requested", "border border-amber-200 bg-amber-50 text-amber-900"],
+    refund_under_review: ["Refund under review", "border border-blue-200 bg-blue-50 text-blue-900"],
+    refunded: ["Refunded", "border border-zinc-200 bg-zinc-100 text-zinc-800"],
+    auto_refunded: ["Auto refunded", "border border-purple-200 bg-purple-50 text-purple-900"],
+    revoked: ["Revoked", "border border-rose-200 bg-rose-50 text-rose-800"],
+    failed: ["Failed", "border border-rose-200 bg-rose-50 text-rose-800"],
+    expired: ["Expired", "border border-zinc-200 bg-zinc-100 text-zinc-700"],
+    rejected: ["Rejected", "border border-rose-200 bg-rose-50 text-rose-800"],
+  };
+  const [label, cls] = map[s] || [s || "Unknown", "border border-zinc-200 bg-zinc-100 text-zinc-700"];
+  return { label, cls };
 }
 
-function paymentsCol(requestId) {
-  return collection(db, "serviceRequests", requestId, "payments");
-}
-
-function paymentDocRef(requestId, paymentId) {
-  return doc(db, "serviceRequests", requestId, "payments", paymentId);
-}
-
-function refundsCol(requestId) {
-  return collection(db, "serviceRequests", requestId, "refundRequests");
-}
-
-function refundDocRef(requestId, refundId) {
-  return doc(db, "serviceRequests", requestId, "refundRequests", refundId);
-}
-
-function unlockStartedAtMs(requestData) {
-  return getRequestStartedAtMs(requestData);
+export function refundStatusUi(status) {
+  const s = lower(status, 80);
+  const map = {
+    requested: ["Requested", "border border-amber-200 bg-amber-50 text-amber-900"],
+    under_review: ["Under review", "border border-blue-200 bg-blue-50 text-blue-900"],
+    approved: ["Approved", "border border-blue-200 bg-blue-50 text-blue-900"],
+    rejected: ["Rejected", "border border-rose-200 bg-rose-50 text-rose-800"],
+    refunded: ["Refunded", "border border-zinc-200 bg-zinc-100 text-zinc-800"],
+    auto_refunded: ["Auto refunded", "border border-purple-200 bg-purple-50 text-purple-900"],
+    failed: ["Failed", "border border-rose-200 bg-rose-50 text-rose-800"],
+  };
+  const [label, cls] = map[s] || [s || "Unknown", "border border-zinc-200 bg-zinc-100 text-zinc-700"];
+  return { label, cls };
 }
 
 export function isUnlockPaymentAutoRefundEligible({
@@ -395,216 +1166,191 @@ export function isUnlockPaymentAutoRefundEligible({
   if (p.status !== PAYMENT_STATUSES.PAID) return false;
   const paidAtMs = Number(p.paidAtMs || 0);
   if (paidAtMs <= 0) return false;
-  if (unlockStartedAtMs(requestData) > 0) return false;
-  return nowMs >= paidAtMs + UNLOCK_AUTO_REFUND_WINDOW_MS;
+  if (getRequestStartedAtMs(requestData) > 0) return false;
+  const eligibleAtMs =
+    Number(p.unlockAutoRefundEligibleAtMs || 0) || paidAtMs + UNLOCK_AUTO_REFUND_WINDOW_MS;
+  return nowMs >= eligibleAtMs;
 }
 
-export async function createUnlockPaymentForRequest({
-  requestId,
-  requestUid,
-  amount,
-  currency = "KES",
-  paymentLabel = "Unlock request payment",
-  note = "",
-  paidAtMs = Date.now(),
-  transactionReference = "",
-  context = null,
-} = {}) {
-  const cleanRequestId = cleanStr(requestId, 180);
-  if (!cleanRequestId) throw new Error("Missing request ID.");
-  const uid = cleanStr(requestUid, 160);
-  if (!uid) throw new Error("Missing request owner UID.");
-
-  const actorUid = requireActorUid();
-  const safePaidAtMs = Number(paidAtMs || Date.now()) || Date.now();
-  const amountNum = cleanAmount(amount);
-  const ref = cleanStr(transactionReference, 120) || buildDummyTransactionReference(safePaidAtMs);
-  const nowMs = Date.now();
-  const requestSnap = await getDoc(doc(db, "serviceRequests", cleanRequestId));
-  const requestData = requestSnap.exists() ? requestSnap.data() || {} : {};
-
-  const payload = {
-    requestId: cleanRequestId,
-    requestUid: uid,
+export async function createUnlockCheckoutSession(payload = {}) {
+  const context = await loadRequestCheckoutContext(payload?.requestId);
+  const metadata = buildHostedPaymentMetadata({
+    flowType: cleanStr(context.requestData?.paymentFlowType || "unlock_request", 80),
     paymentType: PAYMENT_TYPES.UNLOCK_REQUEST,
-    paymentLabel: cleanStr(paymentLabel, 120) || "Unlock request payment",
-    amount: amountNum,
-    currency: cleanCurrency(currency),
-    status: PAYMENT_STATUSES.PAID,
-    createdAt: serverTimestamp(),
-    createdAtMs: nowMs,
-    approvedAt: serverTimestamp(),
-    approvedAtMs: nowMs,
-    paidAt: serverTimestamp(),
-    paidAtMs: safePaidAtMs,
-    transactionReference: ref,
-    note: cleanStr(note, 1200),
-    createdByUid: actorUid,
-    createdByRole: "user",
-    approvedByAdminUid: "",
-    rejectionReason: "",
-    unlockAutoRefundEligibleAtMs: safePaidAtMs + UNLOCK_AUTO_REFUND_WINDOW_MS,
-    context: context && typeof context === "object" ? context : null,
-    updatedAt: serverTimestamp(),
-  };
-
-  const refDoc = await addDoc(paymentsCol(cleanRequestId), payload);
-
-  await updateDoc(doc(db, "serviceRequests", cleanRequestId), {
-    unlockPaymentId: refDoc.id,
-    unlockPaymentRequestId: cleanRequestId,
-    markedInProgressAtMs: Number(0),
-    updatedAt: serverTimestamp(),
+    requestId: context.requestId,
+    paymentId: context.paymentId,
+    draftId: cleanStr(payload?.draftId, 160),
+    returnTo: cleanStr(payload?.returnTo, 600),
+    appBaseUrl: resolveFrontendAppBaseUrl(payload?.appBaseUrl),
+    track: cleanStr(context.requestData?.track, 24),
+    country: cleanStr(context.requestData?.country, 120),
+    requestType: cleanStr(context.requestData?.requestType, 80),
+    serviceName: cleanStr(context.requestData?.serviceName, 120),
+    currency: context.currency,
+    metadata: payload?.metadata,
   });
-
-  await safeNotifyAdminForRequest(cleanRequestId, requestData, {
-    type: "PAYMENT_RECEIVED",
-    notificationId: `payment_received_unlock_${cleanRequestId}_${refDoc.id}`,
-    extras: {
-      paymentId: refDoc.id,
-      paymentType: PAYMENT_TYPES.UNLOCK_REQUEST,
-      paymentLabel: payload.paymentLabel,
-      amount: payload.amount,
-      currency: payload.currency,
-      title: "Payment received",
-      body: `${payload.paymentLabel} ${formatMoneyText(payload.amount, payload.currency)} paid.`,
-      route: requestRoutePath(cleanRequestId, "admin"),
-    },
+  const session = await initializeHostedCheckout({
+    email: context.email,
+    amount: context.amount,
+    currency: context.currency,
+    reference: cleanStr(payload?.reference, 120) || buildDummyTransactionReference(),
+    metadata,
   });
-
-  return {
-    id: refDoc.id,
-    ...payload,
-  };
-}
-
-export async function createInProgressPaymentProposal({
-  requestId,
-  amount,
-  paymentLabel,
-  note,
-} = {}) {
-  const cleanRequestId = cleanStr(requestId, 180);
-  if (!cleanRequestId) throw new Error("Missing request ID.");
-
-  const actorUid = requireActorUid();
-  const label = cleanStr(paymentLabel, 120);
-  if (!label) throw new Error("Payment label is required.");
-  const amountNum = cleanAmount(amount);
-  if (amountNum <= 0) throw new Error("Amount must be greater than zero.");
-
-  const snap = await getDoc(doc(db, "serviceRequests", cleanRequestId));
-  if (!snap.exists()) throw new Error("Request not found.");
-  const req = snap.data() || {};
-  const requestUid = cleanStr(req.uid, 160);
-  if (!requestUid) throw new Error("Request owner is missing.");
-
-  const nowMs = Date.now();
-  const payload = {
-    requestId: cleanRequestId,
-    requestUid,
-    paymentType: PAYMENT_TYPES.IN_PROGRESS,
-    paymentLabel: label,
-    amount: amountNum,
-    currency: "KES",
-    status: PAYMENT_STATUSES.PENDING_ADMIN_APPROVAL,
-    createdAt: serverTimestamp(),
-    createdAtMs: nowMs,
-    approvedAt: null,
-    approvedAtMs: 0,
-    paidAt: null,
-    paidAtMs: 0,
-    transactionReference: "",
-    note: cleanStr(note, 1200),
-    rejectionReason: "",
-    createdByStaffUid: actorUid,
-    approvedByAdminUid: "",
-    updatedAt: serverTimestamp(),
-  };
-
-  const refDoc = await addDoc(paymentsCol(cleanRequestId), payload);
-  await safeNotifyAdminForRequest(cleanRequestId, req, {
-    type: "PAYMENT_UPDATE",
-    notificationId: `payment_review_${cleanRequestId}_${refDoc.id}`,
-    extras: {
-      paymentId: refDoc.id,
-      paymentType: PAYMENT_TYPES.IN_PROGRESS,
-      paymentLabel: payload.paymentLabel,
-      amount: payload.amount,
-      currency: payload.currency,
-      title: "Payment update",
-      body: `${payload.paymentLabel} ${formatMoneyText(payload.amount, payload.currency)} awaiting admin review.`,
-      route: requestRoutePath(cleanRequestId, "admin"),
-    },
-  });
-  return { id: refDoc.id, ...payload };
-}
-
-export async function adminApproveInProgressPayment({
-  requestId,
-  paymentId,
-} = {}) {
-  const cleanRequestId = cleanStr(requestId, 180);
-  const cleanPaymentId = cleanStr(paymentId, 180);
-  if (!cleanRequestId || !cleanPaymentId) throw new Error("Missing payment details.");
-  const actorUid = requireActorUid();
-  const nowMs = Date.now();
-  const [requestSnap, paymentSnap] = await Promise.all([
-    getDoc(doc(db, "serviceRequests", cleanRequestId)),
-    getDoc(paymentDocRef(cleanRequestId, cleanPaymentId)),
-  ]);
-  const requestData = requestSnap.exists() ? requestSnap.data() || {} : {};
-  const payment = paymentSnap.exists()
-    ? normalizePaymentDoc({ id: paymentSnap.id, ...paymentSnap.data() })
+  const inlinePaymentReceipt = session.demoResult
+    ? buildDemoInlinePaymentReceipt({
+        reference: session.reference,
+        amount: context.amount,
+        currency: context.currency,
+        requestId: context.requestId,
+        paymentId: context.paymentId,
+        demoResult: session.demoResult,
+      })
     : null;
 
-  await updateDoc(paymentDocRef(cleanRequestId, cleanPaymentId), {
-    status: PAYMENT_STATUSES.AWAITING_USER_PAYMENT,
-    approvedAt: serverTimestamp(),
-    approvedAtMs: nowMs,
-    approvedByAdminUid: actorUid,
-    rejectionReason: "",
-    updatedAt: serverTimestamp(),
-  });
-
-  if (payment) {
-    await Promise.allSettled([
-      safeCreateUserNotification({
-        uid: payment.requestUid,
-        requestId: cleanRequestId,
-        type: "PAYMENT_REQUIRED",
-        notificationId: `payment_required_${cleanRequestId}_${cleanPaymentId}`,
-        extras: {
-          paymentId: cleanPaymentId,
-          paymentType: payment.paymentType,
-          paymentLabel: payment.paymentLabel,
-          amount: payment.amount,
-          currency: payment.currency,
-          title: "Payment required",
-          body: `${payment.paymentLabel} ${formatMoneyText(payment.amount, payment.currency)} ready for payment.`,
-          route: requestRoutePath(cleanRequestId, "user"),
-        },
-      }),
-      safeCreateStaffNotification({
-        uid: requestAssignedStaffUidFromData(requestData) || payment.createdByStaffUid,
-        requestId: cleanRequestId,
-        type: "PAYMENT_UPDATE",
-        notificationId: `payment_update_approved_${cleanRequestId}_${cleanPaymentId}`,
-        extras: {
-          paymentId: cleanPaymentId,
-          paymentType: payment.paymentType,
-          paymentLabel: payment.paymentLabel,
-          amount: payment.amount,
-          currency: payment.currency,
-          title: "Payment update",
-          body: `${payment.paymentLabel} approved and published to user.`,
-          route: requestRoutePath(cleanRequestId, "staff"),
-        },
-      }),
-    ]);
+  if (session.demoResult) {
+    try {
+      await syncDemoUnlockPaymentRecord({
+        requestId: context.requestId,
+        paymentId: context.paymentId,
+        requestData: context.requestData,
+        amount: context.amount,
+        currency: context.currency,
+        status: PAYMENT_STATUSES.PAYMENT_SESSION_CREATED,
+      });
+      await syncDemoUnlockPaymentRecord({
+        requestId: context.requestId,
+        paymentId: context.paymentId,
+        requestData: context.requestData,
+        amount: context.amount,
+        currency: context.currency,
+        status: PAYMENT_STATUSES.PAID,
+        reference: session.reference,
+        method: inlinePaymentReceipt?.method || "demo_paystack",
+        paidAtMs: inlinePaymentReceipt?.paidAtMs || Date.now(),
+      });
+    } catch (error) {
+      console.error("Failed to sync demo unlock payment record:", error);
+      throw new Error("Payment could not be prepared right now. Please try again.");
+    }
   }
 
-  return true;
+  return {
+    ok: true,
+    requestId: context.requestId,
+    paymentId: context.paymentId,
+    amount: context.amount,
+    currency: context.currency,
+    reference: session.reference,
+    inlinePaymentReceipt,
+    authorizationUrl: session.authorizationUrl,
+    redirectUrl: session.authorizationUrl,
+  };
+}
+
+export async function createFullPackageUnlockCheckoutSession(payload = {}) {
+  if (!isDemoPaymentMode()) {
+    return callFinance("createFullPackageUnlockCheckoutSession", payload);
+  }
+
+  const context = await loadFullPackageCheckoutContext({
+    fullPackageId: payload?.fullPackageId,
+    selectedItems: payload?.selectedItems,
+  });
+
+  if (context.alreadyCovered || context.amount <= 0) {
+    return {
+      ok: true,
+      alreadyCovered: true,
+      flowType: "full_package_unlock",
+      fullPackageId: context.fullPackageId,
+      coveredItems: context.coveredItems,
+      payableItems: [],
+      selectedItems: context.selectedItems,
+      amount: 0,
+      currency: context.currency,
+    };
+  }
+
+  if (!context.email) {
+    throw new Error(PAYMENT_CHECKOUT_START_ERROR);
+  }
+
+  const metadata = buildHostedPaymentMetadata({
+    flowType: "full_package_unlock",
+    paymentType: PAYMENT_TYPES.UNLOCK_REQUEST,
+    draftId: cleanStr(payload?.draftId, 160),
+    returnTo: cleanStr(payload?.returnTo, 600),
+    appBaseUrl: resolveFrontendAppBaseUrl(payload?.appBaseUrl),
+    fullPackageId: context.fullPackageId,
+    track: cleanStr(payload?.track || context.fullPackage?.track, 24),
+    country: cleanStr(payload?.country || context.fullPackage?.country, 120),
+    selectedItems: context.selectedItems,
+    currency: context.currency,
+    metadata: payload?.metadata,
+  });
+  const session = await initializeHostedCheckout({
+    email: context.email,
+    amount: context.amount,
+    currency: context.currency,
+    reference: cleanStr(payload?.reference, 120) || buildDummyTransactionReference(),
+    metadata,
+  });
+  const inlinePaymentReceipt = session.demoResult
+    ? buildDemoInlinePaymentReceipt({
+        reference: session.reference,
+        amount: context.amount,
+        currency: context.currency,
+        requestId: "",
+        paymentId: "",
+        demoResult: session.demoResult,
+      })
+    : null;
+
+  return {
+    ok: true,
+    flowType: "full_package_unlock",
+    fullPackageId: context.fullPackageId,
+    requestId: "",
+    paymentId: "",
+    amount: context.amount,
+    currency: context.currency,
+    coveredItems: context.coveredItems,
+    payableItems: context.payableItems,
+    selectedItems: context.selectedItems,
+    reference: session.reference,
+    inlinePaymentReceipt,
+    demoResult: session.demoResult || null,
+    authorizationUrl: session.authorizationUrl,
+    redirectUrl: session.authorizationUrl,
+  };
+}
+
+export async function activatePreparedUnlockRequest(payload = {}) {
+  const paymentReceipt =
+    payload?.unlockPaymentReceipt && typeof payload.unlockPaymentReceipt === "object"
+      ? payload.unlockPaymentReceipt
+      : null;
+  const receiptReference = cleanStr(
+    paymentReceipt?.transactionReference || paymentReceipt?.reference,
+    180
+  );
+
+  if (isDemoPaymentMode() || isDemoPaymentReference(receiptReference)) {
+    return activatePreparedUnlockRequestDemo({
+      requestId: payload?.requestId,
+      unlockPaymentReceipt: paymentReceipt,
+    });
+  }
+
+  return callFinance("activatePreparedUnlockRequest", payload);
+}
+
+export async function createInProgressPaymentProposal(payload = {}) {
+  return callFinance("createInProgressPaymentProposal", payload);
+}
+
+export async function adminApproveInProgressPayment(payload = {}) {
+  return callFinance("adminApprovePaymentRequest", payload);
 }
 
 export async function adminRejectInProgressPayment({
@@ -612,270 +1358,104 @@ export async function adminRejectInProgressPayment({
   paymentId,
   rejectionReason,
 } = {}) {
-  const cleanRequestId = cleanStr(requestId, 180);
-  const cleanPaymentId = cleanStr(paymentId, 180);
-  if (!cleanRequestId || !cleanPaymentId) throw new Error("Missing payment details.");
-
-  const actorUid = requireActorUid();
-  const reason = cleanStr(rejectionReason, 1200);
-  if (!reason) throw new Error("Rejection reason is required.");
-  const [requestSnap, paymentSnap] = await Promise.all([
-    getDoc(doc(db, "serviceRequests", cleanRequestId)),
-    getDoc(paymentDocRef(cleanRequestId, cleanPaymentId)),
-  ]);
-  const requestData = requestSnap.exists() ? requestSnap.data() || {} : {};
-  const payment = paymentSnap.exists()
-    ? normalizePaymentDoc({ id: paymentSnap.id, ...paymentSnap.data() })
-    : null;
-
-  await updateDoc(paymentDocRef(cleanRequestId, cleanPaymentId), {
-    status: PAYMENT_STATUSES.REJECTED,
-    rejectionReason: reason,
-    approvedByAdminUid: actorUid,
-    approvedAt: serverTimestamp(),
-    approvedAtMs: Date.now(),
-    updatedAt: serverTimestamp(),
+  return callFinance("adminRevokePaymentRequest", {
+    requestId,
+    paymentId,
+    reason: rejectionReason,
   });
-
-  if (payment) {
-    await safeCreateStaffNotification({
-      uid: requestAssignedStaffUidFromData(requestData) || payment.createdByStaffUid,
-      requestId: cleanRequestId,
-      type: "PAYMENT_UPDATE",
-      notificationId: `payment_update_rejected_${cleanRequestId}_${cleanPaymentId}`,
-      extras: {
-        paymentId: cleanPaymentId,
-        paymentType: payment.paymentType,
-        paymentLabel: payment.paymentLabel,
-        amount: payment.amount,
-        currency: payment.currency,
-        title: "Payment update",
-        body: `${payment.paymentLabel} was not approved.`,
-        route: requestRoutePath(cleanRequestId, "staff"),
-        rejectionReason: reason,
-      },
-    });
-  }
-
-  return true;
 }
 
-export async function userPayAwaitingPayment({
-  requestId,
-  paymentId,
-  method = "dummy",
-  paidAtMs = Date.now(),
-} = {}) {
-  const cleanRequestId = cleanStr(requestId, 180);
-  const cleanPaymentId = cleanStr(paymentId, 180);
-  if (!cleanRequestId || !cleanPaymentId) throw new Error("Missing payment details.");
-  const actorUid = requireActorUid();
-  const paymentRef = paymentDocRef(cleanRequestId, cleanPaymentId);
-  const requestSnap = await getDoc(doc(db, "serviceRequests", cleanRequestId));
-  const requestData = requestSnap.exists() ? requestSnap.data() || {} : {};
-  let settledPayment = null;
+export async function createPaymentCheckoutSession(payload = {}) {
+  const shareToken = cleanStr(payload?.shareToken, 400);
+  const context = shareToken
+    ? await loadSharedPaymentCheckoutContext({
+        shareToken,
+        email: payload?.email,
+      })
+    : await loadExistingPaymentCheckoutContext({
+        requestId: payload?.requestId,
+        paymentId: payload?.paymentId,
+      });
 
-  await runTransaction(db, async (tx) => {
-    const paySnap = await tx.get(paymentRef);
-    if (!paySnap.exists()) throw new Error("Payment request not found.");
-    const payment = normalizePaymentDoc({ id: paySnap.id, ...paySnap.data() });
-
-    if (payment.requestUid !== actorUid) {
-      throw new Error("This payment is not linked to your account.");
-    }
-    if (payment.status !== PAYMENT_STATUSES.AWAITING_USER_PAYMENT) {
-      throw new Error("This payment is not awaiting user payment.");
-    }
-
-    const finalPaidAtMs = Number(paidAtMs || Date.now()) || Date.now();
-    tx.update(paymentRef, {
-      status: PAYMENT_STATUSES.PAID,
-      paidAt: serverTimestamp(),
-      paidAtMs: finalPaidAtMs,
-      transactionReference: buildDummyTransactionReference(finalPaidAtMs),
-      paymentMethod: cleanStr(method, 40) || "dummy",
-      updatedAt: serverTimestamp(),
-    });
-    settledPayment = {
-      ...payment,
-      status: PAYMENT_STATUSES.PAID,
-      paidAtMs: finalPaidAtMs,
-    };
+  const metadata = buildHostedPaymentMetadata({
+    flowType: cleanStr(payload?.flowType || "payment_checkout", 80),
+    paymentType: cleanStr(context.paymentData?.paymentType, 80) || PAYMENT_TYPES.IN_PROGRESS,
+    requestId: context.requestId,
+    paymentId: context.paymentId,
+    returnTo: cleanStr(payload?.returnTo, 600),
+    shareToken,
+    appBaseUrl: resolveFrontendAppBaseUrl(payload?.appBaseUrl),
+    paymentLabel: cleanStr(context.paymentData?.paymentLabel, 180),
+    payerMode: cleanStr(context.payerMode, 80),
+    currency: context.currency,
+    metadata: payload?.metadata,
+  });
+  const session = await initializeHostedCheckout({
+    email: context.email,
+    amount: context.amount,
+    currency: context.currency,
+    reference: cleanStr(payload?.reference, 120) || buildDummyTransactionReference(),
+    metadata,
   });
 
-  if (settledPayment) {
-    const title = "Payment received";
-    const body = `${settledPayment.paymentLabel} ${formatMoneyText(
-      settledPayment.amount,
-      settledPayment.currency
-    )} paid.`;
-    await Promise.allSettled([
-      safeNotifyAdminForRequest(cleanRequestId, requestData, {
-        type: "PAYMENT_RECEIVED",
-        notificationId: `payment_received_${cleanRequestId}_${cleanPaymentId}_admin`,
-        extras: {
-          paymentId: cleanPaymentId,
-          paymentType: settledPayment.paymentType,
-          paymentLabel: settledPayment.paymentLabel,
-          amount: settledPayment.amount,
-          currency: settledPayment.currency,
-          title,
-          body,
-          route: requestRoutePath(cleanRequestId, "admin"),
-        },
-      }),
-      safeCreateStaffNotification({
-        uid:
-          requestAssignedStaffUidFromData(requestData) || settledPayment.createdByStaffUid,
-        requestId: cleanRequestId,
-        type: "PAYMENT_RECEIVED",
-        notificationId: `payment_received_${cleanRequestId}_${cleanPaymentId}_staff`,
-        extras: {
-          paymentId: cleanPaymentId,
-          paymentType: settledPayment.paymentType,
-          paymentLabel: settledPayment.paymentLabel,
-          amount: settledPayment.amount,
-          currency: settledPayment.currency,
-          title,
-          body,
-          route: requestRoutePath(cleanRequestId, "staff"),
-        },
-      }),
-      safeCreateUserNotification({
-        uid: settledPayment.requestUid,
-        requestId: cleanRequestId,
-        type: "PAYMENT_RECEIVED",
-        notificationId: `payment_received_${cleanRequestId}_${cleanPaymentId}_user`,
-        extras: {
-          paymentId: cleanPaymentId,
-          paymentType: settledPayment.paymentType,
-          paymentLabel: settledPayment.paymentLabel,
-          amount: settledPayment.amount,
-          currency: settledPayment.currency,
-          title,
-          body,
-          route: requestRoutePath(cleanRequestId, "user"),
-        },
-      }),
-    ]);
-  }
-
-  return true;
-}
-
-export async function createRefundRequest({
-  requestId,
-  paymentId,
-  userReason,
-} = {}) {
-  const cleanRequestId = cleanStr(requestId, 180);
-  const cleanPaymentId = cleanStr(paymentId, 180);
-  if (!cleanRequestId || !cleanPaymentId) throw new Error("Missing payment details.");
-  const actorUid = requireActorUid();
-  const reason = cleanStr(userReason, 2000);
-  if (!reason) throw new Error("Refund reason is required.");
-
-  const reqSnap = await getDoc(doc(db, "serviceRequests", cleanRequestId));
-  if (!reqSnap.exists()) throw new Error("Request not found.");
-  const reqData = reqSnap.data() || {};
-  if (cleanStr(reqData.uid, 160) !== actorUid) {
-    throw new Error("You can only refund your own request payments.");
-  }
-
-  const paySnap = await getDoc(paymentDocRef(cleanRequestId, cleanPaymentId));
-  if (!paySnap.exists()) throw new Error("Payment not found.");
-  const payment = normalizePaymentDoc({ id: paySnap.id, ...paySnap.data() });
-  if (cleanStr(payment.requestId, 180) !== cleanRequestId) {
-    throw new Error("Payment reference mismatch for this request.");
-  }
-  if (payment.paymentType === PAYMENT_TYPES.UNLOCK_REQUEST) {
-    throw new Error(
-      "Unlock request payment is not manually refundable. It only auto-refunds after 48 hours if work has not started."
-    );
-  }
-  if (
-    payment.status !== PAYMENT_STATUSES.PAID &&
-    payment.status !== PAYMENT_STATUSES.AWAITING_USER_PAYMENT
-  ) {
-    throw new Error("This payment is not eligible for refund request.");
-  }
-
-  const priorQ = query(refundsCol(cleanRequestId), where("paymentId", "==", cleanPaymentId), limit(20));
-  const priorSnap = await getDocs(priorQ);
-  const hasPendingOrDone = priorSnap.docs.some((row) => {
-    const status = cleanStr(row.data()?.status, 40).toLowerCase();
-    return (
-      status === REFUND_STATUSES.PENDING ||
-      status === REFUND_STATUSES.APPROVED ||
-      status === REFUND_STATUSES.REFUNDED ||
-      status === REFUND_STATUSES.AUTO_REFUNDED
-    );
-  });
-  if (hasPendingOrDone) {
-    throw new Error("A refund request already exists for this payment.");
-  }
-
-  const nowMs = Date.now();
-  const refundRef = doc(refundsCol(cleanRequestId));
-  const payload = {
-    refundId: refundRef.id,
-    requestId: cleanRequestId,
-    paymentId: cleanPaymentId,
-    paymentType: payment.paymentType,
-    paymentLabel: payment.paymentLabel,
-    amount: payment.amount,
-    currency: payment.currency,
-    uid: actorUid,
-    status: REFUND_STATUSES.PENDING,
-    userReason: reason,
-    adminExplanation: "",
-    expectedRefundPeriodText: "",
-    rejectionReason: "",
-    autoGenerated: false,
-    createdAt: serverTimestamp(),
-    createdAtMs: nowMs,
-    decisionAt: null,
-    decisionAtMs: 0,
-    decidedByAdminUid: "",
-    updatedAt: serverTimestamp(),
+  return {
+    ok: true,
+    requestId: context.requestId,
+    paymentId: context.paymentId,
+    payerMode: context.payerMode,
+    amount: context.amount,
+    currency: context.currency,
+    reference: session.reference,
+    authorizationUrl: session.authorizationUrl,
+    redirectUrl: session.authorizationUrl,
   };
+}
 
-  await setDoc(refundRef, payload);
-  await Promise.allSettled([
-    safeNotifyAdminForRequest(cleanRequestId, reqData, {
-      type: "REFUND_REQUESTED",
-      notificationId: `refund_requested_${cleanRequestId}_${refundRef.id}_admin`,
-      extras: {
-        refundId: refundRef.id,
-        paymentId: cleanPaymentId,
-        paymentType: payment.paymentType,
-        paymentLabel: payment.paymentLabel,
-        amount: payment.amount,
-        currency: payment.currency,
-        title: "Refund requested",
-        body: `${payment.paymentLabel} ${formatMoneyText(payment.amount, payment.currency)} refund requested.`,
-        route: requestRoutePath(cleanRequestId, "admin"),
+export async function getOrCreateSharedPaymentLink(payload = {}) {
+  return callFinance("getOrCreateSharedPaymentLink", payload);
+}
+
+export async function resolveSharedPaymentLink(payload = {}) {
+  return callFinance("resolveSharedPaymentLink", payload);
+}
+
+export async function reconcilePaymentReference(payload = {}) {
+  const reference = cleanStr(
+    typeof payload === "string" ? payload : payload?.reference,
+    120
+  );
+  if (!reference) {
+    throw new Error("Payment reference is missing.");
+  }
+
+  if (isDemoPaymentMode() || isDemoPaymentReference(reference)) {
+    return normalizeVerificationResponse(
+      {
+        ok: true,
+        success: true,
+        demo: true,
+        provider: "demo_paystack",
+        status: "success",
+        message: "Demo payment verified successfully.",
+        data: {
+          reference,
+          status: "success",
+        },
       },
-    }),
-    safeCreateStaffNotification({
-      uid: requestAssignedStaffUidFromData(reqData),
-      requestId: cleanRequestId,
-      type: "REFUND_REQUESTED",
-      notificationId: `refund_requested_${cleanRequestId}_${refundRef.id}_staff`,
-      extras: {
-        refundId: refundRef.id,
-        paymentId: cleanPaymentId,
-        paymentType: payment.paymentType,
-        paymentLabel: payment.paymentLabel,
-        amount: payment.amount,
-        currency: payment.currency,
-        title: "Refund requested",
-        body: `${payment.paymentLabel} ${formatMoneyText(payment.amount, payment.currency)} refund requested.`,
-        route: requestRoutePath(cleanRequestId, "staff"),
-      },
-    }),
-  ]);
-  return { id: refundRef.id, ...payload };
+      reference
+    );
+  }
+
+  const result = await callLocalPaymentBackend(
+    `/paystack/verify/${encodeURIComponent(reference)}`,
+    { method: "GET" },
+    PAYMENT_VERIFY_ERROR
+  );
+  return normalizeVerificationResponse(result, reference);
+}
+
+export async function createRefundRequest({ requestId, paymentId, userReason } = {}) {
+  return callFinance("requestPaymentRefund", { requestId, paymentId, userReason });
 }
 
 export async function adminApproveRefund({
@@ -884,378 +1464,97 @@ export async function adminApproveRefund({
   adminExplanation,
   expectedRefundPeriodText,
 } = {}) {
-  const cleanRequestId = cleanStr(requestId, 180);
-  const cleanRefundId = cleanStr(refundId, 180);
-  if (!cleanRequestId || !cleanRefundId) throw new Error("Missing refund details.");
-  const actorUid = requireActorUid();
-  const explanation = cleanStr(adminExplanation, 2000);
-  const expected = cleanStr(expectedRefundPeriodText, 300);
-  if (!explanation) throw new Error("Approval explanation is required.");
-  if (!expected) throw new Error("Expected refund period text is required.");
-  const requestSnap = await getDoc(doc(db, "serviceRequests", cleanRequestId));
-  const requestData = requestSnap.exists() ? requestSnap.data() || {} : {};
-  let settledRefund = null;
-  let settledPayment = null;
-
-  const nowMs = Date.now();
-  await runTransaction(db, async (tx) => {
-    const refundRef = refundDocRef(cleanRequestId, cleanRefundId);
-    const refundSnap = await tx.get(refundRef);
-    if (!refundSnap.exists()) throw new Error("Refund request not found.");
-    const refund = normalizeRefundDoc({ id: refundSnap.id, ...refundSnap.data() });
-    const links = requireRefundLinks(refund, cleanRequestId);
-    if (refund.status !== REFUND_STATUSES.PENDING) {
-      throw new Error("Refund request already decided.");
-    }
-
-    const payRef = paymentDocRef(cleanRequestId, links.paymentId);
-    const paySnap = await tx.get(payRef);
-    if (!paySnap.exists()) throw new Error("Target payment not found.");
-    const payment = normalizePaymentDoc({ id: paySnap.id, ...paySnap.data() });
-    if (cleanStr(payment.requestId, 180) !== cleanRequestId) {
-      throw new Error("Target payment is not linked to this request.");
-    }
-    settledRefund = refund;
-    settledPayment = payment;
-
-    tx.update(refundRef, {
-      refundId: links.refundId,
-      requestId: links.requestId,
-      paymentId: links.paymentId,
-      status: REFUND_STATUSES.REFUNDED,
-      adminExplanation: explanation,
-      expectedRefundPeriodText: expected,
-      rejectionReason: "",
-      decisionAt: serverTimestamp(),
-      decisionAtMs: nowMs,
-      decidedByAdminUid: actorUid,
-      updatedAt: serverTimestamp(),
-    });
-
-    tx.update(payRef, {
-      status: PAYMENT_STATUSES.REFUNDED,
-      refundedAt: serverTimestamp(),
-      refundedAtMs: nowMs,
-      refundReason: explanation,
-      refundExpectedPeriodText: expected,
-      updatedAt: serverTimestamp(),
-    });
-
-    if (payment.paymentType === PAYMENT_TYPES.UNLOCK_REQUEST) {
-      tx.set(
-        doc(db, "serviceRequests", cleanRequestId),
-        {
-          unlockPaymentRefundedAtMs: nowMs,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-    }
+  return callFinance("adminDecidePaymentRefund", {
+    requestId,
+    refundId,
+    decision: "approve",
+    note: adminExplanation,
+    expectedRefundPeriodText,
   });
-
-  if (settledRefund && settledPayment) {
-    await safeCreateUserNotification({
-      uid: settledRefund.uid,
-      requestId: cleanRequestId,
-      type: "REFUND_COMPLETED",
-      notificationId: `refund_completed_${cleanRequestId}_${cleanRefundId}`,
-      extras: {
-        refundId: cleanRefundId,
-        paymentId: settledRefund.paymentId,
-        paymentType: settledPayment.paymentType,
-        paymentLabel: settledPayment.paymentLabel,
-        amount: settledPayment.amount,
-        currency: settledPayment.currency,
-        title: "Refund completed",
-        body: `${settledPayment.paymentLabel} ${formatMoneyText(
-          settledPayment.amount,
-          settledPayment.currency
-        )} refunded.`,
-        route: requestRoutePath(cleanRequestId, "user"),
-        adminExplanation: explanation,
-        expectedRefundPeriodText: expected,
-      },
-    });
-    await Promise.allSettled([
-      safeNotifyAdminForRequest(cleanRequestId, requestData, {
-        type: "REFUND_COMPLETED",
-        notificationId: `refund_completed_${cleanRequestId}_${cleanRefundId}_admin`,
-        extras: {
-          refundId: cleanRefundId,
-          paymentId: settledRefund.paymentId,
-          paymentType: settledPayment.paymentType,
-          paymentLabel: settledPayment.paymentLabel,
-          amount: settledPayment.amount,
-          currency: settledPayment.currency,
-          title: "Refund completed",
-          body: `${settledPayment.paymentLabel} ${formatMoneyText(
-            settledPayment.amount,
-            settledPayment.currency
-          )} refunded.`,
-          route: requestRoutePath(cleanRequestId, "admin"),
-        },
-      }),
-      safeCreateStaffNotification({
-        uid: requestAssignedStaffUidFromData(requestData),
-        requestId: cleanRequestId,
-        type: "REFUND_COMPLETED",
-        notificationId: `refund_completed_${cleanRequestId}_${cleanRefundId}_staff`,
-        extras: {
-          refundId: cleanRefundId,
-          paymentId: settledRefund.paymentId,
-          paymentType: settledPayment.paymentType,
-          paymentLabel: settledPayment.paymentLabel,
-          amount: settledPayment.amount,
-          currency: settledPayment.currency,
-          title: "Refund completed",
-          body: `${settledPayment.paymentLabel} ${formatMoneyText(
-            settledPayment.amount,
-            settledPayment.currency
-          )} refunded.`,
-          route: requestRoutePath(cleanRequestId, "staff"),
-        },
-      }),
-    ]);
-  }
-
-  return true;
 }
 
-export async function adminRejectRefund({
-  requestId,
-  refundId,
-  rejectionReason,
-} = {}) {
-  const cleanRequestId = cleanStr(requestId, 180);
-  const cleanRefundId = cleanStr(refundId, 180);
-  if (!cleanRequestId || !cleanRefundId) throw new Error("Missing refund details.");
-  const actorUid = requireActorUid();
-  const reason = cleanStr(rejectionReason, 2000);
-  if (!reason) throw new Error("Rejection explanation is required.");
-  const nowMs = Date.now();
-  let settledRefund = null;
-  let settledPayment = null;
-
-  await runTransaction(db, async (tx) => {
-    const refundRef = refundDocRef(cleanRequestId, cleanRefundId);
-    const refundSnap = await tx.get(refundRef);
-    if (!refundSnap.exists()) throw new Error("Refund request not found.");
-    const refund = normalizeRefundDoc({ id: refundSnap.id, ...refundSnap.data() });
-    const links = requireRefundLinks(refund, cleanRequestId);
-    if (refund.status !== REFUND_STATUSES.PENDING) {
-      throw new Error("Refund request already decided.");
-    }
-    settledRefund = refund;
-
-    const payRef = paymentDocRef(cleanRequestId, links.paymentId);
-    const paySnap = await tx.get(payRef);
-    if (!paySnap.exists()) throw new Error("Target payment not found.");
-    settledPayment = normalizePaymentDoc({ id: paySnap.id, ...paySnap.data() });
-
-    tx.update(refundRef, {
-      refundId: links.refundId,
-      requestId: links.requestId,
-      paymentId: links.paymentId,
-      status: REFUND_STATUSES.REJECTED,
-      rejectionReason: reason,
-      adminExplanation: "",
-      decisionAt: serverTimestamp(),
-      decisionAtMs: nowMs,
-      decidedByAdminUid: actorUid,
-      updatedAt: serverTimestamp(),
-    });
+export async function adminRejectRefund({ requestId, refundId, rejectionReason } = {}) {
+  return callFinance("adminDecidePaymentRefund", {
+    requestId,
+    refundId,
+    decision: "reject",
+    note: rejectionReason,
   });
-  if (settledRefund && settledPayment) {
-    await safeCreateUserNotification({
-      uid: settledRefund.uid,
-      requestId: cleanRequestId,
-      type: "REFUND_REJECTED",
-      notificationId: `refund_rejected_${cleanRequestId}_${cleanRefundId}`,
-      extras: {
-        refundId: cleanRefundId,
-        paymentId: settledRefund.paymentId,
-        paymentType: settledPayment.paymentType,
-        paymentLabel: settledPayment.paymentLabel,
-        amount: settledPayment.amount,
-        currency: settledPayment.currency,
-        title: "Refund rejected",
-        body: `${settledPayment.paymentLabel} refund rejected.`,
-        route: requestRoutePath(cleanRequestId, "user"),
-        rejectionReason: reason,
-      },
-    });
-  }
-  return true;
 }
 
-export async function ensureUnlockAutoRefundForRequest(requestId) {
-  const cleanRequestId = cleanStr(requestId, 180);
-  if (!cleanRequestId) return 0;
-
-  const reqRef = doc(db, "serviceRequests", cleanRequestId);
-  const reqSnap = await getDoc(reqRef);
-  if (!reqSnap.exists()) return 0;
-  const reqData = reqSnap.data() || {};
-
-  const payQ = query(
-    paymentsCol(cleanRequestId),
-    where("paymentType", "==", PAYMENT_TYPES.UNLOCK_REQUEST),
-    limit(10)
-  );
-  const paySnap = await getDocs(payQ);
-  if (paySnap.empty) return 0;
-
-  let applied = 0;
-  const nowMs = Date.now();
-  const appliedRows = [];
-
-  for (const row of paySnap.docs) {
-    const payment = normalizePaymentDoc({ id: row.id, ...row.data() });
-    if (!isUnlockPaymentAutoRefundEligible({ payment, requestData: reqData, nowMs })) {
-      continue;
-    }
-
-    await runTransaction(db, async (tx) => {
-      const latestReq = await tx.get(reqRef);
-      if (!latestReq.exists()) return;
-      const latestReqData = latestReq.data() || {};
-
-      const payRef = paymentDocRef(cleanRequestId, row.id);
-      const latestPay = await tx.get(payRef);
-      if (!latestPay.exists()) return;
-      const payData = normalizePaymentDoc({ id: latestPay.id, ...latestPay.data() });
-
-      if (!isUnlockPaymentAutoRefundEligible({ payment: payData, requestData: latestReqData, nowMs })) {
-        return;
-      }
-
-      const ownerUid = cleanStr(latestReqData.uid, 160);
-      const refundRef = refundDocRef(cleanRequestId, `auto_${row.id}`);
-      const refundSnap = await tx.get(refundRef);
-      if (!refundSnap.exists()) {
-        tx.set(refundRef, {
-          refundId: `auto_${row.id}`,
-          requestId: cleanRequestId,
-          paymentId: row.id,
-          paymentType: payData.paymentType,
-          paymentLabel: payData.paymentLabel,
-          amount: payData.amount,
-          currency: payData.currency,
-          uid: ownerUid,
-          status: REFUND_STATUSES.AUTO_REFUNDED,
-          userReason: "Auto-refund: staff had not started work within 48 hours.",
-          adminExplanation: "Auto-refund applied by system rule.",
-          expectedRefundPeriodText: "Auto-refunded in showcase mode.",
-          rejectionReason: "",
-          autoGenerated: true,
-          createdAt: serverTimestamp(),
-          createdAtMs: nowMs,
-          decisionAt: serverTimestamp(),
-          decisionAtMs: nowMs,
-          decidedByAdminUid: "system",
-          updatedAt: serverTimestamp(),
-        });
-      }
-
-      tx.update(payRef, {
-        status: PAYMENT_STATUSES.AUTO_REFUNDED,
-        refundedAt: serverTimestamp(),
-        refundedAtMs: nowMs,
-        refundReason: "Auto-refund after 48 hours without staff starting work.",
-        updatedAt: serverTimestamp(),
-      });
-    });
-
-    appliedRows.push({
-      requestId: cleanRequestId,
-      requestUid: cleanStr(reqData.uid, 160),
-      paymentId: row.id,
-      paymentLabel: payment.paymentLabel,
-      paymentType: payment.paymentType,
-      amount: payment.amount,
-      currency: payment.currency,
-    });
-    applied += 1;
-  }
-
-  await Promise.allSettled(
-    appliedRows.flatMap((row) => [
-      safeCreateUserNotification({
-        uid: row.requestUid,
-        requestId: row.requestId,
-        type: "REFUND_COMPLETED",
-        notificationId: `refund_completed_auto_${row.requestId}_${row.paymentId}`,
-        extras: {
-          refundId: `auto_${row.paymentId}`,
-          paymentId: row.paymentId,
-          paymentType: row.paymentType,
-          paymentLabel: row.paymentLabel,
-          amount: row.amount,
-          currency: row.currency,
-          title: "Refund completed",
-          body: `${row.paymentLabel} ${formatMoneyText(row.amount, row.currency)} refunded.`,
-          route: requestRoutePath(row.requestId, "user"),
-        },
-      }),
-      safeNotifyAdminForRequest(cleanRequestId, reqData, {
-        type: "REFUND_COMPLETED",
-        notificationId: `refund_completed_auto_${row.requestId}_${row.paymentId}_admin`,
-        extras: {
-          refundId: `auto_${row.paymentId}`,
-          paymentId: row.paymentId,
-          paymentType: row.paymentType,
-          paymentLabel: row.paymentLabel,
-          amount: row.amount,
-          currency: row.currency,
-          title: "Refund completed",
-          body: `${row.paymentLabel} ${formatMoneyText(row.amount, row.currency)} refunded.`,
-          route: requestRoutePath(row.requestId, "admin"),
-        },
-      }),
-    ])
-  );
-
-  return applied;
-}
-
-export async function listUnlockAutoRefundEligibleRequests({ requestIds = [] } = {}) {
-  const ids = Array.from(new Set((requestIds || []).map((id) => cleanStr(id, 180)).filter(Boolean)));
-  const rows = [];
-
-  for (const requestId of ids) {
-    const reqSnap = await getDoc(doc(db, "serviceRequests", requestId));
-    if (!reqSnap.exists()) continue;
-    const reqData = reqSnap.data() || {};
-    const paySnap = await getDocs(
-      query(
-        paymentsCol(requestId),
-        where("paymentType", "==", PAYMENT_TYPES.UNLOCK_REQUEST),
-        limit(10)
-      )
-    );
-    paySnap.docs.forEach((row) => {
-      const payment = normalizePaymentDoc({ id: row.id, ...row.data() });
-      if (!isUnlockPaymentAutoRefundEligible({ payment, requestData: reqData })) return;
-      rows.push({
-        requestId,
-        paymentId: payment.id,
-        paymentLabel: payment.paymentLabel,
-        amount: payment.amount,
-        currency: payment.currency,
-        paidAtMs: payment.paidAtMs,
-      });
-    });
-  }
-
-  rows.sort((a, b) => Number(a.paidAtMs || 0) - Number(b.paidAtMs || 0));
-  return rows;
+export async function getFinanceEnvironmentStatus() {
+  return callFinance("getFinanceEnvironmentStatus", {});
 }
 
 export async function applyUnlockAutoRefundSweep({ requestIds = [] } = {}) {
-  const ids = Array.from(new Set((requestIds || []).map((id) => cleanStr(id, 180)).filter(Boolean)));
-  let applied = 0;
-  for (const requestId of ids) {
-    applied += Number(await ensureUnlockAutoRefundForRequest(requestId)) || 0;
-  }
-  return applied;
+  const result = await callFinance("runUnlockAutoRefundSweep", { requestIds });
+  return Number(result?.applied || 0);
+}
+
+export async function listUnlockAutoRefundEligibleRequests({ requestIds = [] } = {}) {
+  const result = await callFinance("listUnlockAutoRefundCandidates", { requestIds });
+  return Array.isArray(result?.rows) ? result.rows : [];
+}
+
+export async function releasePartnerPayout(payload = {}) {
+  return callFinance("releasePartnerPayout", payload);
+}
+
+export async function userPayAwaitingPayment() {
+  throw new Error("Dummy payment is retired. Use hosted checkout.");
+}
+
+export async function ensureUnlockAutoRefundForRequest(requestId) {
+  const ids = cleanStr(requestId, 180) ? [cleanStr(requestId, 180)] : [];
+  if (!ids.length) return 0;
+  return applyUnlockAutoRefundSweep({ requestIds: ids });
+}
+
+export async function createUnlockPaymentForRequest({
+  requestId,
+} = {}) {
+  void requestId;
+  throw new Error("Legacy direct unlock payment writes are retired. Use backend checkout verification.");
+}
+
+export async function userCanOpenSharedLink(shareToken = "") {
+  const result = await resolveSharedPaymentLink({ shareToken });
+  return result?.valid === true;
+}
+
+export async function getUnlockPaymentForRequest(requestId = "") {
+  const safeRequestId = cleanStr(requestId, 180);
+  if (!safeRequestId) return null;
+  const snap = await getDocs(
+    query(
+      collection(db, "serviceRequests", safeRequestId, "payments"),
+      where("paymentType", "==", PAYMENT_TYPES.UNLOCK_REQUEST),
+      limit(10)
+    )
+  );
+  const row = snap.docs
+    .map((docSnap) => normalizePaymentDoc({ id: docSnap.id, ...(docSnap.data() || {}) }))
+    .find(Boolean);
+  return row || null;
+}
+
+export async function listRequestRefunds(requestId = "") {
+  const safeRequestId = cleanStr(requestId, 180);
+  if (!safeRequestId) return [];
+  const snap = await getDocs(collection(db, "serviceRequests", safeRequestId, "refundRequests"));
+  return snap.docs.map((docSnap) => normalizeRefundDoc({ id: docSnap.id, ...(docSnap.data() || {}) }));
+}
+
+export async function listRequestPayments(requestId = "") {
+  const safeRequestId = cleanStr(requestId, 180);
+  if (!safeRequestId) return [];
+  const snap = await getDocs(collection(db, "serviceRequests", safeRequestId, "payments"));
+  return snap.docs.map((docSnap) => normalizePaymentDoc({ id: docSnap.id, ...(docSnap.data() || {}) }));
+}
+
+export async function getRequestOwnerUid(requestId = "") {
+  const safeRequestId = cleanStr(requestId, 180);
+  if (!safeRequestId) return "";
+  const snap = await getDoc(doc(db, "serviceRequests", safeRequestId));
+  return snap.exists() ? cleanStr(snap.data()?.uid, 160) : "";
 }

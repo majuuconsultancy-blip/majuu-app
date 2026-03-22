@@ -42,15 +42,57 @@ export function normalizeAdminAvailability(value) {
 
 export function normalizeAdminScope(rawScope) {
   const scope = rawScope && typeof rawScope === "object" ? rawScope : {};
+  const primaryCounty = safeStr(scope?.primaryCounty || scope?.county);
+  const primaryCountyLower = lower(scope?.primaryCountyLower || primaryCounty);
+  const neighboringCounties = Array.isArray(scope?.neighboringCounties)
+    ? scope.neighboringCounties.map((v) => safeStr(v)).filter(Boolean)
+    : [];
+  const neighboringCountiesLower = Array.isArray(scope?.neighboringCountiesLower)
+    ? scope.neighboringCountiesLower.map((v) => lower(v)).filter(Boolean)
+    : [];
+  const directCounties = Array.isArray(scope?.counties)
+    ? scope.counties.map((v) => safeStr(v)).filter(Boolean)
+    : [];
+  const directCountiesLower = Array.isArray(scope?.countiesLower)
+    ? scope.countiesLower.map((v) => lower(v)).filter(Boolean)
+    : [];
+  const mergedCounties = [
+    ...(primaryCounty ? [primaryCounty] : []),
+    ...neighboringCounties,
+    ...directCounties,
+  ].filter(Boolean);
+  const mergedCountiesLower = [
+    ...(primaryCountyLower ? [primaryCountyLower] : []),
+    ...neighboringCountiesLower,
+    ...directCountiesLower,
+    ...mergedCounties.map((v) => lower(v)),
+  ].filter(Boolean);
+  const seenCounties = new Set();
+  const counties = mergedCounties.filter((value) => {
+    const key = lower(value);
+    if (!key || seenCounties.has(key)) return false;
+    seenCounties.add(key);
+    return true;
+  });
+  const seenCountiesLower = new Set();
+  const countiesLower = mergedCountiesLower.filter((value) => {
+    const key = lower(value);
+    if (!key || seenCountiesLower.has(key)) return false;
+    seenCountiesLower.add(key);
+    return true;
+  });
   const maxActiveRequests = Number(scope?.maxActiveRequests || 0);
   const responseTimeoutMinutes = Number(scope?.responseTimeoutMinutes || 0);
   return {
-    counties: Array.isArray(scope?.counties)
-      ? scope.counties.map((v) => safeStr(v)).filter(Boolean)
-      : [],
-    countiesLower: Array.isArray(scope?.countiesLower)
-      ? scope.countiesLower.map((v) => lower(v)).filter(Boolean)
-      : [],
+    partnerId: safeStr(scope?.partnerId, 140),
+    partnerName: safeStr(scope?.partnerName || scope?.partnerDisplayName, 120),
+    partnerStatus: safeStr(scope?.partnerStatus || "active", 20).toLowerCase() || "active",
+    primaryCounty,
+    primaryCountyLower,
+    neighboringCounties,
+    neighboringCountiesLower,
+    counties,
+    countiesLower,
     town: safeStr(scope?.town),
     availability: normalizeAdminAvailability(scope?.availability),
     active: scope?.active !== false,

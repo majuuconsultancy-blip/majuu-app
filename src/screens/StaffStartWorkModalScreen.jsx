@@ -11,6 +11,10 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 
 import { auth, db } from "../firebase";
+import {
+  buildRequestContinuityPatch,
+  REQUEST_BACKEND_STATUSES,
+} from "../utils/requestLifecycle";
 
 /* ---------- Icons ---------- */
 function IconX(props) {
@@ -160,6 +164,12 @@ export default function StaffStartWorkModalScreen() {
       markedInProgressAtMs: nowMs,
 
       staffUpdatedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      ...buildRequestContinuityPatch(req, {
+        backendStatus: REQUEST_BACKEND_STATUSES.IN_PROGRESS,
+        userStatus: "in_progress",
+        everAssigned: true,
+      }),
     };
 
     if (currentStatus === "new") {

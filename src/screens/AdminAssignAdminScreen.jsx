@@ -5,12 +5,12 @@ import { useNavigate } from "react-router-dom";
 import AppIcon from "../components/AppIcon";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
 import {
-  KENYA_COUNTY_OPTIONS,
   getNearbyCountySuggestions,
   normalizeCountyList,
 } from "../constants/kenyaCounties";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import { setAssignedAdminByEmail } from "../services/assignedadminservice";
+import { listPartners } from "../services/partnershipService";
 import { smartBack } from "../utils/navBack";
 
 function safeStr(value) {
@@ -38,7 +38,10 @@ export default function AdminAssignAdminScreen() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   const [email, setEmail] = useState("");
-  const [counties, setCounties] = useState([]);
+  const [partners, setPartners] = useState([]);
+  const [partnerId, setPartnerId] = useState("");
+  const [primaryCounty, setPrimaryCounty] = useState("");
+  const [neighboringCounties, setNeighboringCounties] = useState([]);
   const [countySearch, setCountySearch] = useState("");
   const [countyOpen, setCountyOpen] = useState(false);
   const [town, setTown] = useState("");
@@ -60,10 +63,18 @@ export default function AdminAssignAdminScreen() {
         const ctx = await getCurrentUserRoleContext();
         if (cancelled) return;
         setIsSuperAdmin(Boolean(ctx?.isSuperAdmin));
+        if (ctx?.isSuperAdmin) {
+          const rows = await listPartners({ max: 250 });
+          if (!cancelled) {
+            const activeRows = (Array.isArray(rows) ? rows : []).filter((row) => row?.isActive !== false);
+            setPartners(activeRows);
+          }
+        }
       } catch (error) {
         if (cancelled) return;
         console.error(error);
         setIsSuperAdmin(false);
+        setPartners([]);
       } finally {
         if (!cancelled) setCheckingRole(false);
       }
@@ -85,27 +96,72 @@ export default function AdminAssignAdminScreen() {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [countyOpen]);
 
-  const selectedCounties = useMemo(() => normalizeCountyList(counties), [counties]);
+  const selectedNeighboringCounties = useMemo(
+    () => normalizeCountyList(neighboringCounties).filter((county) => county !== primaryCounty),
+    [neighboringCounties, primaryCounty]
+  );
+
+  const selectedPartner = useMemo(
+    () => partners.find((partner) => partner.id === partnerId) || null,
+    [partnerId, partners]
+  );
+
+  const partnerCountyOptions = useMemo(
+    () =>
+      selectedPartner?.isActive === false
+        ? []
+        : normalizeCountyList(selectedPartner?.supportedCounties || []),
+    [selectedPartner]
+  );
+
+  const countyFieldsEnabled = Boolean(partnerId) && Boolean(selectedPartner) && partnerCountyOptions.length > 0;
+  const neighboringFieldsEnabled = countyFieldsEnabled && Boolean(primaryCounty) && partnerCountyOptions.length > 1;
 
   const filteredCounties = useMemo(() => {
     const needle = safeStr(countySearch).toLowerCase();
-    if (!needle) return KENYA_COUNTY_OPTIONS;
-    return KENYA_COUNTY_OPTIONS.filter((county) => county.toLowerCase().includes(needle));
-  }, [countySearch]);
+    const rows = partnerCountyOptions.filter((county) => county !== primaryCounty);
+    if (!needle) return rows;
+    return rows.filter((county) => county.toLowerCase().includes(needle));
+  }, [countySearch, partnerCountyOptions, primaryCounty]);
 
   const recommendedCounties = useMemo(() => {
-    const firstCounty = selectedCounties[0] || "";
-    return getNearbyCountySuggestions(firstCounty, selectedCounties).slice(0, 8);
-  }, [selectedCounties]);
+    return getNearbyCountySuggestions(primaryCounty, selectedNeighboringCounties)
+      .filter((county) => partnerCountyOptions.includes(county))
+      .slice(0, 8);
+  }, [partnerCountyOptions, primaryCounty, selectedNeighboringCounties]);
 
-  const toggleCounty = (countyName) => {
-    const normalized = normalizeCountyList([...selectedCounties, countyName]);
-    const key = safeStr(countyName).toLowerCase();
-    if (selectedCounties.some((value) => safeStr(value).toLowerCase() === key)) {
-      setCounties(selectedCounties.filter((value) => safeStr(value).toLowerCase() !== key));
+  useEffect(() => {
+    if (!partnerId) {
+      setPrimaryCounty("");
+      setNeighboringCounties([]);
+      setCountySearch("");
+      setCountyOpen(false);
       return;
     }
-    setCounties(normalized);
+
+    const allowed = new Set(partnerCountyOptions);
+    setPrimaryCounty((current) => (current && allowed.has(current) ? current : ""));
+    setNeighboringCounties((current) =>
+      normalizeCountyList(current).filter((county) => allowed.has(county))
+    );
+
+    if (!partnerCountyOptions.length) {
+      setCountySearch("");
+      setCountyOpen(false);
+    }
+  }, [partnerCountyOptions, partnerId]);
+
+  const toggleCounty = (countyName) => {
+    const normalized = normalizeCountyList([...selectedNeighboringCounties, countyName])
+      .filter((county) => county !== primaryCounty);
+    const key = safeStr(countyName).toLowerCase();
+    if (selectedNeighboringCounties.some((value) => safeStr(value).toLowerCase() === key)) {
+      setNeighboringCounties(
+        selectedNeighboringCounties.filter((value) => safeStr(value).toLowerCase() !== key)
+      );
+      return;
+    }
+    setNeighboringCounties(normalized);
   };
 
   const askConfirmAssign = () => {
@@ -115,8 +171,12 @@ export default function AdminAssignAdminScreen() {
       setErr("Enter a valid admin email.");
       return;
     }
-    if (!selectedCounties.length) {
-      setErr("Select at least one county.");
+    if (!safeStr(partnerId)) {
+      setErr("Select a partner.");
+      return;
+    }
+    if (!safeStr(primaryCounty)) {
+      setErr("Select a primary county.");
       return;
     }
     const maxActive = toBoundedInt(maxActiveRequests, 0, 1, 120);
@@ -145,7 +205,9 @@ export default function AdminAssignAdminScreen() {
       await setAssignedAdminByEmail({
         email: safeEmail,
         action: "upsert",
-        counties: selectedCounties,
+        partnerId,
+        primaryCounty,
+        neighboringCounties: selectedNeighboringCounties,
         town,
         availability,
         maxActiveRequests: maxActive,
@@ -219,15 +281,89 @@ export default function AdminAssignAdminScreen() {
                 />
               </div>
 
+              <div className="grid gap-1.5">
+                <div className={label}>Partner</div>
+                <select
+                  className={input}
+                  value={partnerId}
+                  onChange={(event) => {
+                    setPartnerId(event.target.value);
+                    setPrimaryCounty("");
+                    setNeighboringCounties([]);
+                    setCountySearch("");
+                    setCountyOpen(false);
+                  }}
+                >
+                  <option value="">Select partner</option>
+                  {partners.map((partner) => (
+                    <option key={partner.id} value={partner.id}>
+                      {partner.displayName}
+                    </option>
+                  ))}
+                </select>
+                {partners.length === 0 ? (
+                  <div className="text-xs text-amber-700 dark:text-amber-200">
+                    No active partners yet. Create one first in SACC Partnerships.
+                  </div>
+                ) : !partnerId ? (
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Select a partner first. Primary and neighboring counties unlock from that partner's county coverage.
+                  </div>
+                ) : !selectedPartner ? (
+                  <div className="text-xs text-amber-700 dark:text-amber-200">
+                    The selected partner is unavailable. Pick an active partner.
+                  </div>
+                ) : partnerCountyOptions.length === 0 ? (
+                  <div className="text-xs text-amber-700 dark:text-amber-200">
+                    This partner has no county coverage yet. Add counties in SACC Partnerships first.
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="grid gap-1.5">
+                <div className={label}>Primary County</div>
+                <select
+                  className={input}
+                  value={primaryCounty}
+                  disabled={!countyFieldsEnabled}
+                  onChange={(event) => {
+                    const nextPrimary = event.target.value;
+                    setPrimaryCounty(nextPrimary);
+                    setNeighboringCounties((prev) =>
+                      normalizeCountyList(prev).filter((county) => county !== nextPrimary)
+                    );
+                  }}
+                >
+                  <option value="">
+                    {countyFieldsEnabled ? "Select primary county" : "Select partner first"}
+                  </option>
+                  {partnerCountyOptions.map((countyName) => (
+                    <option key={countyName} value={countyName}>
+                      {countyName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div ref={countyRef} className="relative grid gap-1.5">
-                <div className={label}>Select County</div>
+                <div className={label}>Neighboring Counties</div>
                 <button
                   type="button"
-                  onClick={() => setCountyOpen((value) => !value)}
+                  onClick={() => {
+                    if (!neighboringFieldsEnabled) return;
+                    setCountyOpen((value) => !value);
+                  }}
+                  disabled={!neighboringFieldsEnabled}
                   className={`${input} inline-flex items-center justify-between text-left`}
                 >
                   <span className="truncate">
-                    {selectedCounties.length ? selectedCounties.join(", ") : "Select counties"}
+                    {!countyFieldsEnabled
+                      ? "Select partner first"
+                      : !primaryCounty
+                      ? "Select primary county first"
+                      : selectedNeighboringCounties.length
+                      ? selectedNeighboringCounties.join(", ")
+                      : "Select neighboring counties"}
                   </span>
                   <AppIcon icon={ChevronDown} size={ICON_SM} className={countyOpen ? "rotate-180 transition" : "transition"} />
                 </button>
@@ -263,7 +399,7 @@ export default function AdminAssignAdminScreen() {
 
                     <div className="mt-3 max-h-56 overflow-y-auto grid gap-1">
                       {filteredCounties.map((countyName) => {
-                        const selected = selectedCounties.includes(countyName);
+                        const selected = selectedNeighboringCounties.includes(countyName);
                         return (
                           <button
                             key={countyName}
@@ -280,6 +416,11 @@ export default function AdminAssignAdminScreen() {
                           </button>
                         );
                       })}
+                      {!filteredCounties.length ? (
+                        <div className="rounded-xl border border-dashed border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                          No more counties available for this partner.
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ) : null}

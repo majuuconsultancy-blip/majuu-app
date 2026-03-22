@@ -20,6 +20,7 @@ import {
 import { motion, AnimatePresence } from "../utils/motionProxy";
 import RequestChatLauncher from "../components/RequestChatLauncher";
 import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
+import RequestProgressUpdatesList from "../components/RequestProgressUpdatesList";
 import RequestExtraDetailsSection from "../components/RequestExtraDetailsSection";
 
 import { auth, db } from "../firebase";
@@ -33,7 +34,9 @@ import {
 import { normalizeTextDeep } from "../utils/textNormalizer";
 import { getRequestWorkProgress } from "../utils/requestWorkProgress";
 import {
+  createPaymentCheckoutSession,
   createRefundRequest,
+  getOrCreateSharedPaymentLink,
   normalizePaymentDoc,
   normalizeRefundDoc,
   PAYMENT_STATUSES,
@@ -41,9 +44,11 @@ import {
   paymentStatusUi,
   refundStatusUi,
 } from "../services/paymentservice";
+import { subscribeRequestProgressUpdates } from "../services/requestcontinuityservice";
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
 import { isUnsubmittedGhostRequest } from "../utils/requestGhosts";
+import { getUserRequestState } from "../utils/requestLifecycle";
 
 /* ---------------- Minimal icons ---------------- */
 function IconReceipt(props) {
@@ -140,22 +145,22 @@ function IconChevronDown(props) {
 }
 
 /* ---------------- Helpers ---------------- */
-function statusUI(status) {
-  const s = String(status || "new").toLowerCase();
+function statusUI(request) {
+  const s = getUserRequestState(request);
 
-  if (s === "new")
+  if (s === "submitted")
     return {
       label: "Submitted",
       badge: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800",
     };
 
-  if (s === "contacted")
+  if (s === "in_progress")
     return {
       label: "In progress",
       badge: "bg-emerald-50 text-emerald-800 border border-emerald-100",
     };
 
-  if (s === "closed")
+  if (s === "completed")
     return {
       label: "Completed",
       badge: "bg-emerald-100 text-emerald-900 border border-emerald-200",
@@ -272,13 +277,18 @@ export default function RequestStatusScreen() {
   const [fullPackageLinkedRequests, setFullPackageLinkedRequests] = useState([]);
   const [payments, setPayments] = useState([]);
   const [paymentsErr, setPaymentsErr] = useState("");
+  const [paymentsMsg, setPaymentsMsg] = useState("");
   const [refunds, setRefunds] = useState([]);
   const [refundsErr, setRefundsErr] = useState("");
   const [selectedRefundPaymentId, setSelectedRefundPaymentId] = useState("");
   const [refundReason, setRefundReason] = useState("");
   const [refundBusy, setRefundBusy] = useState(false);
+  const [paymentBusyId, setPaymentBusyId] = useState("");
+  const [shareBusyId, setShareBusyId] = useState("");
   const [paymentsOpen, setPaymentsOpen] = useState(false);
   const [refundsOpen, setRefundsOpen] = useState(false);
+  const [progressUpdates, setProgressUpdates] = useState([]);
+  const [progressUpdatesErr, setProgressUpdatesErr] = useState("");
   const unreadRequestState = useNotifsV2Store(
     (s) => s.unreadByRequest?.[String(requestId || "").trim()] || EMPTY_REQUEST_UNREAD_STATE
   );
@@ -473,6 +483,25 @@ export default function RequestStatusScreen() {
   }, [validRequestId]);
 
   useEffect(() => {
+    if (!validRequestId) return undefined;
+
+    const unsub = subscribeRequestProgressUpdates({
+      requestId: validRequestId,
+      viewerRole: "user",
+      onData: (rows) => {
+        setProgressUpdates(rows);
+        setProgressUpdatesErr("");
+      },
+      onError: (error) => {
+        console.error("request progress updates snapshot error:", error);
+        setProgressUpdatesErr(error?.message || "Failed to load progress updates.");
+      },
+    });
+
+    return () => unsub?.();
+  }, [validRequestId]);
+
+  useEffect(() => {
     if (!isFullRequest || !fullPackageIdValue) return;
 
     const unsubs = [];
@@ -613,10 +642,11 @@ export default function RequestStatusScreen() {
     );
   }
 
-  const ui = statusUI(req?.status);
+  const ui = statusUI(req);
   const track = String(req?.track || "").toLowerCase();
   const safeTrack = track === "work" || track === "travel" ?track : "study";
   const st = String(req?.status || "new").toLowerCase();
+  const userRequestState = getUserRequestState(req);
   const country = String(req?.country || "Not selected");
 
   const adminNote = String(
@@ -692,13 +722,21 @@ export default function RequestStatusScreen() {
   const serviceTitle = `${String(req?.track || "").toUpperCase()} • ${req?.country || "-"}`;
   const serviceSub = isFull ?"Full package" : `Single service: ${req?.serviceName || "-"}`;
   const workProgress = getRequestWorkProgress(req);
-  const showWorkProgressCard = Boolean(workProgress.isStarted || workProgress.progressPercent);
+  const showWorkProgressCard = Boolean(
+    workProgress.isStarted || workProgress.progressPercent || userRequestState === "in_progress"
+  );
   const unlockPayment =
     payments.find((p) => String(p.paymentType || "").toLowerCase() === PAYMENT_TYPES.UNLOCK_REQUEST) ||
     null;
   const pendingUserPayments = payments.filter((p) => {
     const status = String(p.status || "").toLowerCase();
-    if (status !== PAYMENT_STATUSES.AWAITING_USER_PAYMENT) return false;
+    if (
+      status !== PAYMENT_STATUSES.PAYABLE &&
+      status !== PAYMENT_STATUSES.PAYMENT_SESSION_CREATED &&
+      status !== PAYMENT_STATUSES.AWAITING_PAYMENT
+    ) {
+      return false;
+    }
     const paymentType = String(p.paymentType || "").toLowerCase();
     return paymentType !== PAYMENT_TYPES.UNLOCK_REQUEST;
   });
@@ -714,9 +752,19 @@ export default function RequestStatusScreen() {
     }
     if (paymentType === PAYMENT_TYPES.IN_PROGRESS) {
       return (
-        status === PAYMENT_STATUSES.AWAITING_USER_PAYMENT ||
-        status === PAYMENT_STATUSES.PAID ||
-        status === PAYMENT_STATUSES.REFUNDED
+        status === PAYMENT_STATUSES.PAYABLE ||
+        status === PAYMENT_STATUSES.PAYMENT_SESSION_CREATED ||
+        status === PAYMENT_STATUSES.AWAITING_PAYMENT ||
+        status === PAYMENT_STATUSES.FAILED ||
+        status === PAYMENT_STATUSES.EXPIRED ||
+        status === PAYMENT_STATUSES.REVOKED ||
+        status === PAYMENT_STATUSES.HELD ||
+        status === PAYMENT_STATUSES.PAYOUT_READY ||
+        status === PAYMENT_STATUSES.SETTLED ||
+        status === PAYMENT_STATUSES.REFUND_REQUESTED ||
+        status === PAYMENT_STATUSES.REFUND_UNDER_REVIEW ||
+        status === PAYMENT_STATUSES.REFUNDED ||
+        status === PAYMENT_STATUSES.AUTO_REFUNDED
       );
     }
     return false;
@@ -732,11 +780,18 @@ export default function RequestStatusScreen() {
     const status = String(p.status || "").toLowerCase();
     const paymentType = String(p.paymentType || "").toLowerCase();
     if (paymentType === PAYMENT_TYPES.UNLOCK_REQUEST) return false;
-    if (status !== PAYMENT_STATUSES.PAID) return false;
+    if (
+      status !== PAYMENT_STATUSES.HELD &&
+      status !== PAYMENT_STATUSES.PAYOUT_READY &&
+      status !== PAYMENT_STATUSES.SETTLED
+    ) {
+      return false;
+    }
     const refundStatus = refundStatusByPaymentId.get(String(p.id || "").trim());
     if (!refundStatus) return true;
     return (
-      refundStatus !== "pending" &&
+      refundStatus !== "requested" &&
+      refundStatus !== "under_review" &&
       refundStatus !== "approved" &&
       refundStatus !== "refunded" &&
       refundStatus !== "auto_refunded"
@@ -747,25 +802,69 @@ export default function RequestStatusScreen() {
     refundablePayments.length === 1 ?String(refundablePayments[0]?.id || "").trim() : "";
   const refundTargetPaymentId = selectedRefundTargetPaymentId || autoRefundTargetPaymentId;
 
-  const openInProgressPayment = (payment) => {
+  const openInProgressPayment = async (payment) => {
     const paymentId = String(payment?.id || "").trim();
     if (!paymentId || !validRequestId) return;
-    const amountText = `${payment.currency || "KES"} ${Number(payment.amount || 0).toLocaleString()}`;
-    const returnTo = `/app/request/${encodeURIComponent(validRequestId)}`;
-    const paymentQs = new URLSearchParams();
-    paymentQs.set("returnTo", returnTo);
-    paymentQs.set("amount", amountText);
-    navigate(`/app/dummy-payment?${paymentQs.toString()}`, {
-      state: {
-        returnTo,
-        amount: amountText,
-        paymentContext: {
-          flow: "inProgressPayment",
-          requestId: validRequestId,
-          paymentId,
-        },
-      },
-    });
+    setPaymentBusyId(paymentId);
+    setPaymentsErr("");
+    setPaymentsMsg("");
+    try {
+      const session = await createPaymentCheckoutSession({
+        requestId: validRequestId,
+        paymentId,
+        appBaseUrl: typeof window !== "undefined" ? window.location.origin : "",
+        returnTo: `/app/request/${encodeURIComponent(validRequestId)}`,
+      });
+      const redirectUrl = String(session?.authorizationUrl || session?.redirectUrl || "").trim();
+      if (!redirectUrl) {
+        throw new Error("Hosted checkout is unavailable right now.");
+      }
+      window.location.assign(redirectUrl);
+    } catch (error) {
+      setPaymentsErr(error?.message || "Failed to start payment.");
+      setPaymentBusyId("");
+    }
+  };
+
+  const sharePayablePayment = async (payment) => {
+    const paymentId = String(payment?.id || "").trim();
+    if (!paymentId || !validRequestId) return;
+    setShareBusyId(paymentId);
+    setPaymentsErr("");
+    setPaymentsMsg("");
+    try {
+      const result = await getOrCreateSharedPaymentLink({
+        requestId: validRequestId,
+        paymentId,
+        appBaseUrl: typeof window !== "undefined" ? window.location.origin : "",
+      });
+      const shareUrl = String(result?.shareUrl || "").trim();
+      if (!shareUrl) {
+        throw new Error("Payment link is unavailable right now.");
+      }
+      if (navigator.share) {
+        await navigator.share({
+          title: payment.paymentLabel || "MAJUU payment",
+          text: "Complete the full payment with this secure MAJUU link.",
+          url: shareUrl,
+        });
+        setPaymentsMsg("Full payment link shared.");
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+        setPaymentsMsg("Full payment link copied.");
+      } else {
+        window.prompt("Copy payment link", shareUrl);
+        setPaymentsMsg("Full payment link ready to copy.");
+      }
+    } catch (error) {
+      if (String(error?.name || "").toLowerCase() === "aborterror") {
+        setPaymentsMsg("");
+        return;
+      }
+      setPaymentsErr(error?.message || "Failed to create share link.");
+    } finally {
+      setShareBusyId("");
+    }
   };
 
   const submitRefundRequestForSelectedPayment = async () => {
@@ -918,7 +1017,7 @@ export default function RequestStatusScreen() {
                 </div>
               ) : null}
 
-              {st === "contacted" ?(
+              {userRequestState === "in_progress" ?(
                 <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 text-sm text-emerald-900">
                   In progress. Live staff updates will appear below.
                 </div>
@@ -945,7 +1044,21 @@ export default function RequestStatusScreen() {
                   request={req}
                   title="Work progress"
                   subtitle="Your staff member posts live progress updates here."
+                  showWhenIdle={userRequestState === "in_progress"}
+                  idleText="Your request is in progress. Live updates will appear here as work continues."
                   pendingText="Work has started. A percentage update has not been posted yet."
+                />
+
+                {progressUpdatesErr ? (
+                  <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+                    {progressUpdatesErr}
+                  </div>
+                ) : null}
+
+                <RequestProgressUpdatesList
+                  updates={progressUpdates}
+                  viewerRole="user"
+                  emptyText="No visible progress updates yet."
                 />
               </motion.div>
             </motion.div>
@@ -982,6 +1095,12 @@ export default function RequestStatusScreen() {
                     </div>
                   ) : null}
 
+                  {paymentsMsg ?(
+                    <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-800">
+                      {paymentsMsg}
+                    </div>
+                  ) : null}
+
                   {pendingUserPayments.length > 0 ?(
                     <div className="mt-4 grid gap-2">
                       {pendingUserPayments.map((payment) => {
@@ -1013,9 +1132,20 @@ export default function RequestStatusScreen() {
                             <button
                               type="button"
                               onClick={() => openInProgressPayment(payment)}
+                              disabled={paymentBusyId === payment.id || shareBusyId === payment.id}
                               className="mt-3 w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
                             >
-                              Pay now
+                              {paymentBusyId === payment.id ? "Opening checkout..." : "Pay now"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => sharePayablePayment(payment)}
+                              disabled={paymentBusyId === payment.id || shareBusyId === payment.id}
+                              className="mt-2 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:opacity-60"
+                            >
+                              {shareBusyId === payment.id
+                                ? "Preparing link..."
+                                : "Share full payment link"}
                             </button>
                           </div>
                         );
@@ -1077,6 +1207,18 @@ export default function RequestStatusScreen() {
                                 {payment.transactionReference ?(
                                   <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
                                     Ref: <span className="font-semibold">{payment.transactionReference}</span>
+                                  </div>
+                                ) : null}
+                                {refundStatusByPaymentId.get(String(payment.id || "").trim()) ?(
+                                  <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                                    Refund:{" "}
+                                    <span className="font-semibold">
+                                      {
+                                        refundStatusUi(
+                                          refundStatusByPaymentId.get(String(payment.id || "").trim())
+                                        ).label
+                                      }
+                                    </span>
                                   </div>
                                 ) : null}
                               </div>
@@ -1226,6 +1368,16 @@ export default function RequestStatusScreen() {
                                   {refund.adminExplanation ?(
                                     <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
                                       Note: {refund.adminExplanation}
+                                    </div>
+                                  ) : null}
+                                  {refund.userReason ?(
+                                    <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
+                                      Reason: {refund.userReason}
+                                    </div>
+                                  ) : null}
+                                  {refund.expectedRefundPeriodText ?(
+                                    <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                                      ETA: {refund.expectedRefundPeriodText}
                                     </div>
                                   ) : null}
                                   {refund.rejectionReason ?(

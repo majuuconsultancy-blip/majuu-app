@@ -13,11 +13,13 @@ import { auth, db } from "../firebase";
 import {
   getCurrentUserRoleContext,
   normalizeAdminAvailability,
+  normalizeAdminScope,
 } from "./adminroleservice";
 import {
   normalizeCountyList,
   normalizeCountyLowerList,
 } from "../constants/kenyaCounties";
+import { fetchPartnerById } from "./partnershipService";
 
 const ASSIGNED_ADMIN_ROLE_VARIANTS = [
   "assignedAdmin",
@@ -87,6 +89,13 @@ function toBoundedInt(value, fallback, min, max) {
 
 function defaultAdminScopePayload() {
   return {
+    partnerId: "",
+    partnerName: "",
+    partnerStatus: "inactive",
+    primaryCounty: "",
+    primaryCountyLower: "",
+    neighboringCounties: [],
+    neighboringCountiesLower: [],
     counties: [],
     countiesLower: [],
     town: "",
@@ -95,6 +104,54 @@ function defaultAdminScopePayload() {
     maxActiveRequests: 12,
     responseTimeoutMinutes: 20,
   };
+}
+
+function buildCoverageCountySet(primaryCounty = "", neighboringCounties = []) {
+  return normalizeCountyList([primaryCounty, ...(neighboringCounties || [])]);
+}
+
+function assertPartnerCoversAdminCounties(partner, counties = []) {
+  const safePartner = partner && typeof partner === "object" ? partner : null;
+  if (!safePartner?.id) {
+    throw new Error("Select a valid partner.");
+  }
+  if (safePartner.isActive === false) {
+    throw new Error("Selected partner is inactive.");
+  }
+
+  const coverageSet = new Set(
+    (Array.isArray(safePartner?.supportedCountiesLower)
+      ? safePartner.supportedCountiesLower
+      : Array.isArray(safePartner?.coverageCountiesLower)
+      ? safePartner.coverageCountiesLower
+      : []
+    ).map((value) => safeStr(value).toLowerCase())
+  );
+
+  const invalidCounty = normalizeCountyList(counties).find(
+    (county) => !coverageSet.has(safeStr(county).toLowerCase())
+  );
+  if (invalidCounty) {
+    throw new Error(
+      `${invalidCounty} is outside the selected partner's county coverage.`
+    );
+  }
+}
+
+async function resolvePartnerAssignment(partnerId, { allowInactive = false } = {}) {
+  const safePartnerId = safeStr(partnerId);
+  if (!safePartnerId) {
+    throw new Error("Select a partner.");
+  }
+
+  const partner = await fetchPartnerById(safePartnerId);
+  if (!partner) {
+    throw new Error("Selected partner was not found.");
+  }
+  if (!allowInactive && partner.isActive === false) {
+    throw new Error("Selected partner is inactive.");
+  }
+  return partner;
 }
 
 async function requireSuperAdmin() {
@@ -142,7 +199,14 @@ export async function listAssignedAdmins({ max = 100, dedupeEmail = true } = {})
       limit(maxRows)
     )
   );
-  const rows = snap.docs.map((d) => ({ uid: d.id, ...(d.data() || {}) }));
+  const rows = snap.docs.map((d) => {
+    const data = d.data() || {};
+    return {
+      uid: d.id,
+      ...data,
+      adminScope: normalizeAdminScope(data?.adminScope),
+    };
+  });
   const scoped = dedupeEmail === false ?rows : dedupeByEmail(rows);
   return scoped.sort((a, b) => {
     const emailCmp = normalizeEmail(a?.email).localeCompare(normalizeEmail(b?.email));
@@ -154,6 +218,9 @@ export async function listAssignedAdmins({ max = 100, dedupeEmail = true } = {})
 export async function setAssignedAdminByEmail({
   email,
   action = "upsert",
+  partnerId = "",
+  primaryCounty = "",
+  neighboringCounties = [],
   counties = [],
   town = "",
   availability = "active",
@@ -206,12 +273,29 @@ export async function setAssignedAdminByEmail({
     };
   }
 
-  const cleanCounties = normalizeCountyList(counties);
-  if (!cleanCounties.length) {
-    throw new Error("Select at least one county.");
+  const resolvedPartner = await resolvePartnerAssignment(partnerId);
+  const cleanPrimaryCounty = normalizeCountyList([
+    primaryCounty || normalizeCountyList(counties)[0] || "",
+  ])[0];
+  if (!cleanPrimaryCounty) {
+    throw new Error("Select a primary county.");
   }
+  const cleanNeighboringCounties = normalizeCountyList(
+    neighboringCounties?.length
+      ? neighboringCounties
+      : normalizeCountyList(counties).filter((county) => county !== cleanPrimaryCounty)
+  ).filter((county) => county !== cleanPrimaryCounty);
+  const cleanCounties = buildCoverageCountySet(cleanPrimaryCounty, cleanNeighboringCounties);
+  assertPartnerCoversAdminCounties(resolvedPartner, cleanCounties);
 
   const scopePayload = {
+    partnerId: safeStr(resolvedPartner.id),
+    partnerName: safeStr(resolvedPartner.displayName),
+    partnerStatus: resolvedPartner.isActive === false ? "inactive" : "active",
+    primaryCounty: cleanPrimaryCounty,
+    primaryCountyLower: safeStr(cleanPrimaryCounty).toLowerCase(),
+    neighboringCounties: cleanNeighboringCounties,
+    neighboringCountiesLower: normalizeCountyLowerList(cleanNeighboringCounties),
     counties: cleanCounties,
     countiesLower: normalizeCountyLowerList(cleanCounties),
     town: safeStr(town).slice(0, 80),
@@ -242,6 +326,10 @@ export async function setAssignedAdminByEmail({
     uids: targetUids,
     email: normalizeEmail(email),
     action: "upserted",
+    partnerId: scopePayload.partnerId,
+    partnerName: scopePayload.partnerName,
+    primaryCounty: scopePayload.primaryCounty,
+    neighboringCounties: scopePayload.neighboringCounties,
     counties: scopePayload.counties,
     town: scopePayload.town,
     availability: scopePayload.availability,

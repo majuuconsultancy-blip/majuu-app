@@ -2,6 +2,16 @@
   "appId": "com.majuu.app",
   "appName": "Majuu App",
   "webDir": "dist",
+  "server": {
+    "cleartext": true,
+    "allowNavigation": [
+      "192.168.100.63",
+      "localhost",
+      "127.0.0.1",
+      "checkout.paystack.com",
+      "standard.paystack.co"
+    ]
+  },
   "plugins": {
     "SplashScreen": {
       "layoutName": "launch_screen",

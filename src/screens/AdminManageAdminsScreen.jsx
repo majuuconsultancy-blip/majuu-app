@@ -5,7 +5,6 @@ import { useNavigate } from "react-router-dom";
 import AppIcon from "../components/AppIcon";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
 import {
-  KENYA_COUNTY_OPTIONS,
   getNearbyCountySuggestions,
   normalizeCountyList,
 } from "../constants/kenyaCounties";
@@ -14,6 +13,7 @@ import {
   listAssignedAdmins,
   setAssignedAdminByEmail,
 } from "../services/assignedadminservice";
+import { listPartners } from "../services/partnershipService";
 import { smartBack } from "../utils/navBack";
 
 function safeStr(value) {
@@ -51,9 +51,16 @@ function makeDraft(row) {
   const timeout = timeoutToUnit(scope?.responseTimeoutMinutes);
   const maxActiveRaw = Number(scope?.maxActiveRequests);
   return {
+    partnerId: safeStr(scope?.partnerId),
     availability: safeStr(scope?.availability || "active").toLowerCase() || "active",
     town: safeStr(scope?.town),
-    counties: normalizeCountyList(scope?.counties || []),
+    primaryCounty: safeStr(scope?.primaryCounty || scope?.counties?.[0]),
+    neighboringCounties: normalizeCountyList(
+      scope?.neighboringCounties ||
+        normalizeCountyList(scope?.counties || []).filter(
+          (county) => county !== safeStr(scope?.primaryCounty || scope?.counties?.[0])
+        )
+    ),
     countySearch: "",
     maxActiveRequests:
       Number.isFinite(maxActiveRaw) && maxActiveRaw > 0
@@ -71,6 +78,7 @@ export default function AdminManageAdminsScreen() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   const [rows, setRows] = useState([]);
+  const [partners, setPartners] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
@@ -129,7 +137,25 @@ export default function AdminManageAdminsScreen() {
   useEffect(() => {
     if (!isSuperAdmin) return;
     void loadRows();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await listPartners({ max: 250 });
+        if (!cancelled) setPartners(Array.isArray(list) ? list : []);
+      } catch (error) {
+        if (!cancelled) {
+          console.error(error);
+          setPartners([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [isSuperAdmin]);
 
   const setDraft = (uid, patch) => {
@@ -144,12 +170,20 @@ export default function AdminManageAdminsScreen() {
 
   const toggleCounty = (uid, countyName) => {
     const draft = draftByUid?.[uid] || {};
-    const selected = normalizeCountyList(draft?.counties || []);
+    const selected = normalizeCountyList(draft?.neighboringCounties || []).filter(
+      (county) => county !== safeStr(draft?.primaryCounty)
+    );
     if (selected.includes(countyName)) {
-      setDraft(uid, { counties: selected.filter((county) => county !== countyName) });
+      setDraft(uid, {
+        neighboringCounties: selected.filter((county) => county !== countyName),
+      });
       return;
     }
-    setDraft(uid, { counties: normalizeCountyList([...selected, countyName]) });
+    setDraft(uid, {
+      neighboringCounties: normalizeCountyList([...selected, countyName]).filter(
+        (county) => county !== safeStr(draft?.primaryCounty)
+      ),
+    });
   };
 
   const toggleExpand = (row) => {
@@ -208,13 +242,20 @@ export default function AdminManageAdminsScreen() {
     const uid = safeStr(row?.uid);
     const email = safeStr(row?.email).toLowerCase();
     const draft = draftByUid?.[uid] || makeDraft(row);
-    const counties = normalizeCountyList(draft?.counties || []);
+    const primaryCounty = safeStr(draft?.primaryCounty);
+    const neighboringCounties = normalizeCountyList(draft?.neighboringCounties || []).filter(
+      (county) => county !== primaryCounty
+    );
     if (!email) {
       setErr("Missing admin email.");
       return;
     }
-    if (!counties.length) {
-      setErr("Select at least one county.");
+    if (!safeStr(draft?.partnerId)) {
+      setErr("Select a partner.");
+      return;
+    }
+    if (!primaryCounty) {
+      setErr("Select a primary county.");
       return;
     }
     const maxActive = toBoundedInt(draft?.maxActiveRequests, 0, 1, 120);
@@ -238,7 +279,9 @@ export default function AdminManageAdminsScreen() {
       await setAssignedAdminByEmail({
         email,
         action: "upsert",
-        counties,
+        partnerId: safeStr(draft?.partnerId),
+        primaryCounty,
+        neighboringCounties,
         town: safeStr(draft?.town),
         availability: safeStr(draft?.availability || "active").toLowerCase() || "active",
         maxActiveRequests: maxActive,
@@ -323,13 +366,33 @@ export default function AdminManageAdminsScreen() {
                   const email = safeStr(row?.email || uid).toLowerCase();
                   const isExpanded = expandedUid === uid;
                   const draft = draftByUid?.[uid] || makeDraft(row);
-                  const filteredCounties = KENYA_COUNTY_OPTIONS.filter((county) =>
+                  const scope = row?.adminScope || {};
+                  const partnerName =
+                    partners.find((partner) => partner.id === safeStr(scope?.partnerId))?.displayName ||
+                    safeStr(scope?.partnerName) ||
+                    "No partner";
+                  const selectedPartner =
+                    partners.find((partner) => partner.id === safeStr(draft?.partnerId)) || null;
+                  const partnerCountyOptions =
+                    selectedPartner?.isActive === false
+                      ? []
+                      : normalizeCountyList(selectedPartner?.supportedCounties || []);
+                  const countyFieldsEnabled =
+                    Boolean(selectedPartner?.id) && partnerCountyOptions.length > 0;
+                  const neighboringFieldsEnabled =
+                    countyFieldsEnabled &&
+                    Boolean(safeStr(draft?.primaryCounty)) &&
+                    partnerCountyOptions.length > 1;
+                  const filteredCounties = partnerCountyOptions.filter((county) =>
+                    county !== safeStr(draft?.primaryCounty) &&
                     county.toLowerCase().includes(safeStr(draft?.countySearch).toLowerCase())
                   );
                   const recommendations = getNearbyCountySuggestions(
-                    draft?.counties?.[0],
-                    draft?.counties
-                  ).slice(0, 8);
+                    draft?.primaryCounty,
+                    draft?.neighboringCounties
+                  )
+                    .filter((county) => partnerCountyOptions.includes(county))
+                    .slice(0, 8);
                   const countyOpen = Boolean(countyOpenByUid?.[uid]);
                   const revokeBusy = actionBusy === `revoke:${uid}`;
                   const updateBusy = actionBusy === `update:${uid}`;
@@ -351,6 +414,10 @@ export default function AdminManageAdminsScreen() {
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                               {email}
+                            </div>
+                            <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                              {partnerName}
+                              {safeStr(scope?.primaryCounty) ? ` • ${safeStr(scope?.primaryCounty)}` : ""}
                             </div>
                           </div>
 
@@ -377,6 +444,44 @@ export default function AdminManageAdminsScreen() {
                         <div className="border-t border-zinc-200 dark:border-zinc-800 px-4 pb-4 pt-3">
                           <div className="grid gap-3">
                             <div className="grid gap-1.5">
+                              <div className={label}>Partner</div>
+                              <select
+                                className={input}
+                                value={draft?.partnerId || ""}
+                                onChange={(event) => {
+                                  setDraft(uid, {
+                                    partnerId: event.target.value,
+                                    primaryCounty: "",
+                                    neighboringCounties: [],
+                                    countySearch: "",
+                                  });
+                                  setCountyOpenByUid((prev) => ({ ...(prev || {}), [uid]: false }));
+                                }}
+                              >
+                                <option value="">Select partner</option>
+                                {partners.map((partner) => (
+                                  <option key={partner.id} value={partner.id}>
+                                    {partner.displayName}
+                                    {partner.isActive === false ? " (Inactive)" : ""}
+                                  </option>
+                                ))}
+                              </select>
+                              {!draft?.partnerId ? (
+                                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                                  Select a partner first. County fields unlock from that partner's county coverage.
+                                </div>
+                              ) : !selectedPartner ? (
+                                <div className="text-xs text-amber-700 dark:text-amber-200">
+                                  Choose an active partner before editing counties.
+                                </div>
+                              ) : partnerCountyOptions.length === 0 ? (
+                                <div className="text-xs text-amber-700 dark:text-amber-200">
+                                  This partner has no county coverage yet. Add counties in SACC Partnerships first.
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <div className="grid gap-1.5">
                               <div className={label}>Availability</div>
                               <select
                                 className={input}
@@ -390,16 +495,50 @@ export default function AdminManageAdminsScreen() {
                             </div>
 
                             <div className="grid gap-1.5">
-                              <div className={label}>Add Counties</div>
+                              <div className={label}>Primary County</div>
+                              <select
+                                className={input}
+                                value={draft?.primaryCounty || ""}
+                                disabled={!countyFieldsEnabled}
+                                onChange={(event) =>
+                                  setDraft(uid, {
+                                    primaryCounty: event.target.value,
+                                    neighboringCounties: normalizeCountyList(
+                                      draft?.neighboringCounties || []
+                                    ).filter((county) => county !== event.target.value),
+                                  })
+                                }
+                              >
+                                <option value="">
+                                  {countyFieldsEnabled ? "Select primary county" : "Select partner first"}
+                                </option>
+                                {partnerCountyOptions.map((countyName) => (
+                                  <option key={`${uid}-primary-${countyName}`} value={countyName}>
+                                    {countyName}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="grid gap-1.5">
+                              <div className={label}>Neighboring Counties</div>
                               <button
                                 type="button"
-                                onClick={() => toggleCountyDropdown(uid)}
+                                onClick={() => {
+                                  if (!neighboringFieldsEnabled) return;
+                                  toggleCountyDropdown(uid);
+                                }}
+                                disabled={!neighboringFieldsEnabled}
                                 className={`${input} inline-flex items-center justify-between text-left`}
                               >
                                 <span className="truncate">
-                                  {(draft?.counties || []).length
-                                    ? `${(draft?.counties || []).length} counties selected`
-                                    : "Select counties"}
+                                  {!countyFieldsEnabled
+                                    ? "Select partner first"
+                                    : !safeStr(draft?.primaryCounty)
+                                    ? "Select primary county first"
+                                    : (draft?.neighboringCounties || []).length
+                                    ? `${(draft?.neighboringCounties || []).length} neighboring counties selected`
+                                    : "Select neighboring counties"}
                                 </span>
                                 <AppIcon
                                   icon={ChevronDown}
@@ -434,7 +573,7 @@ export default function AdminManageAdminsScreen() {
 
                                   <div className="mt-3 max-h-44 overflow-y-auto grid gap-1 sm:grid-cols-2">
                                     {filteredCounties.map((countyName) => {
-                                      const selected = (draft?.counties || []).includes(countyName);
+                                      const selected = (draft?.neighboringCounties || []).includes(countyName);
                                       return (
                                         <button
                                           key={`${uid}-${countyName}`}
@@ -451,6 +590,11 @@ export default function AdminManageAdminsScreen() {
                                         </button>
                                       );
                                     })}
+                                    {!filteredCounties.length ? (
+                                      <div className="rounded-xl border border-dashed border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                                        No more counties available for this partner.
+                                      </div>
+                                    ) : null}
                                   </div>
                                 </div>
                               ) : null}

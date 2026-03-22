@@ -30,6 +30,7 @@ import { useNotifsV2Store } from "../services/notifsV2Store";
 import { clearActiveProcess, getUserState } from "../services/userservice";
 import { getMyApplications } from "../services/progressservice";
 import { getResumeTarget } from "../resume/resumeEngine";
+import { clearDummyPaymentDraft, clearDummyPaymentState } from "../utils/dummyPayment";
 import {
   buildFullPackageHubPath,
   toFullPackageItemKey,
@@ -40,6 +41,7 @@ import {
   filterVisibleSubmittedRequests,
   isUnsubmittedGhostRequest,
 } from "../utils/requestGhosts";
+import { getUserRequestState } from "../utils/requestLifecycle";
 import {
   buildSelfHelpRouteTarget,
   getResourceDomain,
@@ -54,6 +56,14 @@ import {
   peekSelfHelpProgress,
   toggleSelfHelpBookmark,
 } from "../selfHelp/selfHelpProgressStore";
+import {
+  buildWorkflowDraftContinueTarget,
+  deleteWorkflowDraft,
+  isWorkflowDraftVisible,
+  markWorkflowDraftResumed,
+  subscribeMyWorkflowDrafts,
+  workflowDraftStatusUi,
+} from "../services/workflowdraftservice";
 
 const REQUESTS_INITIAL_RENDER = 5;
 const PROGRESS_CACHE_PREFIX = "majuu_progress_cache_";
@@ -127,21 +137,21 @@ function writeProgressCache(uid, payload) {
   }
 }
 
-function statusUI(status) {
-  const value = String(status || "new").toLowerCase();
+function statusUI(request) {
+  const value = getUserRequestState(request);
 
-  if (value === "contacted") {
+  if (value === "in_progress") {
     return {
-      label: "Received",
+      label: "In progress",
       badge:
         "border border-emerald-100 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200",
       dot: "bg-emerald-500",
     };
   }
 
-  if (value === "closed") {
+  if (value === "completed") {
     return {
-      label: "Succeeded",
+      label: "Completed",
       badge:
         "border border-emerald-200 bg-emerald-100 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/45 dark:text-emerald-200",
       dot: "bg-emerald-700",
@@ -281,6 +291,31 @@ function formatTrackCountry(track, country) {
     (value) => value && value !== "-"
   );
   return parts.length ? parts.join(" · ") : "-";
+}
+
+function workflowDraftTitle(draft) {
+  const flowFamily = safeString(draft?.flowFamily, 80).toLowerCase();
+  if (flowFamily === "full_package") return "Full Package";
+  return safeString(draft?.serviceName, 160) || "Unfinished request";
+}
+
+function workflowDraftSubtitle(draft) {
+  const flowFamily = safeString(draft?.flowFamily, 80).toLowerCase();
+  if (flowFamily === "full_package") {
+    return `Setup Â· ${formatTrackCountry(draft?.track, draft?.country)}`;
+  }
+  return formatTrackCountry(draft?.track, draft?.country);
+}
+
+function isPaidWorkflowDraft(draft) {
+  const paymentState = safeString(draft?.paymentState, 40).toLowerCase();
+  const draftStatus = safeString(draft?.status, 80).toLowerCase();
+  return (
+    draft?.fullPackageUnlockPaid === true ||
+    paymentState === "paid" ||
+    draftStatus === "unlock_paid_pending_submission" ||
+    draftStatus === "full_package_paid_pending_diagnostics"
+  );
 }
 
 function matchesSelfHelpSearch(item, query) {
@@ -533,8 +568,11 @@ export default function ProgressScreen() {
   const [state, setState] = useState(null);
   const [requests, setRequests] = useState([]);
   const [apps, setApps] = useState([]);
+  const [workflowDrafts, setWorkflowDrafts] = useState([]);
   const [err, setErr] = useState("");
   const [deletingId, setDeletingId] = useState("");
+  const [draftBusyId, setDraftBusyId] = useState("");
+  const [draftDeleteBusyId, setDraftDeleteBusyId] = useState("");
   const [pinnedIds, setPinnedIds] = useState([]);
   const [visibleCount, setVisibleCount] = useState(REQUESTS_INITIAL_RENDER);
   const [selfHelpProgress, setSelfHelpProgress] = useState(null);
@@ -613,6 +651,7 @@ export default function ProgressScreen() {
 
   useEffect(() => {
     let unsubRequests = null;
+    let unsubDrafts = null;
 
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
       if (!user) {
@@ -644,6 +683,7 @@ export default function ProgressScreen() {
 
       const requestQuery = query(collection(db, "serviceRequests"), where("uid", "==", user.uid));
       if (unsubRequests) unsubRequests();
+      if (unsubDrafts) unsubDrafts();
 
       unsubRequests = onSnapshot(
         requestQuery,
@@ -703,6 +743,15 @@ export default function ProgressScreen() {
         }
       );
 
+      unsubDrafts = subscribeMyWorkflowDrafts(user.uid, {
+        onData: (rows) => {
+          setWorkflowDrafts(Array.isArray(rows) ? rows : []);
+        },
+        onError: (error) => {
+          console.error("workflow drafts snapshot error:", error);
+        },
+      });
+
       try {
         const userState = await getUserState(user.uid);
         const normalizedState = normalizeTextDeep(userState);
@@ -736,6 +785,7 @@ export default function ProgressScreen() {
     return () => {
       unsubAuth();
       if (unsubRequests) unsubRequests();
+      if (unsubDrafts) unsubDrafts();
     };
   }, [navigate]);
 
@@ -747,6 +797,22 @@ export default function ProgressScreen() {
   const requestsCountLabel = useMemo(() => {
     return requests.length === 1 ? "1 request" : `${requests.length} requests`;
   }, [requests.length]);
+
+  const visibleWorkflowDrafts = useMemo(() => {
+    const submittedRequestIds = new Set(
+      (Array.isArray(requests) ? requests : [])
+        .map((row) => safeString(row?.id, 180))
+        .filter(Boolean)
+    );
+
+    return (Array.isArray(workflowDrafts) ? workflowDrafts : [])
+      .filter(isWorkflowDraftVisible)
+      .filter((draft) => {
+        const linkedRequestId = safeString(draft?.linkedRequestId, 180);
+        if (!linkedRequestId) return true;
+        return !submittedRequestIds.has(linkedRequestId);
+      });
+  }, [workflowDrafts, requests]);
 
   const requestsSorted = useMemo(() => {
     const pinSet = new Set((pinnedIds || []).map((item) => String(item)));
@@ -853,6 +919,62 @@ export default function ProgressScreen() {
     }
 
     navigate("/dashboard", { replace: true });
+  };
+
+  const continueWorkflowDraft = async (draft) => {
+    const draftId = safeString(draft?.draftId || draft?.id, 180);
+    const target = buildWorkflowDraftContinueTarget(draft);
+    if (!draftId || !target?.path) return;
+
+    setDraftBusyId(draftId);
+    try {
+      await markWorkflowDraftResumed(draftId);
+      navigate(`${target.path}${target.search || ""}`, {
+        replace: true,
+        state: target.state,
+      });
+    } finally {
+      setDraftBusyId("");
+    }
+  };
+
+  const deleteUnpaidWorkflowDraft = async (draft) => {
+    const draftId = safeString(draft?.draftId || draft?.id, 180);
+    if (!draftId) return;
+    if (isPaidWorkflowDraft(draft)) {
+      setErr("Paid drafts cannot be deleted.");
+      return;
+    }
+    const linkedRequestId = safeString(draft?.linkedRequestId, 180);
+    const isFullPackage =
+      safeString(draft?.flowFamily, 80).toLowerCase() === "full_package";
+
+    const confirmed = window.confirm(
+      isFullPackage
+        ? "Delete this saved draft?"
+        : "Delete this saved request draft? This also removes its pending request."
+    );
+    if (!confirmed) return;
+
+    setDraftDeleteBusyId(draftId);
+    try {
+      if (!isFullPackage && linkedRequestId) {
+        await deleteRequestDeep(linkedRequestId);
+      }
+      await deleteWorkflowDraft(draftId);
+      clearDummyPaymentState(draftId);
+      clearDummyPaymentDraft(draftId);
+      setWorkflowDrafts((current) =>
+        (Array.isArray(current) ? current : []).filter(
+          (row) => safeString(row?.draftId || row?.id, 180) !== draftId
+        )
+      );
+    } catch (error) {
+      console.error("Failed to delete workflow draft:", error);
+      setErr(error?.message || "Failed to delete draft.");
+    } finally {
+      setDraftDeleteBusyId("");
+    }
   };
 
   const togglePin = (requestId) => {
@@ -971,12 +1093,17 @@ export default function ProgressScreen() {
     }
   };
 
-  async function deleteRequestDeep(requestId) {
-    const attachmentRef = collection(db, "serviceRequests", requestId, "attachments");
-    const attachmentSnap = await getDocs(attachmentRef);
-    for (const attachment of attachmentSnap.docs) {
-      await deleteDoc(doc(db, "serviceRequests", requestId, "attachments", attachment.id));
+  async function deleteRequestSubcollection(requestId, subcollectionName) {
+    const snap = await getDocs(collection(db, "serviceRequests", requestId, subcollectionName));
+    for (const row of snap.docs) {
+      await deleteDoc(doc(db, "serviceRequests", requestId, subcollectionName, row.id));
     }
+  }
+
+  async function deleteRequestDeep(requestId) {
+    await deleteRequestSubcollection(requestId, "attachments");
+    await deleteRequestSubcollection(requestId, "payments");
+    await deleteRequestSubcollection(requestId, "refundRequests");
     await deleteDoc(doc(db, "serviceRequests", requestId));
   }
 
@@ -1011,8 +1138,8 @@ export default function ProgressScreen() {
           initial="hidden"
           animate="show"
         >
-          <div className="mb-3">
-            <h1 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+          <div className="mb-3 text-center">
+            <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
               Progress
             </h1>
             <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
@@ -1020,53 +1147,55 @@ export default function ProgressScreen() {
             </p>
           </div>
 
-          <div className={`${cardBase} mt-3`}>
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                Current process
-              </h2>
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                {hasActive ? "Live" : "Idle"}
-              </span>
-            </div>
-
-            {hasActive ? (
-              <div className="mt-3 grid gap-2">
-                <div className="grid gap-1.5 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 dark:text-zinc-400">Track</span>
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {activeTrack || "-"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 dark:text-zinc-400">Country</span>
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {activeCountry || "-"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 dark:text-zinc-400">Mode</span>
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {activeHelpType === "we" ? "We-Help" : "Self-Help"}
-                    </span>
-                  </div>
-                </div>
-
-                <button type="button" onClick={goContinue} className={primaryBtn}>
-                  {activeHelpType === "self" ? "Continue SelfHelp" : "Continue"}
-                </button>
+          <div className="mt-3 flex justify-center">
+            <div className={`${cardBase} w-full max-w-sm`}>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  Current process
+                </h2>
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {hasActive ? "Live" : "Idle"}
+                </span>
               </div>
-            ) : (
-              <div className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
-                No active process yet. Choose a track to begin.
-                <div className="mt-3">
-                  <button type="button" onClick={() => navigate("/dashboard")} className={ghostBtn}>
-                    Choose track
+
+              {hasActive ? (
+                <div className="mt-3 grid gap-2">
+                  <div className="grid gap-1.5 text-sm">
+                    <div className="flex items-baseline gap-2 text-left">
+                      <span className="text-zinc-500 dark:text-zinc-400">Track</span>
+                      <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                        {activeTrack || "-"}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2 text-left">
+                      <span className="text-zinc-500 dark:text-zinc-400">Country</span>
+                      <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                        {activeCountry || "-"}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2 text-left">
+                      <span className="text-zinc-500 dark:text-zinc-400">Mode</span>
+                      <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                        {activeHelpType === "we" ? "We-Help" : "Self-Help"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button type="button" onClick={goContinue} className={primaryBtn}>
+                    {activeHelpType === "self" ? "Continue SelfHelp" : "Continue"}
                   </button>
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
+                  No active process yet. Choose a track to begin.
+                  <div className="mt-3">
+                    <button type="button" onClick={() => navigate("/dashboard")} className={ghostBtn}>
+                      Choose track
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="mt-4">
@@ -1151,9 +1280,96 @@ export default function ProgressScreen() {
           >
             {activeTab === "wehelp" ? (
               <div>
+              {visibleWorkflowDrafts.length ? (
+                <div className="mb-5">
+                  <div className="flex items-end justify-between">
+                    <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
+                      Saved drafts
+                    </h2>
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {visibleWorkflowDrafts.length} saved
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid gap-3">
+                    {visibleWorkflowDrafts.map((draft) => {
+                      const draftId = safeString(draft?.draftId || draft?.id, 180);
+                      const status = workflowDraftStatusUi(draft);
+                      const updatedLabel = formatCreatedAt(
+                        Number(draft?.updatedAtMs || 0) || Number(draft?.createdAtMs || 0)
+                      );
+                      const isBusy = draftBusyId === draftId;
+                      const isDeleteBusy = draftDeleteBusyId === draftId;
+                      const isFullPackage =
+                        safeString(draft?.flowFamily, 80).toLowerCase() === "full_package";
+                      const canDeleteDraft = !isPaidWorkflowDraft(draft);
+
+                      return (
+                        <div
+                          key={draftId}
+                          className={`${cardBase} relative overflow-hidden ${
+                            isFullPackage
+                              ? "border-emerald-300/80 bg-emerald-50/45 dark:border-emerald-800/60 dark:bg-emerald-950/20"
+                              : ""
+                          }`}
+                        >
+                          {isFullPackage ? (
+                            <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5 rounded-l-3xl bg-emerald-500/80 dark:bg-emerald-400/70" />
+                          ) : null}
+
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                                {workflowDraftTitle(draft)}
+                              </div>
+                              <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                                {workflowDraftSubtitle(draft)}
+                              </div>
+                              {updatedLabel ? (
+                                <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+                                  Updated: <span className="font-medium">{updatedLabel}</span>
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${status.className}`}>
+                              {status.label}
+                            </span>
+                          </div>
+
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void continueWorkflowDraft(draft)}
+                              disabled={isBusy || isDeleteBusy}
+                              className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3.5 py-2 text-sm font-semibold text-emerald-900 transition hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-100 dark:hover:bg-emerald-950/40"
+                            >
+                              {isBusy ? "Opening..." : "Continue"}
+                              <AppIcon size={ICON_SM} icon={ChevronRight} />
+                            </button>
+
+                            {canDeleteDraft ? (
+                              <button
+                                type="button"
+                                onClick={() => void deleteUnpaidWorkflowDraft(draft)}
+                                disabled={isBusy || isDeleteBusy}
+                                className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/80 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60 dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-200 dark:hover:bg-rose-950/40"
+                              >
+                                <AppIcon size={ICON_SM} icon={Trash2} />
+                                {isDeleteBusy ? "Deleting..." : "Delete"}
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
               <div className="flex items-end justify-between">
                 <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
-                  We-Help requests
+                  Sent We-Help requests
                 </h2>
                 <span className="text-xs text-zinc-500 dark:text-zinc-400">
                   {requestsCountLabel}
@@ -1163,10 +1379,12 @@ export default function ProgressScreen() {
               {requests.length === 0 ? (
                 <div className={`${cardBase} mt-3`}>
                   <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                    No requests yet
+                    {visibleWorkflowDrafts.length ? "No submitted requests yet" : "No requests yet"}
                   </div>
                   <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    When you submit a We-Help request, it will show up here.
+                    {visibleWorkflowDrafts.length
+                      ? "Your unfinished drafts are saved above. Submitted We-Help requests will appear here too."
+                      : "When you submit a We-Help request, it will show up here."}
                   </div>
                   <div className="mt-4">
                     <button type="button" onClick={() => navigate("/dashboard")} className={ghostBtn}>
@@ -1177,7 +1395,7 @@ export default function ProgressScreen() {
               ) : (
                 <div className="mt-3 grid gap-3">
                   {visibleRequests.map((request) => {
-                    const ui = statusUI(request.status);
+                    const ui = statusUI(request);
                     const track = safeString(request.track, 20).toLowerCase();
                     const safeTrack = track === "work" || track === "travel" ? track : "study";
                     const status = safeString(request.status, 30).toLowerCase();

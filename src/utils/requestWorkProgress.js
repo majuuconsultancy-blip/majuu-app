@@ -1,3 +1,5 @@
+import { normalizeRequestBackendStatus } from "./requestLifecycle";
+
 function safeStr(value) {
   return String(value || "").trim();
 }
@@ -40,6 +42,7 @@ export function getRequestWorkProgress(request) {
   const data = request && typeof request === "object" ? request : {};
   const status = safeStr(data.status).toLowerCase();
   const staffStatus = safeStr(data.staffStatus).toLowerCase();
+  const backendStatus = normalizeRequestBackendStatus(data.backendStatus, data);
   const progressPercent = normalizeStaffProgressPercent(data.staffProgressPercent);
   const progressUpdatedAtMs =
     toRequestProgressMillis(data.staffProgressUpdatedAtMs) ||
@@ -51,18 +54,21 @@ export function getRequestWorkProgress(request) {
     status === "contacted" || status === "active" || status === "in_progress" || status === "in-progress";
   const hasStartedEvidence =
     startedAtMs > 0 ||
+    backendStatus === "in_progress" ||
     staffStatus === "in_progress" ||
     staffStatus === "done" ||
     hasLegacyInProgressStatus;
 
   const isInProgress =
     !isFinalized &&
-    (staffStatus === "in_progress" ||
+    (backendStatus === "in_progress" ||
+      staffStatus === "in_progress" ||
       (staffStatus !== "done" && (hasLegacyInProgressStatus || startedAtMs > 0)));
 
   return {
     status,
     staffStatus,
+    backendStatus,
     startedAtMs,
     progressPercent,
     progressUpdatedAtMs,

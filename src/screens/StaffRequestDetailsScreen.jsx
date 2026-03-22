@@ -37,6 +37,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { auth, db } from "../firebase";
 
 import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
+import RequestProgressUpdatesList from "../components/RequestProgressUpdatesList";
 import RequestExtraDetailsSection from "../components/RequestExtraDetailsSection";
 import StaffRequestChatPanel from "../components/StaffRequestChatPanel";
 import { smartBack } from "../utils/navBack";
@@ -51,6 +52,10 @@ import {
   PAYMENT_TYPES,
   paymentStatusUi,
 } from "../services/paymentservice";
+import {
+  postRequestProgressUpdate,
+  subscribeRequestProgressUpdates,
+} from "../services/requestcontinuityservice";
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 
 /* ---------- Minimal icons ---------- */
@@ -223,6 +228,28 @@ function safeMinutesBetween(startTs, endMs) {
   return Math.max(1, mins);
 }
 
+function permissionAwareMessage(error, fallback) {
+  const message = String(error?.message || "").trim().toLowerCase();
+  if (message.includes("missing or insufficient permissions")) {
+    return fallback;
+  }
+  return String(error?.message || "").trim() || fallback;
+}
+
+function cleanMoneyInput(value, { allowZero = false } = {}) {
+  const num = Number(String(value || "").replace(/[^0-9.]+/g, ""));
+  if (!Number.isFinite(num)) return 0;
+  const rounded = Math.round(num);
+  if (allowZero) return Math.max(0, rounded);
+  return rounded > 0 ? rounded : 0;
+}
+
+function formatMoney(amount, currency = "KES") {
+  const safeAmount = Math.max(0, Math.round(Number(amount || 0)));
+  const safeCurrency = String(currency || "KES").trim().toUpperCase() || "KES";
+  return `${safeCurrency} ${safeAmount.toLocaleString()}`;
+}
+
 function createStaffSectionState() {
   return {
     chat: false,
@@ -287,6 +314,10 @@ export default function StaffRequestDetailsScreen() {
   const [req, setReq] = useState(null);
   const [note, setNote] = useState("");
   const [progressDraft, setProgressDraft] = useState("");
+  const [progressNote, setProgressNote] = useState("");
+  const [progressVisibleToUser, setProgressVisibleToUser] = useState(true);
+  const [progressUpdates, setProgressUpdates] = useState([]);
+  const [progressUpdatesErr, setProgressUpdatesErr] = useState("");
   const [decision, setDecision] = useState("recommend_accept");
   const [busy, setBusy] = useState("");
 
@@ -299,7 +330,8 @@ export default function StaffRequestDetailsScreen() {
   const [payments, setPayments] = useState([]);
   const [paymentsErr, setPaymentsErr] = useState("");
   const [paymentLabel, setPaymentLabel] = useState("");
-  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentOfficialAmount, setPaymentOfficialAmount] = useState("");
+  const [paymentServiceFee, setPaymentServiceFee] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [openSections, setOpenSections] = useState(createStaffSectionState);
@@ -412,6 +444,32 @@ export default function StaffRequestDetailsScreen() {
   }, [currentProgressPercent, requestId]);
 
   useEffect(() => {
+    setProgressNote("");
+    setProgressVisibleToUser(true);
+  }, [requestId]);
+
+  useEffect(() => {
+    if (!requestId) return undefined;
+
+    const unsub = subscribeRequestProgressUpdates({
+      requestId,
+      viewerRole: "staff",
+      onData: (rows) => {
+        setProgressUpdates(rows);
+        setProgressUpdatesErr("");
+      },
+      onError: (error) => {
+        console.error("staff progress updates snapshot error:", error);
+        setProgressUpdatesErr(
+          permissionAwareMessage(error, "Progress updates are not available right now.")
+        );
+      },
+    });
+
+    return () => unsub?.();
+  }, [requestId]);
+
+  useEffect(() => {
     if (!requestId) return;
 
     const ref = collection(db, "serviceRequests", requestId, "staffFileDrafts");
@@ -490,11 +548,12 @@ export default function StaffRequestDetailsScreen() {
 
   const submitInProgressPaymentProposal = async () => {
     const label = String(paymentLabel || "").trim();
-    const amountNum = Number(String(paymentAmount || "").replace(/[^0-9.]+/g, ""));
+    const officialAmount = cleanMoneyInput(paymentOfficialAmount);
+    const serviceFee = cleanMoneyInput(paymentServiceFee, { allowZero: true });
     const noteText = String(paymentNote || "").trim();
 
     if (!label) return alert("Enter a payment label.");
-    if (!Number.isFinite(amountNum) || amountNum <= 0) return alert("Enter a valid amount.");
+    if (!officialAmount) return alert("Enter a valid official amount.");
     if (!noteText) return alert("Enter a reason for the applicant.");
 
     try {
@@ -502,11 +561,13 @@ export default function StaffRequestDetailsScreen() {
       await createInProgressPaymentProposal({
         requestId,
         paymentLabel: label,
-        amount: amountNum,
+        officialAmount,
+        serviceFee,
         note: noteText,
       });
       setPaymentLabel("");
-      setPaymentAmount("");
+      setPaymentOfficialAmount("");
+      setPaymentServiceFee("");
       setPaymentNote("");
     } catch (proposalErr) {
       alert(proposalErr?.message || "Failed to submit payment proposal.");
@@ -580,24 +641,31 @@ export default function StaffRequestDetailsScreen() {
     try {
       setBusy("progress");
       setErr("");
-      const nowMs = Date.now();
-      await updateRequest({
-        staffProgressPercent: nextProgress,
-        staffProgressUpdatedAt: serverTimestamp(),
-        staffProgressUpdatedAtMs: nowMs,
+      await postRequestProgressUpdate({
+        requestId,
+        requestData: req,
+        progressPercent: nextProgress,
+        content: progressNote,
+        visibleToUser: progressVisibleToUser,
       });
+      const nowMs = Date.now();
       setReq((prev) =>
         prev
           ? {
               ...prev,
               staffProgressPercent: nextProgress,
               staffProgressUpdatedAtMs: nowMs,
+              backendStatus: "in_progress",
+              userStatus: "in_progress",
+              everAssigned: true,
             }
           : prev
       );
+      setProgressNote("");
+      setProgressVisibleToUser(true);
     } catch (e) {
       console.error(e);
-      setErr(e?.message || "Progress update failed (check rules).");
+      setErr(permissionAwareMessage(e, "Progress update failed. Please try again."));
     } finally {
       setBusy("");
     }
@@ -832,11 +900,6 @@ export default function StaffRequestDetailsScreen() {
                   ) : null}
                 </div>
 
-                <div className="shrink-0 flex flex-col items-end gap-2">
-                  <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">
-                    Staff: {staffStatus.replace("_", " ")}
-                  </span>
-                </div>
               </div>
 
               {!canWork ?(
@@ -853,18 +916,18 @@ export default function StaffRequestDetailsScreen() {
             <StaffCollapsibleSectionCard
               className={`mt-6 ${floatCard} p-5`}
               title="Work progress"
-              subtitle="Only staff can update this live percentage. Admin and user can view it."
+              subtitle=""
               open={openSections.workProgress}
               onToggle={() => toggleSection("workProgress")}
             >
               <div className="mt-4">
                 <RequestWorkProgressCard
                   request={req}
-                  title="Work progress"
-                  subtitle="Only staff can update this live percentage. Admin and user can view it."
+                  title=""
+                  subtitle=""
                   showWhenIdle={true}
                   idleText="Start work from the staff modal first."
-                  pendingText="Work started. Add a live progress update when you have one."
+                  pendingText="Work started. Add a progress update when you have one."
                 >
                   <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
                     <label className="grid gap-2">
@@ -896,10 +959,51 @@ export default function StaffRequestDetailsScreen() {
                     </button>
                   </div>
 
-                  <div className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
-                    Use this for live work updates only. Completion should still go through the existing
-                    done flow.
+                  <div className="mt-3 grid gap-3">
+                    <label className="grid gap-2">
+                      <span className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
+                        Progress note
+                      </span>
+                      <textarea
+                        value={progressNote}
+                        onChange={(e) => setProgressNote(e.target.value)}
+                        disabled={!canUpdateProgress || busy === "progress"}
+                        rows={3}
+                        placeholder="Example: Documents checked and corrections sent to the applicant."
+                        className={`${inputBase} min-h-[92px] resize-y`}
+                      />
+                    </label>
+
+                    <label className="inline-flex items-start gap-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/50 px-3 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+                      <input
+                        type="checkbox"
+                        checked={progressVisibleToUser}
+                        onChange={(e) => setProgressVisibleToUser(e.target.checked)}
+                        disabled={!canUpdateProgress || busy === "progress"}
+                        className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span>
+                        <span className="block font-semibold text-zinc-900 dark:text-zinc-100">
+                          Visible to user
+                        </span>
+                        <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
+                          Turn this off for internal-only notes that only staff and admin should see.
+                        </span>
+                      </span>
+                    </label>
                   </div>
+
+                  {progressUpdatesErr ? (
+                    <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+                      {progressUpdatesErr}
+                    </div>
+                  ) : null}
+
+                  <RequestProgressUpdatesList
+                    updates={progressUpdates}
+                    viewerRole="staff"
+                    emptyText="No progress updates posted yet."
+                  />
                 </RequestWorkProgressCard>
               </div>
             </StaffCollapsibleSectionCard>
@@ -907,7 +1011,7 @@ export default function StaffRequestDetailsScreen() {
             <StaffCollapsibleSectionCard
               className={`mt-6 ${floatCard} p-5`}
               title="Applicant"
-              subtitle="Contact details are hidden in staff view."
+              subtitle=""
               open={openSections.applicant}
               onToggle={() => toggleSection("applicant")}
             >
@@ -952,7 +1056,7 @@ export default function StaffRequestDetailsScreen() {
             <StaffCollapsibleSectionCard
               className={`mt-6 ${floatCard} p-5`}
               title="In-progress payments"
-              subtitle="Propose payment requests. Admin must approve before user can pay."
+              subtitle=""
               open={openSections.payments}
               onToggle={() => toggleSection("payments")}
               badge={
@@ -994,9 +1098,17 @@ export default function StaffRequestDetailsScreen() {
                     disabled={paymentBusy || busy}
                   />
                   <input
-                    value={paymentAmount}
-                    onChange={(e) => setPaymentAmount(e.target.value)}
-                    placeholder="Amount in KES (e.g. 2500)"
+                    value={paymentOfficialAmount}
+                    onChange={(e) => setPaymentOfficialAmount(e.target.value)}
+                    placeholder="Official amount (e.g. 2500)"
+                    inputMode="decimal"
+                    className={inputBase}
+                    disabled={paymentBusy || busy}
+                  />
+                  <input
+                    value={paymentServiceFee}
+                    onChange={(e) => setPaymentServiceFee(e.target.value)}
+                    placeholder="Optional service fee (e.g. 300)"
                     inputMode="decimal"
                     className={inputBase}
                     disabled={paymentBusy || busy}
@@ -1037,8 +1149,20 @@ export default function StaffRequestDetailsScreen() {
                               {p.paymentLabel || "In-progress payment"}
                             </div>
                             <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                              {p.currency} {Number(p.amount || 0).toLocaleString()}
+                              User pays: {formatMoney(p.amount, p.currency)}
                             </div>
+                            {p.breakdown ? (
+                              <div className="mt-2 grid gap-1 text-xs text-zinc-600 dark:text-zinc-300">
+                                <div>Official amount: {formatMoney(p.breakdown.officialAmount, p.currency)}</div>
+                                <div>Service fee: {formatMoney(p.breakdown.serviceFee, p.currency)}</div>
+                                <div>Platform cut: {formatMoney(p.breakdown.platformCutAmount, p.currency)}</div>
+                                <div>Tax: {formatMoney(p.breakdown.taxAmount, p.currency)}</div>
+                                <div>
+                                  Estimated partner payout:{" "}
+                                  {formatMoney(p.breakdown.estimatedNetPartnerPayable, p.currency)}
+                                </div>
+                              </div>
+                            ) : null}
                             {p.note ? (
                               <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
                                 {p.note}
@@ -1063,8 +1187,8 @@ export default function StaffRequestDetailsScreen() {
 
             <StaffCollapsibleSectionCard
               className={`mt-6 ${floatCard} p-5`}
-              title="Attach files for applicant"
-              subtitle="Add links (Google Drive / Dropbox). When you mark done, these auto-fill admin's staged files."
+              title="Attach Files"
+              subtitle=""
               open={openSections.attachments}
               onToggle={() => toggleSection("attachments")}
               meta={
@@ -1117,9 +1241,6 @@ export default function StaffRequestDetailsScreen() {
                     </button>
                   </div>
 
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Tip: set access to "Anyone with the link can view".
-                  </div>
                 </div>
               )}
 

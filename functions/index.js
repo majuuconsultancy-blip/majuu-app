@@ -3,6 +3,7 @@ const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
+const buildFinanceFoundation = require("./finance-foundation");
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -19,6 +20,8 @@ const ADMIN_AVAILABILITY_WEIGHTS = { active: 1, busy: 0.35, offline: 0 };
 const DEFAULT_MAX_ACTIVE_REQUESTS = 12;
 const DEFAULT_ADMIN_RESPONSE_TIMEOUT_MINUTES = 20;
 const DEFAULT_ROUTING_SWEEP_LIMIT = 500;
+const PARTNERS_COLLECTION = "partners";
+const PARTNER_COVERAGE_COLLECTION = "partnerCoverage";
 const HARDCODED_SUPER_ADMIN_EMAIL = "brioneroo@gmail.com";
 const ASSIGNED_ADMIN_ROLE_VARIANTS = [
   "assignedAdmin",
@@ -69,6 +72,151 @@ function normalizeCountyLower(value) {
 function normalizeAvailability(value) {
   const v = lower(value);
   return Object.prototype.hasOwnProperty.call(ADMIN_AVAILABILITY_WEIGHTS, v) ? v : "active";
+}
+
+function normalizeStringList(values, { max = 120, lowercase = false } = {}) {
+  const arr = Array.isArray(values) ? values : [];
+  const seen = new Set();
+  const out = [];
+  arr.forEach((value) => {
+    const normalized = lowercase ? lower(String(value || "").slice(0, max)) : safeStr(value).slice(0, max);
+    const key = lowercase ? normalized : lower(normalized);
+    if (!normalized || seen.has(key)) return;
+    seen.add(key);
+    out.push(normalized);
+  });
+  return out;
+}
+
+function mergeUniqueLowerLists(...lists) {
+  return normalizeStringList(lists.flat(), { lowercase: true, max: 120 });
+}
+
+function normalizePartnerDoc(partnerId, partnerData = {}, coverageData = {}) {
+  const displayName = safeStr(partnerData?.displayName);
+  if (!displayName) return null;
+
+  const status = lower(
+    partnerData?.status || (partnerData?.isActive === false ? "inactive" : "active")
+  ) === "inactive"
+    ? "inactive"
+    : "active";
+  const supportedTracks = normalizeStringList(
+    coverageData?.supportedTracks || partnerData?.supportedTracks,
+    { lowercase: true, max: 40 }
+  );
+  const supportedCountriesLower = normalizeStringList(
+    coverageData?.supportedCountriesLower ||
+      coverageData?.supportedCountries ||
+      partnerData?.supportedCountries,
+    { lowercase: true, max: 120 }
+  );
+  const supportedCountiesLower = normalizeStringList(
+    coverageData?.supportedCountiesLower ||
+      coverageData?.supportedCounties ||
+      partnerData?.supportedCounties,
+    { lowercase: true, max: 120 }
+  );
+  const neighboringCountiesLower = [];
+  const coverageCountiesLower = mergeUniqueLowerLists(
+    coverageData?.coverageCountiesLower,
+    coverageData?.coverageCounties,
+    partnerData?.coverageCounties,
+    supportedCountiesLower
+  );
+
+  return {
+    id: safeStr(partnerId),
+    displayName,
+    status,
+    isActive: status === "active",
+    supportedTracks,
+    supportedCountriesLower,
+    supportedCountiesLower,
+    neighboringCountiesLower,
+    coverageCountiesLower,
+  };
+}
+
+async function listPartners({ activeOnly = false, max = 250 } = {}) {
+  const maxRows = clamp(toNum(max, 250), 1, 400);
+  const partnerQuery = activeOnly
+    ? db.collection(PARTNERS_COLLECTION).where("isActive", "==", true).limit(maxRows)
+    : db.collection(PARTNERS_COLLECTION).limit(maxRows);
+
+  const [partnerSnap, coverageSnap] = await Promise.all([
+    partnerQuery.get(),
+    db.collection(PARTNER_COVERAGE_COLLECTION).limit(maxRows).get(),
+  ]);
+
+  const coverageMap = new Map();
+  coverageSnap.docs.forEach((docSnap) => {
+    coverageMap.set(docSnap.id, docSnap.data() || {});
+  });
+
+  return partnerSnap.docs
+    .map((docSnap) =>
+      normalizePartnerDoc(docSnap.id, docSnap.data() || {}, coverageMap.get(docSnap.id))
+    )
+    .filter(Boolean)
+    .sort((a, b) => safeStr(a?.displayName).localeCompare(safeStr(b?.displayName)));
+}
+
+async function fetchPartnerById(partnerId) {
+  const safePartnerId = safeStr(partnerId);
+  if (!safePartnerId) return null;
+
+  const [partnerSnap, coverageSnap] = await Promise.all([
+    db.collection(PARTNERS_COLLECTION).doc(safePartnerId).get(),
+    db.collection(PARTNER_COVERAGE_COLLECTION).doc(safePartnerId).get(),
+  ]);
+  if (!partnerSnap.exists) return null;
+
+  return normalizePartnerDoc(
+    safePartnerId,
+    partnerSnap.data() || {},
+    coverageSnap.exists ? coverageSnap.data() || {} : {}
+  );
+}
+
+function evaluatePartnerRequestCompatibility(partner, { trackType = "", country = "", county = "" } = {}) {
+  const safePartner = partner && typeof partner === "object" ? partner : {};
+  const safeTrack = lower(trackType);
+  const safeCountry = lower(country);
+  const safeCounty = normalizeCountyLower(county);
+  const trackOk = Boolean(safeTrack) && safePartner.supportedTracks?.includes(safeTrack);
+  const countryOk =
+    Boolean(safeCountry) && safePartner.supportedCountriesLower?.includes(safeCountry);
+  const countyDirect =
+    Boolean(safeCounty) && safePartner.supportedCountiesLower?.includes(safeCounty);
+  const countyNeighbor = false;
+  const countyOk = Boolean(safeCounty) && safePartner.supportedCountiesLower?.includes(safeCounty);
+
+  const reasons = [];
+  if (safePartner.isActive === false) reasons.push("partner_inactive");
+  if (!trackOk) reasons.push("track_not_supported");
+  if (!countryOk) reasons.push("country_not_supported");
+  if (!countyOk) reasons.push("county_not_supported");
+
+  return {
+    partnerId: safeStr(safePartner?.id),
+    partnerName: safeStr(safePartner?.displayName),
+    eligible: reasons.length === 0,
+    reasons,
+    countyMatchType: countyDirect ? "direct" : "",
+  };
+}
+
+function preferredAgentReasonLabel(reason) {
+  const safeReason = lower(reason);
+  if (safeReason === "partner_inactive") return "Selected agent is inactive.";
+  if (safeReason === "track_not_supported") return "Selected agent does not support this track.";
+  if (safeReason === "country_not_supported") return "Selected agent does not support this country.";
+  if (safeReason === "county_not_supported") return "Selected agent does not support this county.";
+  if (safeReason === "partner_not_found") return "Selected agent was not found.";
+  if (safeReason === "admin_unavailable") return "Assigned admin is unavailable.";
+  if (safeReason === "admin_at_capacity") return "Assigned admin is at max capacity.";
+  return "Selected agent is not valid for this request.";
 }
 
 function toDataStrings(obj) {
@@ -358,12 +506,23 @@ async function requireAdminCallerContext(context, { superOnly = false } = {}) {
 
 function normalizeAdminScope(rawScope) {
   const scope = rawScope && typeof rawScope === "object" ? rawScope : {};
+  const primaryCountyLower = normalizeCountyLower(scope?.primaryCounty);
+  const neighboringCountiesLower = normalizeStringList(
+    scope?.neighboringCountiesLower || scope?.neighboringCounties,
+    { lowercase: true, max: 120 }
+  );
   const countiesLower = Array.isArray(scope?.countiesLower)
     ? scope.countiesLower.map((x) => lower(x)).filter(Boolean)
     : [];
   const countiesFallback = Array.isArray(scope?.counties)
     ? scope.counties.map((x) => lower(x)).filter(Boolean)
     : [];
+  const mergedCountiesLower = mergeUniqueLowerLists(
+    primaryCountyLower ? [primaryCountyLower] : [],
+    neighboringCountiesLower,
+    countiesLower,
+    countiesFallback
+  );
   return {
     active: scope?.active !== false,
     availability: normalizeAvailability(scope?.availability),
@@ -377,14 +536,80 @@ function normalizeAdminScope(rawScope) {
       5,
       240
     ),
-    countiesLower: countiesLower.length ? countiesLower : countiesFallback,
+    partnerId: safeStr(scope?.partnerId),
+    partnerName: safeStr(scope?.partnerName),
+    partnerStatus: lower(scope?.partnerStatus || "active"),
+    primaryCountyLower,
+    neighboringCountiesLower,
+    countiesLower: mergedCountiesLower,
     town: safeStr(scope?.town),
   };
 }
 
-async function listAssignedAdminCandidatesForCounty(countyLower, { excludeUids = [] } = {}) {
-  const safeCountyLower = normalizeCountyLower(countyLower);
-  if (!safeCountyLower) return [];
+function enrichAdminCandidate(candidate, loadMap = {}) {
+  const uid = safeStr(candidate?.uid);
+  const availability = normalizeAvailability(candidate?.availability);
+  const availabilityWeight = ADMIN_AVAILABILITY_WEIGHTS[availability] || 0;
+  const activeLoad = Math.max(0, toNum(loadMap?.[uid], 0));
+  const maxActive = clamp(
+    toNum(candidate?.maxActiveRequests, DEFAULT_MAX_ACTIVE_REQUESTS),
+    1,
+    120
+  );
+  const capacityRatio = activeLoad / maxActive;
+  const hasCapacity = capacityRatio < 1;
+  const eligible = Boolean(uid) && availabilityWeight > 0 && hasCapacity;
+  const capacityWeight = eligible ? clamp(1 - capacityRatio, 0.08, 1) : 0;
+  const fairnessWeight = eligible ? 1 / (1 + activeLoad) : 0;
+
+  return {
+    ...candidate,
+    availability,
+    activeLoad,
+    maxActiveRequests: maxActive,
+    availableSlots: Math.max(0, maxActive - activeLoad),
+    capacityRatio,
+    eligible,
+    ineligibleReason:
+      !uid
+        ? "missing_admin_uid"
+        : availabilityWeight <= 0
+        ? "admin_unavailable"
+        : !hasCapacity
+        ? "admin_at_capacity"
+        : "",
+    score: eligible ? availabilityWeight * capacityWeight * fairnessWeight : 0,
+  };
+}
+
+function buildEligibleAdminOptions(candidates, loadMap = {}) {
+  return (Array.isArray(candidates) ? candidates : [])
+    .map((candidate) => enrichAdminCandidate(candidate, loadMap))
+    .filter((candidate) => candidate.eligible)
+    .sort((a, b) => {
+      const directGap =
+        Number(safeStr(b?.countyMatchType) === "direct") -
+        Number(safeStr(a?.countyMatchType) === "direct");
+      if (directGap !== 0) return directGap;
+
+      const loadGap = Number(a?.activeLoad || 0) - Number(b?.activeLoad || 0);
+      if (loadGap !== 0) return loadGap;
+
+      return safeStr(a?.email || a?.uid).localeCompare(safeStr(b?.email || b?.uid));
+    });
+}
+
+function pickAdminCandidate(candidates, loadMap = {}) {
+  return buildEligibleAdminOptions(candidates, loadMap)[0] || null;
+}
+
+async function listAssignedAdminCandidatesForRequest(
+  requestData,
+  { partnerId = "", excludeUids = [] } = {}
+) {
+  const safeCountyLower = normalizeCountyLower(requestData?.countyLower || requestData?.county);
+  const safePartnerId = safeStr(partnerId);
+  if (!safeCountyLower || !safePartnerId) return [];
 
   const excluded = new Set((excludeUids || []).map((x) => safeStr(x)).filter(Boolean));
   const snap = await db
@@ -399,6 +624,7 @@ async function listAssignedAdminCandidatesForCounty(countyLower, { excludeUids =
     if (!uid || excluded.has(uid)) return;
     const scope = normalizeAdminScope(data?.adminScope);
     if (!scope.active) return;
+    if (safeStr(scope?.partnerId) !== safePartnerId) return;
     if (!scope.countiesLower.includes(safeCountyLower)) return;
     rows.push({
       uid,
@@ -408,6 +634,10 @@ async function listAssignedAdminCandidatesForCounty(countyLower, { excludeUids =
       maxActiveRequests: scope.maxActiveRequests,
       responseTimeoutMinutes: scope.responseTimeoutMinutes,
       town: scope.town,
+      partnerId: safePartnerId,
+      partnerName: safeStr(scope?.partnerName),
+      countyMatchType:
+        safeStr(scope?.primaryCountyLower) === safeCountyLower ? "direct" : "neighboring",
     });
   });
 
@@ -463,43 +693,6 @@ async function buildActiveLoadMap() {
   return loadMap;
 }
 
-function pickAdminCandidate(candidates, loadMap = {}) {
-  const rows = Array.isArray(candidates) ? candidates : [];
-  if (!rows.length) return null;
-
-  let best = null;
-  rows.forEach((candidate) => {
-    const uid = safeStr(candidate?.uid);
-    if (!uid) return;
-
-    const availability = normalizeAvailability(candidate?.availability);
-    const availabilityWeight = ADMIN_AVAILABILITY_WEIGHTS[availability] || 0;
-    if (availabilityWeight <= 0) return;
-
-    const activeLoad = Math.max(0, toNum(loadMap?.[uid], 0));
-    const maxActive = clamp(toNum(candidate?.maxActiveRequests, DEFAULT_MAX_ACTIVE_REQUESTS), 1, 120);
-    const capacityRatio = activeLoad / maxActive;
-    if (capacityRatio >= 1.35) return;
-
-    const capacityWeight = capacityRatio >= 1 ? 0.08 : clamp(1 - capacityRatio, 0.1, 1);
-    const fairnessWeight = 1 / (1 + activeLoad);
-    const randomWeight = 0.9 + Math.random() * 0.2;
-    const score = availabilityWeight * capacityWeight * fairnessWeight * randomWeight;
-
-    if (!best || score > best.score) {
-      best = {
-        ...candidate,
-        availability,
-        activeLoad,
-        maxActiveRequests: maxActive,
-        score,
-      };
-    }
-  });
-
-  return best;
-}
-
 function buildReassignmentHistory(currentRequest, nextEntry) {
   const routingMeta =
     currentRequest?.routingMeta && typeof currentRequest.routingMeta === "object"
@@ -510,6 +703,236 @@ function buildReassignmentHistory(currentRequest, nextEntry) {
     : [];
   const next = [...currentHistory, nextEntry];
   return next.slice(Math.max(0, next.length - 25));
+}
+
+async function resolveSuperAdminFallback({ excludeUids = [] } = {}) {
+  const rows = await listSuperAdminCandidates({ excludeUids });
+  const candidate = rows[0] || null;
+  if (!candidate) return null;
+
+  return {
+    ...candidate,
+    partnerId: "",
+    partnerName: "",
+    countyMatchType: "",
+    unresolvedInbox: true,
+  };
+}
+
+async function buildRoutingSnapshot(
+  requestData,
+  { excludeAdminUids = [], includeAdminOptions = false } = {}
+) {
+  const trackType = lower(requestData?.track);
+  const country = safeStr(requestData?.country);
+  const county = safeStr(requestData?.county);
+  const preferredAgentId = safeStr(requestData?.preferredAgentId);
+  const partnerRows = await listPartners({ activeOnly: false, max: 250 });
+  const evaluations = partnerRows.map((partner) => ({
+    partner,
+    compatibility: evaluatePartnerRequestCompatibility(partner, {
+      trackType,
+      country,
+      county,
+    }),
+  }));
+
+  const eligiblePartners = evaluations.filter((row) => row.compatibility?.eligible);
+  const preferredRow = preferredAgentId
+    ? evaluations.find((row) => safeStr(row?.partner?.id) === preferredAgentId)
+    : null;
+
+  let preferredAgentValid = false;
+  let preferredAgentReason = safeStr(requestData?.preferredAgentInvalidReason);
+  let partnerDecisionSource = "auto";
+  let candidatePartners = eligiblePartners;
+
+  if (preferredAgentId) {
+    if (!preferredRow) {
+      preferredAgentReason = preferredAgentReason || "partner_not_found";
+      partnerDecisionSource = "preferred_agent_invalid";
+    } else if (preferredRow.compatibility?.eligible) {
+      preferredAgentValid = true;
+      candidatePartners = [preferredRow];
+      partnerDecisionSource = "preferred_agent";
+    } else {
+      preferredAgentReason =
+        preferredAgentReason || safeStr(preferredRow.compatibility?.reasons?.[0]);
+      partnerDecisionSource = "preferred_agent_invalid";
+    }
+  }
+
+  const activeLoadMap = await buildActiveLoadMap();
+  const partnerSourceRows = includeAdminOptions ? eligiblePartners : candidatePartners;
+  const partnerOptions = [];
+  for (const row of partnerSourceRows) {
+    const adminCandidates = await listAssignedAdminCandidatesForRequest(requestData, {
+      partnerId: row.partner.id,
+      excludeUids: excludeAdminUids,
+    });
+    const eligibleAdminOptions = buildEligibleAdminOptions(adminCandidates, activeLoadMap);
+    const bestAdmin = pickAdminCandidate(adminCandidates, activeLoadMap);
+    const countyWeight = row.compatibility?.countyMatchType === "direct" ? 1.08 : 1;
+    const preferredWeight = preferredAgentValid ? 1.12 : 1;
+
+    partnerOptions.push({
+      partner: row.partner,
+      compatibility: row.compatibility,
+      adminOptions: includeAdminOptions ? eligibleAdminOptions : [],
+      bestAdmin,
+      pairScore: bestAdmin ? Number(bestAdmin.score || 0) * countyWeight * preferredWeight : 0,
+    });
+  }
+
+  const autoCandidatePartnerIds = new Set(candidatePartners.map((row) => safeStr(row?.partner?.id)));
+  const viableOptions = partnerOptions
+    .filter((row) => autoCandidatePartnerIds.has(safeStr(row?.partner?.id)))
+    .filter((row) => row.bestAdmin)
+    .sort((a, b) => Number(b.pairScore || 0) - Number(a.pairScore || 0));
+  const bestOption = viableOptions[0] || null;
+
+  let unresolvedReason = "";
+  if (!eligiblePartners.length) {
+    unresolvedReason = preferredAgentReason || "no_eligible_partner";
+  } else if (!viableOptions.length) {
+    unresolvedReason = "no_eligible_assigned_admin";
+  }
+
+  return {
+    preferredAgentId,
+    preferredAgentValid,
+    preferredAgentReason,
+    preferredAgentReasonLabel: preferredAgentReason
+      ? preferredAgentReasonLabel(preferredAgentReason)
+      : "",
+    partnerDecisionSource:
+      bestOption && partnerDecisionSource === "auto"
+        ? "auto"
+        : bestOption
+        ? partnerDecisionSource
+        : partnerDecisionSource === "auto"
+        ? "unresolved"
+        : partnerDecisionSource,
+    routingStatus: bestOption ? "assigned" : "unresolved",
+    unresolvedReason,
+    eligiblePartnerCount: eligiblePartners.length,
+    eligibleAdminCount: viableOptions.length,
+    eligiblePartners: partnerOptions.map((row) => ({
+      id: safeStr(row?.partner?.id),
+      displayName: safeStr(row?.partner?.displayName),
+      countyMatchType: safeStr(row?.compatibility?.countyMatchType),
+      adminCount: Array.isArray(row?.adminOptions) ? row.adminOptions.length : 0,
+      admins: Array.isArray(row?.adminOptions) ? row.adminOptions : [],
+      isPreferred: safeStr(row?.partner?.id) === preferredAgentId,
+    })),
+    bestOption,
+  };
+}
+
+async function resolveExplicitAdminCandidate(targetAdminUid, requestData = {}) {
+  const uid = safeStr(targetAdminUid);
+  if (!uid) throw new Error("Target admin is required.");
+
+  const data = await getUserDocByUid(uid);
+  if (!data) throw new Error("Target admin user does not exist.");
+
+  const email = safeStr(data?.email);
+  const normalizedRole = normalizeRole(data?.role);
+  const targetIsHardcodedSuper = isHardcodedSuperAdminEmail(email);
+  const isAssigned = normalizedRole === "assignedAdmin";
+
+  if (!(targetIsHardcodedSuper || isAssigned)) {
+    throw new Error("Target user is not an assigned admin.");
+  }
+
+  const scope = normalizeAdminScope(data?.adminScope);
+  if (isAssigned && !safeStr(scope?.partnerId)) {
+    throw new Error("Target admin is missing a partner binding.");
+  }
+
+  const countyLower = normalizeCountyLower(requestData?.countyLower || requestData?.county);
+  if (isAssigned && countyLower && !scope.countiesLower.includes(countyLower)) {
+    throw new Error("Target admin does not cover this county.");
+  }
+
+  const candidateBase = {
+    uid,
+    email,
+    role: targetIsHardcodedSuper ? "superAdmin" : "assignedAdmin",
+    availability: scope.availability,
+    maxActiveRequests: scope.maxActiveRequests,
+    responseTimeoutMinutes: scope.responseTimeoutMinutes,
+    town: scope.town,
+    partnerId: safeStr(scope?.partnerId),
+    partnerName: safeStr(scope?.partnerName),
+    countyMatchType:
+      safeStr(scope?.primaryCountyLower) === countyLower ? "direct" : countyLower ? "neighboring" : "",
+  };
+
+  if (!isAssigned) {
+    return candidateBase;
+  }
+
+  const partner = await fetchPartnerById(scope.partnerId);
+  if (!partner) {
+    throw new Error("Target admin's partner no longer exists.");
+  }
+
+  const compatibility = evaluatePartnerRequestCompatibility(partner, {
+    trackType: requestData?.track,
+    country: requestData?.country,
+    county: requestData?.county,
+  });
+  if (!compatibility?.eligible) {
+    throw new Error(
+      preferredAgentReasonLabel(safeStr(compatibility?.reasons?.[0])) ||
+        "Target admin's partner is incompatible with this request."
+    );
+  }
+
+  const activeLoadMap = await buildActiveLoadMap();
+  const eligibility = enrichAdminCandidate(
+    {
+      ...candidateBase,
+      partnerId: safeStr(partner?.id || scope?.partnerId),
+      partnerName: safeStr(partner?.displayName || scope?.partnerName),
+    },
+    activeLoadMap
+  );
+  if (!eligibility.eligible) {
+    if (eligibility.ineligibleReason === "admin_unavailable") {
+      throw new Error("Target admin is unavailable.");
+    }
+    if (eligibility.ineligibleReason === "admin_at_capacity") {
+      throw new Error("Target admin has reached max capacity.");
+    }
+    throw new Error("Target admin is not eligible for routing.");
+  }
+
+  return eligibility;
+}
+
+async function resolveRoutingCandidate({ requestData, excludeAdminUids = [] } = {}) {
+  const routingSnapshot = await buildRoutingSnapshot(requestData, { excludeAdminUids });
+  if (routingSnapshot?.bestOption?.bestAdmin) {
+    return {
+      candidate: {
+        ...routingSnapshot.bestOption.bestAdmin,
+        partnerId: safeStr(routingSnapshot.bestOption?.partner?.id),
+        partnerName: safeStr(routingSnapshot.bestOption?.partner?.displayName),
+        countyMatchType: safeStr(routingSnapshot.bestOption?.compatibility?.countyMatchType),
+      },
+      routingSnapshot,
+      escalationReason: "",
+    };
+  }
+
+  const fallback = await resolveSuperAdminFallback({ excludeUids: excludeAdminUids });
+  return {
+    candidate: fallback,
+    routingSnapshot,
+    escalationReason: safeStr(routingSnapshot?.unresolvedReason || "manual_intervention_required"),
+  };
 }
 
 async function notifyAdminRoutedRequest({ requestId, adminUid, reason }) {
@@ -551,11 +974,13 @@ async function routeRequestToAdmin({
   reason,
   escalationReason = "",
   previousAdminUid = "",
+  routingSnapshot = null,
 }) {
   const safeRid = safeStr(requestId);
   const targetUid = safeStr(candidate?.uid);
   if (!safeRid || !targetUid) return { ok: false, reason: "missing_target" };
 
+  const snapshot = routingSnapshot && typeof routingSnapshot === "object" ? routingSnapshot : {};
   const nowMs = Date.now();
   const timeoutMin = clamp(
     toNum(candidate?.responseTimeoutMinutes, DEFAULT_ADMIN_RESPONSE_TIMEOUT_MINUTES),
@@ -564,6 +989,15 @@ async function routeRequestToAdmin({
   );
   const deadlineMs = nowMs + timeoutMin * 60 * 1000;
   const previousUid = safeStr(previousAdminUid || requestData?.currentAdminUid);
+  const assignedAdminId = safeStr(candidate?.role) === "assignedAdmin" ? targetUid : "";
+  const assignedPartnerId =
+    safeStr(candidate?.role) === "assignedAdmin" ? safeStr(candidate?.partnerId) : "";
+  const assignedPartnerName =
+    safeStr(candidate?.role) === "assignedAdmin" ? safeStr(candidate?.partnerName) : "";
+  const routingStatus = safeStr(
+    snapshot?.routingStatus || (assignedAdminId ? "assigned" : "unresolved")
+  );
+  const unresolvedReason = safeStr(snapshot?.unresolvedReason || "");
   const historyEntry = {
     fromAdminUid: previousUid || null,
     toAdminUid: targetUid,
@@ -571,6 +1005,7 @@ async function routeRequestToAdmin({
     escalationReason: safeStr(escalationReason),
     routedAtMs: nowMs,
     availabilityAtRouting: normalizeAvailability(candidate?.availability),
+    assignedPartnerId: assignedPartnerId || null,
   };
   const reassignmentHistory = buildReassignmentHistory(requestData, historyEntry);
   const escalationCount =
@@ -591,6 +1026,10 @@ async function routeRequestToAdmin({
         currentAdminRole: safeStr(candidate?.role || "assignedAdmin"),
         currentAdminEmail: safeStr(candidate?.email),
         currentAdminAvailability: normalizeAvailability(candidate?.availability),
+        assignedAdminId,
+        assignedPartnerId,
+        assignedPartnerName,
+        routingStatus,
         routedAt: FieldValue.serverTimestamp(),
         routedAtMs: nowMs,
         routingReason: safeStr(reason) || "auto_route",
@@ -601,14 +1040,34 @@ async function routeRequestToAdmin({
         routingMeta: {
           county,
           town,
+          track: safeStr(requestData?.track),
+          country: safeStr(requestData?.country),
           currentAdminUid: targetUid,
           currentAdminRole: safeStr(candidate?.role || "assignedAdmin"),
           currentAdminEmail: safeStr(candidate?.email),
+          assignedAdminId,
+          assignedPartnerId,
+          assignedPartnerName,
+          preferredAgentId: safeStr(requestData?.preferredAgentId),
+          preferredAgentName: safeStr(requestData?.preferredAgentName),
+          preferredAgentStatus: safeStr(requestData?.preferredAgentStatus),
+          preferredAgentInvalidReason: safeStr(
+            snapshot?.preferredAgentReason || requestData?.preferredAgentInvalidReason
+          ),
+          preferredAgentInvalidMessage:
+            safeStr(snapshot?.preferredAgentReasonLabel) ||
+            safeStr(requestData?.preferredAgentInvalidMessage),
           routedAt: FieldValue.serverTimestamp(),
           routedAtMs: nowMs,
           routingReason: safeStr(reason) || "auto_route",
+          routingStatus,
           adminAvailabilityAtRouting: normalizeAvailability(candidate?.availability),
           escalationReason: safeStr(escalationReason),
+          unresolvedReason,
+          partnerDecisionSource: safeStr(snapshot?.partnerDecisionSource),
+          countyMatchType: safeStr(candidate?.countyMatchType || ""),
+          eligiblePartnerCount: toNum(snapshot?.eligiblePartnerCount, 0),
+          eligibleAdminCount: toNum(snapshot?.eligibleAdminCount, 0),
           escalationCount,
           reassignmentHistory,
           acceptedAt: requestData?.routingMeta?.acceptedAt || null,
@@ -638,7 +1097,6 @@ async function autoRouteRequest({
     return { ok: false, reason: "locked_owner" };
   }
 
-  const countyLower = normalizeCountyLower(data?.countyLower || data?.county);
   const excluded = Array.from(
     new Set(
       [safeStr(data?.currentAdminUid), ...excludeAdminUids]
@@ -647,45 +1105,48 @@ async function autoRouteRequest({
     )
   );
 
-  const [assignedAdmins, activeLoadMap] = await Promise.all([
-    listAssignedAdminCandidatesForCounty(countyLower, { excludeUids: excluded }),
-    buildActiveLoadMap(),
-  ]);
-
-  const pickedAssigned = pickAdminCandidate(assignedAdmins, activeLoadMap);
-  if (pickedAssigned) {
+  const auto = await resolveRoutingCandidate({
+    requestData: data,
+    excludeAdminUids: excluded,
+  });
+  if (auto?.candidate) {
     return routeRequestToAdmin({
       requestId: safeRid,
       requestData: data,
-      candidate: pickedAssigned,
+      candidate: auto.candidate,
       reason,
-      escalationReason: "",
-    });
-  }
-
-  const superAdmins = await listSuperAdminCandidates({ excludeUids: excluded });
-  const pickedSuper = pickAdminCandidate(superAdmins, activeLoadMap);
-  if (pickedSuper) {
-    return routeRequestToAdmin({
-      requestId: safeRid,
-      requestData: data,
-      candidate: pickedSuper,
-      reason,
-      escalationReason: "no_eligible_assigned_admin",
+      escalationReason: safeStr(auto?.escalationReason),
+      previousAdminUid: safeStr(data?.currentAdminUid),
+      routingSnapshot: auto?.routingSnapshot || null,
     });
   }
 
   await db.collection("serviceRequests").doc(safeRid).set(
     {
-      escalationReason: "no_valid_admin_available",
+      routingStatus: "unresolved",
+      escalationReason:
+        safeStr(auto?.routingSnapshot?.unresolvedReason || "no_valid_admin_available"),
       escalationCount: toNum(data?.escalationCount, 0) + 1,
       routingReason: safeStr(reason) || "auto_route",
       updatedAt: FieldValue.serverTimestamp(),
+      routingMeta: {
+        ...(data?.routingMeta && typeof data.routingMeta === "object" ? data.routingMeta : {}),
+        routingStatus: "unresolved",
+        unresolvedReason: safeStr(
+          auto?.routingSnapshot?.unresolvedReason || "no_valid_admin_available"
+        ),
+        partnerDecisionSource: safeStr(auto?.routingSnapshot?.partnerDecisionSource || "unresolved"),
+        eligiblePartnerCount: toNum(auto?.routingSnapshot?.eligiblePartnerCount, 0),
+        eligibleAdminCount: toNum(auto?.routingSnapshot?.eligibleAdminCount, 0),
+      },
     },
     { merge: true }
   );
 
-  return { ok: false, reason: "no_valid_admin_available" };
+  return {
+    ok: false,
+    reason: safeStr(auto?.routingSnapshot?.unresolvedReason || "no_valid_admin_available"),
+  };
 }
 
 async function notifyRequestOwnerStatus({
@@ -897,6 +1358,9 @@ exports.superAdminOverrideRouteRequest = functions.https.onCall(async (data, con
   }
 
   const selectedTargetAdminDoc = await getUserDocByUid(targetAdminUid);
+  if (!selectedTargetAdminDoc) {
+    throw new functions.https.HttpsError("not-found", "Target admin user does not exist");
+  }
   const selectedTargetRole = normalizeRole(selectedTargetAdminDoc?.role);
   const selectedIsHardcodedSuper = isHardcodedSuperAdminEmail(selectedTargetAdminDoc?.email);
   if (!(selectedIsHardcodedSuper || selectedTargetRole === "assignedAdmin")) {
@@ -934,27 +1398,25 @@ exports.superAdminOverrideRouteRequest = functions.https.onCall(async (data, con
     }
   }
 
-  const targetRole = normalizeRole(targetAdminDoc?.role);
-  const targetIsHardcodedSuper = isHardcodedSuperAdminEmail(
-    targetAdminDoc?.email || selectedTargetAdminDoc?.email
-  );
-  if (!(targetIsHardcodedSuper || targetRole === "assignedAdmin")) {
-    throw new functions.https.HttpsError("invalid-argument", "Target admin account is not active.");
+  let candidate = null;
+  try {
+    candidate = await resolveExplicitAdminCandidate(
+      effectiveTargetAdminUid || safeStr(targetAdminUid),
+      reqData
+    );
+  } catch (error) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      safeStr(error?.message || "Target admin is not eligible for this request.")
+    );
   }
 
-  const targetScope = normalizeAdminScope(
-    targetAdminDoc?.adminScope && typeof targetAdminDoc.adminScope === "object"
-      ? targetAdminDoc.adminScope
-      : selectedTargetAdminDoc?.adminScope
-  );
-  const candidate = {
-    uid: effectiveTargetAdminUid || safeStr(targetAdminUid),
-    email: safeStr(targetAdminDoc?.email || selectedTargetAdminDoc?.email),
-    role: targetIsHardcodedSuper ? "superAdmin" : "assignedAdmin",
-    availability: targetScope.availability,
-    maxActiveRequests: targetScope.maxActiveRequests,
-    responseTimeoutMinutes: targetScope.responseTimeoutMinutes,
-    town: targetScope.town,
+  const routingSnapshot = {
+    routingStatus: safeStr(candidate?.role) === "assignedAdmin" ? "assigned" : "unresolved",
+    unresolvedReason: safeStr(candidate?.role) === "assignedAdmin" ? "" : "manual_intervention_required",
+    partnerDecisionSource: "manual_override",
+    eligiblePartnerCount: candidate?.partnerId ? 1 : 0,
+    eligibleAdminCount: safeStr(candidate?.role) === "assignedAdmin" ? 1 : 0,
   };
 
   const result = await routeRequestToAdmin({
@@ -962,8 +1424,12 @@ exports.superAdminOverrideRouteRequest = functions.https.onCall(async (data, con
     requestData: reqData,
     candidate,
     reason,
-    escalationReason: "super_admin_override",
+    escalationReason:
+      safeStr(candidate?.role) === "assignedAdmin"
+        ? "super_admin_override"
+        : "manual_intervention_required",
     previousAdminUid: safeStr(reqData?.currentAdminUid),
+    routingSnapshot,
   });
 
   if (safeStr(reqData?.ownerLockedAdminUid)) {
@@ -1558,4 +2024,26 @@ exports.onSelfHelpLinkClick = onDocumentCreated(
 
     await ref.set(update, { merge: true });
   }
+);
+
+Object.assign(
+  exports,
+  buildFinanceFoundation({
+    functions,
+    onSchedule,
+    logger,
+    db,
+    FieldValue,
+    REGION,
+    safeStr,
+    lower,
+    toNum,
+    clamp,
+    getUserDocByUid,
+    requireAdminCallerContext,
+    normalizeAdminScope,
+    fetchPartnerById,
+    claimEventLock,
+    autoRouteRequest,
+  })
 );

@@ -18,12 +18,24 @@ import {
   getDummyPaymentDraft,
   getDummyPaymentState,
   setDummyPaymentDraft,
+  setDummyPaymentState,
 } from "../utils/dummyPayment";
 import { useRequestPricingEntry } from "../hooks/useRequestPricing";
 import {
   buildRequestDefinitionKey,
   fetchRequestDefinitionByKey,
 } from "../services/requestDefinitionService";
+import {
+  saveWorkflowDraft,
+  WORKFLOW_DRAFT_FLOW_FAMILIES,
+  WORKFLOW_DRAFT_FLOW_KINDS,
+  WORKFLOW_DRAFT_STATUSES,
+} from "../services/workflowdraftservice";
+import {
+  listEligiblePreferredAgents,
+  preferredAgentReasonLabel,
+  validatePreferredAgentSelection,
+} from "../services/partnershipService";
 
 const STANDALONE = isStandalone();
 
@@ -193,13 +205,25 @@ function normalizeUnlockPaymentReceipt(input) {
     status: "paid",
     method: String(input?.method || "dummy").trim().toLowerCase() || "dummy",
     amount: String(input?.amount || "").trim(),
+    currency: String(input?.currency || "KES").trim().toUpperCase() || "KES",
     paidAtMs,
     transactionReference: String(
       input?.transactionReference || input?.reference || input?.ref || ""
     )
       .trim()
       .slice(0, 120),
+    requestId: String(input?.requestId || "").trim(),
+    paymentId: String(input?.paymentId || "").trim(),
   };
+}
+
+function parseAmountNumber(input) {
+  const digits = String(input || "")
+    .replace(/[^0-9.]+/g, "")
+    .trim();
+  const amount = Number(digits || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  return Math.round(amount);
 }
 
 function stripModalTitlePrefix(value) {
@@ -208,7 +232,28 @@ function stripModalTitlePrefix(value) {
   return text
     .replace(/^request:\s*/i, "")
     .replace(/^continue:\s*/i, "")
-    .trim();
+      .trim();
+}
+
+function toWorkflowDraftExpiryMs({ paymentRequired, paid }) {
+  if (paid) return 0;
+  if (paymentRequired) return Date.now() + 30 * 24 * 60 * 60 * 1000;
+  return Date.now() + 30 * 24 * 60 * 60 * 1000;
+}
+
+function resolveWorkflowDraftStatus({ flow, paymentRequired, paid }) {
+  if (flow === "fullpackage") {
+    return paid
+      ? WORKFLOW_DRAFT_STATUSES.READY_TO_GENERATE_REQUESTS
+      : WORKFLOW_DRAFT_STATUSES.FULL_PACKAGE_DRAFT;
+  }
+  if (paymentRequired && paid) {
+    return WORKFLOW_DRAFT_STATUSES.UNLOCK_PAID_PENDING_SUBMISSION;
+  }
+  if (paymentRequired) {
+    return WORKFLOW_DRAFT_STATUSES.DRAFT_PENDING_PAYMENT;
+  }
+  return WORKFLOW_DRAFT_STATUSES.DRAFT;
 }
 
 function normalizeExtraFieldSnapshot(input) {
@@ -295,14 +340,18 @@ function scrollFieldIntoView(el, scrollContainer) {
     try {
       el.scrollIntoView({ block: "center", behavior: "smooth" });
       return;
-    } catch {}
+    } catch {
+      // Fall back to manual scroll adjustment when smooth centering is unavailable.
+    }
 
     try {
       const r1 = el.getBoundingClientRect();
       const r2 = scrollContainer.getBoundingClientRect();
       const delta = r1.top - r2.top - r2.height * 0.35;
       scrollContainer.scrollTop += delta;
-    } catch {}
+    } catch {
+      // Ignore positioning failures from stale nodes during rapid modal transitions.
+    }
   }, 80);
 }
 
@@ -330,15 +379,21 @@ function warmUpKeyboardOnceAndRefocus(targetEl) {
 
     try {
       hidden.focus();
-    } catch {}
+    } catch {
+      // Some WebViews reject focusing hidden warm-up inputs.
+    }
 
     setTimeout(() => {
       try {
         hidden.blur();
-      } catch {}
+      } catch {
+        // Ignore cleanup blur failures.
+      }
       try {
         document.body.removeChild(hidden);
-      } catch {}
+      } catch {
+        // Ignore if the hidden input was already detached.
+      }
 
       sessionStorage.setItem("kb_warmed", "1");
 
@@ -350,13 +405,17 @@ function warmUpKeyboardOnceAndRefocus(targetEl) {
             } catch {
               try {
                 targetEl.focus();
-              } catch {}
+              } catch {
+                // Final focus attempt can fail if the target is gone.
+              }
             }
           });
         });
       }
     }, 60);
-  } catch {}
+  } catch {
+    // Session storage or DOM access may be unavailable in some embedded contexts.
+  }
 }
 
 export default function RequestModal({
@@ -393,6 +452,7 @@ export default function RequestModal({
   const scrollRef = useRef(null);
   const wasOpenRef = useRef(false);
   const lastStateEmitRef = useRef("");
+  const persistDraftBeforeCloseRef = useRef(() => {});
 
   // prevents "tap causes close + blur" on Android
   const startedInsidePanelRef = useRef(false);
@@ -409,7 +469,7 @@ export default function RequestModal({
     }
   }, [returnTo, location.search]);
 
-  const handleClose = useMemo(() => {
+  const finishClose = useMemo(() => {
     return () => {
       if (onClose) onClose();
       if (effectiveReturnTo) {
@@ -435,6 +495,10 @@ export default function RequestModal({
   const [town, setTown] = useState(defaultTown);
   const [note, setNote] = useState("");
   const [requestDraftId, setRequestDraftId] = useState("");
+  const [preferredAgentId, setPreferredAgentId] = useState("");
+  const [agentOptions, setAgentOptions] = useState([]);
+  const [agentLoading, setAgentLoading] = useState(false);
+  const [preferredAgentWarning, setPreferredAgentWarning] = useState("");
 
   const [requestDefinition, setRequestDefinition] = useState(null);
   const [definitionLoading, setDefinitionLoading] = useState(false);
@@ -620,10 +684,14 @@ export default function RequestModal({
     );
     setTown(seeded?.town ?? seeded?.city ?? storedForm?.town ?? storedForm?.city ?? defaultTown ?? "");
     setNote(seeded?.note ?? storedForm?.note ?? "");
+    setPreferredAgentId(
+      String(seeded?.preferredAgentId ?? storedForm?.preferredAgentId ?? "").trim()
+    );
     setExtraFieldValues(normalizeExtraFieldSnapshot(seededExtraRaw));
     setPickedFiles([]);
     setPickedFileMetas(restoredMetas);
     setPaid(Boolean(forcePaid || seeded?.paid || storedForm?.paid || paidFromStorage));
+    setPreferredAgentWarning("");
     setErr("");
     setLoading(false);
 
@@ -672,6 +740,7 @@ export default function RequestModal({
         town: String(town || ""),
         city: String(town || ""),
         note: String(note || ""),
+        preferredAgentId: String(preferredAgentId || ""),
         fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
         extraFieldValues: extraFieldSnapshot,
         paid: Boolean(forcePaid || paid),
@@ -700,6 +769,7 @@ export default function RequestModal({
     county,
     town,
     note,
+    preferredAgentId,
     pickedFileMetas,
     requestDraftId,
     extraFieldValues,
@@ -720,6 +790,7 @@ export default function RequestModal({
         town: String(town || ""),
         city: String(town || ""),
         note: String(note || ""),
+        preferredAgentId: String(preferredAgentId || ""),
         fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
         extraFieldValues: extraFieldSnapshot,
         paid: Boolean(forcePaid || paid),
@@ -738,6 +809,7 @@ export default function RequestModal({
     county,
     town,
     note,
+    preferredAgentId,
     pickedFileMetas,
     paid,
     forcePaid,
@@ -745,6 +817,233 @@ export default function RequestModal({
     resolvedPaymentAmount,
     extraFieldValues,
   ]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    if (!requestDraftId) return undefined;
+
+    const flow = String(paymentContext?.flow || "").trim().toLowerCase();
+    const isFullPackageItemFlow = flow === "fullpackage";
+    const effectivePaid = Boolean(forcePaid || paid);
+    const requestModalState = {
+      open: true,
+      serviceName: String(paymentContext?.serviceName || definitionTitle || "").trim(),
+      requestType: String(paymentContext?.requestType || "single").trim(),
+      step: effectivePaid ? "submit" : "form",
+      formState: {
+        name: String(name || ""),
+        phone: String(phone || ""),
+        email: String(email || ""),
+        county: String(county || ""),
+        town: String(town || ""),
+        city: String(town || ""),
+        note: String(note || ""),
+        preferredAgentId: String(preferredAgentId || ""),
+        fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        extraFieldValues: serializeExtraFieldSnapshot(extraFieldValues),
+        paid: effectivePaid,
+        requestDraftId: String(requestDraftId || ""),
+      },
+      selectedItem: String(paymentContext?.selectedItem || "").trim(),
+    };
+
+    const timer = setTimeout(() => {
+      void saveWorkflowDraft(requestDraftId, {
+        flowFamily: isFullPackageItemFlow
+          ? WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE
+          : WORKFLOW_DRAFT_FLOW_FAMILIES.NORMAL_REQUEST,
+        flowKind: isFullPackageItemFlow
+          ? WORKFLOW_DRAFT_FLOW_KINDS.FULL_PACKAGE_ITEM_REQUEST
+          : WORKFLOW_DRAFT_FLOW_KINDS.WEHELP_REQUEST,
+        status: resolveWorkflowDraftStatus({
+          flow,
+          paymentRequired,
+          paid: effectivePaid,
+        }),
+        title:
+          String(
+            paymentContext?.selectedItem ||
+              paymentContext?.serviceName ||
+              definitionTitle ||
+              stripModalTitlePrefix(title)
+          ).trim() || "Draft",
+        subtitle: String(subtitle || "").trim(),
+        track: String(paymentContext?.track || "").trim().toLowerCase(),
+        country: String(paymentContext?.country || "").trim(),
+        county: String(county || "").trim(),
+        serviceName: String(paymentContext?.serviceName || definitionTitle || "").trim(),
+        requestType: String(paymentContext?.requestType || "single").trim(),
+        routePath: location.pathname,
+        routeSearch: location.search || "",
+        selectedItem: String(paymentContext?.selectedItem || "").trim(),
+        selectedItems: Array.isArray(paymentContext?.selectedItems)
+          ? paymentContext.selectedItems
+          : [],
+        fullPackageId: String(paymentContext?.fullPackageId || "").trim(),
+        paymentState: effectivePaid ? "paid" : paymentRequired ? "pending" : "unpaid",
+        paymentAmount: Number(
+          String(resolvedPaymentAmount || "")
+            .replace(/[^0-9.]+/g, "")
+            .trim() || 0
+        ),
+        paymentCurrency: String(paymentContext?.currency || "KES").trim().toUpperCase(),
+        fullPackageUnlockPaid: effectivePaid && isFullPackageItemFlow,
+        expiresAtMs: toWorkflowDraftExpiryMs({
+          paymentRequired,
+          paid: effectivePaid,
+        }),
+        resumeState: {
+          requestModal: requestModalState,
+          fullPackage: isFullPackageItemFlow
+            ? {
+                screen: "missing",
+                fullPackageId: String(paymentContext?.fullPackageId || "").trim(),
+                selectedItem: String(paymentContext?.selectedItem || "").trim(),
+                selectedItems: Array.isArray(paymentContext?.selectedItems)
+                  ? paymentContext.selectedItems
+                  : [],
+                requestModal: requestModalState,
+              }
+            : null,
+        },
+      }).catch((error) => {
+        console.warn("Failed to save workflow draft:", error?.message || error);
+      });
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [
+    open,
+    requestDraftId,
+    paymentContext,
+    definitionTitle,
+    title,
+    subtitle,
+    location.pathname,
+    location.search,
+    name,
+    phone,
+    email,
+    county,
+    town,
+    note,
+    preferredAgentId,
+    pickedFileMetas,
+    extraFieldValues,
+    paymentRequired,
+    resolvedPaymentAmount,
+    forcePaid,
+    paid,
+  ]);
+
+  const persistDraftBeforeClose = () => {
+    if (!open || !requestDraftId) return;
+
+    const flow = String(paymentContext?.flow || "").trim().toLowerCase();
+    const isFullPackageItemFlow = flow === "fullpackage";
+    const effectivePaid = Boolean(forcePaid || paid);
+    const extraFieldSnapshot = serializeExtraFieldSnapshot(extraFieldValues);
+    const requestModalState = {
+      open: true,
+      serviceName: String(paymentContext?.serviceName || definitionTitle || "").trim(),
+      requestType: String(paymentContext?.requestType || "single").trim(),
+      step: effectivePaid ? "submit" : "form",
+      formState: {
+        name: String(name || ""),
+        phone: String(phone || ""),
+        email: String(email || ""),
+        county: String(county || ""),
+        town: String(town || ""),
+        city: String(town || ""),
+        note: String(note || ""),
+        preferredAgentId: String(preferredAgentId || ""),
+        fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        extraFieldValues: extraFieldSnapshot,
+        paid: effectivePaid,
+        requestDraftId: String(requestDraftId || ""),
+      },
+      selectedItem: String(paymentContext?.selectedItem || "").trim(),
+    };
+
+    setDummyPaymentDraft(requestDraftId, {
+      requestDraftId: String(requestDraftId || ""),
+      formState: requestModalState.formState,
+      paymentContext: paymentContext && typeof paymentContext === "object" ? paymentContext : null,
+      amount: resolvedPaymentAmount,
+      updatedAt: Date.now(),
+    });
+
+    void saveWorkflowDraft(requestDraftId, {
+      flowFamily: isFullPackageItemFlow
+        ? WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE
+        : WORKFLOW_DRAFT_FLOW_FAMILIES.NORMAL_REQUEST,
+      flowKind: isFullPackageItemFlow
+        ? WORKFLOW_DRAFT_FLOW_KINDS.FULL_PACKAGE_ITEM_REQUEST
+        : WORKFLOW_DRAFT_FLOW_KINDS.WEHELP_REQUEST,
+      status: resolveWorkflowDraftStatus({
+        flow,
+        paymentRequired,
+        paid: effectivePaid,
+      }),
+      title:
+        String(
+          paymentContext?.selectedItem ||
+            paymentContext?.serviceName ||
+            definitionTitle ||
+            stripModalTitlePrefix(title)
+        ).trim() || "Draft",
+      subtitle: String(subtitle || "").trim(),
+      track: String(paymentContext?.track || "").trim().toLowerCase(),
+      country: String(paymentContext?.country || "").trim(),
+      county: String(county || "").trim(),
+      serviceName: String(paymentContext?.serviceName || definitionTitle || "").trim(),
+      requestType: String(paymentContext?.requestType || "single").trim(),
+      routePath: location.pathname,
+      routeSearch: location.search || "",
+      selectedItem: String(paymentContext?.selectedItem || "").trim(),
+      selectedItems: Array.isArray(paymentContext?.selectedItems)
+        ? paymentContext.selectedItems
+        : [],
+      fullPackageId: String(paymentContext?.fullPackageId || "").trim(),
+      paymentState: effectivePaid ? "paid" : paymentRequired ? "pending" : "unpaid",
+      paymentAmount: Number(
+        String(resolvedPaymentAmount || "")
+          .replace(/[^0-9.]+/g, "")
+          .trim() || 0
+      ),
+      paymentCurrency: String(paymentContext?.currency || "KES").trim().toUpperCase(),
+      fullPackageUnlockPaid: effectivePaid && isFullPackageItemFlow,
+      expiresAtMs: toWorkflowDraftExpiryMs({
+        paymentRequired,
+        paid: effectivePaid,
+      }),
+      resumeState: {
+        requestModal: requestModalState,
+        fullPackage: isFullPackageItemFlow
+          ? {
+              screen: "missing",
+              fullPackageId: String(paymentContext?.fullPackageId || "").trim(),
+              selectedItem: String(paymentContext?.selectedItem || "").trim(),
+              selectedItems: Array.isArray(paymentContext?.selectedItems)
+                ? paymentContext.selectedItems
+                : [],
+              requestModal: requestModalState,
+            }
+          : null,
+      },
+    }).catch((error) => {
+      console.warn("Failed to save workflow draft on close:", error?.message || error);
+    });
+  };
+
+  persistDraftBeforeCloseRef.current = persistDraftBeforeClose;
+
+  const handleClose = useMemo(() => {
+    return () => {
+      persistDraftBeforeCloseRef.current?.();
+      finishClose();
+    };
+  }, [finishClose]);
 
   // lock body scroll (ANDROID SAFE)
   useEffect(() => {
@@ -807,22 +1106,54 @@ export default function RequestModal({
     definitionLoading,
   ]);
 
-  if (!open) return null;
-
   const doPay = () => {
     if (!paymentRequired) return;
-    if (!name.trim() || !phone.trim() || !String(email || "").trim()) {
+    const cleanName = String(name || "").trim();
+    const cleanPhone = normalizePhone(phone);
+    const cleanEmail = String(email || "").trim().toLowerCase();
+    const cleanCounty = normalizeCountyName(county);
+    const cleanTown = String(town || "").trim();
+
+    if (!cleanName || !cleanPhone || !cleanEmail) {
       setErr("Please fill in name, phone and email first.");
       return;
     }
-    if (!isValidEmail(email)) {
+    if (!isValidEmail(cleanEmail)) {
       setErr("Please enter a valid email address.");
+      return;
+    }
+    if (!cleanCounty) {
+      setErr("Please select your county first.");
       return;
     }
     if (!resolvedPaymentAmount) {
       setErr("Pricing is unavailable right now. Refresh and try again.");
       return;
     }
+    if (definitionLoading) {
+      setErr("Please wait for additional fields to load.");
+      return;
+    }
+
+    const extraFieldError = validateExtraFields();
+    if (extraFieldError) {
+      setErr(extraFieldError);
+      return;
+    }
+
+    const { extraFieldAnswers, extraDocMetas } = buildExtraFieldPayload();
+    const mergedFileMetas = [
+      ...(Array.isArray(pickedFileMetas) ? pickedFileMetas : []),
+      ...(Array.isArray(extraDocMetas) ? extraDocMetas : []),
+    ];
+    const requestUploadMeta =
+      mergedFileMetas.length > 0
+        ? {
+            count: mergedFileMetas.length,
+            files: mergedFileMetas,
+            note: "User selected PDF files (metadata only).",
+          }
+        : null;
 
     const draftId = String(requestDraftId || createRequestDraftId()).trim();
     const qs = new URLSearchParams(location.search || "");
@@ -853,13 +1184,14 @@ export default function RequestModal({
     setDummyPaymentDraft(draftId, {
       requestDraftId: draftId,
       formState: {
-        name: String(name || ""),
-        phone: String(phone || ""),
-        email: String(email || ""),
-        county: String(county || ""),
-        town: String(town || ""),
-        city: String(town || ""),
+        name: cleanName,
+        phone: cleanPhone,
+        email: cleanEmail,
+        county: cleanCounty,
+        town: cleanTown,
+        city: cleanTown,
         note: String(note || ""),
+        preferredAgentId: String(preferredAgentId || ""),
         fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
         extraFieldValues: extraFieldSnapshot,
         paid: Boolean(forcePaid || paid),
@@ -871,36 +1203,98 @@ export default function RequestModal({
     });
 
     setErr("");
-    onPay?.({
+    const payPayload = {
       requestDraftId: draftId,
       returnTo,
       amount: amountText,
-    });
+      name: cleanName,
+      phone: cleanPhone,
+      email: cleanEmail,
+      county: cleanCounty,
+      town: cleanTown,
+      city: cleanTown,
+      note: String(note || "").trim(),
+      preferredAgentId: String(preferredAgentId || "").trim(),
+      requestUploadMeta,
+      extraFieldAnswers: extraFieldAnswers || null,
+      paymentContext: paymentContext && typeof paymentContext === "object" ? paymentContext : null,
+    };
 
-    const paymentQs = new URLSearchParams();
-    paymentQs.set("draft", draftId);
-    paymentQs.set("returnTo", returnTo);
-    if (amountText) paymentQs.set("amount", amountText);
+    Promise.resolve(onPay?.(payPayload))
+      .then((result) => {
+        void saveWorkflowDraft(draftId, {
+          flowFamily:
+            flow === "fullpackage"
+              ? WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE
+              : WORKFLOW_DRAFT_FLOW_FAMILIES.NORMAL_REQUEST,
+          flowKind:
+            flow === "fullpackage"
+              ? WORKFLOW_DRAFT_FLOW_KINDS.FULL_PACKAGE_ITEM_REQUEST
+              : WORKFLOW_DRAFT_FLOW_KINDS.WEHELP_REQUEST,
+          status: WORKFLOW_DRAFT_STATUSES.PAYMENT_INITIATED,
+          linkedRequestId: String(result?.requestId || "").trim(),
+          linkedPayment: {
+            requestId: String(result?.requestId || "").trim(),
+            paymentId: String(result?.paymentId || "").trim(),
+            paymentType: "unlock_request",
+            status: "payment_session_created",
+            paymentState: "pending",
+            amount: Number(result?.amount || 0) || parseAmountNumber(amountText),
+            currency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
+            reference: String(result?.reference || "").trim(),
+          },
+          paymentState: "pending",
+          paymentAmount: Number(result?.amount || 0) || parseAmountNumber(amountText),
+          paymentCurrency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
+          paymentReference: String(result?.reference || "").trim(),
+        }).catch((error) => {
+          console.warn("Failed to link workflow draft to payment session:", error?.message || error);
+        });
 
-    navigate(`/app/dummy-payment?${paymentQs.toString()}`, {
-      state: {
-        requestDraftId: draftId,
-        returnTo,
-        amount: amountText,
-        paymentContext: paymentContext && typeof paymentContext === "object" ? paymentContext : null,
-        draftForm: {
-          name: String(name || ""),
-          phone: String(phone || ""),
-          email: String(email || ""),
-          county: String(county || ""),
-          town: String(town || ""),
-          city: String(town || ""),
-          note: String(note || ""),
-          fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
-          extraFieldValues: extraFieldSnapshot,
-        },
-      },
-    });
+        const inlinePaymentReceipt = normalizeUnlockPaymentReceipt(
+          result?.inlinePaymentReceipt || result?.unlockPaymentReceipt
+        );
+        if (inlinePaymentReceipt) {
+          setDummyPaymentState(draftId, inlinePaymentReceipt);
+          setPaid(true);
+          setErr("");
+          void saveWorkflowDraft(draftId, {
+            status: WORKFLOW_DRAFT_STATUSES.UNLOCK_PAID_PENDING_SUBMISSION,
+            paymentState: "paid",
+            paymentAmount: Number(result?.amount || 0) || parseAmountNumber(amountText),
+            paymentCurrency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
+            paymentReference: String(
+              inlinePaymentReceipt.transactionReference || result?.reference || ""
+            ).trim(),
+            linkedPayment: {
+              requestId: String(result?.requestId || inlinePaymentReceipt.requestId || "").trim(),
+              paymentId: String(result?.paymentId || inlinePaymentReceipt.paymentId || "").trim(),
+              paymentType: "unlock_request",
+              status: "paid",
+              paymentState: "paid",
+              amount: Number(result?.amount || 0) || parseAmountNumber(amountText),
+              currency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
+              reference: String(
+                inlinePaymentReceipt.transactionReference || result?.reference || ""
+              ).trim(),
+              method: String(inlinePaymentReceipt.method || "").trim(),
+            },
+          }).catch((error) => {
+            console.warn("Failed to mark workflow draft as paid:", error?.message || error);
+          });
+          return;
+        }
+
+        const redirectUrl = String(result?.authorizationUrl || result?.redirectUrl || "").trim();
+        if (redirectUrl && typeof window !== "undefined") {
+          window.location.assign(redirectUrl);
+          return;
+        }
+        throw new Error("Hosted checkout URL was not returned by the backend.");
+      })
+      .catch((error) => {
+        setErr(error?.message || "Failed to start payment. Please try again.");
+      });
   };
 
   const openLegalDoc = (docKey) => {
@@ -908,6 +1302,91 @@ export default function RequestModal({
       state: { backTo: `${location.pathname}${location.search}` },
     });
   };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const trackType = String(paymentContext?.track || "").trim().toLowerCase();
+    const routeCountry = String(paymentContext?.country || "").trim();
+    const routeCounty = normalizeCountyName(county);
+
+    if (!trackType || !routeCountry || !routeCounty) {
+      setAgentOptions([]);
+      setAgentLoading(false);
+      setPreferredAgentWarning("");
+      return undefined;
+    }
+
+    let cancelled = false;
+    setAgentLoading(true);
+
+    (async () => {
+      try {
+        const rows = await listEligiblePreferredAgents({
+          trackType,
+          country: routeCountry,
+          county: routeCounty,
+          max: 250,
+        });
+        if (cancelled) return;
+        setAgentOptions(Array.isArray(rows) ? rows : []);
+      } catch (error) {
+        if (cancelled) return;
+        console.warn("preferred agent lookup failed:", error?.message || error);
+        setAgentOptions([]);
+      } finally {
+        if (!cancelled) setAgentLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, paymentContext?.track, paymentContext?.country, county]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const safePreferredAgentId = String(preferredAgentId || "").trim();
+    if (!safePreferredAgentId) {
+      setPreferredAgentWarning("");
+      return undefined;
+    }
+    if (agentOptions.some((row) => row.id === safePreferredAgentId)) {
+      setPreferredAgentWarning("");
+      return undefined;
+    }
+
+    const trackType = String(paymentContext?.track || "").trim().toLowerCase();
+    const routeCountry = String(paymentContext?.country || "").trim();
+    const routeCounty = normalizeCountyName(county);
+
+    if (!trackType || !routeCountry || !routeCounty) {
+      setPreferredAgentWarning("Selected agent will be rechecked when the route is complete.");
+      return undefined;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const validation = await validatePreferredAgentSelection({
+          partnerId: safePreferredAgentId,
+          trackType,
+          country: routeCountry,
+          county: routeCounty,
+        });
+        if (cancelled) return;
+        setPreferredAgentWarning(
+          validation?.valid ? "" : preferredAgentReasonLabel(validation?.reason)
+        );
+      } catch {
+        if (cancelled) return;
+        setPreferredAgentWarning("Selected agent will be validated during routing.");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, preferredAgentId, agentOptions, paymentContext?.track, paymentContext?.country, county]);
 
   const updateExtraFieldValue = (fieldId, patch) => {
     if (!fieldId) return;
@@ -941,6 +1420,8 @@ export default function RequestModal({
       fileMetas: files.map(fileToMeta),
     });
   };
+
+  if (!open) return null;
 
   const clearExtraDocument = (fieldId) => {
     updateExtraFieldValue(fieldId, { files: [], fileMetas: [] });
@@ -1130,10 +1611,12 @@ export default function RequestModal({
         name: cleanName,
         phone: cleanPhone,
         email: cleanEmail,
+        requestDraftId: String(requestDraftId || "").trim(),
         county: cleanCounty,
         town: cleanTown,
         city: cleanTown,
         note: String(note || "").trim(),
+        preferredAgentId: String(preferredAgentId || "").trim(),
 
         dummyFiles: mergedFiles,
 
@@ -1154,6 +1637,8 @@ export default function RequestModal({
               method: unlockPaymentReceipt.method,
               paidAt: unlockPaymentReceipt.paidAtMs,
               ref: unlockPaymentReceipt.transactionReference,
+              requestId: String(unlockPaymentReceipt.requestId || "").trim(),
+              paymentId: String(unlockPaymentReceipt.paymentId || "").trim(),
             }
           : { status: "paid_gate_passed", method: "dummy", paidAt: Date.now() },
         unlockPaymentReceipt: unlockPaymentReceipt || null,
@@ -1395,6 +1880,55 @@ export default function RequestModal({
                       {...focusProps}
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                    Preferred agent (optional)
+                  </label>
+                  <div className={fieldWrap}>
+                    <IconUser className="h-5 w-5 text-zinc-500" />
+                    <select
+                      className={inputBase}
+                      value={preferredAgentId}
+                      onChange={(e) => setPreferredAgentId(String(e.target.value || ""))}
+                      disabled={loading || agentLoading || !String(county || "").trim()}
+                      {...focusProps}
+                    >
+                      <option value="">No preference</option>
+                      {preferredAgentId &&
+                      !agentOptions.some((row) => row.id === preferredAgentId) ? (
+                        <option value={preferredAgentId}>Previously selected agent</option>
+                      ) : null}
+                      {agentOptions.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.displayName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {!String(county || "").trim() ? (
+                    <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      Select your county first to see matching agents.
+                    </div>
+                  ) : agentLoading ? (
+                    <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      Loading available agents...
+                    </div>
+                  ) : agentOptions.length === 0 ? (
+                    <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      No matched agents right now. You can still send the request.
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      This only sets a preference. Routing will still be validated.
+                    </div>
+                  )}
+                  {preferredAgentWarning ? (
+                    <div className="mt-1 text-xs text-amber-700 dark:text-amber-200">
+                      {preferredAgentWarning}
+                    </div>
+                  ) : null}
                 </div>
 
                 {definitionLoading ? (

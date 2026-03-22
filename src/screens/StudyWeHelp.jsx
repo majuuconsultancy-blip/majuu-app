@@ -8,7 +8,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import { motion, AnimatePresence } from "../utils/motionProxy";
+// eslint-disable-next-line no-unused-vars
+import { AnimatePresence, motion } from "../utils/motionProxy";
 import { smartBack } from "../utils/navBack";
 
 import {
@@ -22,8 +23,6 @@ import {
   Package,
   BadgeCheck,
   MapPinned,
-  Filter,
-  Tags,
   FileCheck2,
   PenTool,
   GraduationCap,
@@ -40,7 +39,10 @@ import RequestModal from "../components/RequestModal";
 import FullPackageDiagnosticModal from "../components/FullPackageDiagnosticModal";
 
 import { createServiceRequest } from "../services/requestservice";
-import { createUnlockPaymentForRequest } from "../services/paymentservice";
+import {
+  activatePreparedUnlockRequest,
+  createUnlockCheckoutSession,
+} from "../services/paymentservice";
 import {
   getUserState,
   setActiveProcessDetails,
@@ -54,7 +56,6 @@ import {
 import {
   findRequestCatalogEntry,
   buildRequestPricingKey,
-  listSingleRequestCatalogByTrack,
 } from "../constants/requestCatalog";
 import {
   getRequestPricingQuote,
@@ -65,6 +66,7 @@ import { setSnapshot } from "../resume/resumeEngine";
 import { normalizeJourney } from "../journey/journeyModel";
 import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
 import { logAnalyticsEvent } from "../services/analyticsService";
+import { archiveWorkflowDraft } from "../services/workflowdraftservice";
 
 const FULL_PACKAGE = [
   "Consultation & country selection",
@@ -112,24 +114,6 @@ function buildSingleRequestMeta(serviceName, country = "") {
   };
 }
 
-function Chip({ active, children, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition active:scale-[0.995]",
-        active
-          ? "border-emerald-200 bg-emerald-50/80 text-emerald-900"
-          : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-white",
-      ].join(" ")}
-    >
-      <AppIcon size={ICON_SM} icon={Tags} className="opacity-80" />
-      {children}
-    </button>
-  );
-}
-
 function ServiceIcon({ tag, title }) {
   if (title === "Document Review") return <AppIcon size={ICON_SM} icon={FileCheck2} />;
   if (title === "Passport Application") return <AppIcon size={ICON_SM} icon={IdCard} />;
@@ -145,6 +129,7 @@ function ServiceIcon({ tag, title }) {
 function ServiceTile({ s, disabled, onClick }) {
   const serviceName = s.serviceName || s.title;
   const isDocReview = serviceName === "Document Review";
+  const showTag = Boolean(String(s?.tag || "").trim());
   return (
     <motion.button
       type="button"
@@ -163,21 +148,27 @@ function ServiceTile({ s, disabled, onClick }) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-              <ServiceIcon tag={s.tag} title={serviceName} />
-              {s.tag}
-            </span>
+          {showTag || isDocReview ? (
+            <div className="flex items-center gap-2">
+              {showTag ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+                  <ServiceIcon tag={s.tag} title={serviceName} />
+                  {s.tag}
+                </span>
+              ) : null}
 
-            {isDocReview ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/70 px-2 py-0.5 text-[11px] font-semibold text-emerald-900">
-                <AppIcon size={ICON_SM} icon={FileCheck2} />
-                Attach PDFs
-              </span>
-            ) : null}
+              {isDocReview ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/70 px-2 py-0.5 text-[11px] font-semibold text-emerald-900">
+                  <AppIcon size={ICON_SM} icon={FileCheck2} />
+                  Attach PDFs
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className={`${showTag || isDocReview ? "mt-2 " : ""}font-semibold text-zinc-900 dark:text-zinc-100`}>
+            {serviceName}
           </div>
-
-          <div className="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{serviceName}</div>
           <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{s.note}</div>
         </div>
 
@@ -228,8 +219,6 @@ export default function StudyWeHelp() {
 
   // UI extras
   const [q, setQ] = useState("");
-  const [chip, setChip] = useState("All"); // All | Visa | Docs | Writing | Test | CV
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [fullPackageDetailsOpen, setFullPackageDetailsOpen] = useState(false);
   const [toast, setToast] = useState("");
 
@@ -272,7 +261,9 @@ export default function StudyWeHelp() {
         "",
         window.location.href
       );
-    } catch {}
+    } catch {
+      // Ignore warm-up navigation-state parsing failures.
+    }
 
     const onPopState = () => {
       navigate(backUrl, { replace: true });
@@ -426,17 +417,6 @@ export default function StudyWeHelp() {
 
   const modalSubtitle = useMemo(() => `Study Abroad • ${country}`, [country]);
 
-  const openSingle = (serviceName) => {
-    if (!canUseWeHelp) return;
-    if (!country || country === "Not selected") {
-      alert("Pick a destination country first so we can load the correct request price.");
-      return;
-    }
-    setModalResumeState(null);
-    setRequestMeta(buildSingleRequestMeta(serviceName, country));
-    setModalOpen(true);
-  };
-
   const openDefinition = async (definition) => {
     const title = String(definition?.title || definition || "").trim();
     if (!title) return;
@@ -486,37 +466,25 @@ export default function StudyWeHelp() {
 
   // ✅ Attachments on all single-package requests
   const enableAttachments = requestMeta?.requestType === "single";
-  const singleServices = useMemo(() => listSingleRequestCatalogByTrack("study"), []);
-
-  const visibleDefinitions = useMemo(() => {
-    const builtInTitles = new Set(
-      singleServices
-        .map((service) => String(service?.serviceName || service?.title || "").trim().toLowerCase())
-        .filter(Boolean)
-    );
-
+  const singlePackages = useMemo(() => {
     const defs = Array.isArray(activeDefinitions) ? activeDefinitions : [];
     return defs
-      .filter((def) => {
-        const title = String(def?.title || "").trim();
-        if (!title) return false;
-        return !builtInTitles.has(title.toLowerCase());
-      })
+      .filter((def) => String(def?.title || "").trim())
       .sort((a, b) => String(a?.title || "").localeCompare(String(b?.title || "")));
-  }, [activeDefinitions, singleServices]);
+  }, [activeDefinitions]);
 
-  const filteredSingles = useMemo(() => {
+  const filteredSinglePackages = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return singleServices.filter((s) => {
-      const serviceName = s.serviceName || s.title;
-      const chipOk = chip === "All" ? true : s.tag === chip;
-      const qOk = !needle
-        ? true
-        : `${serviceName} ${s.note} ${s.tag}`.toLowerCase().includes(needle);
-      return chipOk && qOk;
+    return singlePackages.filter((def) => {
+      if (!needle) return true;
+      const title = String(def?.title || "").trim().toLowerCase();
+      const note =
+        Number(def?.activeExtraFieldCount || 0) > 0
+          ? `${Number(def?.activeExtraFieldCount || 0)} extra fields`
+          : "No extra fields configured yet";
+      return `${title} ${note}`.includes(needle);
     });
-  }, [singleServices, q, chip]);
-  const hasActiveFilters = chip !== "All" || q.trim().length > 0;
+  }, [singlePackages, q]);
 
   const submitRequest = async ({
     name,
@@ -526,8 +494,10 @@ export default function StudyWeHelp() {
     requestUploadMeta,
     extraFieldAnswers,
     email: formEmail,
+    requestDraftId,
     county,
     town,
+    preferredAgentId,
     paid,
     paymentMeta,
     unlockPaymentReceipt,
@@ -562,6 +532,9 @@ export default function StudyWeHelp() {
     }
 
     try {
+      const pendingRequestId = String(
+        unlockPaymentReceipt?.requestId || paymentMeta?.requestId || ""
+      ).trim();
       const pricingQuote = await getRequestPricingQuote({
         pricingKey: requestMeta.pricingKey,
         track: "study",
@@ -576,54 +549,50 @@ export default function StudyWeHelp() {
       if (!appliedPricing) {
         throw new Error("Request pricing is unavailable right now. Please try again.");
       }
+      if (paid && !pendingRequestId) {
+        throw new Error("This paid unlock session could not be linked safely. Please start checkout again.");
+      }
 
-      const requestId = await createServiceRequest({
-        uid,
-        email: String(formEmail || email || "").trim(),
-        track: "study",
-        country,
-        requestType: requestMeta.requestType,
-        serviceName: requestMeta.serviceName,
-        name,
-        phone,
-        note,
-
-        county: String(county || "").trim(),
-        town: String(town || "").trim(),
-        city: String(town || "").trim(),
-        paid: Boolean(paid),
-        paymentMeta: paymentMeta || null,
-        pricingSnapshot: appliedPricing,
-        requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
-        extraFieldAnswers: extraFieldAnswers || null,
-      });
-
-      try {
-        await createUnlockPaymentForRequest({
-          requestId,
-          requestUid: uid,
-          amount: unlockPaymentReceipt?.amount || appliedPricing.amount,
-          currency: String(unlockPaymentReceipt?.currency || appliedPricing.currency || "KES"),
-          paymentLabel: "Unlock request payment",
-          note: String(requestMeta?.serviceName || "").trim(),
-          paidAtMs:
-            Number(unlockPaymentReceipt?.paidAtMs || unlockPaymentReceipt?.paidAt || Date.now()) ||
-            Date.now(),
-          transactionReference: String(
-            unlockPaymentReceipt?.transactionReference ||
-              unlockPaymentReceipt?.ref ||
-              paymentMeta?.ref ||
-              ""
-          ),
-          context: {
-            flow: "wehelp",
+      const requestId = pendingRequestId
+        ? pendingRequestId
+        : await createServiceRequest({
+            uid,
+            email: String(formEmail || email || "").trim(),
             track: "study",
-            serviceName: String(requestMeta?.serviceName || ""),
-            pricingKey: String(requestMeta?.pricingKey || ""),
-          },
+            country,
+            requestType: requestMeta.requestType,
+            serviceName: requestMeta.serviceName,
+            name,
+            phone,
+            note,
+            county: String(county || "").trim(),
+            town: String(town || "").trim(),
+            city: String(town || "").trim(),
+            preferredAgentId: String(preferredAgentId || "").trim(),
+            paid: false,
+            paymentMeta: null,
+            pricingSnapshot: appliedPricing,
+            requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
+            extraFieldAnswers: extraFieldAnswers || null,
+          });
+
+      if (pendingRequestId) {
+        const activation = await activatePreparedUnlockRequest({
+          requestId: pendingRequestId,
+          unlockPaymentReceipt,
         });
-      } catch (paymentError) {
-        console.warn("Failed to persist unlock payment record:", paymentError);
+        if (activation?.alreadyActivated) {
+          if (requestDraftId) {
+            await archiveWorkflowDraft(requestDraftId, {
+              status: "submitted",
+              archivedReason: "request_already_activated",
+              linkedRequestId: pendingRequestId,
+            });
+          }
+          setModalOpen(false);
+          navigate(`/app/request/${pendingRequestId}`, { replace: true });
+          return { requestId: pendingRequestId, alreadyActivated: true };
+        }
       }
 
       const picked = Array.isArray(dummyFiles) ? dummyFiles : [];
@@ -651,14 +620,89 @@ export default function StudyWeHelp() {
         weHelp: { activeRequestId: requestId },
       });
 
+      if (requestDraftId) {
+        await archiveWorkflowDraft(requestDraftId, {
+          status: "submitted",
+          archivedReason: "request_submitted",
+          linkedRequestId: requestId,
+        });
+      }
+
       setModalOpen(false);
       navigate(`/app/request/${requestId}`, { replace: true });
+      return { requestId };
     } catch (err) {
       if (err?.code === "auth/email-not-verified") {
         navigate("/verify-email", { replace: false });
       }
       throw err;
     }
+  };
+
+  const prepareUnlockCheckout = async ({
+    requestDraftId,
+    returnTo,
+    name,
+    phone,
+    email: formEmail,
+    county,
+    town,
+    note,
+    preferredAgentId,
+    requestUploadMeta,
+    extraFieldAnswers,
+  } = {}) => {
+    if (!uid || !requestMeta) throw new Error("Request details are not ready yet.");
+
+    const missingNow = getMissingProfileFields(userState || {});
+    if (missingNow.length > 0) {
+      alert(`Please complete your profile first:\n- ${missingNow.join("\n- ")}`);
+      setModalOpen(false);
+      goToProfile();
+      throw new Error("Profile is incomplete.");
+    }
+
+    const pricingQuote = await getRequestPricingQuote({
+      pricingKey: requestMeta.pricingKey,
+      track: "study",
+      country,
+      serviceName: requestMeta.serviceName,
+      requestType: requestMeta.requestType,
+    });
+    const appliedPricing = toRequestPricingSnapshot(pricingQuote);
+    if (!appliedPricing) {
+      throw new Error("Request pricing is unavailable right now. Please try again.");
+    }
+
+    const requestId = await createServiceRequest({
+      uid,
+      email: String(formEmail || email || "").trim(),
+      track: "study",
+      country,
+      requestType: requestMeta.requestType,
+      serviceName: requestMeta.serviceName,
+      name: String(name || "").trim(),
+      phone: String(phone || "").trim(),
+      note,
+      county: String(county || "").trim(),
+      town: String(town || "").trim(),
+      city: String(town || "").trim(),
+      preferredAgentId: String(preferredAgentId || "").trim(),
+      paid: false,
+      paymentMeta: null,
+      pricingSnapshot: appliedPricing,
+      requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
+      extraFieldAnswers: extraFieldAnswers || null,
+      status: "payment_pending",
+      skipAdminPush: true,
+    });
+
+    return createUnlockCheckoutSession({
+      requestId,
+      draftId: requestDraftId,
+      returnTo,
+      appBaseUrl: typeof window !== "undefined" ? window.location.origin : "",
+    });
   };
 
   return (
@@ -786,9 +830,6 @@ export default function StudyWeHelp() {
               <h2 className="mt-3 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
                 Complete study support in one request
               </h2>
-              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                Clear steps, verified guidance, and support inside MAJUU.
-              </p>
             </div>
 
             <span className="shrink-0 inline-flex h-12 w-12 items-center justify-center rounded-3xl border border-emerald-100 bg-emerald-50/80 text-emerald-800 shadow-sm">
@@ -845,38 +886,65 @@ export default function StudyWeHelp() {
           ) : null}
         </motion.div>
 
-        {/* Requests configured in SACC (per track/country) */}
+        {/* Single-package requests configured in SACC */}
         <div className="mt-6">
           <div className="flex items-end justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-                Requests
-              </h2>
-              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                Requests configured in SACC for Study {country}. Built-in single packages stay
-                below.
-              </p>
-            </div>
+            <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+              Single packages
+            </h2>
             <span className="text-xs font-semibold text-zinc-500">
-              {visibleDefinitions.length} configured
+              {singlePackages.length} available
             </span>
+          </div>
+
+          <div className="mt-4 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/72 dark:bg-zinc-900/60 p-3 shadow-sm backdrop-blur-xl">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/70 text-emerald-800">
+                <AppIcon size={ICON_MD} icon={Search} />
+              </span>
+
+              <div className="min-w-0 flex-1">
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search single packages..."
+                  className="w-full bg-transparent text-sm font-semibold text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 outline-none"
+                />
+              </div>
+
+              {q ? (
+                <button
+                  type="button"
+                  onClick={() => setQ("")}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition hover:bg-white active:scale-[0.995]"
+                  aria-label="Clear search"
+                  title="Clear"
+                >
+                  <AppIcon size={ICON_MD} icon={X} />
+                </button>
+              ) : null}
+            </div>
           </div>
 
           {definitionsErr ? (
             <div className="mt-4 rounded-3xl border border-amber-200 bg-amber-50/80 p-5 text-sm text-amber-900 shadow-sm backdrop-blur dark:border-amber-900/40 dark:bg-amber-950/35 dark:text-amber-200">
               {definitionsErr}
             </div>
-          ) : definitionsLoading && visibleDefinitions.length === 0 ? (
+          ) : definitionsLoading && singlePackages.length === 0 ? (
             <div className="mt-4 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 text-sm text-zinc-600 dark:text-zinc-300 shadow-sm backdrop-blur">
-              Loading requests...
+              Loading single packages...
             </div>
-          ) : visibleDefinitions.length === 0 ? (
+          ) : singlePackages.length === 0 ? (
             <div className="mt-4 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 text-sm text-zinc-600 dark:text-zinc-300 shadow-sm backdrop-blur">
-              No custom requests configured yet for this route.
+              No single packages configured yet for this route.
+            </div>
+          ) : filteredSinglePackages.length === 0 ? (
+            <div className="mt-4 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 text-sm text-zinc-600 dark:text-zinc-300 shadow-sm backdrop-blur">
+              No single packages match your search yet.
             </div>
           ) : (
             <div className="mt-4 grid gap-3">
-              {visibleDefinitions.map((def) => {
+              {filteredSinglePackages.map((def) => {
                 const count = Number(def?.activeExtraFieldCount || 0);
                 const note = count > 0 ? `${count} extra fields` : "No extra fields configured yet";
                 return (
@@ -885,7 +953,6 @@ export default function StudyWeHelp() {
                     s={{
                       serviceName: def.title,
                       note,
-                      tag: "SACC",
                     }}
                     disabled={!canUseWeHelp}
                     onClick={() => void openDefinition(def)}
@@ -896,7 +963,7 @@ export default function StudyWeHelp() {
           )}
         </div>
 
-        {/* Single services */}
+        {/*
         <div className="mt-6">
           <div className="flex items-end justify-between gap-3">
             <div>
@@ -910,7 +977,7 @@ export default function StudyWeHelp() {
             </span>
           </div>
 
-          {/* Search */}
+          Search
           <div className="mt-4 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/72 dark:bg-zinc-900/60 p-3 shadow-sm backdrop-blur-xl">
             <button
               type="button"
@@ -978,7 +1045,7 @@ export default function StudyWeHelp() {
               </span>
             </div>
 
-            {/* Chips */}
+            Chips
                 <div className="mt-3 flex flex-wrap gap-2">
               {["All", "Visa", "Docs", "Writing", "Test", "CV"].map((c) => (
                 <Chip key={c} active={chip === c} onClick={() => setChip(c)}>
@@ -990,7 +1057,7 @@ export default function StudyWeHelp() {
             ) : null}
           </div>
 
-          {/* Tiles */}
+          Tiles
           <div className="mt-4 grid gap-3">
             {filteredSingles.length === 0 ? (
               <div className="rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 text-sm text-zinc-600 dark:text-zinc-300 shadow-sm backdrop-blur">
@@ -1007,7 +1074,7 @@ export default function StudyWeHelp() {
               ))
             )}
           </div>
-        </div>
+        */}
 
         <div className="h-10" />
       </motion.div>
@@ -1025,6 +1092,7 @@ export default function StudyWeHelp() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         onSubmit={submitRequest}
+        onPay={prepareUnlockCheckout}
         title={modalTitle}
         subtitle={modalSubtitle}
         defaultName={defaultName}

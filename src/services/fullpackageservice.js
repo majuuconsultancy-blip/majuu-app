@@ -29,6 +29,31 @@ export function normalizeFullPackageItems(items) {
   return out.slice(0, 60);
 }
 
+function fullPackageItemKey(item) {
+  return cleanStr(item, 120).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+export function resolveFullPackageCoverageState(fullPackage = {}, selectedItems = []) {
+  const currentSelected = normalizeFullPackageItems(
+    selectedItems?.length ? selectedItems : fullPackage?.selectedItems
+  );
+  const coveredItems = normalizeFullPackageItems(
+    fullPackage?.unlockCoverage?.coveredItems ||
+      fullPackage?.coveredItems ||
+      []
+  );
+  const coveredSet = new Set(coveredItems.map((item) => fullPackageItemKey(item)));
+  const outstandingItems = currentSelected.filter(
+    (item) => !coveredSet.has(fullPackageItemKey(item))
+  );
+  return {
+    selectedItems: currentSelected,
+    coveredItems,
+    outstandingItems,
+    isCovered: currentSelected.length === 0 || outstandingItems.length === 0,
+  };
+}
+
 export function toFullPackageItemKey(item) {
   const base = cleanStr(item, 120).toLowerCase();
   if (!base) return "item";

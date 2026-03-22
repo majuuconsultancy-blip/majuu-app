@@ -402,16 +402,13 @@ export default function TrackScreen({ track }) {
                           <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                             {c}
                           </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-2">
-                            <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                              Tap to choose help mode
-                            </div>
-                            {highlighted ? (
+                          {highlighted ? (
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
                               <span className="rounded-full border border-emerald-200 bg-white/60 px-2 py-0.5 text-[10px] font-semibold text-emerald-900 dark:border-emerald-900/40 dark:bg-zinc-950/25 dark:text-emerald-100">
                                 Continue journey
                               </span>
-                            ) : null}
-                          </div>
+                            </div>
+                          ) : null}
                         </div>
 
                         <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/50 text-zinc-700 transition group-hover:border-emerald-200 group-hover:bg-emerald-50/70 group-hover:text-emerald-800 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200 dark:group-hover:border-emerald-900/40 dark:group-hover:bg-emerald-950/25 dark:group-hover:text-emerald-200">
@@ -461,7 +458,7 @@ export default function TrackScreen({ track }) {
                     {selectedCountry}
                   </h2>
                   <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                    Choose how you want help.
+                    Choose the help for extensive guidance.
                   </p>
                 </div>
 
@@ -499,7 +496,7 @@ export default function TrackScreen({ track }) {
                         </span>
                       </div>
                       <div className="mt-0.5 text-xs font-medium text-zinc-600 dark:text-zinc-300">
-                        Steps & checklists you follow on your own.
+                        Guide Yourself
                       </div>
                     </div>
                   </div>
@@ -519,7 +516,7 @@ export default function TrackScreen({ track }) {
                     <div className="min-w-0">
                       <div>{saving && startingType === "we" ? "Starting…" : "We-Help"}</div>
                       <div className="mt-0.5 text-xs font-medium text-white/80">
-                        We guide you and work with you end-to-end.
+                        We Guide You
                       </div>
                     </div>
                   </div>
@@ -536,7 +533,7 @@ export default function TrackScreen({ track }) {
               </div>
 
               <div className="mt-4 text-center text-xs text-zinc-500 dark:text-zinc-400">
-                Your progress is saved automatically.
+                Choose the help for extensive guidance.
               </div>
             </Motion.div>
           </Motion.div>

@@ -1,24 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { doc, onSnapshot } from "firebase/firestore";
 import { listFullPackageItemCatalogByTrack } from "../constants/requestCatalog";
-import { auth } from "../firebase";
+import { auth, db } from "../firebase";
 import { useFullPackagePricingList } from "../hooks/useRequestPricing";
 import {
   buildFullPackageHubPath,
   createFullPackageDraft,
   markFullPackageUnlockPaid,
   normalizeFullPackageItems,
+  resolveFullPackageCoverageState,
   syncFullPackageSelection,
 } from "../services/fullpackageservice";
+import { createFullPackageUnlockCheckoutSession } from "../services/paymentservice";
 import { formatPricingMoney } from "../services/pricingservice";
 import {
-  clearDummyPaymentDraft,
-  clearDummyPaymentState,
-  createRequestDraftId,
-  getDummyPaymentDraft,
-  getDummyPaymentState,
-  setDummyPaymentDraft,
-} from "../utils/dummyPayment";
+  getWorkflowDraft,
+  saveWorkflowDraft,
+  WORKFLOW_DRAFT_FLOW_FAMILIES,
+  WORKFLOW_DRAFT_FLOW_KINDS,
+  WORKFLOW_DRAFT_STATUSES,
+} from "../services/workflowdraftservice";
+import { createRequestDraftId } from "../utils/dummyPayment";
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -42,8 +45,12 @@ function toFallbackChecklistRows(track, country) {
   }));
 }
 
-function buildItemListKey(items) {
-  return normalizeFullPackageItems(items).slice().sort().join("||");
+function resolveDiagnosticDraftStatus({ depositPaid, gateAmount, fullPackageId }) {
+  if (depositPaid || gateAmount <= 0) {
+    return WORKFLOW_DRAFT_STATUSES.FULL_PACKAGE_PAID_PENDING_DIAGNOSTICS;
+  }
+  if (fullPackageId) return WORKFLOW_DRAFT_STATUSES.FULL_PACKAGE_PENDING_PAYMENT;
+  return WORKFLOW_DRAFT_STATUSES.FULL_PACKAGE_DRAFT;
 }
 
 function lockBodyScrollFixed() {
@@ -126,14 +133,11 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
   const [checked, setChecked] = useState({});
   const [pricePulse, setPricePulse] = useState(false);
-  const [depositPaid, setDepositPaid] = useState(false);
   const [depositLoading, setDepositLoading] = useState(false);
   const [depositError, setDepositError] = useState("");
-  const [depositPaymentMeta, setDepositPaymentMeta] = useState(null);
   const [depositDraftId, setDepositDraftId] = useState("");
   const [fullPackageId, setFullPackageId] = useState("");
-  const [paidSelectionKey, setPaidSelectionKey] = useState("");
-  const [paidGateAmount, setPaidGateAmount] = useState(0);
+  const [fullPackageDoc, setFullPackageDoc] = useState(null);
   const {
     rows: livePricingRows,
     loading: pricingLoading,
@@ -158,15 +162,43 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     resumeApplyRef.current = "";
     setChecked({});
     setPricePulse(false);
-    setDepositPaid(false);
     setDepositLoading(false);
     setDepositError("");
-    setDepositPaymentMeta(null);
     setDepositDraftId("");
     setFullPackageId("");
-    setPaidSelectionKey("");
-    setPaidGateAmount(0);
+    setFullPackageDoc(null);
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const params = new URLSearchParams(location.search || "");
+    const existingDraftId = String(
+      location.state?.resumeWeHelp?.fullPackage?.unlock?.requestDraftId ||
+        location.state?.resumeWeHelp?.fullPackage?.deposit?.requestDraftId ||
+        params.get("draft") ||
+        params.get("fpDraft") ||
+        ""
+    ).trim();
+    if (existingDraftId) {
+      setDepositDraftId(existingDraftId);
+      return;
+    }
+    setDepositDraftId((current) => current || createRequestDraftId());
+  }, [open, location.search, location.state]);
+
+  useEffect(() => {
+    if (!open || !fullPackageId) return undefined;
+    return onSnapshot(
+      doc(db, "fullPackages", fullPackageId),
+      (snap) => {
+        setFullPackageDoc(snap.exists() ? { id: snap.id, ...(snap.data() || {}) } : null);
+      },
+      (error) => {
+        console.warn("Failed to watch full package state:", error?.message || error);
+        setFullPackageDoc(null);
+      }
+    );
+  }, [open, fullPackageId]);
 
   useEffect(() => {
     if (!open) return;
@@ -215,7 +247,6 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     () => missingRows.map((row) => row.serviceName),
     [missingRows]
   );
-  const missingItemsKey = useMemo(() => buildItemListKey(missingItems), [missingItems]);
   const readiness = useMemo(
     () => (total > 0 ? clamp(Math.round((haveCount / total) * 100), 0, 100) : 0),
     [haveCount, total]
@@ -231,12 +262,30 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
       checklistRows.reduce((acc, row) => acc + Math.max(0, Number(row.amount || 0)), 0),
     [checklistRows]
   );
+  const coverageState = useMemo(
+    () => resolveFullPackageCoverageState(fullPackageDoc || {}, missingItems),
+    [fullPackageDoc, missingItems]
+  );
+  const outstandingItemKeys = useMemo(
+    () => new Set(coverageState.outstandingItems.map((item) => item.toLowerCase())),
+    [coverageState.outstandingItems]
+  );
+  const payableRows = useMemo(
+    () => missingRows.filter((row) => outstandingItemKeys.has(String(row.serviceName || "").toLowerCase())),
+    [missingRows, outstandingItemKeys]
+  );
   const livePrice = useMemo(
-    () => missingRows.reduce((acc, row) => acc + Math.max(0, Number(row.amount || 0)), 0),
-    [missingRows]
+    () => payableRows.reduce((acc, row) => acc + Math.max(0, Number(row.amount || 0)), 0),
+    [payableRows]
   );
   const saved = useMemo(() => Math.max(0, totalPrice - livePrice), [livePrice, totalPrice]);
-  const saveText = saved > 0 ? `Saved ${formatPricingMoney(saved, "KES")}` : "Live package total";
+  const coveredCount = Math.max(0, missingItems.length - coverageState.outstandingItems.length);
+  const saveText =
+    coveredCount > 0
+      ? `${coveredCount} item${coveredCount === 1 ? "" : "s"} already covered`
+      : saved > 0
+        ? `Saved ${formatPricingMoney(saved, "KES")}`
+        : "Live package total";
   const gateAmount = livePrice;
 
   useEffect(() => {
@@ -248,95 +297,128 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
   const isCountryValid = Boolean(normalizedCountry && normalizedCountry !== "Not selected");
   const canPayDeposit = isCountryValid && gateAmount > 0 && !depositLoading;
-  const isPaidForCurrentSelection =
-    gateAmount <= 0 ||
-    (depositPaid && paidGateAmount === gateAmount && paidSelectionKey === missingItemsKey);
+  const isPaidForCurrentSelection = gateAmount <= 0 || coverageState.isCovered;
   const canProceed =
     isCountryValid &&
     !depositLoading &&
-    (gateAmount <= 0 ? true : isPaidForCurrentSelection) &&
+    (missingItems.length === 0 ? true : isPaidForCurrentSelection) &&
     (gateAmount <= 0 ? true : Boolean(fullPackageId));
 
   const helperText = !isCountryValid
     ? "Pick a country first to load the exact package price."
     : gateAmount <= 0
-      ? "Everything is already covered."
-      : `${missingItems.length} item${missingItems.length === 1 ? "" : "s"} remaining in your package.`;
+      ? "Everything in your current selection is already covered."
+      : coverageState.coveredItems.length > 0
+        ? `${coverageState.outstandingItems.length} newly added item${coverageState.outstandingItems.length === 1 ? "" : "s"} still need payment.`
+        : `${missingItems.length} item${missingItems.length === 1 ? "" : "s"} remaining in your package.`;
 
   useEffect(() => {
     if (!open) return;
 
-    const resumeDeposit =
-      location.state?.resumeWeHelp?.fullPackage?.unlock ||
-      location.state?.resumeWeHelp?.fullPackage?.deposit;
-    const queryDraftId = String(
-      new URLSearchParams(location.search || "").get("fpDraft") || ""
-    ).trim();
+    const resumeFullPackage = location.state?.resumeWeHelp?.fullPackage || {};
+    const resumeDeposit = resumeFullPackage?.unlock || resumeFullPackage?.deposit || null;
+    const params = new URLSearchParams(location.search || "");
+    const queryDraftId = String(params.get("fpDraft") || params.get("draft") || "").trim();
     const stateDraftId = String(resumeDeposit?.requestDraftId || "").trim();
-    const draftId = stateDraftId || queryDraftId;
+    const draftId = stateDraftId || queryDraftId || depositDraftId;
     if (!draftId) return;
     if (resumeApplyRef.current === draftId) return;
     resumeApplyRef.current = draftId;
     queueMicrotask(() => setDepositDraftId(draftId));
 
-    const storedDraft = getDummyPaymentDraft(draftId);
-    const storedPayment = getDummyPaymentState(draftId);
-    const context =
-      resumeDeposit && typeof resumeDeposit === "object"
-        ? resumeDeposit
-        : storedDraft?.paymentContext || {};
+    let cancelled = false;
 
-    const selectedItems = normalizeFullPackageItems(context?.selectedItems || []);
-    if (selectedItems.length > 0) {
-      const set = new Set(selectedItems);
-      const restoredChecked = {};
-      for (const item of checklistItemNames) restoredChecked[item] = !set.has(item);
-      queueMicrotask(() => setChecked(restoredChecked));
-    }
+    (async () => {
+      const persistedDraft = await getWorkflowDraft(draftId);
+      if (cancelled) return;
 
-    const ctxFullPackageId = String(context?.fullPackageId || "").trim();
-    if (ctxFullPackageId) queueMicrotask(() => setFullPackageId(ctxFullPackageId));
+      const context =
+        (resumeDeposit && typeof resumeDeposit === "object" ? resumeDeposit : null) ||
+        (persistedDraft && typeof persistedDraft === "object"
+          ? {
+              fullPackageId: persistedDraft.fullPackageId,
+              selectedItems: persistedDraft.selectedItems,
+            }
+          : null) ||
+        {};
 
-    const status = String(storedPayment?.status || "").trim().toLowerCase();
-    const paid = status === "paid" || status === "confirmed";
-    if (!paid || !ctxFullPackageId) return;
+      const selectedItems = normalizeFullPackageItems(
+        context?.selectedItems || resumeFullPackage?.selectedItems || persistedDraft?.selectedItems || []
+      );
+      if (selectedItems.length > 0) {
+        const set = new Set(selectedItems);
+        const restoredChecked = {};
+        for (const item of checklistItemNames) restoredChecked[item] = !set.has(item);
+        queueMicrotask(() => setChecked(restoredChecked));
+      }
 
-    const paymentMeta = {
-      status: "paid",
-      method: String(storedPayment?.method || "dummy"),
-      paidAt: Number(storedPayment?.paidAt || storedPayment?.confirmedAt || Date.now()),
-      amount: Number(context?.unlockAmount || context?.depositAmount || gateAmount),
-      currency: "KES",
-      ref: String(storedPayment?.ref || storedPayment?.reference || ""),
+      const ctxFullPackageId = String(
+        context?.fullPackageId || persistedDraft?.fullPackageId || ""
+      ).trim();
+      if (ctxFullPackageId) queueMicrotask(() => setFullPackageId(ctxFullPackageId));
+    })().catch((error) => {
+      if (!cancelled) {
+        console.warn("Failed to restore workflow draft:", error?.message || error);
+      }
+    });
+
+    return () => {
+      cancelled = true;
     };
+  }, [open, location.state, location.search, checklistItemNames, depositDraftId]);
 
-    setDepositLoading(true);
-    setDepositError("");
-    markFullPackageUnlockPaid({
-      fullPackageId: ctxFullPackageId,
-      selectedItems: selectedItems.length ? selectedItems : missingItems,
-      unlockAmount: Number(context?.unlockAmount || context?.depositAmount || gateAmount),
-      unlockPaymentMeta: paymentMeta,
-    })
-      .then(() => {
-        setDepositPaid(true);
-        setDepositPaymentMeta(paymentMeta);
-        setPaidGateAmount(Number(paymentMeta.amount || 0));
-        setPaidSelectionKey(
-          buildItemListKey(selectedItems.length ? selectedItems : missingItems)
-        );
-      })
-      .catch((error) => {
-        if (String(error?.code || "").toLowerCase().includes("permission-denied")) {
-          setDepositError(
-            "Firestore rules are blocking full package updates. Please allow fullPackages create/update for the signed-in owner."
-          );
-        } else {
-          setDepositError(error?.message || "Failed to confirm unlock payment.");
-        }
-      })
-      .finally(() => setDepositLoading(false));
-  }, [open, location.state, location.search, gateAmount, missingItems, checklistItemNames]);
+  useEffect(() => {
+    if (!open) return undefined;
+    if (!depositDraftId) return undefined;
+
+    const timer = setTimeout(() => {
+      void saveWorkflowDraft(depositDraftId, {
+        flowFamily: WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE,
+        flowKind: WORKFLOW_DRAFT_FLOW_KINDS.FULL_PACKAGE_SETUP,
+        status: resolveDiagnosticDraftStatus({
+          depositPaid: isPaidForCurrentSelection,
+          gateAmount,
+          fullPackageId,
+        }),
+        title: "Full Package",
+        subtitle: normalizedCountry,
+        track: normalizedTrack,
+        country: normalizedCountry,
+        routePath: location.pathname,
+        routeSearch: location.search || "",
+        fullPackageId,
+        selectedItems: missingItems,
+        paymentState: isPaidForCurrentSelection ? "paid" : fullPackageId ? "pending" : "unpaid",
+        paymentAmount: gateAmount,
+        paymentCurrency: "KES",
+        fullPackageUnlockPaid: isPaidForCurrentSelection,
+        resumeState: {
+          fullPackage: {
+            screen: "diagnostic",
+            detailsOpen: true,
+            diagnosticOpen: true,
+            fullPackageId,
+            selectedItems: missingItems,
+          },
+        },
+      }).catch((error) => {
+        console.warn("Failed to save full package draft:", error?.message || error);
+      });
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [
+    open,
+    depositDraftId,
+    isPaidForCurrentSelection,
+    gateAmount,
+    fullPackageId,
+    missingItems,
+    normalizedTrack,
+    normalizedCountry,
+    location.pathname,
+    location.search,
+  ]);
 
   const handlePayDeposit = async () => {
     if (!canPayDeposit) return;
@@ -364,41 +446,144 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
         await syncFullPackageSelection({ fullPackageId: id, selectedItems: missingItems });
       }
 
-      const draftId = createRequestDraftId();
-      const paymentContext = {
-        flow: "fullPackageUnlock",
+      const draftId = String(depositDraftId || createRequestDraftId()).trim();
+      setDepositDraftId(draftId);
+
+      const returnQS = new URLSearchParams();
+      if (normalizedCountry) returnQS.set("country", normalizedCountry);
+      returnQS.set("fpDraft", draftId);
+      returnQS.set("draft", draftId);
+      const hubPath =
+        buildFullPackageHubPath({ fullPackageId: id, track: normalizedTrack }) || location.pathname;
+      const returnTo = `${hubPath}${hubPath.includes("?") ? "&" : "?"}${returnQS.toString()}`;
+
+      const baseDraftPayload = {
+        flowFamily: WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE,
+        flowKind: WORKFLOW_DRAFT_FLOW_KINDS.FULL_PACKAGE_SETUP,
+        status: WORKFLOW_DRAFT_STATUSES.PAYMENT_INITIATED,
+        title: "Full Package",
+        subtitle: normalizedCountry,
         track: normalizedTrack,
         country: normalizedCountry,
+        routePath: location.pathname,
+        routeSearch: `?${returnQS.toString()}`,
         fullPackageId: id,
         selectedItems: missingItems,
-        unlockAmount: gateAmount,
+        paymentState: "pending",
+        paymentAmount: gateAmount,
+        paymentCurrency: "KES",
       };
-      const amountText = formatPricingMoney(gateAmount, "KES");
+      await saveWorkflowDraft(draftId, baseDraftPayload);
 
-      setDepositDraftId(draftId);
-      setDummyPaymentDraft(draftId, {
-        requestDraftId: draftId,
-        paymentContext,
-        amount: amountText,
-        updatedAt: Date.now(),
+      const session = await createFullPackageUnlockCheckoutSession({
+        fullPackageId: id,
+        selectedItems: missingItems,
+        track: normalizedTrack,
+        country: normalizedCountry,
+        draftId,
+        returnTo,
+        appBaseUrl: typeof window !== "undefined" ? window.location.origin : "",
+      });
+      if (session?.alreadyCovered) {
+        await saveWorkflowDraft(draftId, {
+          ...baseDraftPayload,
+          status: WORKFLOW_DRAFT_STATUSES.FULL_PACKAGE_PAID_PENDING_DIAGNOSTICS,
+          paymentState: "paid",
+          paymentAmount: 0,
+          fullPackageUnlockPaid: true,
+        });
+        return;
+      }
+
+      const inlinePaymentReceipt =
+        session?.inlinePaymentReceipt && typeof session.inlinePaymentReceipt === "object"
+          ? session.inlinePaymentReceipt
+          : null;
+      if (inlinePaymentReceipt) {
+        const unlockPaymentMeta = {
+          status: "paid",
+          method: String(inlinePaymentReceipt.method || "demo_paystack").trim() || "demo_paystack",
+          paidAt: Number(inlinePaymentReceipt.paidAtMs || Date.now()) || Date.now(),
+          amount: Number(session?.amount || gateAmount) || gateAmount,
+          currency: String(session?.currency || "KES").trim().toUpperCase() || "KES",
+          ref: String(
+            inlinePaymentReceipt.transactionReference || session?.reference || ""
+          ).trim(),
+          requestId: String(session?.requestId || inlinePaymentReceipt.requestId || "").trim(),
+          paymentId: String(session?.paymentId || inlinePaymentReceipt.paymentId || "").trim(),
+        };
+
+        await markFullPackageUnlockPaid({
+          fullPackageId: id,
+          selectedItems: missingItems,
+          unlockAmount: Number(session?.amount || gateAmount) || gateAmount,
+          unlockPaymentMeta,
+        });
+
+        await saveWorkflowDraft(draftId, {
+          ...baseDraftPayload,
+          status: WORKFLOW_DRAFT_STATUSES.READY_TO_GENERATE_REQUESTS,
+          paymentState: "paid",
+          paymentAmount: Number(session?.amount || gateAmount) || gateAmount,
+          paymentCurrency: String(session?.currency || "KES").trim().toUpperCase() || "KES",
+          paymentReference: unlockPaymentMeta.ref,
+          fullPackageUnlockPaid: true,
+          linkedPayment: {
+            requestId: unlockPaymentMeta.requestId,
+            paymentId: unlockPaymentMeta.paymentId,
+            paymentType: "unlock_request",
+            status: "paid",
+            paymentState: "paid",
+            amount: Number(session?.amount || gateAmount) || gateAmount,
+            currency: String(session?.currency || "KES").trim().toUpperCase() || "KES",
+            reference: unlockPaymentMeta.ref,
+            method: unlockPaymentMeta.method,
+          },
+        });
+
+        navigate(returnTo, {
+          replace: true,
+          state: {
+            fullPackageId: id,
+            missingItems,
+            unlockPaid: true,
+            unlockPaymentMeta,
+            depositPaid: true,
+            depositPaymentMeta: unlockPaymentMeta,
+          },
+        });
+        onClose?.();
+        return;
+      }
+
+      await saveWorkflowDraft(draftId, {
+        ...baseDraftPayload,
+        linkedRequestId: String(session?.requestId || "").trim(),
+        linkedPayment: {
+          requestId: String(session?.requestId || "").trim(),
+          paymentId: String(session?.paymentId || "").trim(),
+          paymentType: "unlock_request",
+          status: "payment_session_created",
+          paymentState: "pending",
+          amount: Number(session?.amount || gateAmount) || 0,
+          currency: String(session?.currency || "KES").trim().toUpperCase() || "KES",
+          reference: String(session?.reference || "").trim(),
+        },
+        paymentAmount: Number(session?.amount || gateAmount) || gateAmount,
+        paymentCurrency: String(session?.currency || "KES").trim().toUpperCase() || "KES",
+        paymentReference: String(session?.reference || "").trim(),
       });
 
-      const returnQS = new URLSearchParams(location.search || "");
-      returnQS.set("fpDraft", draftId);
-      const returnTo = `${location.pathname}?${returnQS.toString()}`;
-
-      const paymentQS = new URLSearchParams();
-      paymentQS.set("draft", draftId);
-      paymentQS.set("returnTo", returnTo);
-      paymentQS.set("amount", amountText);
-
-      navigate(`/app/dummy-payment?${paymentQS.toString()}`, {
-        state: { requestDraftId: draftId, returnTo, amount: amountText, paymentContext },
-      });
+      const redirectUrl = String(session?.authorizationUrl || session?.redirectUrl || "").trim();
+      if (!redirectUrl) {
+        throw new Error("Hosted checkout is unavailable right now.");
+      }
+      window.location.assign(redirectUrl);
+      return;
     } catch (error) {
       if (String(error?.code || "").toLowerCase().includes("permission-denied")) {
         setDepositError(
-          "Firestore rules are blocking full package creation. Please allow fullPackages create for signed-in users."
+          "Full package access is blocked for this account. Please sign in again and retry."
         );
       } else {
         setDepositError(error?.message || "Failed to start unlock payment.");
@@ -447,22 +632,52 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
     const qs = new URLSearchParams();
     qs.set("country", normalizedCountry);
+    if (depositDraftId) {
+      qs.set("draft", depositDraftId);
+      qs.set("fpDraft", depositDraftId);
+    }
 
-    navigate(`${hubPath}&${qs.toString()}`, {
+    const hubSearch = qs.toString();
+
+    if (depositDraftId) {
+      await saveWorkflowDraft(depositDraftId, {
+        flowFamily: WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE,
+        flowKind: WORKFLOW_DRAFT_FLOW_KINDS.FULL_PACKAGE_SETUP,
+        status: WORKFLOW_DRAFT_STATUSES.READY_TO_GENERATE_REQUESTS,
+        title: "Full Package",
+        subtitle: normalizedCountry,
+        track: normalizedTrack,
+        country: normalizedCountry,
+        routePath: `/app/full-package/${normalizedTrack}`,
+        routeSearch: `?fullPackageId=${encodeURIComponent(nextFullPackageId)}&${hubSearch}`,
+        fullPackageId: nextFullPackageId,
+        selectedItems: missingItems,
+        paymentState: isPaidForCurrentSelection ? "paid" : "pending",
+        paymentAmount: gateAmount,
+        paymentCurrency: "KES",
+        fullPackageUnlockPaid: isPaidForCurrentSelection,
+        resumeState: {
+          fullPackage: {
+            screen: "missing",
+            fullPackageId: nextFullPackageId,
+            selectedItems: missingItems,
+          },
+        },
+      });
+    }
+
+    navigate(`${hubPath}&${hubSearch}`, {
       state: {
         fullPackageId: nextFullPackageId,
         missingItems,
-        unlockPaid: gateAmount <= 0 ? true : depositPaid,
-        unlockPaymentMeta: depositPaymentMeta || null,
-        depositPaid: gateAmount <= 0 ? true : depositPaid,
-        depositPaymentMeta: depositPaymentMeta || null,
+        unlockPaid: isPaidForCurrentSelection,
+        unlockPaymentMeta:
+          fullPackageDoc?.unlockPaymentMeta || fullPackageDoc?.depositPaymentMeta || null,
+        depositPaid: isPaidForCurrentSelection,
+        depositPaymentMeta:
+          fullPackageDoc?.unlockPaymentMeta || fullPackageDoc?.depositPaymentMeta || null,
       },
     });
-
-    if (depositDraftId) {
-      clearDummyPaymentState(depositDraftId);
-      clearDummyPaymentDraft(depositDraftId);
-    }
     onClose?.();
   };
 
@@ -589,8 +804,26 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
                 <div className="mt-2 text-sm font-semibold text-zinc-900">
                   Remaining total: {formatPricingMoney(gateAmount, "KES")}
                 </div>
+                {coverageState.coveredItems.length > 0 ? (
+                  <div className="mt-1 text-[11px] text-zinc-700">
+                    Already covered: {coverageState.coveredItems.length} item
+                    {coverageState.coveredItems.length === 1 ? "" : "s"}.
+                  </div>
+                ) : null}
+                {gateAmount > 0 && coverageState.outstandingItems.length > 0 ? (
+                  <div className="mt-1 text-[11px] text-zinc-700">
+                    New payment needed for {coverageState.outstandingItems.length} added item
+                    {coverageState.outstandingItems.length === 1 ? "" : "s"}.
+                  </div>
+                ) : null}
                 <button type="button" onClick={handlePayDeposit} disabled={!canPayDeposit || isPaidForCurrentSelection || depositLoading} className={["mt-3 w-full rounded-xl border px-3 py-2.5 text-sm font-semibold transition active:scale-[0.99]", isPaidForCurrentSelection ? "border-emerald-200 bg-emerald-600 text-white cursor-default" : canPayDeposit ? "border-emerald-200 bg-white text-emerald-900 hover:bg-emerald-100" : "border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed"].join(" ")}>
-                  {isPaidForCurrentSelection ? "Payment Gate Paid" : depositLoading ? "Processing..." : depositPaid ? "Pay Updated Total" : "Pay Remaining Total"}
+                  {isPaidForCurrentSelection
+                    ? "Payment Gate Paid"
+                    : depositLoading
+                      ? "Processing..."
+                      : coverageState.coveredItems.length > 0
+                        ? "Pay Added Items"
+                        : "Pay Remaining Total"}
                 </button>
                 {depositError ? <div className="mt-2 rounded-xl border border-rose-100 bg-rose-50 px-2.5 py-2 text-xs text-rose-700">{depositError}</div> : null}
               </div>

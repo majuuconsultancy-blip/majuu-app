@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { motion, AnimatePresence } from "../utils/motionProxy";
+import { motion as Motion, AnimatePresence } from "../utils/motionProxy";
 
 function cleanStr(x, max = 80) {
   return String(x || "").trim().slice(0, max);
@@ -149,7 +149,9 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
     // If parent passed onClose, call it (so parent clears modal state)
     try {
       onClose?.();
-    } catch {}
+    } catch {
+      // ignore close callback errors
+    }
     // Then navigate to track screen (replace so modal doesn’t come back)
     navigate(trackPath, { replace: true });
   }, [busy, navigate, trackPath, onClose]);
@@ -159,12 +161,16 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
     // anchor current entry so back becomes predictable
     try {
       window.history.replaceState({ ...(window.history.state || {}), __majuu_helpchoice: true }, "");
-    } catch {}
+    } catch {
+      // ignore history state issues
+    }
 
     const onPopState = (e) => {
       try {
         e.preventDefault?.();
-      } catch {}
+      } catch {
+        // ignore preventDefault issues
+      }
       goBackToTrack();
     };
 
@@ -243,7 +249,6 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
 
   const rootCard =
     "relative w-[92vw] max-w-sm rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 shadow-[0_14px_34px_rgba(0,0,0,0.14)] backdrop-blur-xl motion-modal-panel";
-  const subText = "text-xs text-zinc-500";
   const titleText = "text-[13px] font-semibold text-zinc-700 dark:text-zinc-300";
   const headline = "text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100";
 
@@ -258,7 +263,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
 
   return (
     <AnimatePresence>
-      <motion.div
+      <Motion.div
         className="fixed inset-0 z-50 flex items-start justify-center app-overlay-safe motion-modal-backdrop"
         variants={overlay}
         initial="hidden"
@@ -274,7 +279,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
         />
 
         {/* Modal */}
-        <motion.div
+        <Motion.div
           variants={sheet}
           initial="hidden"
           animate="show"
@@ -306,8 +311,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
               </span>
             </div>
             <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-              Self-Help is <span className="font-semibold text-emerald-700">free</span>. We-Help is guided by the MAJUU
-              team.
+              Choose the help for extensive guidance.
             </p>
           </div>
 
@@ -315,7 +319,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
           <div className="px-5 pb-5">
             <div className="grid gap-3">
               {/* Self-Help */}
-              <motion.button
+              <Motion.button
                 type="button"
                 onClick={handleSelf}
                 disabled={busy}
@@ -331,15 +335,15 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
                   </span>
                   <span className="text-left">
                     <div className="leading-tight">Self-Help</div>
-                    <div className="text-[12px] font-medium opacity-90">Do it yourself (Free)</div>
+                    <div className="text-[12px] font-medium opacity-90">Guide Yourself</div>
                   </span>
                 </span>
 
                 {busy ? <Spinner className="h-4 w-4" /> : <span className="text-[12px] opacity-95">Continue</span>}
-              </motion.button>
+              </Motion.button>
 
               {/* We-Help */}
-              <motion.button
+              <Motion.button
                 type="button"
                 onClick={handleWe}
                 disabled={busy}
@@ -356,20 +360,13 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
                   <span className="text-left">
                     <div className="leading-tight">We-Help</div>
                     <div className="text-[12px] font-medium text-zinc-600 dark:text-zinc-300">
-                      Guided support (Login required)
+                      We Guide You
                     </div>
                   </span>
                 </span>
 
                 {busy ? <Spinner className="h-4 w-4 text-zinc-700 dark:text-zinc-300" /> : <span className="text-[12px]">Continue</span>}
-              </motion.button>
-
-              {/* Footer note */}
-              <div className="mt-1 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/55 dark:bg-zinc-900/60 p-3">
-                <p className={subText}>
-                  We-Help requires login (and verification) so we can keep your request secure and support you properly.
-                </p>
-              </div>
+              </Motion.button>
 
               {/* Cancel -> TrackScreen */}
               <button
@@ -382,10 +379,10 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
               </button>
             </div>
           </div>
-        </motion.div>
+        </Motion.div>
 
         <div aria-hidden="true" className="pointer-events-none h-24 w-full max-w-sm shrink-0" />
-      </motion.div>
+      </Motion.div>
     </AnimatePresence>
   );
 }

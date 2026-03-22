@@ -5,6 +5,11 @@ import {
   buildDummyTransactionReference,
   userPayAwaitingPayment,
 } from "../services/paymentservice";
+import {
+  saveWorkflowDraft,
+  WORKFLOW_DRAFT_STATUSES,
+} from "../services/workflowdraftservice";
+import { markFullPackageUnlockPaid } from "../services/fullpackageservice";
 import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
 import {
   getDummyPaymentDraft,
@@ -67,6 +72,15 @@ function formatCvv(value) {
 
 function normalizeContext(value) {
   return value && typeof value === "object" ? value : null;
+}
+
+function toAmountNumber(value) {
+  const digits = String(value || "")
+    .replace(/[^0-9.]+/g, "")
+    .trim();
+  const num = Number(digits || 0);
+  if (!Number.isFinite(num) || num <= 0) return 0;
+  return Math.round(num);
 }
 
 function buildReturnState({ paymentContext, formState, requestDraftId }) {
@@ -304,45 +318,7 @@ export default function DummyPaymentScreen() {
     : "Complete this demo checkout to unlock request submission.";
 
   const handlePayNow = () => {
-    const validationError = validate();
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
-    setError("");
-    setProcessing(true);
-
-    if (!isInProgressFlow) {
-      setDummyPaymentState(requestDraftId, {
-        status: "processing",
-        method,
-        amount,
-        startedAt: Date.now(),
-      });
-    }
-
-    if (timerRef.current) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-
-    timerRef.current = window.setTimeout(() => {
-      setProcessing(false);
-      setSuccess(true);
-      const reference = buildDummyTransactionReference(Date.now());
-      setTransactionReference(reference);
-      if (!isInProgressFlow) {
-        setDummyPaymentState(requestDraftId, {
-          status: "confirmed",
-          method,
-          amount,
-          confirmedAt: Date.now(),
-          transactionReference: reference,
-        });
-      }
-      timerRef.current = null;
-    }, PROCESSING_DELAY_MS);
+    setError("Demo checkout is retired. Please restart payment from the secure hosted checkout flow.");
   };
 
   const handleContinue = async () => {

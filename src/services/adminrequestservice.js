@@ -17,6 +17,14 @@ import { db, auth } from "../firebase";
 import { createStaffNotification, createUserNotification } from "./notificationDocs";
 import { getCurrentUserRoleContext } from "./adminroleservice";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import {
+  buildRequestHistoryPayload,
+  buildSystemChatMessagePayload,
+} from "./requestcontinuityservice";
+import {
+  buildRequestContinuityPatch,
+  REQUEST_BACKEND_STATUSES,
+} from "../utils/requestLifecycle";
 
 const ACTIVE_REQUEST_STATUSES = ["new", "contacted"];
 const STALE_ASSIGNMENT_HOURS = 24;
@@ -176,7 +184,7 @@ export async function sweepStaleAssignments({
     if (!assignedMs) return;
 
     if (assignedMs <= staleCutoff) {
-      staleRows.push({ requestId, assignedTo });
+      staleRows.push({ requestId, assignedTo, requestData: data });
       return;
     }
 
@@ -252,8 +260,41 @@ export async function sweepStaleAssignments({
         reassignFromStaffUid: row.assignedTo,
         staffStartReminder3hSentAt: deleteField(),
         staffStartReminder3hSentAtMs: deleteField(),
+        updatedAt: serverTimestamp(),
+        ...buildRequestContinuityPatch(row.requestData, {
+          backendStatus: REQUEST_BACKEND_STATUSES.NEW,
+          everAssigned: true,
+        }),
       },
       { merge: true }
+    );
+    writes += 1;
+
+    const historyRef = doc(collection(db, "serviceRequests", row.requestId, "requestHistory"));
+    batch.set(
+      historyRef,
+      buildRequestHistoryPayload({
+        requestId: row.requestId,
+        action: "unassigned",
+        staffId: row.assignedTo,
+        previousStaffUid: row.assignedTo,
+        actorUid: "system",
+        details: {
+          reason: "stale_start_timeout",
+        },
+      })
+    );
+    writes += 1;
+
+    const messageRef = doc(collection(db, "serviceRequests", row.requestId, "messages"));
+    batch.set(
+      messageRef,
+      buildSystemChatMessagePayload({
+        requestId: row.requestId,
+        kind: "request_unassigned",
+        previousStaffUid: row.assignedTo,
+        actorUid: "system",
+      })
     );
     writes += 1;
     expired += 1;
@@ -513,6 +554,12 @@ export async function adminAcceptRequest({ requestId, note = "" }) {
     staffProgressUpdatedAt: serverTimestamp(),
     staffProgressUpdatedAtMs: nowMs,
     updatedAt: serverTimestamp(),
+    ...buildRequestContinuityPatch(req, {
+      status: "closed",
+      backendStatus: REQUEST_BACKEND_STATUSES.COMPLETED,
+      userStatus: "completed",
+      everAssigned: true,
+    }),
   });
 
   const result = await updateStaffStatsAfterDecision({
@@ -592,6 +639,12 @@ export async function adminRejectRequest({ requestId, note = "" }) {
       lockedOwnerAdminUid: lockedAdminUid || "",
     },
     updatedAt: serverTimestamp(),
+    ...buildRequestContinuityPatch(req, {
+      status: "rejected",
+      backendStatus: REQUEST_BACKEND_STATUSES.COMPLETED,
+      userStatus: "completed",
+      everAssigned: true,
+    }),
   });
 
   const result = await updateStaffStatsAfterDecision({

@@ -8,6 +8,7 @@ export function isUnsubmittedGhostRequest(request) {
   const draftLifecycle = safeString(request?.draftLifecycle, 40).toLowerCase();
 
   if (status === "draft") return true;
+  if (status === "payment_pending") return true;
   if (submissionState === "draft") return true;
   if (draftLifecycle) return true;
 

@@ -259,24 +259,16 @@ function AssignedAdminAccessPanel() {
         <button type="button" onClick={() => setOpen((v) => !v)} className={headerBtn}>
           <div className="min-w-0">
             <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Admin Assign System
-            </div>
-            <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-              Quick actions for assigning and managing admins.
+              Admin System
             </div>
           </div>
-          <div className="shrink-0 inline-flex items-center gap-2">
-            <span className="rounded-full border border-emerald-100 bg-emerald-50/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
-              Super Admin
-            </span>
-            <span
-              className={`inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-200 ${
-                open ?"rotate-180" : "rotate-0"
-              }`}
-            >
-              <AppIcon size={ICON_MD} icon={ChevronDown} />
-            </span>
-          </div>
+          <span
+            className={`inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 transition dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-200 ${
+              open ?"rotate-180" : "rotate-0"
+            }`}
+          >
+            <AppIcon size={ICON_MD} icon={ChevronDown} />
+          </span>
         </button>
 
         <div className={`grid transition-all duration-300 ease-out ${open ?"grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
@@ -324,16 +316,8 @@ function SaccEntryPanel() {
           </div>
 
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                SACC
-              </div>
-              <span className="rounded-full border border-emerald-100 bg-emerald-50/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
-                Super Admin
-              </span>
-            </div>
-            <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              Super Admin Control Center. Request Management, Pricing Controls, News Management, and other app-wide modules now live here.
+            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Superadmin Control Center
             </div>
           </div>
 

@@ -6,7 +6,7 @@
 // Supports rendering text/pdf/bundle for published + pending.
 // Marks read when opened.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
@@ -20,6 +20,7 @@ import {
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 import useKeyboardInset from "../hooks/useKeyboardInset";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import { getSystemChatMessageLabel, isSystemChatMessage } from "../utils/chatSystemMessages";
 import { safeText } from "../utils/safeText";
 
 /* ---------------- helpers ---------------- */
@@ -105,13 +106,6 @@ function pickCreatedAt(doc) {
     doc?.hiddenAt ||
     null
   );
-}
-
-function roleLabel(role) {
-  const r = String(role || "").toLowerCase();
-  if (r === "user") return "User";
-  if (r === "staff") return "Staff";
-  return "Admin";
 }
 
 /* Render helper: supports text/pdf/bundle */
@@ -309,12 +303,16 @@ export default function StaffRequestChatPanel({ requestId }) {
     try {
       const params = new URLSearchParams(location.search || "");
       if (params.get("openChat") === "1") return;
-    } catch {}
+    } catch {
+      // ignore malformed search params
+    }
     let shouldOpen = false;
     try {
       shouldOpen = sessionStorage.getItem(`maj_open_staff_chat:${rid}`) === "1";
       if (shouldOpen) sessionStorage.removeItem(`maj_open_staff_chat:${rid}`);
-    } catch {}
+    } catch {
+      // ignore session storage issues
+    }
     if (!shouldOpen) return;
 
     if (uid) notifsV2Store.markChatRead(rid).catch(() => {});
@@ -565,6 +563,18 @@ export default function StaffRequestChatPanel({ requestId }) {
               const m = item.data || {};
               const kind = item._kind;
 
+              if (isSystemChatMessage(m)) {
+                return (
+                  <div key={item.id} className="flex justify-center py-1.5">
+                    <div className="flex w-full items-center gap-3 text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
+                      <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+                      <span>{getSystemChatMessageLabel(m, "staff")}</span>
+                      <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+                    </div>
+                  </div>
+                );
+              }
+
               const fromRole = String(m?.fromRole || "").toLowerCase();
               const mine = fromRole === "staff";
               const time = formatTime(pickCreatedAt(m));
@@ -683,10 +693,10 @@ export default function StaffRequestChatPanel({ requestId }) {
     </div>
   );
 
-  const openChat = () => {
+  const openChat = useCallback(() => {
     if (rid) notifsV2Store.markChatRead(rid).catch(() => {});
     setOpen(true);
-  };
+  }, [rid]);
 
   useEffect(() => {
     if (!rid || open) return;
@@ -706,7 +716,7 @@ export default function StaffRequestChatPanel({ requestId }) {
     if (nextUrl !== `${location.pathname}${location.search || ""}`) {
       navigate(nextUrl, { replace: true });
     }
-  }, [rid, open, location.pathname, location.search, navigate]);
+  }, [rid, open, location.pathname, location.search, navigate, openChat]);
 
   return (
     <>

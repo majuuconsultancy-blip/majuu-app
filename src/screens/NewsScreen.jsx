@@ -366,9 +366,6 @@ export default function NewsScreen() {
               <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 {trackMeta.label} News
               </h1>
-              <p className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
-                Clean updates for {trackMeta.label.toLowerCase()} migration moves, policy shifts, and trusted destination changes.
-              </p>
             </div>
 
             <div className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-3xl border border-emerald-100 bg-emerald-50/70 text-emerald-700 dark:flex dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
@@ -380,7 +377,7 @@ export default function NewsScreen() {
             <div className="rounded-2xl border border-zinc-200/80 bg-white/85 px-3.5 py-3 dark:border-zinc-800 dark:bg-zinc-950/40">
               <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
                 <AppIcon icon={Sparkles} size={ICON_SM} />
-                Active Track Context
+                Active Track
               </div>
               <div className="mt-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 {trackMeta.title}
@@ -471,12 +468,12 @@ export default function NewsScreen() {
                 {trackMeta.label} updates for {effectiveCountry || APP_DESTINATION_COUNTRIES[0]}
               </div>
               <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                Importance first, then newer updates for ties.
+                Latest News
               </div>
             </div>
 
             <div className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950/45 dark:text-zinc-300">
-              {regularItems.length + (breakingItem ? 1 : 0)} items
+              {regularItems.length + (breakingItem ? 1 : 0)} news
             </div>
           </div>
 
@@ -497,7 +494,7 @@ export default function NewsScreen() {
                 No published news yet for {trackMeta.label.toLowerCase()} in {effectiveCountry}.
               </div>
               <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                Try another destination country or publish items from SACC News Management.
+                News will be published as soon as available.
               </div>
             </div>
           ) : (

@@ -207,6 +207,9 @@ export default function AssignStaffPanel({ request }) {
     if (!requestId) return setErr("Missing request id.");
     if (!staffUid) return setErr("Pick a staff member.");
     if (!selected) return setErr("Selected staff member not found.");
+    if (isAssigned && String(staffUid) === String(assignedTo)) {
+      return setErr("Pick a different staff member to reassign this request.");
+    }
     if (!selectedSpecMatch) return setErr(`Selected staff does not match ${specialityLabel}.`);
     if (selectedBlocked) return setErr("This staff member is blocked due to low performance.");
     if (!selectedActive) return setErr("This staff member is inactive.");
@@ -228,7 +231,7 @@ export default function AssignStaffPanel({ request }) {
         serviceName: request?.serviceName || "",
         applicantName: request?.name || "",
       });
-      setMsg(`Assigned to ${selected?.email || staffUid}.`);
+      setMsg(`${isAssigned ? "Reassigned" : "Assigned"} to ${selected?.email || staffUid}.`);
       setPickerOpen(false);
     } catch (e) {
       console.error(e);
@@ -282,11 +285,125 @@ export default function AssignStaffPanel({ request }) {
         </div>
       ) : null}
 
-      {isAssigned ? (
-        <div className="mt-4 grid gap-3">
+      <div className="mt-4 grid gap-3">
+        {isAssigned ? (
           <div className="rounded-2xl border border-white/45 bg-white/55 px-4 py-3 text-sm font-medium text-zinc-700 dark:border-zinc-700/60 dark:bg-zinc-900/55 dark:text-zinc-300">
             Assigned to = {assignedLabel}
           </div>
+        ) : null}
+
+        <div className={`relative ${pickerOpen ? "z-[10040]" : "z-20"}`} ref={pickerRef}>
+          <button
+            type="button"
+            onClick={() => setPickerOpen((v) => !v)}
+            className="w-full inline-flex items-center justify-between gap-3 rounded-2xl border border-white/45 bg-white/60 px-4 py-3 text-left shadow-[0_10px_30px_rgba(0,0,0,0.08)] transition hover:border-emerald-200 dark:border-zinc-700/60 dark:bg-zinc-900/55"
+          >
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                {selected?.email || "Select staff member"}
+              </span>
+              <span className="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
+                {selected
+                  ? `Spec ${selected.__hasSpecMatch ? "match" : "mismatch"} - Load ${selected.__activeLoad}/${selected.__maxActive}`
+                  : `${selectableBySpeciality.length} speciality matches`}
+              </span>
+            </span>
+            <span className={`text-zinc-500 transition ${pickerOpen ? "rotate-180" : ""}`}>
+              <AppIcon icon={ChevronDown} size={ICON_SM} />
+            </span>
+          </button>
+
+          {pickerOpen ? (
+            <div className="absolute z-[10050] mt-2 w-full overflow-hidden rounded-2xl border border-zinc-200 bg-white/95 shadow-xl backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95">
+              <div className="border-b border-zinc-200 p-3 dark:border-zinc-800">
+                <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/80 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/70">
+                  <AppIcon icon={Search} size={ICON_SM} className="text-zinc-500" />
+                  <input
+                    type="text"
+                    value={pickerSearch}
+                    onChange={(e) => setPickerSearch(e.target.value)}
+                    placeholder="Search staff or speciality..."
+                    className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
+                  />
+                </div>
+              </div>
+
+              <div className="max-h-72 overflow-y-auto p-2">
+                {visibleOptions.length === 0 ? (
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-3 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+                    No staff match this request speciality yet.
+                  </div>
+                ) : (
+                  visibleOptions.map((s) => {
+                    const smart = s.__smart || {};
+                    const blocked = Boolean(smart.blocked);
+                    const active = Boolean(smart.active);
+                    const disabled = blocked || !active || s.__atCapacity || !s.__hasSpecMatch;
+                    const rankTxt = Number.isFinite(smart.score)
+                      ? `Rank ${Math.round(smart.score)}`
+                      : "Rank -";
+                    const matchTxt = s.__hasSpecMatch ? "Spec match" : "Spec mismatch";
+                    const loadTxt = `Load ${s.__activeLoad}/${s.__maxActive}`;
+
+                    return (
+                      <button
+                        key={s.uid}
+                        type="button"
+                        onClick={() => {
+                          if (disabled) return;
+                          setStaffUid(s.uid);
+                          setPickerOpen(false);
+                        }}
+                        disabled={disabled}
+                        className={[
+                          "mb-2 w-full rounded-xl border px-3 py-2.5 text-left transition",
+                          disabled
+                            ? "border-zinc-200/80 bg-zinc-100/70 text-zinc-400 cursor-not-allowed dark:border-zinc-800/80 dark:bg-zinc-900/70"
+                            : "border-zinc-200 bg-white/80 hover:border-emerald-200 dark:border-zinc-800 dark:bg-zinc-900/80",
+                        ].join(" ")}
+                      >
+                        <div className="min-w-0 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                          {s.email || s.uid}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                          {rankTxt} - {matchTxt} - {loadTxt}
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <button
+          type="button"
+          onClick={doAssign}
+          disabled={
+            busy === "assign" ||
+            busy === "unassign" ||
+            !staffUid ||
+            selectedBlocked ||
+            !selectedActive ||
+            selectedCapacityBlocked ||
+            !selectedSpecMatch ||
+            (isAssigned && String(staffUid) === String(assignedTo))
+          }
+          className={`${btn} ${btnGreen} w-full`}
+          title={isAssigned ? "Reassign" : "Assign"}
+        >
+          <AppIcon icon={Link2} size={ICON_SM} />
+          {busy === "assign"
+            ? isAssigned
+              ? "Reassigning..."
+              : "Assigning..."
+            : isAssigned
+            ? "Reassign"
+            : "Assign"}
+        </button>
+
+        {isAssigned ? (
           <button
             type="button"
             onClick={() => setConfirmOpen(true)}
@@ -297,114 +414,8 @@ export default function AssignStaffPanel({ request }) {
             <AppIcon icon={Unlink} size={ICON_SM} />
             {busy === "unassign" ? "Unassigning..." : "Unassign"}
           </button>
-        </div>
-      ) : (
-        <div className="mt-4 grid gap-3">
-          <div className={`relative ${pickerOpen ? "z-[10040]" : "z-20"}`} ref={pickerRef}>
-            <button
-              type="button"
-              onClick={() => setPickerOpen((v) => !v)}
-              className="w-full inline-flex items-center justify-between gap-3 rounded-2xl border border-white/45 bg-white/60 px-4 py-3 text-left shadow-[0_10px_30px_rgba(0,0,0,0.08)] transition hover:border-emerald-200 dark:border-zinc-700/60 dark:bg-zinc-900/55"
-            >
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                  {selected?.email || "Select staff member"}
-                </span>
-                <span className="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
-                  {selected
-                    ? `Spec ${selected.__hasSpecMatch ? "match" : "mismatch"} - Load ${selected.__activeLoad}/${selected.__maxActive}`
-                    : `${selectableBySpeciality.length} speciality matches`}
-                </span>
-              </span>
-              <span className={`text-zinc-500 transition ${pickerOpen ? "rotate-180" : ""}`}>
-                <AppIcon icon={ChevronDown} size={ICON_SM} />
-              </span>
-            </button>
-
-            {pickerOpen ? (
-              <div className="absolute z-[10050] mt-2 w-full overflow-hidden rounded-2xl border border-zinc-200 bg-white/95 shadow-xl backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95">
-                <div className="border-b border-zinc-200 p-3 dark:border-zinc-800">
-                  <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/80 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/70">
-                    <AppIcon icon={Search} size={ICON_SM} className="text-zinc-500" />
-                    <input
-                      type="text"
-                      value={pickerSearch}
-                      onChange={(e) => setPickerSearch(e.target.value)}
-                      placeholder="Search staff or speciality..."
-                      className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
-                    />
-                  </div>
-                </div>
-
-                <div className="max-h-72 overflow-y-auto p-2">
-                  {visibleOptions.length === 0 ? (
-                    <div className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-3 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
-                      No staff match this request speciality yet.
-                    </div>
-                  ) : (
-                    visibleOptions.map((s) => {
-                      const smart = s.__smart || {};
-                      const blocked = Boolean(smart.blocked);
-                      const active = Boolean(smart.active);
-                      const disabled = blocked || !active || s.__atCapacity || !s.__hasSpecMatch;
-                      const rankTxt = Number.isFinite(smart.score)
-                        ? `Rank ${Math.round(smart.score)}`
-                        : "Rank -";
-                      const matchTxt = s.__hasSpecMatch ? "Spec match" : "Spec mismatch";
-                      const loadTxt = `Load ${s.__activeLoad}/${s.__maxActive}`;
-
-                      return (
-                        <button
-                          key={s.uid}
-                          type="button"
-                          onClick={() => {
-                            if (disabled) return;
-                            setStaffUid(s.uid);
-                            setPickerOpen(false);
-                          }}
-                          disabled={disabled}
-                          className={[
-                            "mb-2 w-full rounded-xl border px-3 py-2.5 text-left transition",
-                            disabled
-                              ? "border-zinc-200/80 bg-zinc-100/70 text-zinc-400 cursor-not-allowed dark:border-zinc-800/80 dark:bg-zinc-900/70"
-                              : "border-zinc-200 bg-white/80 hover:border-emerald-200 dark:border-zinc-800 dark:bg-zinc-900/80",
-                          ].join(" ")}
-                        >
-                          <div className="min-w-0 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                            {s.email || s.uid}
-                          </div>
-                          <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-                            {rankTxt} - {matchTxt} - {loadTxt}
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          <button
-            type="button"
-            onClick={doAssign}
-            disabled={
-              busy === "assign" ||
-              busy === "unassign" ||
-              !staffUid ||
-              selectedBlocked ||
-              !selectedActive ||
-              selectedCapacityBlocked ||
-              !selectedSpecMatch
-            }
-            className={`${btn} ${btnGreen} w-full`}
-            title="Assign"
-          >
-            <AppIcon icon={Link2} size={ICON_SM} />
-            {busy === "assign" ? "Assigning..." : "Assign"}
-          </button>
-        </div>
-      )}
+        ) : null}
+      </div>
 
       {confirmOpen ? (
         <div className="fixed inset-0 z-[10060]">

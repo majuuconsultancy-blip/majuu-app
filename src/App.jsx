@@ -56,6 +56,8 @@ import { logAnalyticsEvent } from "./services/analyticsService";
 // Main user flows
 const PaymentScreen = lazy(() => import("./screens/PaymentScreen"));
 const DummyPaymentScreen = lazy(() => import("./screens/DummyPaymentScreen"));
+const PaymentCallbackScreen = lazy(() => import("./screens/PaymentCallbackScreen"));
+const SharedPaymentScreen = lazy(() => import("./screens/SharedPaymentScreen"));
 
 const StudySelfHelp = lazy(() => import("./screens/StudySelfHelp"));
 const StudyWeHelp = lazy(() => import("./screens/StudyWeHelp"));
@@ -88,6 +90,8 @@ const AdminSaccScreen = lazy(() => import("./screens/AdminSaccScreen"));
 const AdminAnalyticsScreen = lazy(() => import("./screens/AdminAnalyticsScreen"));
 const AdminNewsManagementScreen = lazy(() => import("./screens/AdminNewsManagementScreen"));
 const AdminPricingControlsScreen = lazy(() => import("./screens/AdminPricingControlsScreen"));
+const AdminFinancesScreen = lazy(() => import("./screens/AdminFinancesScreen"));
+const AdminPartnershipsScreen = lazy(() => import("./screens/AdminPartnershipsScreen"));
 const AdminCountryManagementScreen = lazy(() =>
   import("./screens/AdminCountryManagementScreen")
 );
@@ -148,12 +152,16 @@ function preloadCriticalScreens() {
   import("./screens/NotificationsScreen");
   import("./screens/PaymentScreen");
   import("./screens/DummyPaymentScreen");
+  import("./screens/PaymentCallbackScreen");
+  import("./screens/SharedPaymentScreen");
   import("./screens/LegalPortalScreen");
   import("./screens/LegalDocumentScreen");
   import("./screens/ServicePartnerOnboardingScreen");
   import("./screens/AdminSelfHelpLinksManagementScreen");
   import("./screens/AdminRequestManagementScreen");
   import("./screens/AdminCountryManagementScreen");
+  import("./screens/AdminPartnershipsScreen");
+  import("./screens/AdminFinancesScreen");
 }
 
 function runWhenIdle(fn) {
@@ -486,6 +494,8 @@ function AppRoutes() {
           <Route path="/setup" element={<SetupProfileJourneyScreen />} />
           <Route path="/legal" element={<LegalPortalScreen />} />
           <Route path="/legal/:docKey" element={<LegalDocumentScreen />} />
+          <Route path="/payment/callback" element={<PaymentCallbackScreen />} />
+          <Route path="/pay/shared/:shareToken" element={<SharedPaymentScreen />} />
 
           {/* Track selection hub */}
           <Route path="/dashboard" element={<TrackSelectScreen />} />
@@ -679,10 +689,26 @@ function AppRoutes() {
               }
             />
             <Route
+              path="admin/sacc/partnerships"
+              element={
+                <AdminGate>
+                  <AdminPartnershipsScreen />
+                </AdminGate>
+              }
+            />
+            <Route
               path="admin/sacc/pricing"
               element={
                 <AdminGate>
                   <AdminPricingControlsScreen />
+                </AdminGate>
+              }
+            />
+            <Route
+              path="admin/sacc/finances"
+              element={
+                <AdminGate>
+                  <AdminFinancesScreen />
                 </AdminGate>
               }
             />

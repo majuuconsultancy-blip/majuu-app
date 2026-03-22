@@ -9,11 +9,11 @@ import {
 } from "../services/attachmentservice";
 import {
   normalizeFullPackageItems,
+  resolveFullPackageCoverageState,
   syncFullPackageItemStates,
   toFullPackageItemKey,
 } from "../services/fullpackageservice";
 import { createServiceRequest } from "../services/requestservice";
-import { createUnlockPaymentForRequest } from "../services/paymentservice";
 import {
   getUserState,
   setActiveProcessDetails,
@@ -22,6 +22,14 @@ import {
 import { getMissingProfileFields } from "../utils/profileGuard";
 import { setSnapshot } from "../resume/resumeEngine";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import {
+  getWorkflowDraft,
+  recordWorkflowDraftGeneratedRequest,
+  saveWorkflowDraft,
+  WORKFLOW_DRAFT_FLOW_FAMILIES,
+  WORKFLOW_DRAFT_FLOW_KINDS,
+  WORKFLOW_DRAFT_STATUSES,
+} from "../services/workflowdraftservice";
 
 function toMillis(value) {
   if (!value) return 0;
@@ -47,15 +55,6 @@ function normalizeRequestOutcome(req) {
 function mapTrack(input) {
   const t = String(input || "").trim().toLowerCase();
   return t === "study" || t === "work" || t === "travel" ?t : "study";
-}
-
-function toAmountNumber(input) {
-  const raw = String(input || "").trim();
-  if (!raw) return 0;
-  const digits = raw.replace(/[^0-9.]+/g, "");
-  const n = Number(digits || 0);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.round(n);
 }
 
 function titleForTrack(track) {
@@ -112,13 +111,26 @@ export default function FullPackageMissingScreen() {
   const location = useLocation();
   const { track: trackParam } = useParams();
   const queryParams = useMemo(() => new URLSearchParams(location.search || ""), [location.search]);
+  const workflowDraftId = useMemo(() => {
+    const fromState = String(
+      location.state?.resumeFullPackage?.requestModal?.formState?.requestDraftId ||
+        location.state?.resumeWeHelp?.fullPackage?.unlock?.requestDraftId ||
+        location.state?.resumeWeHelp?.fullPackage?.deposit?.requestDraftId ||
+        ""
+    ).trim();
+    const fromQuery = String(queryParams.get("draft") || queryParams.get("fpDraft") || "").trim();
+    return fromState || fromQuery;
+  }, [location.state, queryParams]);
+  const [workflowDraft, setWorkflowDraft] = useState(null);
+  const activeWorkflowDraft = workflowDraftId ? workflowDraft : null;
 
   const fullPackageId = useMemo(() => {
     const fromState = String(location.state?.fullPackageId || "").trim();
     const fromResumeState = String(location.state?.resumeFullPackage?.fullPackageId || "").trim();
     const fromQuery = String(queryParams.get("fullPackageId") || "").trim();
-    return fromState || fromResumeState || fromQuery;
-  }, [location.state, queryParams]);
+    const fromDraft = String(activeWorkflowDraft?.fullPackageId || "").trim();
+    return fromState || fromResumeState || fromQuery || fromDraft;
+  }, [location.state, queryParams, activeWorkflowDraft?.fullPackageId]);
 
   const fallbackTrack = useMemo(() => {
     const fromRoute = String(trackParam || "").trim();
@@ -148,6 +160,24 @@ export default function FullPackageMissingScreen() {
 
   const restoreAppliedRef = useRef(false);
   const syncedItemStateRef = useRef("");
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!workflowDraftId) return undefined;
+    void getWorkflowDraft(workflowDraftId)
+      .then((row) => {
+        if (!cancelled) setWorkflowDraft(row || null);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn("Failed to load workflow draft:", error?.message || error);
+          setWorkflowDraft(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workflowDraftId]);
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged(async (user) => {
@@ -228,19 +258,29 @@ export default function FullPackageMissingScreen() {
     [fullPackageDoc?.track, queryParams, fallbackTrack]
   );
   const country = useMemo(
-    () => String(fullPackageDoc?.country || queryParams.get("country") || "Not selected"),
-    [fullPackageDoc?.country, queryParams]
+    () =>
+      String(
+        fullPackageDoc?.country || activeWorkflowDraft?.country || queryParams.get("country") || "Not selected"
+      ),
+    [fullPackageDoc?.country, activeWorkflowDraft?.country, queryParams]
   );
   const trackTitle = useMemo(() => titleForTrack(safeTrack), [safeTrack]);
 
   const selectedItems = useMemo(() => {
     const fromDoc = normalizeFullPackageItems(fullPackageDoc?.selectedItems);
     if (fromDoc.length > 0) return fromDoc;
+    const fromDraft = normalizeFullPackageItems(activeWorkflowDraft?.selectedItems);
+    if (fromDraft.length > 0) return fromDraft;
     return normalizeFullPackageItems(location.state?.missingItems);
-  }, [fullPackageDoc?.selectedItems, location.state]);
+  }, [fullPackageDoc?.selectedItems, activeWorkflowDraft?.selectedItems, location.state]);
 
-  const unlockPaid = Boolean(fullPackageDoc?.unlockPaid || fullPackageDoc?.depositPaid);
-  const unlockPaymentMeta = fullPackageDoc?.unlockPaymentMeta || fullPackageDoc?.depositPaymentMeta || null;
+  const coverageState = useMemo(
+    () => resolveFullPackageCoverageState(fullPackageDoc || {}, selectedItems),
+    [fullPackageDoc, selectedItems]
+  );
+  const unlockPaid = coverageState.isCovered;
+  const unlockPaymentMeta =
+    fullPackageDoc?.unlockPaymentMeta || fullPackageDoc?.depositPaymentMeta || null;
   const canUseRequestFlow = Boolean(uid) && profileMissing.length === 0 && unlockPaid;
   const backToWeHelpHref = `/app/${safeTrack}/we-help?country=${encodeURIComponent(country)}`;
 
@@ -305,7 +345,18 @@ export default function FullPackageMissingScreen() {
   useEffect(() => {
     if (restoreAppliedRef.current) return;
     if (!canUseRequestFlow) return;
-    const resumeState = location.state?.resumeFullPackage;
+    const resumeState =
+      location.state?.resumeFullPackage ||
+      (activeWorkflowDraft
+        ? {
+            fullPackageId: activeWorkflowDraft.fullPackageId,
+            selectedItem:
+              activeWorkflowDraft.selectedItem ||
+              activeWorkflowDraft.resumeState?.fullPackage?.selectedItem ||
+              activeWorkflowDraft.resumeState?.fullPackage?.requestModal?.selectedItem,
+            requestModal: activeWorkflowDraft.resumeState?.fullPackage?.requestModal || null,
+          }
+        : null);
     if (!resumeState) return;
 
     restoreAppliedRef.current = true;
@@ -328,7 +379,7 @@ export default function FullPackageMissingScreen() {
         setAutoOpened(true);
       });
     }
-  }, [location.state, canUseRequestFlow, itemRows]);
+  }, [location.state, activeWorkflowDraft, canUseRequestFlow, itemRows]);
 
   useEffect(() => {
     if (autoOpened || !canUseRequestFlow) return;
@@ -368,9 +419,6 @@ export default function FullPackageMissingScreen() {
     email: formEmail,
     county,
     town,
-    paid,
-    paymentMeta,
-    unlockPaymentReceipt,
   }) => {
     if (!uid || !fullPackageId || !pickedNeed) return;
 
@@ -401,6 +449,21 @@ export default function FullPackageMissingScreen() {
     const itemKey = toFullPackageItemKey(pickedNeed);
     const parentRequestId = String(latestByItemKey.get(itemKey)?.id || "");
     const finalNote = String(note || "").trim();
+    const latestForItem = latestByItemKey.get(itemKey) || null;
+    const latestOutcome = latestForItem ? normalizeRequestOutcome(latestForItem) : "not_started";
+
+    if (latestForItem && latestOutcome !== "rejected") {
+      if (workflowDraftId) {
+        await recordWorkflowDraftGeneratedRequest(workflowDraftId, {
+          requestId: latestForItem.id,
+          itemKey,
+          selectedItems,
+        });
+      }
+      setModalOpen(false);
+      navigate(`/app/request/${latestForItem.id}`, { replace: true });
+      return { requestId: latestForItem.id, reused: true };
+    }
 
     const requestId = await createServiceRequest({
       uid,
@@ -416,8 +479,8 @@ export default function FullPackageMissingScreen() {
       county: String(county || "").trim(),
       town: String(town || "").trim(),
       city: String(town || "").trim(),
-      paid: true,
-      paymentMeta: paymentMeta || unlockPaymentReceipt || unlockPaymentMeta || null,
+      paid: false,
+      paymentMeta: null,
       requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
       extraFieldAnswers: extraFieldAnswers || null,
       parentRequestId,
@@ -428,30 +491,44 @@ export default function FullPackageMissingScreen() {
       fullPackageSelectedItems: selectedItems,
     });
 
-    try {
-      const receipt = unlockPaymentReceipt || unlockPaymentMeta || {};
-      const amountNum = toAmountNumber(
-        receipt?.amount || fullPackageDoc?.unlockAmount || fullPackageDoc?.depositAmount
-      );
-      await createUnlockPaymentForRequest({
+    if (workflowDraftId) {
+      const generatedDraft = await recordWorkflowDraftGeneratedRequest(workflowDraftId, {
         requestId,
-        requestUid: uid,
-        amount: amountNum,
-        currency: String(receipt?.currency || "KES"),
-        paymentLabel: "Unlock request payment",
-        note: "Full package unlock payment",
-        paidAtMs: Number(receipt?.paidAtMs || receipt?.paidAt || Date.now()) || Date.now(),
-        transactionReference: String(
-          receipt?.transactionReference || receipt?.ref || ""
-        ),
-        context: {
-          flow: "fullpackage",
-          fullPackageId,
-          fullPackageItem: pickedNeed,
-        },
+        itemKey,
+        selectedItems,
       });
-    } catch (payError) {
-      console.warn("Failed to persist full package unlock payment record:", payError);
+      if (!generatedDraft?.archived) {
+        await saveWorkflowDraft(workflowDraftId, {
+          flowFamily: WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE,
+          flowKind: WORKFLOW_DRAFT_FLOW_KINDS.FULL_PACKAGE_ITEM_REQUEST,
+          status: WORKFLOW_DRAFT_STATUSES.READY_TO_GENERATE_REQUESTS,
+          title: "Full Package",
+          subtitle: country,
+          track: safeTrack,
+          country,
+          fullPackageId,
+          selectedItems,
+          selectedItem: "",
+          paymentState: "paid",
+          fullPackageUnlockPaid: true,
+          routePath: location.pathname,
+          routeSearch: location.search || "",
+          resumeState: {
+            fullPackage: {
+              screen: "missing",
+              fullPackageId,
+              selectedItems,
+              selectedItem: "",
+              requestModal: {
+                open: false,
+                step: "closed",
+                formState: null,
+                selectedItem: "",
+              },
+            },
+          },
+        });
+      }
     }
 
     const files = Array.isArray(dummyFiles) ? dummyFiles : [];
@@ -511,6 +588,62 @@ export default function FullPackageMissingScreen() {
     pickedNeed,
     modalOpen,
     requestModalResumeState,
+  ]);
+
+  useEffect(() => {
+    if (!workflowDraftId) return undefined;
+    if (!fullPackageId) return undefined;
+
+    const timer = setTimeout(() => {
+      void saveWorkflowDraft(workflowDraftId, {
+        flowFamily: WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE,
+        flowKind: modalOpen
+          ? WORKFLOW_DRAFT_FLOW_KINDS.FULL_PACKAGE_ITEM_REQUEST
+          : WORKFLOW_DRAFT_FLOW_KINDS.FULL_PACKAGE_SETUP,
+        status: WORKFLOW_DRAFT_STATUSES.READY_TO_GENERATE_REQUESTS,
+        title: "Full Package",
+        subtitle: country,
+        track: safeTrack,
+        country,
+        fullPackageId,
+        selectedItems,
+        selectedItem: pickedNeed,
+        paymentState: unlockPaid ? "paid" : "pending",
+        fullPackageUnlockPaid: unlockPaid,
+        routePath: location.pathname,
+        routeSearch: location.search || "",
+        resumeState: {
+          fullPackage: {
+            screen: "missing",
+            fullPackageId,
+            selectedItems,
+            selectedItem: pickedNeed,
+            requestModal: {
+              open: modalOpen,
+              step: requestModalResumeState?.step || (modalOpen ? "submit" : "closed"),
+              formState: requestModalResumeState?.formState || null,
+              selectedItem: pickedNeed,
+            },
+          },
+        },
+      }).catch((error) => {
+        console.warn("Failed to save full package hub draft:", error?.message || error);
+      });
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [
+    workflowDraftId,
+    fullPackageId,
+    modalOpen,
+    requestModalResumeState,
+    pickedNeed,
+    selectedItems,
+    unlockPaid,
+    safeTrack,
+    country,
+    location.pathname,
+    location.search,
   ]);
 
   if (!authChecked) {

@@ -30,8 +30,8 @@ function formatMonthInput(year, month) {
 }
 
 export const MONEY_TOOL_TABS = [
-  { id: "currency", label: "Currency" },
-  { id: "planner", label: "Planner" },
+  { id: "currency", label: "Converter" },
+  { id: "planner", label: "Budget Plan" },
   { id: "timeline", label: "Timeline" },
 ];
 

@@ -222,12 +222,7 @@ function useExchangeRate(fromCurrency, toCurrency) {
   return exchangeState;
 }
 
-function CurrencyTab({
-  profileCountry,
-  destinationCountry,
-  value,
-  onChange,
-}) {
+function CurrencyTab({ value, onChange }) {
   const supportedCurrencies = useMemo(() => getSupportedSelfHelpCurrencies(), []);
   const [quoteState, setQuoteState] = useState({
     status: "idle",
@@ -288,10 +283,7 @@ function CurrencyTab({
     <div className="grid gap-4">
       <div className="rounded-3xl border border-zinc-200/80 bg-white/85 p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/55">
         <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-          Currency converter
-        </div>
-        <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-          Defaulting from {profileCountry || "your profile"} into {destinationCountry || "your destination"}.
+          Converter
         </div>
 
         <div className="mt-4 rounded-2xl border border-zinc-200/80 bg-zinc-50/90 p-3 dark:border-zinc-800 dark:bg-zinc-900/55">
@@ -388,7 +380,7 @@ function CurrencyTab({
         <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 dark:border-emerald-900/35 dark:bg-emerald-950/20">
           {currencyState.status === "loading" ? (
             <div className="text-sm font-medium text-emerald-900 dark:text-emerald-100">
-              Refreshing live quote...
+              Refreshing rate...
             </div>
           ) : null}
 
@@ -429,7 +421,7 @@ function CurrencyTab({
 
           {currencyState.status === "idle" ? (
             <div className="text-sm text-zinc-600 dark:text-zinc-300">
-              Add an amount and pick both currencies to calculate a quote.
+              Enter an amount and choose both currencies.
             </div>
           ) : null}
         </div>
@@ -439,11 +431,8 @@ function CurrencyTab({
 }
 
 function PlannerTab({
-  trackLabel,
-  country,
   localCurrency,
   destinationCurrency,
-  profileCountry,
   rows,
   onRowsChange,
 }) {
@@ -451,7 +440,7 @@ function PlannerTab({
     () => uniqueCurrencies(localCurrency, destinationCurrency, rows.map((row) => row.currency)),
     [destinationCurrency, localCurrency, rows]
   );
-  const { rate, status, error, date, sourceLabel, sourceUrl, isFallback } = useExchangeRate(
+  const { rate, status, error, date, sourceLabel, sourceUrl } = useExchangeRate(
     localCurrency,
     destinationCurrency
   );
@@ -511,19 +500,8 @@ function PlannerTab({
   return (
     <div className="grid gap-4">
       <div className="rounded-3xl border border-zinc-200/80 bg-white/85 p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/55">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Budget planner
-            </div>
-            <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              Planning for {trackLabel} to {country || "your destination"}.
-            </div>
-          </div>
-
-          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100">
-            {profileCountry || "Profile not set"} {"->"} {country || "Destination not set"}
-          </span>
+        <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+          Budget Plan
         </div>
 
         <div className="mt-4 grid gap-3">
@@ -537,7 +515,7 @@ function PlannerTab({
                   {row.label}
                 </div>
                 <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                  Editable estimate
+                  Estimate
                 </div>
               </div>
 
@@ -615,16 +593,15 @@ function PlannerTab({
         </div>
 
         <div className="mt-4 rounded-2xl border border-zinc-200/80 bg-white/70 p-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/35 dark:text-zinc-300">
-          {status === "loading" ? "Refreshing the planning exchange rate..." : null}
+          {status === "loading" ? "Refreshing rate..." : null}
           {status === "ready" && localCurrency && destinationCurrency ? (
             <span>
-              {isFallback ? "Fallback planning rate" : "Latest planning rate"}: 1 {localCurrency} ={" "}
-              {effectiveRate.toFixed(4)} {destinationCurrency}
+              Rate: 1 {localCurrency} = {effectiveRate.toFixed(4)} {destinationCurrency}
             </span>
           ) : null}
           {status === "error" ? <span className="text-rose-700 dark:text-rose-300">{error}</span> : null}
           {!localCurrency || !destinationCurrency ? (
-            <span>Add both your profile country and destination country to compare totals in both currencies.</span>
+            <span>Set both your profile and destination countries to compare totals.</span>
           ) : null}
           {status === "ready" && date ? (
             <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">

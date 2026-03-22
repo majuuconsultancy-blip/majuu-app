@@ -999,7 +999,7 @@ export default function SelfHelpHubScreen({ track }) {
           </div>
 
           <div className="mt-6 text-xs text-zinc-500 dark:text-zinc-400">
-            Official resources stay clearly marked. Featured and recommended links use the same gateway so later provider switching and outbound reporting do not require JSX rewrites.
+            All links here are official and direct. Avoid phishing links and scams.
           </div>
         </div>
       </div>

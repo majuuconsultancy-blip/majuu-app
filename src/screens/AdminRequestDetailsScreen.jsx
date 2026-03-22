@@ -13,8 +13,10 @@ import {
   adminRejectRequest,
 } from "../services/adminrequestservice";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
-import { listAssignedAdmins } from "../services/assignedadminservice";
-import { superAdminOverrideRouteRequest } from "../services/adminroutingservice";
+import {
+  getRoutingOptionsForRequest,
+  superAdminOverrideRouteRequest,
+} from "../services/adminroutingservice";
 import {
   stageAdminFile,
   deleteStagedAdminFile,
@@ -27,10 +29,12 @@ import AdminRequestChatLauncher from "../components/AdminRequestChatLauncher";
 import AppIcon from "../components/AppIcon";
 import RequestExtraDetailsSection from "../components/RequestExtraDetailsSection";
 import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
+import RequestProgressUpdatesList from "../components/RequestProgressUpdatesList";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { smartBack } from "../utils/navBack";
 import { normalizeTextDeep } from "../utils/textNormalizer";
 import { getRequestWorkProgress } from "../utils/requestWorkProgress";
+import { isUnsubmittedGhostRequest } from "../utils/requestGhosts";
 import {
   adminApproveInProgressPayment,
   adminApproveRefund,
@@ -45,6 +49,7 @@ import {
   refundStatusUi,
 } from "../services/paymentservice";
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
+import { subscribeRequestProgressUpdates } from "../services/requestcontinuityservice";
 
 /* ---------- UI helpers ---------- */
 function pill(status) {
@@ -85,6 +90,28 @@ function formatDT(createdAt) {
 
 function safeStr(x) {
   return String(x || "").trim();
+}
+
+function permissionAwareMessage(error, fallback) {
+  const message = safeStr(error?.message, 240).toLowerCase();
+  if (message.includes("missing or insufficient permissions")) {
+    return fallback;
+  }
+  return safeStr(error?.message, 240) || fallback;
+}
+
+function cleanMoneyInput(value, { allowZero = false } = {}) {
+  const num = Number(String(value || "").replace(/[^0-9.]+/g, ""));
+  if (!Number.isFinite(num)) return 0;
+  const rounded = Math.round(num);
+  if (allowZero) return Math.max(0, rounded);
+  return rounded > 0 ? rounded : 0;
+}
+
+function formatMoney(amount, currency = "KES") {
+  const safeAmount = Math.max(0, Math.round(Number(amount || 0)));
+  const safeCurrency = safeStr(currency || "KES").toUpperCase() || "KES";
+  return `${safeCurrency} ${safeAmount.toLocaleString()}`;
 }
 
 function isHttp(url) {
@@ -180,7 +207,8 @@ export default function AdminRequestDetailsScreen() {
   // ✅ chat notification
   const [chatPendingCount, setChatPendingCount] = useState(0);
   const [roleCtx, setRoleCtx] = useState(null);
-  const [assignedAdminRows, setAssignedAdminRows] = useState([]);
+  const [routingOptions, setRoutingOptions] = useState(null);
+  const [overridePartnerId, setOverridePartnerId] = useState("");
   const [overrideTargetAdminUid, setOverrideTargetAdminUid] = useState("");
   const [overrideBusy, setOverrideBusy] = useState(false);
   const [overrideErr, setOverrideErr] = useState("");
@@ -189,6 +217,7 @@ export default function AdminRequestDetailsScreen() {
   const [payments, setPayments] = useState([]);
   const [paymentsErr, setPaymentsErr] = useState("");
   const [paymentRejectReasonById, setPaymentRejectReasonById] = useState({});
+  const [paymentApprovalDraftById, setPaymentApprovalDraftById] = useState({});
   const [paymentDecisionBusyId, setPaymentDecisionBusyId] = useState("");
 
   const [refunds, setRefunds] = useState([]);
@@ -197,6 +226,8 @@ export default function AdminRequestDetailsScreen() {
   const [refundApproveEtaById, setRefundApproveEtaById] = useState({});
   const [refundRejectReasonById, setRefundRejectReasonById] = useState({});
   const [refundDecisionBusyId, setRefundDecisionBusyId] = useState("");
+  const [progressUpdates, setProgressUpdates] = useState([]);
+  const [progressUpdatesErr, setProgressUpdatesErr] = useState("");
   const [openSections, setOpenSections] = useState(createAdminSectionState);
   const unreadRequestState = useNotifsV2Store(
     (s) => s.unreadByRequest?.[String(requestId || "").trim()] || EMPTY_REQUEST_UNREAD_STATE
@@ -228,6 +259,12 @@ export default function AdminRequestDetailsScreen() {
         setReq(null);
       } else {
         const data = normalizeTextDeep({ id: snap.id, ...snap.data() });
+        const requestStatus = safeStr(data?.status).toLowerCase();
+        if (requestStatus === "payment_pending" || isUnsubmittedGhostRequest(data)) {
+          setReq(null);
+          setErr("This request is still unfinished and is not yet in the admin queue.");
+          return;
+        }
         setReq(data);
 
         const existing = safeStr(
@@ -265,24 +302,39 @@ export default function AdminRequestDetailsScreen() {
   }, []);
 
   useEffect(() => {
-    if (!roleCtx?.isSuperAdmin) return;
+    if (!roleCtx?.isSuperAdmin || !req) return;
     let cancelled = false;
     (async () => {
       try {
-        const rows = await listAssignedAdmins({ max: 300, dedupeEmail: false });
+        const snapshot = await getRoutingOptionsForRequest(req);
         if (cancelled) return;
-        setAssignedAdminRows(Array.isArray(rows) ?rows : []);
+        setRoutingOptions(snapshot || null);
       } catch (error) {
         if (!cancelled) {
-          setAssignedAdminRows([]);
-          console.warn("Failed to load assigned admins:", error?.message || error);
+          setRoutingOptions(null);
+          console.warn("Failed to load routing options:", error?.message || error);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [roleCtx?.isSuperAdmin]);
+  }, [roleCtx?.isSuperAdmin, req]);
+
+  useEffect(() => {
+    if (!overridePartnerId) return;
+    const partnerRows = Array.isArray(routingOptions?.eligiblePartners)
+      ? routingOptions.eligiblePartners
+      : [];
+    const adminRows =
+      partnerRows.find((partner) => partner.id === overridePartnerId)?.admins || [];
+    const stillValid = adminRows.some(
+      (row) => safeStr(row?.uid) === safeStr(overrideTargetAdminUid)
+    );
+    if (!stillValid) {
+      setOverrideTargetAdminUid("");
+    }
+  }, [overridePartnerId, routingOptions, overrideTargetAdminUid]);
 
   /* ✅ FIX: pending chat count without orderBy (no index needed) */
   useEffect(() => {
@@ -369,6 +421,27 @@ export default function AdminRequestDetailsScreen() {
 
   useEffect(() => {
     setOpenSections(createAdminSectionState());
+  }, [requestId]);
+
+  useEffect(() => {
+    if (!requestId) return undefined;
+
+    const unsub = subscribeRequestProgressUpdates({
+      requestId,
+      viewerRole: "admin",
+      onData: (rows) => {
+        setProgressUpdates(rows);
+        setProgressUpdatesErr("");
+      },
+      onError: (error) => {
+        console.error("admin progress updates snapshot error:", error);
+        setProgressUpdatesErr(
+          permissionAwareMessage(error, "Progress updates are not available right now.")
+        );
+      },
+    });
+
+    return () => unsub?.();
   }, [requestId]);
 
   // ✅ live drafts list (adminFileDrafts)
@@ -585,12 +658,75 @@ export default function AdminRequestDetailsScreen() {
     }
   };
 
-  const approveInProgressPayment = async (paymentId) => {
+  const getPaymentApprovalDraft = (payment) => {
+    const id = safeStr(payment?.id);
+    const current = paymentApprovalDraftById?.[id] || {};
+    return {
+      paymentLabel:
+        current.paymentLabel != null ? String(current.paymentLabel) : safeStr(payment?.paymentLabel),
+      officialAmount:
+        current.officialAmount != null
+          ? String(current.officialAmount)
+          : String(
+              Number(
+                payment?.breakdown?.officialAmount || payment?.financialSnapshot?.officialAmount || 0
+              ) || ""
+            ),
+      serviceFee:
+        current.serviceFee != null
+          ? String(current.serviceFee)
+          : String(
+              Number(payment?.breakdown?.serviceFee || payment?.financialSnapshot?.serviceFee || 0) ||
+                ""
+            ),
+      note: current.note != null ? String(current.note) : safeStr(payment?.note),
+    };
+  };
+
+  const updatePaymentApprovalDraft = (paymentId, patch = {}) => {
     const id = safeStr(paymentId);
     if (!id) return;
+    setPaymentApprovalDraftById((prev) => ({
+      ...prev,
+      [id]: {
+        ...(prev?.[id] || {}),
+        ...patch,
+      },
+    }));
+  };
+
+  const approveInProgressPayment = async (payment) => {
+    const id = safeStr(payment?.id);
+    if (!id) return;
+    const draft = getPaymentApprovalDraft(payment);
+    const paymentLabel = safeStr(draft.paymentLabel, 180);
+    const officialAmount = cleanMoneyInput(draft.officialAmount);
+    const serviceFee = cleanMoneyInput(draft.serviceFee, { allowZero: true });
+    const note = safeStr(draft.note, 2000);
+
+    if (!paymentLabel) {
+      alert("Payment label is required.");
+      return;
+    }
+    if (!officialAmount) {
+      alert("Official amount is required.");
+      return;
+    }
+    if (!note) {
+      alert("Applicant note is required.");
+      return;
+    }
+
     setPaymentDecisionBusyId(id);
     try {
-      await adminApproveInProgressPayment({ requestId, paymentId: id });
+      await adminApproveInProgressPayment({
+        requestId,
+        paymentId: id,
+        paymentLabel,
+        officialAmount,
+        serviceFee,
+        note,
+      });
     } catch (error) {
       alert(error?.message || "Failed to approve payment.");
     } finally {
@@ -728,20 +864,43 @@ export default function AdminRequestDetailsScreen() {
       : status === "rejected"
       ?"Decision complete. This request was rejected."
       : String(req?.assignedTo || "").trim()
-      ?"Assigned requests move into active progress only after staff taps Start Work."
+      ?"Assigned to staff."
       : "Review the applicant details and documents, then make a decision.";
   const workProgress = getRequestWorkProgress(req);
   const showWorkProgressCard = Boolean(
-    String(req?.assignedTo || "").trim() || workProgress.isStarted || workProgress.progressPercent
+    String(req?.assignedTo || "").trim() ||
+      workProgress.isStarted ||
+      workProgress.progressPercent ||
+      progressUpdates.length > 0 ||
+      req?.everAssigned
   );
   const adminProgressHint = String(req?.assignedTo || "").trim()
-    ?"Staff controls live progress updates from their request details."
-    : "Assign staff first. The request stays in New until they actually start work.";
+    ?"Updates appear here when staff posts them."
+    : req?.everAssigned
+    ? "Earlier updates remain below."
+    : "Assign staff first.";
 
   const badgeText = chatPendingCount > 99 ?"99+" : String(chatPendingCount);
   const reassignmentCount = Array.isArray(req?.routingMeta?.reassignmentHistory)
     ?req.routingMeta.reassignmentHistory.length
     : 0;
+  const validPartners = Array.isArray(routingOptions?.eligiblePartners)
+    ? routingOptions.eligiblePartners
+    : [];
+  const validAdmins = (
+    overridePartnerId
+      ? validPartners.find((partner) => partner.id === overridePartnerId)?.admins || []
+      : validPartners.flatMap((partner) => (Array.isArray(partner?.admins) ? partner.admins : []))
+  ).filter((row, index, arr) => {
+    const uid = safeStr(row?.uid);
+    if (!uid) return false;
+    return arr.findIndex((item) => safeStr(item?.uid) === uid) === index;
+  });
+  const currentAssignedPartnerName = safeStr(req?.assignedPartnerName || req?.routingMeta?.assignedPartnerName);
+  const currentRoutingStatus = safeStr(req?.routingStatus || req?.routingMeta?.routingStatus || "awaiting_route");
+  const unresolvedRoutingReason = safeStr(
+    req?.routingMeta?.unresolvedReason || routingOptions?.unresolvedReason || ""
+  );
   const unlockPayment =
     payments.find((p) => String(p.paymentType || "").toLowerCase() === PAYMENT_TYPES.UNLOCK_REQUEST) ||
     null;
@@ -837,30 +996,42 @@ export default function AdminRequestDetailsScreen() {
               Review status
             </div>
             <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{actionHint}</div>
-            {!decisionLocked ?(
-              <div className="mt-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300">
-                Staff Start Work is the only normal trigger for in-progress.
-              </div>
-            ) : null}
           </div>
         </div>
 
         {showWorkProgressCard ?(
           <CollapsibleSectionCard
             className={`mt-4 ${card} p-4`}
-            title="Work progress"
-            subtitle="Live progress updates posted by staff."
+            title="Progress"
+            subtitle=""
             open={openSections.workProgress}
             onToggle={() => toggleSection("workProgress")}
           >
             <div className="mt-4">
               <RequestWorkProgressCard
                 request={req}
-                title="Work progress"
+                title=""
                 subtitle={adminProgressHint}
-                showWhenIdle={Boolean(String(req?.assignedTo || "").trim())}
-                idleText="Assigned, but staff has not started work yet."
-                pendingText="Staff has started work. A live percentage update has not been posted yet."
+                showWhenIdle={Boolean(String(req?.assignedTo || "").trim() || req?.everAssigned)}
+                inProgressTone="red"
+                idleText={
+                  String(req?.assignedTo || "").trim()
+                    ? "Assigned to staff. No update yet."
+                    : "Currently unassigned. Earlier updates remain attached to this request."
+                }
+                pendingText="Staff has started work. An update has not been posted yet."
+              />
+
+              {progressUpdatesErr ? (
+                <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+                  {progressUpdatesErr}
+                </div>
+              ) : null}
+
+              <RequestProgressUpdatesList
+                updates={progressUpdates}
+                viewerRole="admin"
+                emptyText="No progress updates posted yet."
               />
             </div>
           </CollapsibleSectionCard>
@@ -878,12 +1049,53 @@ export default function AdminRequestDetailsScreen() {
               Reassignments:{" "}
               <span className="font-semibold text-zinc-900 dark:text-zinc-100">{reassignmentCount}</span>
             </div>
+            <div>
+              Routing status:{" "}
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                {currentRoutingStatus || "-"}
+              </span>
+            </div>
+            <div>
+              Preferred agent:{" "}
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                {req?.preferredAgentName || req?.preferredAgentId || "None"}
+              </span>
+            </div>
+            <div>
+              Assigned partner:{" "}
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                {currentAssignedPartnerName || "-"}
+              </span>
+            </div>
+            {unresolvedRoutingReason ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-900">
+                {unresolvedRoutingReason}
+              </div>
+            ) : null}
           </div>
 
           {roleCtx?.isSuperAdmin ?(
             <div className="mt-4 rounded-2xl border border-emerald-200/70 bg-emerald-50/40 p-3">
               <div className="text-xs font-semibold text-emerald-800">Super admin override</div>
-              <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
+              <div className="mt-2 grid gap-2">
+                <select
+                  value={overridePartnerId}
+                  onChange={(e) => {
+                    setOverridePartnerId(e.target.value);
+                    setOverrideTargetAdminUid("");
+                  }}
+                  disabled={overrideBusy}
+                  className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                >
+                  <option value="">All valid partners</option>
+                  {validPartners.map((partner) => (
+                    <option key={partner.id} value={partner.id}>
+                      {partner.displayName}
+                      {partner.isPreferred ? " (preferred)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                 <select
                   value={overrideTargetAdminUid}
                   onChange={(e) => setOverrideTargetAdminUid(e.target.value)}
@@ -891,9 +1103,11 @@ export default function AdminRequestDetailsScreen() {
                   className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
                 >
                   <option value="">Auto best route</option>
-                  {assignedAdminRows.map((row) => (
+                  {validAdmins.map((row) => (
                     <option key={row.uid} value={row.uid}>
-                      {`${String(row?.email || "No email")} - ${String(row?.uid || "")}`}
+                      {`${String(row?.email || "No email")} - ${String(
+                        row?.partnerName || currentAssignedPartnerName || ""
+                      )}`}
                     </option>
                   ))}
                 </select>
@@ -905,6 +1119,10 @@ export default function AdminRequestDetailsScreen() {
                 >
                   {overrideBusy ?"Applying..." : "Apply override"}
                 </button>
+                </div>
+              </div>
+              <div className="mt-2 text-[11px] text-zinc-600 dark:text-zinc-300">
+                Partner list and admin list are filtered to request-compatible routes only.
               </div>
               {overrideErr ?(
                 <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs text-rose-700">
@@ -974,9 +1192,13 @@ export default function AdminRequestDetailsScreen() {
             ) : (
               inProgressPayments.map((payment) => {
                 const pStatus = String(payment.status || "").toLowerCase();
-                const isPending = pStatus === PAYMENT_STATUSES.PENDING_ADMIN_APPROVAL;
+                const isPending =
+                  pStatus === PAYMENT_STATUSES.ADMIN_REVIEW ||
+                  pStatus === PAYMENT_STATUSES.PROMPTED ||
+                  pStatus === PAYMENT_STATUSES.DRAFT;
                 const isBusy = paymentDecisionBusyId === payment.id;
                 const ui = paymentStatusUi(pStatus);
+                const approvalDraft = getPaymentApprovalDraft(payment);
                 return (
                   <div key={payment.id} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -985,8 +1207,33 @@ export default function AdminRequestDetailsScreen() {
                           {payment.paymentLabel || "In-progress payment"}
                         </div>
                         <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                          {payment.currency} {Number(payment.amount || 0).toLocaleString()}
+                          User pays: {formatMoney(payment.amount, payment.currency)}
                         </div>
+                        {payment.breakdown ?(
+                          <div className="mt-2 grid gap-1 text-xs text-zinc-600 dark:text-zinc-300">
+                            <div>
+                              Official amount:{" "}
+                              {formatMoney(payment.breakdown.officialAmount, payment.currency)}
+                            </div>
+                            <div>
+                              Service fee: {formatMoney(payment.breakdown.serviceFee, payment.currency)}
+                            </div>
+                            <div>
+                              Platform cut:{" "}
+                              {formatMoney(payment.breakdown.platformCutAmount, payment.currency)}
+                            </div>
+                            <div>
+                              Tax: {formatMoney(payment.breakdown.taxAmount, payment.currency)}
+                            </div>
+                            <div>
+                              Estimated partner payout:{" "}
+                              {formatMoney(
+                                payment.breakdown.estimatedNetPartnerPayable,
+                                payment.currency
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
                         {payment.note ?(
                           <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
                             {payment.note}
@@ -1005,6 +1252,51 @@ export default function AdminRequestDetailsScreen() {
 
                     {isPending ?(
                       <div className="mt-3 grid gap-2">
+                        <input
+                          value={approvalDraft.paymentLabel}
+                          onChange={(e) =>
+                            updatePaymentApprovalDraft(payment.id, { paymentLabel: e.target.value })
+                          }
+                          placeholder="Payment label"
+                          className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                          disabled={isBusy}
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            value={approvalDraft.officialAmount}
+                            onChange={(e) =>
+                              updatePaymentApprovalDraft(payment.id, {
+                                officialAmount: e.target.value,
+                              })
+                            }
+                            placeholder="Official amount"
+                            inputMode="decimal"
+                            className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                            disabled={isBusy}
+                          />
+                          <input
+                            value={approvalDraft.serviceFee}
+                            onChange={(e) =>
+                              updatePaymentApprovalDraft(payment.id, {
+                                serviceFee: e.target.value,
+                              })
+                            }
+                            placeholder="Service fee"
+                            inputMode="decimal"
+                            className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                            disabled={isBusy}
+                          />
+                        </div>
+                        <textarea
+                          value={approvalDraft.note}
+                          onChange={(e) =>
+                            updatePaymentApprovalDraft(payment.id, { note: e.target.value })
+                          }
+                          rows={3}
+                          placeholder="Applicant note"
+                          className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                          disabled={isBusy}
+                        />
                         <textarea
                           value={String(paymentRejectReasonById?.[payment.id] || "")}
                           onChange={(e) =>
@@ -1018,7 +1310,7 @@ export default function AdminRequestDetailsScreen() {
                         <div className="grid grid-cols-2 gap-2">
                           <button
                             type="button"
-                            onClick={() => approveInProgressPayment(payment.id)}
+                            onClick={() => approveInProgressPayment(payment)}
                             disabled={isBusy}
                             className="rounded-2xl border border-emerald-200 bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
                           >
@@ -1075,7 +1367,7 @@ export default function AdminRequestDetailsScreen() {
             ) : (
               refunds.map((refund) => {
                 const rStatus = String(refund.status || "").toLowerCase();
-                const pending = rStatus === REFUND_STATUSES.PENDING;
+                const pending = rStatus === REFUND_STATUSES.REQUESTED;
                 const isBusy = refundDecisionBusyId === refund.id;
                 const ui = refundStatusUi(rStatus);
                 return (
@@ -1367,8 +1659,8 @@ export default function AdminRequestDetailsScreen() {
 
         <CollapsibleSectionCard
           className={`mt-6 ${card} p-5`}
-          title="Attach files for applicant"
-          subtitle="Add links for templates and supporting files. These go out after accept."
+          title="Attach Files"
+          subtitle=""
           open={openSections.attachments}
           onToggle={() => toggleSection("attachments")}
           meta={
@@ -1417,10 +1709,6 @@ export default function AdminRequestDetailsScreen() {
                 </button>
               </div>
 
-              <div className="text-xs text-zinc-500">
-                Tip: Make sure the link access is set to "Anyone with the link can
-                view".
-              </div>
             </div>
           ) : (
             <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">

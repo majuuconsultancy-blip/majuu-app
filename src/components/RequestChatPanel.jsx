@@ -14,6 +14,7 @@ import { auth, db } from "../firebase";
 import { sendPendingText, sendPendingPdf, sendPendingBundle } from "../services/chatservice";
 import useKeyboardInset from "../hooks/useKeyboardInset";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import { getSystemChatMessageLabel, isSystemChatMessage } from "../utils/chatSystemMessages";
 import { safeText } from "../utils/safeText";
 
 /* ---------------- helpers ---------------- */
@@ -61,6 +62,7 @@ function roleLabel(role) {
   const r = String(role || "").toLowerCase();
   if (r === "user") return "You";
   if (r === "staff") return "Staff";
+  if (r === "system") return "System";
   return "Admin";
 }
 
@@ -332,12 +334,16 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
         { ...(window.history.state || {}), __majuu_chat_layer: true, requestId: rid },
         ""
       );
-    } catch {}
+    } catch {
+      // ignore history state issues
+    }
 
     const goBackToRequest = () => {
       try {
         onClose?.();
-      } catch {}
+      } catch {
+        // ignore close callback issues
+      }
       navigate(backHref, { replace: true });
     };
 
@@ -706,6 +712,18 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
 
   const renderBubble = (item) => {
     const m = item.data || {};
+    if (isSystemChatMessage(m)) {
+      return (
+        <div key={item.id} className="flex justify-center py-1.5">
+          <div className="flex w-full items-center gap-3 text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
+            <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+            <span>{getSystemChatMessageLabel(m, myRole)}</span>
+            <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+          </div>
+        </div>
+      );
+    }
+
     const fromRole = String(m.fromRole || "").toLowerCase();
     const mine = fromRole === myRole;
     const time = formatTime(m.createdAt || null);
@@ -789,7 +807,9 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
   const closeAndGoBack = () => {
     try {
       onClose?.();
-    } catch {}
+    } catch {
+      // ignore close callback issues
+    }
     navigate(backHref, { replace: true });
   };
 

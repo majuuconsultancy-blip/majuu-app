@@ -96,6 +96,68 @@ service cloud.firestore {
         );
     }
 
+    function clientRequestFinanceFieldsSafeOnCreate() {
+      return (
+        (!request.resource.data.keys().hasAny(["paid"]) || request.resource.data.paid == false)
+        && (!request.resource.data.keys().hasAny(["paymentMeta"]) || request.resource.data.paymentMeta == null)
+        && (!request.resource.data.keys().hasAny(["unlockPaymentId"]) || str(request.resource.data.unlockPaymentId) == "")
+        && (!request.resource.data.keys().hasAny(["unlockPaymentRequestId"]) || str(request.resource.data.unlockPaymentRequestId) == "")
+        && (!request.resource.data.keys().hasAny(["paymentFlowType"]) || str(request.resource.data.paymentFlowType) == "")
+        && (!request.resource.data.keys().hasAny(["unlockAutoRefundEligibleAtMs"]) || request.resource.data.unlockAutoRefundEligibleAtMs == 0)
+        && (!request.resource.data.keys().hasAny(["unlockAutoRefundStatus"]) || str(request.resource.data.unlockAutoRefundStatus) == "")
+      );
+    }
+
+    function clientRequestRoutingFieldsSafeOnCreate() {
+      return (
+        str(request.resource.data.assignedPartnerId) == ""
+        && str(request.resource.data.assignedPartnerName) == ""
+        && str(request.resource.data.assignedAdminId) == ""
+        && str(request.resource.data.currentAdminUid) == ""
+        && str(request.resource.data.currentAdminRole) == ""
+        && str(request.resource.data.currentAdminEmail) == ""
+        && str(request.resource.data.currentAdminAvailability) == ""
+        && str(request.resource.data.ownerLockedAdminUid) == ""
+        && str(request.resource.data.routingStatus) in ["awaiting_route", "awaiting_payment", ""]
+        && (
+          !request.resource.data.keys().hasAny(["routingMeta"])
+          || (
+            str(request.resource.data.routingMeta.currentAdminUid) == ""
+            && str(request.resource.data.routingMeta.currentAdminEmail) == ""
+            && str(request.resource.data.routingMeta.assignedAdminId) == ""
+            && str(request.resource.data.routingMeta.assignedPartnerId) == ""
+            && str(request.resource.data.routingMeta.assignedPartnerName) == ""
+            && str(request.resource.data.routingMeta.lockedOwnerAdminUid) == ""
+            && str(request.resource.data.routingMeta.routingStatus) in ["awaiting_route", "awaiting_payment", ""]
+          )
+        )
+      );
+    }
+
+    function fullPackageOwnerCreateSafe() {
+      return request.resource.data.uid == authUid()
+        && request.resource.data.unlockPaid != true
+        && request.resource.data.depositPaid != true
+        && (!request.resource.data.keys().hasAny(["unlockPaymentMeta"]) || request.resource.data.unlockPaymentMeta == null)
+        && (!request.resource.data.keys().hasAny(["depositPaymentMeta"]) || request.resource.data.depositPaymentMeta == null)
+        && (!request.resource.data.keys().hasAny(["unlockCoverage"]) || request.resource.data.unlockCoverage == null)
+        && (!request.resource.data.keys().hasAny(["latestUnlockRequestId"]) || str(request.resource.data.latestUnlockRequestId) == "")
+        && (!request.resource.data.keys().hasAny(["latestUnlockItemsKey"]) || str(request.resource.data.latestUnlockItemsKey) == "");
+    }
+
+    function fullPackageOwnerUpdateSafe() {
+      return request.resource.data.uid == resource.data.uid
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          "email",
+          "track",
+          "country",
+          "selectedItems",
+          "itemStates",
+          "updatedAt",
+          "updatedAtMs"
+        ]);
+    }
+
     function requestPath(requestId) {
       return /databases/$(database)/documents/serviceRequests/$(requestId);
     }
@@ -142,7 +204,10 @@ service cloud.firestore {
     function isScopedAssignedAdminForRequestData(data) {
       return isAssignedAdmin() && data != null && (
         data.currentAdminUid == authUid() ||
-        data.ownerLockedAdminUid == authUid()
+        data.ownerLockedAdminUid == authUid() ||
+        data.assignedAdminId == authUid() ||
+        data.routingMeta.currentAdminUid == authUid() ||
+        data.routingMeta.assignedAdminId == authUid()
       );
     }
 
@@ -199,6 +264,14 @@ service cloud.firestore {
 
     function staffAllowedRequestStatus(newStatus) {
       return newStatus in ["new", "contacted"];
+    }
+
+    function staffAllowedBackendStatus(newStatus) {
+      return newStatus in ["new", "assigned", "in_progress", "completed"];
+    }
+
+    function staffAllowedUserStatus(newStatus) {
+      return newStatus in ["", "in_progress", "completed"];
     }
 
     function staffAllowedStaffStatus(v) {
@@ -355,6 +428,54 @@ service cloud.firestore {
     match /countries/{countryId} {
       allow read: if signedIn();
       allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /partners/{partnerId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /partnerCoverage/{partnerId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /financeSettings/{configId} {
+      allow read: if isAnyAdmin();
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /partnerFinancialProfiles/{partnerId} {
+      allow read: if isAnyAdmin();
+      allow create, update: if isAnyAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /payoutQueue/{queueId} {
+      allow read: if isAnyAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /settlementHistory/{settlementId} {
+      allow read: if isAnyAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /financialAuditLogs/{auditId} {
+      allow read: if isAnyAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /paymentProviderReferences/{referenceId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /paymentShareLinks/{shareId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /paymentProviderEvents/{eventId} {
+      allow read, create, update, delete: if false;
     }
 
     match /selfHelpLinks/{resourceId} {
@@ -548,18 +669,103 @@ service cloud.firestore {
 
     match /fullPackages/{fullPackageId} {
       allow read: if isSuperAdmin() || (signedIn() && resource.data.uid == authUid());
-      allow create: if signedIn() && request.resource.data.uid == authUid();
-      allow update, delete: if isSuperAdmin() || (signedIn() && resource.data.uid == authUid());
+      allow create: if signedIn() && fullPackageOwnerCreateSafe();
+      allow update: if isSuperAdmin()
+        || (signedIn() && resource.data.uid == authUid() && fullPackageOwnerUpdateSafe());
+      allow delete: if isSuperAdmin() || (signedIn() && resource.data.uid == authUid());
+    }
+
+    match /workflowDrafts/{draftId} {
+      function workflowDraftIsPaid(data) {
+        return data != null && (
+          data.fullPackageUnlockPaid == true ||
+          lower(data.paymentState) == "paid" ||
+          lower(data.status) == "unlock_paid_pending_submission" ||
+          lower(data.status) == "full_package_paid_pending_diagnostics"
+        );
+      }
+
+      allow read: if isSuperAdmin() || (signedIn() && resource.data.uid == authUid());
+
+      allow create: if signedIn()
+        && request.resource.data.uid == authUid();
+
+      allow update: if isSuperAdmin()
+        || (
+          signedIn()
+          && resource.data.uid == authUid()
+          && request.resource.data.uid == resource.data.uid
+        );
+
+      allow delete: if isSuperAdmin()
+        || (
+          signedIn()
+          && resource.data.uid == authUid()
+          && !workflowDraftIsPaid(resource.data)
+        );
     }
 
     match /serviceRequests/{requestId} {
+      function requestOwnerCanDeletePendingRequest() {
+        return isRequestOwner(requestId)
+          && requestExists(requestId)
+          && requestDoc(requestId).paid != true
+          && lower(requestDoc(requestId).status) == "payment_pending";
+      }
+
+      function unlockPaymentPath(paymentId) {
+        return /databases/$(database)/documents/serviceRequests/$(requestId)/payments/$(paymentId);
+      }
+
+      function unlockPaymentExists(paymentId) {
+        return str(paymentId).size() > 0 && exists(unlockPaymentPath(paymentId));
+      }
+
+      function unlockPaymentDoc(paymentId) {
+        return unlockPaymentExists(paymentId)
+          ? get(unlockPaymentPath(paymentId)).data
+          : null;
+      }
+
+      function ownerCanFinalizeUnlockRequest() {
+        let paymentId = str(request.resource.data.unlockPaymentId);
+        let paymentData = unlockPaymentDoc(paymentId);
+        return requestOwnerCanDeletePendingRequest()
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            "paid",
+            "status",
+            "routingStatus",
+            "paymentMeta",
+            "unlockPaymentId",
+            "unlockPaymentRequestId",
+            "updatedAt",
+            "updatedAtMs"
+          ])
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.paid == true
+          && request.resource.data.status == "new"
+          && request.resource.data.routingStatus == "awaiting_route"
+          && request.resource.data.unlockPaymentRequestId == requestId
+          && request.resource.data.paymentMeta != null
+          && lower(request.resource.data.paymentMeta.status) == "paid"
+          && str(request.resource.data.paymentMeta.requestId) == requestId
+          && str(request.resource.data.paymentMeta.paymentId) == paymentId
+          && paymentData != null
+          && lower(paymentData.paymentType) == "unlock_request"
+          && paymentData.requestId == requestId
+          && paymentData.requestUid == authUid()
+          && lower(paymentData.status) == "paid";
+      }
+
       allow read: if canReadRequestData(resource.data);
 
       allow create: if signedIn()
         && request.resource.data.uid == authUid()
         && request.resource.data.county is string
         && request.resource.data.county.size() > 0
-        && validFullPackageLinkOnCreate();
+        && validFullPackageLinkOnCreate()
+        && clientRequestFinanceFieldsSafeOnCreate()
+        && clientRequestRoutingFieldsSafeOnCreate();
 
       allow update: if isSuperAdmin()
         || (
@@ -572,6 +778,7 @@ service cloud.firestore {
             || request.resource.data.ownerLockedAdminUid == authUid()
           )
         )
+        || ownerCanFinalizeUnlockRequest()
         || (
           isRequestAssignedStaff(requestId)
           && request.resource.data.diff(resource.data).changedKeys().hasOnly([
@@ -591,7 +798,11 @@ service cloud.firestore {
             "staffWorkMinutes",
             "staffProgressPercent",
             "staffProgressUpdatedAt",
-            "staffProgressUpdatedAtMs"
+            "staffProgressUpdatedAtMs",
+            "backendStatus",
+            "userStatus",
+            "everAssigned",
+            "updatedAt"
           ])
           && (
             !changedHas("status")
@@ -609,13 +820,63 @@ service cloud.firestore {
             !changedHas("staffProgressPercent")
             || staffAllowedProgressPercent(request.resource.data.staffProgressPercent)
           )
+          && (
+            !changedHas("backendStatus")
+            || staffAllowedBackendStatus(request.resource.data.backendStatus)
+          )
+          && (
+            !changedHas("userStatus")
+            || staffAllowedUserStatus(request.resource.data.userStatus)
+          )
+          && (
+            !changedHas("everAssigned")
+            || request.resource.data.everAssigned == true
+            || request.resource.data.everAssigned == resource.data.everAssigned
+          )
         );
 
       allow delete: if isSuperAdmin()
-        || (isRequestOwner(requestId) && requestIsFinalized(requestId));
+        || (
+          isRequestOwner(requestId)
+          && (requestIsFinalized(requestId) || requestOwnerCanDeletePendingRequest())
+        );
 
       match /assignmentAudit/{auditId} {
         allow read, create: if canAdminAccessRequest(requestId);
+        allow update, delete: if false;
+      }
+
+      match /requestHistory/{historyId} {
+        allow read, create: if canAdminAccessRequest(requestId);
+        allow update, delete: if false;
+      }
+
+      match /progressUpdates/{updateId} {
+        allow read: if canAdminAccessRequest(requestId)
+          || isRequestAssignedStaff(requestId)
+          || (isRequestOwner(requestId) && resource.data.visibleToUser == true);
+
+        allow create: if canAdminAccessRequest(requestId)
+          || (
+            isRequestAssignedStaff(requestId)
+            && request.resource.data.requestId == requestId
+            && request.resource.data.staffId == authUid()
+            && request.resource.data.createdBy == authUid()
+            && request.resource.data.visibleToUser is bool
+            && request.resource.data.content is string
+            && str(request.resource.data.content).size() > 0
+            && request.resource.data.keys().hasOnly([
+              "requestId",
+              "staffId",
+              "createdBy",
+              "content",
+              "visibleToUser",
+              "progressPercent",
+              "createdAt",
+              "createdAtMs"
+            ])
+          );
+
         allow update, delete: if false;
       }
 
@@ -625,126 +886,109 @@ service cloud.firestore {
         allow update: if canAdminAccessRequest(requestId);
 
         allow delete: if canAdminAccessRequest(requestId)
-          || (isRequestOwner(requestId) && requestIsFinalized(requestId));
+          || (
+            isRequestOwner(requestId)
+            && (requestIsFinalized(requestId) || requestOwnerCanDeletePendingRequest())
+          );
       }
 
       match /payments/{paymentId} {
-        function paymentRecordLinksValid(data) {
-          return data != null
-            && data.requestId == requestId
-            && str(data.requestUid).size() > 0
-            && data.requestUid == requestOwner(requestId)
-            && data.paymentType in ["unlock_request", "in_progress"]
-            && str(data.paymentLabel).size() > 0
-            && data.amount is number
-            && data.amount > 0
-            && str(data.currency).size() > 0
-            && data.status in [
-              "pending_admin_approval",
-              "awaiting_user_payment",
-              "paid",
-              "rejected",
-              "auto_refunded",
-              "refunded"
+        function ownerCanCreateUnlockPayment() {
+          return requestOwnerCanDeletePendingRequest()
+            && paymentId == (
+              str(requestDoc(requestId).unlockPaymentId).size() > 0
+                ? str(requestDoc(requestId).unlockPaymentId)
+                : "unlock_request_payment"
+            )
+            && request.resource.data.keys().hasOnly([
+              "requestId",
+              "requestUid",
+              "paymentType",
+              "paymentLabel",
+              "amount",
+              "currency",
+              "status",
+              "createdAt",
+              "createdAtMs",
+              "updatedAt",
+              "updatedAtMs"
+            ])
+            && request.resource.data.requestId == requestId
+            && request.resource.data.requestUid == authUid()
+            && lower(request.resource.data.paymentType) == "unlock_request"
+            && request.resource.data.amount is number
+            && request.resource.data.amount > 0
+            && str(request.resource.data.currency).size() > 0
+            && request.resource.data.status in [
+              "draft",
+              "payment_session_created",
+              "awaiting_payment"
             ];
         }
 
+        function ownerCanUpdateUnlockPayment() {
+          return requestOwnerCanDeletePendingRequest()
+            && paymentId == (
+              str(requestDoc(requestId).unlockPaymentId).size() > 0
+                ? str(requestDoc(requestId).unlockPaymentId)
+                : "unlock_request_payment"
+            )
+            && resource.data.requestId == requestId
+            && resource.data.requestUid == authUid()
+            && lower(resource.data.paymentType) == "unlock_request"
+            && request.resource.data.requestId == resource.data.requestId
+            && request.resource.data.requestUid == resource.data.requestUid
+            && request.resource.data.paymentType == resource.data.paymentType
+            && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+              "status",
+              "transactionReference",
+              "providerReference",
+              "providerTransactionId",
+              "paymentMethod",
+              "paidAt",
+              "paidAtMs",
+              "updatedAt",
+              "updatedAtMs",
+              "latestReference"
+            ])
+            && (
+              request.resource.data.status == resource.data.status
+              || (
+                resource.data.status in ["draft", "payment_session_created", "awaiting_payment"]
+                && request.resource.data.status in ["paid", "failed"]
+              )
+            )
+            && (
+              !changedHas("transactionReference")
+              || str(request.resource.data.transactionReference).size() > 0
+            );
+        }
+
         allow read: if canReadRequestData(requestDoc(requestId));
-
-        allow create: if paymentRecordLinksValid(request.resource.data)
-          && (
-            (isRequestOwner(requestId)
-              && request.resource.data.paymentType == "unlock_request"
-              && request.resource.data.status == "paid")
-            || (isRequestAssignedStaff(requestId)
-              && request.resource.data.paymentType == "in_progress"
-              && request.resource.data.status == "pending_admin_approval")
+        allow create: if ownerCanCreateUnlockPayment();
+        allow update: if ownerCanUpdateUnlockPayment();
+        allow delete: if canAdminAccessRequest(requestId)
+          || (
+            requestOwnerCanDeletePendingRequest()
+            && lower(resource.data.status) in [
+              "draft",
+              "payment_session_created",
+              "awaiting_payment",
+              "failed",
+              "revoked",
+              "expired"
+            ]
           );
 
-        allow update: if paymentRecordLinksValid(request.resource.data)
-          && request.resource.data.requestId == resource.data.requestId
-          && request.resource.data.requestUid == resource.data.requestUid
-          && request.resource.data.paymentType == resource.data.paymentType
-          && request.resource.data.amount == resource.data.amount
-          && request.resource.data.currency == resource.data.currency
-          && (
-            (isRequestOwner(requestId)
-              && resource.data.status == "awaiting_user_payment"
-              && request.resource.data.status == "paid")
-            || (canAdminAccessRequest(requestId)
-              && resource.data.paymentType == "in_progress"
-              && resource.data.status == "pending_admin_approval"
-              && request.resource.data.status in ["awaiting_user_payment", "rejected"])
-            || ((isRequestOwner(requestId) || canAdminAccessRequest(requestId))
-              && resource.data.paymentType == "unlock_request"
-              && resource.data.status == "paid"
-              && request.resource.data.status == "auto_refunded")
-            || (canAdminAccessRequest(requestId)
-              && resource.data.status == "paid"
-              && request.resource.data.status == "refunded")
-          );
-
-        allow delete: if false;
+        match /attempts/{attemptId} {
+          allow read: if canReadRequestData(requestDoc(requestId));
+          allow create, update, delete: if false;
+        }
       }
 
       match /refundRequests/{refundId} {
-        function paymentSubPath(paymentId) {
-          return /databases/$(database)/documents/serviceRequests/$(requestId)/payments/$(paymentId);
-        }
-
-        function paymentSubExists(paymentId) {
-          return str(paymentId).size() > 0 && exists(paymentSubPath(paymentId));
-        }
-
-        function paymentSubDoc(paymentId) {
-          return paymentSubExists(paymentId) ? get(paymentSubPath(paymentId)).data : null;
-        }
-
-        function refundRecordLinksValid(data) {
-          let pid = str(data.paymentId);
-          let pay = paymentSubDoc(pid);
-          return data != null
-            && data.refundId == refundId
-            && data.requestId == requestId
-            && pid.size() > 0
-            && paymentSubExists(pid)
-            && pay != null
-            && pay.requestId == requestId
-            && data.uid == requestOwner(requestId)
-            && data.paymentType == pay.paymentType
-            && data.paymentLabel == pay.paymentLabel
-            && data.amount == pay.amount
-            && data.currency == pay.currency
-            && data.status in ["pending", "approved", "rejected", "auto_refunded", "refunded"];
-        }
-
         allow read: if canReadRequestData(requestDoc(requestId));
-
-        allow create: if refundRecordLinksValid(request.resource.data)
-          && (
-            (isRequestOwner(requestId) && request.resource.data.status == "pending")
-            || (
-              (isRequestOwner(requestId) || canAdminAccessRequest(requestId))
-              && request.resource.data.status == "auto_refunded"
-            )
-          );
-
-        allow update: if canAdminAccessRequest(requestId)
-          && refundRecordLinksValid(resource.data)
-          && refundRecordLinksValid(request.resource.data)
-          && resource.data.status == "pending"
-          && request.resource.data.status in ["rejected", "refunded"]
-          && request.resource.data.refundId == resource.data.refundId
-          && request.resource.data.requestId == resource.data.requestId
-          && request.resource.data.paymentId == resource.data.paymentId
-          && request.resource.data.uid == resource.data.uid
-          && request.resource.data.paymentType == resource.data.paymentType
-          && request.resource.data.paymentLabel == resource.data.paymentLabel
-          && request.resource.data.amount == resource.data.amount
-          && request.resource.data.currency == resource.data.currency
-          && request.resource.data.decidedByAdminUid == authUid();
-
-        allow delete: if false;
+        allow create, update, delete: if false;
       }
 
       match /documentExtracts/{attachmentId} {

@@ -9,19 +9,25 @@ export default function RequestWorkProgressCard({
   idleText = "Work has not started yet.",
   pendingText = "Work started. Progress update pending.",
   children = null,
+  inProgressTone = "blue",
 }) {
   const progress = getRequestWorkProgress(request);
   const progressPercent = progress.progressPercent;
   const hasPercent = Number.isFinite(progressPercent) && progressPercent > 0;
   const shouldRender = showWhenIdle || progress.isStarted || hasPercent || children;
+  const showHeader = Boolean(title || subtitle);
 
   if (!shouldRender) return null;
 
   const badgeLabel = hasPercent ? `${progressPercent}%` : progress.isInProgress ? "Live" : "Waiting";
+  const inProgressBadgeCls =
+    inProgressTone === "red"
+      ? "border-rose-200 bg-rose-50 text-rose-700"
+      : "border-blue-200 bg-blue-50 text-blue-800";
   const badgeCls = hasPercent
     ? "border-emerald-200 bg-emerald-50 text-emerald-800"
     : progress.isInProgress
-    ? "border-blue-200 bg-blue-50 text-blue-800"
+    ? inProgressBadgeCls
     : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300";
 
   const helperText = hasPercent
@@ -32,13 +38,15 @@ export default function RequestWorkProgressCard({
 
   return (
     <div className={className}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</div>
-          {subtitle ? (
-            <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{subtitle}</div>
-          ) : null}
-        </div>
+      <div className={showHeader ? "flex items-start justify-between gap-3" : "flex justify-end"}>
+        {showHeader ? (
+          <div className="min-w-0">
+            {title ? <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</div> : null}
+            {subtitle ? (
+              <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{subtitle}</div>
+            ) : null}
+          </div>
+        ) : null}
         <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${badgeCls}`}>
           {badgeLabel}
         </span>

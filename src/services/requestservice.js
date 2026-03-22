@@ -4,6 +4,11 @@ import { auth, db } from "../firebase";
 import { sendPushToAdmin } from "./pushServerClient";
 import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
 import { logAnalyticsEvent } from "./analyticsService";
+import { REQUEST_BACKEND_STATUSES } from "../utils/requestLifecycle";
+import {
+  preferredAgentReasonLabel,
+  validatePreferredAgentSelection,
+} from "./partnershipService";
 
 function cleanStr(x, max = 500) {
   return String(x || "").trim().slice(0, max);
@@ -27,6 +32,11 @@ function cleanTrack(x) {
 function cleanRequestType(x) {
   const t = cleanStr(x, 20).toLowerCase();
   return t === "full" ? "full" : "single";
+}
+
+function cleanInitialRequestStatus(value) {
+  const raw = cleanStr(value, 40).toLowerCase();
+  return raw === "payment_pending" ? "payment_pending" : "new";
 }
 
 const EXTRA_FIELD_TYPES = new Set(["text", "textarea", "number", "document"]);
@@ -215,6 +225,56 @@ function cleanPricingSnapshot(snapshot) {
   };
 }
 
+async function resolvePreferredAgentPayload({
+  preferredAgentId = "",
+  track = "",
+  country = "",
+  county = "",
+} = {}) {
+  const safePreferredAgentId = cleanStr(preferredAgentId, 140);
+  const checkedAtMs = Date.now();
+  if (!safePreferredAgentId) {
+    return {
+      preferredAgentId: "",
+      preferredAgentName: "",
+      preferredAgentStatus: "none",
+      preferredAgentInvalidReason: "",
+      preferredAgentInvalidMessage: "",
+      preferredAgentValidatedAtMs: checkedAtMs,
+    };
+  }
+
+  try {
+    const validation = await validatePreferredAgentSelection({
+      partnerId: safePreferredAgentId,
+      trackType: track,
+      country,
+      county,
+    });
+
+    return {
+      preferredAgentId: safePreferredAgentId,
+      preferredAgentName: cleanStr(validation?.partner?.displayName, 120),
+      preferredAgentStatus: validation?.valid ? "valid" : "invalid",
+      preferredAgentInvalidReason: validation?.valid ? "" : cleanStr(validation?.reason, 80),
+      preferredAgentInvalidMessage: validation?.valid
+        ? ""
+        : cleanStr(preferredAgentReasonLabel(validation?.reason), 180),
+      preferredAgentValidatedAtMs: checkedAtMs,
+    };
+  } catch (error) {
+    console.warn("preferred agent validation failed:", error?.message || error);
+    return {
+      preferredAgentId: safePreferredAgentId,
+      preferredAgentName: "",
+      preferredAgentStatus: "invalid",
+      preferredAgentInvalidReason: "validation_failed",
+      preferredAgentInvalidMessage: "Preferred agent will be reviewed during routing.",
+      preferredAgentValidatedAtMs: checkedAtMs,
+    };
+  }
+}
+
 // Helpers for auth soft gate + safety
 function requireSignedInUser() {
   const user = auth.currentUser;
@@ -292,6 +352,16 @@ export async function createServiceRequest(payload) {
   const unlockPaymentId = cleanStr(payload?.unlockPaymentId, 180);
   const unlockPaymentRequestId = cleanStr(payload?.unlockPaymentRequestId, 180);
   const pricingSnapshot = cleanPricingSnapshot(payload?.pricingSnapshot);
+  const preferredAgentPayload = await resolvePreferredAgentPayload({
+    preferredAgentId: payload?.preferredAgentId,
+    track: cleanTrack(payload?.track),
+    country: cleanStr(payload?.country, 80),
+    county,
+  });
+  const initialStatus = cleanInitialRequestStatus(payload?.status);
+  const initialRoutingStatus =
+    initialStatus === "payment_pending" ? "awaiting_payment" : "awaiting_route";
+  const skipAdminPush = payload?.skipAdminPush === true || initialStatus !== "new";
 
   const clean = {
     uid: user.uid,
@@ -311,6 +381,16 @@ export async function createServiceRequest(payload) {
     countyLower: county.toLowerCase(),
     town,
     city: town, // legacy compatibility
+    preferredAgentId: preferredAgentPayload.preferredAgentId,
+    preferredAgentName: preferredAgentPayload.preferredAgentName,
+    preferredAgentStatus: preferredAgentPayload.preferredAgentStatus,
+    preferredAgentInvalidReason: preferredAgentPayload.preferredAgentInvalidReason,
+    preferredAgentInvalidMessage: preferredAgentPayload.preferredAgentInvalidMessage,
+    preferredAgentValidatedAtMs: preferredAgentPayload.preferredAgentValidatedAtMs,
+    assignedPartnerId: "",
+    assignedPartnerName: "",
+    assignedAdminId: "",
+    routingStatus: "awaiting_route",
 
     missingItems: cleanMissingItems,
     parentRequestId: parentRequestId || "",
@@ -329,8 +409,12 @@ export async function createServiceRequest(payload) {
     extraFieldAnswers,
 
     status: "new",
+    backendStatus: REQUEST_BACKEND_STATUSES.NEW,
+    userStatus: "",
+    everAssigned: false,
     currentAdminUid: "",
     currentAdminRole: "",
+    currentAdminEmail: "",
     currentAdminAvailability: "",
     ownerLockedAdminUid: "",
     markedInProgressAt: null,
@@ -341,13 +425,31 @@ export async function createServiceRequest(payload) {
     escalationCount: 0,
     responseDeadlineAtMs: 0,
     routingMeta: {
+      track: cleanTrack(payload?.track),
+      country: cleanStr(payload?.country, 80),
       county,
       town,
       currentAdminUid: "",
+      currentAdminEmail: "",
+      assignedAdminId: "",
+      assignedPartnerId: "",
+      assignedPartnerName: "",
+      preferredAgentId: preferredAgentPayload.preferredAgentId,
+      preferredAgentName: preferredAgentPayload.preferredAgentName,
+      preferredAgentStatus: preferredAgentPayload.preferredAgentStatus,
+      preferredAgentInvalidReason: preferredAgentPayload.preferredAgentInvalidReason,
+      preferredAgentInvalidMessage: preferredAgentPayload.preferredAgentInvalidMessage,
       routedAtMs: 0,
-      routingReason: "awaiting_auto_route",
+      routingReason:
+        initialStatus === "payment_pending" ? "awaiting_unlock_payment" : "awaiting_auto_route",
+      routingStatus: initialRoutingStatus,
       adminAvailabilityAtRouting: "",
       escalationReason: "",
+      unresolvedReason: "",
+      partnerDecisionSource: "",
+      countyMatchType: "",
+      eligiblePartnerCount: 0,
+      eligibleAdminCount: 0,
       escalationCount: 0,
       reassignmentHistory: [],
       acceptedAtMs: 0,
@@ -356,37 +458,43 @@ export async function createServiceRequest(payload) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
+  clean.status = initialStatus;
+  clean.routingStatus = initialRoutingStatus;
 
   const docRef = await addDoc(ref, clean);
 
-  void logAnalyticsEvent({
-    uid: user.uid,
-    eventType: ANALYTICS_EVENT_TYPES.REQUEST_SUBMITTED,
-    trackType: clean.track,
-    country: clean.country,
-    requestId: docRef.id,
-    requestTitle: clean.serviceName,
-    sourceScreen: "requestservice.createServiceRequest",
-    metadata: {
-      requestType: clean.requestType,
-      isFullPackage: Boolean(clean.isFullPackage),
-      fullPackageId: clean.fullPackageId || "",
-      paid: Boolean(clean.paid),
-    },
-  });
-
-  try {
-    await sendPushToAdmin({
-      title: "New request",
-      body: "A new service request was submitted.",
-      data: {
-        type: "NEW_REQUEST",
-        requestId: docRef.id,
-        route: `/app/admin/request/${encodeURIComponent(docRef.id)}`,
+  if (initialStatus === "new") {
+    void logAnalyticsEvent({
+      uid: user.uid,
+      eventType: ANALYTICS_EVENT_TYPES.REQUEST_SUBMITTED,
+      trackType: clean.track,
+      country: clean.country,
+      requestId: docRef.id,
+      requestTitle: clean.serviceName,
+      sourceScreen: "requestservice.createServiceRequest",
+      metadata: {
+        requestType: clean.requestType,
+        isFullPackage: Boolean(clean.isFullPackage),
+        fullPackageId: clean.fullPackageId || "",
+        paid: Boolean(clean.paid),
       },
     });
-  } catch (error) {
-    console.warn("Failed to trigger NEW_REQUEST push:", error?.message || error);
+  }
+
+  if (!skipAdminPush) {
+    try {
+      await sendPushToAdmin({
+        title: "New request",
+        body: "A new service request was submitted.",
+        data: {
+          type: "NEW_REQUEST",
+          requestId: docRef.id,
+          route: `/app/admin/request/${encodeURIComponent(docRef.id)}`,
+        },
+      });
+    } catch (error) {
+      console.warn("Failed to trigger NEW_REQUEST push:", error?.message || error);
+    }
   }
   return docRef.id;
 }
