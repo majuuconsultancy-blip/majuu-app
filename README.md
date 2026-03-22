@@ -88,9 +88,9 @@ Each track can have:
 - Helps users organize their journey and understand requirements.
 
 #### We-Help (Assisted)
-- Users submit requests to the MAJUU team.
+- Users submit requests to the their prefered agent.
 - Requests are tracked and updated in real-time.
-- Some services enable document uploads (PDFs), which admins can review.
+- Some services enable document uploads (PDFs), which admins/staff can review.
 
 ---
 
