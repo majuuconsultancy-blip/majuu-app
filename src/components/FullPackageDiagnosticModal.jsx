@@ -308,9 +308,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
     ? "Pick a country first to load the exact package price."
     : gateAmount <= 0
       ? "Everything in your current selection is already covered."
-      : coverageState.coveredItems.length > 0
-        ? `${coverageState.outstandingItems.length} newly added item${coverageState.outstandingItems.length === 1 ? "" : "s"} still need payment.`
-        : `${missingItems.length} item${missingItems.length === 1 ? "" : "s"} remaining in your package.`;
+      : "Your remaining total updates as you mark completed steps.";
 
   useEffect(() => {
     if (!open) return;
@@ -700,57 +698,68 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center app-overlay-safe" onClick={(e) => e.target === e.currentTarget && onClose?.()} role="presentation">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" />
+      <div className="absolute inset-0 bg-black/42" />
       <div
-        className="relative w-full max-w-md rounded-[22px] border border-white/40 bg-white/55 shadow-[0_12px_30px_rgba(0,0,0,0.14)] backdrop-blur-xl ring-1 ring-white/20 flex flex-col overflow-hidden"
+        className="relative flex w-full max-w-md flex-col overflow-hidden rounded-[22px] border border-zinc-200 bg-white shadow-[0_12px_28px_rgba(0,0,0,0.14)] dark:border-zinc-800 dark:bg-zinc-900"
         style={{
           height: "min(82vh, calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 1.5rem))",
           maxHeight: "min(82vh, calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 1.5rem))",
         }}
       >
-        <div className="shrink-0 border-b border-white/25 bg-white/45 px-5 py-2">
+        <div className="shrink-0 border-b border-zinc-200 bg-zinc-50/70 px-5 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[12px] font-semibold text-emerald-900/85">Full package diagnostic</div>
-              <h2 className="mt-0.5 text-[16px] font-semibold tracking-tight text-zinc-900">Let us understand where you are</h2>
-              <p className="mt-0.5 text-[12px] text-zinc-600">Tick what you already have.</p>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-center text-[18px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                Full Package
+              </h2>
+              <p className="mt-1 text-center text-[12px] text-zinc-600 dark:text-zinc-300">
+                Select what you have already completed so we can estimate your remaining package steps.
+              </p>
             </div>
-            <button onClick={onClose} className="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-white/35 bg-white/55 text-zinc-700 hover:bg-white/70" aria-label="Close" type="button">
+            <button onClick={onClose} className="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-950/50 dark:text-zinc-200" aria-label="Close" type="button">
               <IconX className="h-5 w-5" />
             </button>
           </div>
         </div>
 
-        <div className="shrink-0 border-b border-white/20 bg-white/40 px-5 py-2">
-          <div className="rounded-3xl border border-white/35 bg-white/45 px-4 py-2.5">
+        <div className="shrink-0 border-b border-zinc-200 bg-zinc-50/80 px-5 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
+          <div className="rounded-3xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/70">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[10.5px] font-semibold text-zinc-600">Price</div>
-                <div className={["mt-0.5 text-[18px] font-semibold text-zinc-900 tabular-nums leading-none", pricePulse ? "scale-[1.02]" : "scale-100", "transition-transform duration-150 ease-out"].join(" ")}>
+                <div className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">Remaining Total</div>
+                <div
+                  className={[
+                    "mt-1 text-[20px] font-semibold tabular-nums leading-none text-zinc-900 dark:text-zinc-100",
+                    pricePulse ? "scale-[1.015] opacity-95" : "scale-100 opacity-100",
+                    "transition-[transform,opacity] duration-200 ease-out",
+                  ].join(" ")}
+                >
                   {formatPricingMoney(livePrice, "KES")}
                 </div>
-                <div className="mt-0.5 text-[10.5px] font-semibold text-emerald-900/70">{saveText}</div>
-                <div className="mt-1 text-[10.5px] text-zinc-600">
+                <div className="mt-1 text-[10.5px] font-semibold text-emerald-900/70 dark:text-emerald-300">
+                  {saveText}
+                </div>
+                <div className="mt-1 text-[10.5px] text-zinc-600 dark:text-zinc-300">
                   Full package total: {formatPricingMoney(totalPrice, "KES")}
                 </div>
               </div>
-              <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-900">
+              <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/60 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
                 <IconShieldCheck className="h-4 w-4" />
                 Best
               </span>
             </div>
             <div className="mt-2">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-[12px] font-semibold text-zinc-900">Readiness {readiness}%</div>
+                <div className="text-[12px] font-semibold text-zinc-900 dark:text-zinc-100">{haveCount}/{total} selected</div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[10.5px] font-semibold text-zinc-500">{haveCount}/{total}</span>
                   <span className={["inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold", readinessLabel.cls].join(" ")}>{readinessLabel.text}</span>
+                  <span className="text-[10.5px] font-semibold text-zinc-500 dark:text-zinc-400">Readiness {readiness}%</span>
                 </div>
               </div>
-              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-zinc-200/70">
+              <div className="mt-1.5 h-2.5 w-full overflow-hidden rounded-full bg-zinc-200/80 dark:bg-zinc-700/80">
                 <div className="h-full rounded-full bg-emerald-600" style={{ width: `${readiness}%` }} />
               </div>
-              <div className="mt-1 text-[10.5px] text-zinc-600 truncate">{helperText}</div>
+              <div className="mt-1 text-[10.5px] text-zinc-600 dark:text-zinc-300 truncate">{helperText}</div>
             </div>
           </div>
         </div>
@@ -795,35 +804,33 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
               })}
             </div>
 
-            <div className="mt-4 rounded-3xl border border-white/35 bg-white/45 p-4">
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 px-3 py-3">
-                <div className="text-sm font-semibold text-emerald-900">Payment gate for your Full Package</div>
-                <div className="mt-1 text-xs text-emerald-800">
-                  The payment gate uses the remaining package total after subtracting what the client already has.
+            <div className="mt-4 rounded-3xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900/70">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-3 dark:border-emerald-900/40 dark:bg-emerald-950/20">
+                <div className="text-sm font-semibold text-emerald-900 dark:text-emerald-200">Reserve your Full Package</div>
+                <div className="mt-1 text-xs text-emerald-800 dark:text-emerald-200/90">
+                  Pay the remaining amount to reserve and unlock the package workflow.
                 </div>
-                <div className="mt-2 text-sm font-semibold text-zinc-900">
-                  Remaining total: {formatPricingMoney(gateAmount, "KES")}
+                <div className="mt-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  Remaining Total: {formatPricingMoney(gateAmount, "KES")}
                 </div>
                 {coverageState.coveredItems.length > 0 ? (
-                  <div className="mt-1 text-[11px] text-zinc-700">
+                  <div className="mt-1 text-[11px] text-zinc-700 dark:text-zinc-200">
                     Already covered: {coverageState.coveredItems.length} item
                     {coverageState.coveredItems.length === 1 ? "" : "s"}.
                   </div>
                 ) : null}
                 {gateAmount > 0 && coverageState.outstandingItems.length > 0 ? (
-                  <div className="mt-1 text-[11px] text-zinc-700">
-                    New payment needed for {coverageState.outstandingItems.length} added item
+                  <div className="mt-1 text-[11px] text-zinc-700 dark:text-zinc-200">
+                    {coverageState.outstandingItems.length} item
                     {coverageState.outstandingItems.length === 1 ? "" : "s"}.
                   </div>
                 ) : null}
                 <button type="button" onClick={handlePayDeposit} disabled={!canPayDeposit || isPaidForCurrentSelection || depositLoading} className={["mt-3 w-full rounded-xl border px-3 py-2.5 text-sm font-semibold transition active:scale-[0.99]", isPaidForCurrentSelection ? "border-emerald-200 bg-emerald-600 text-white cursor-default" : canPayDeposit ? "border-emerald-200 bg-white text-emerald-900 hover:bg-emerald-100" : "border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed"].join(" ")}>
                   {isPaidForCurrentSelection
-                    ? "Payment Gate Paid"
+                    ? "Package Reserved"
                     : depositLoading
                       ? "Processing..."
-                      : coverageState.coveredItems.length > 0
-                        ? "Pay Added Items"
-                        : "Pay Remaining Total"}
+                      : "Reserve Your Package"}
                 </button>
                 {depositError ? <div className="mt-2 rounded-xl border border-rose-100 bg-rose-50 px-2.5 py-2 text-xs text-rose-700">{depositError}</div> : null}
               </div>

@@ -167,7 +167,7 @@ export default function AdminNewsManagementScreen() {
   }, [isSuperAdmin]);
 
   const selectedTags = useMemo(() => tagListFromDraft(draft.tagsInput), [draft.tagsInput]);
-  const editingLabel = editingId ? "Edit News Item" : "Create News Item";
+  const editingLabel = editingId ? "Edit News Publication" : "Create News Publication";
   const tagSet = new Set(selectedTags.map((tag) => tag.toLowerCase()));
 
   const updateDraft = (patch) => {
@@ -294,23 +294,24 @@ export default function AdminNewsManagementScreen() {
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/80 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
               <AppIcon icon={Newspaper} size={ICON_SM} />
-              News Management
+              News Publication
             </div>
             <h1 className="mt-3 text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-              SACC News Management
+              SACC News Publication
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              Publish migration-relevant news, control breaking alerts, and set feed priority.
+              Publish migration-relevant updates and control how they appear in-app.
             </p>
           </div>
 
           <button
             type="button"
             onClick={() => smartBack(navigate, "/app/admin/sacc")}
-            className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-800 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
+            aria-label="Back"
+            title="Back"
           >
             <AppIcon icon={ArrowLeft} size={ICON_MD} />
-            Back
           </button>
         </div>
 

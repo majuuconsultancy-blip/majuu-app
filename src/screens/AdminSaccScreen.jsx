@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   BarChart3,
@@ -23,74 +23,91 @@ const SACC_MODULES = [
   {
     key: "partnerships",
     title: "Partnerships",
-    description: "Manage partner accounts, coverage, and routing eligibility.",
+    description: "Manage partner onboarding and operational coverage.",
     path: "/app/admin/sacc/partnerships",
     icon: Link2,
+    group: "onboarding",
   },
   {
     key: "finances",
     title: "Finances",
-    description: "Control payment rules, payouts, and finance records.",
+    description: "Manage payment operations, payouts, and records.",
     path: "/app/admin/sacc/finances",
     icon: ShieldCheck,
+    group: "finances",
   },
   {
     key: "countries",
     title: "Country Management",
-    description: "Set up supported countries, tracks, and local settings.",
+    description: "Manage live destination countries and routing context.",
     path: "/app/admin/sacc/countries",
     icon: Globe2,
+    group: "onboarding",
   },
   {
     key: "request-management",
     title: "Request Management",
-    description: "Build modular request types and extra fields.",
+    description: "Configure request structure, fields, and submission behavior.",
     path: "/app/admin/sacc/request-management",
     icon: FileText,
+    group: "request-operations",
   },
   {
     key: "pricing",
     title: "Pricing Controls",
-    description: "Set request prices for checkout and package sales.",
+    description: "Control request and package pricing logic.",
     path: "/app/admin/sacc/pricing",
     icon: Coins,
-    badge: "Live",
+    group: "finances",
   },
   {
     key: "analytics",
     title: "Analytics",
-    description: "Track demand, usage, and request outcomes.",
+    description: "Monitor demand, usage trends, and performance outcomes.",
     path: "/app/admin/sacc/analytics",
     icon: BarChart3,
+    group: "analytics",
   },
   {
     key: "home-design",
-    title: "Home Design Module",
-    description: "Control featured country carousels, metadata, and visuals.",
+    title: "Home Design",
+    description: "Manage home screen layout content and presentation.",
     path: "/app/admin/sacc/home-design",
     icon: ImagePlus,
+    group: "content-design",
   },
   {
     key: "news",
-    title: "News Management",
-    description: "Publish migration updates and announcements.",
+    title: "News Publication",
+    description: "Publish and manage migration updates and announcements.",
     path: "/app/admin/sacc/news",
     icon: Newspaper,
-    badge: "Live",
+    group: "content-design",
   },
   {
     key: "selfhelp-links",
-    title: "SelfHelp Links Management",
-    description: "Manage links shown across SelfHelp resources.",
+    title: "Affiliate Management",
+    description: "Manage affiliate and self-help outbound link resources.",
     path: "/app/admin/sacc/selfhelp-links",
     icon: Link2,
+    group: "content-design",
   },
+];
+
+const MODULE_GROUPS = [
+  { key: "all", label: "All" },
+  { key: "onboarding", label: "Onboarding" },
+  { key: "finances", label: "Finances" },
+  { key: "request-operations", label: "Request Ops" },
+  { key: "analytics", label: "Analytics" },
+  { key: "content-design", label: "Content / Design" },
 ];
 
 export default function AdminSaccScreen() {
   const navigate = useNavigate();
   const [checkingRole, setCheckingRole] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [moduleGroup, setModuleGroup] = useState("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -118,28 +135,36 @@ export default function AdminSaccScreen() {
     "min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
   const card =
     "rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur";
+  const visibleModules = useMemo(() => {
+    if (moduleGroup === "all") return SACC_MODULES;
+    return SACC_MODULES.filter((module) => module.group === moduleGroup);
+  }, [moduleGroup]);
 
   return (
     <div className={pageBg}>
       <div className="app-page-shell app-page-shell--medium">
-        <div className="flex items-end justify-between gap-3">
+        <div className="flex items-start justify-between gap-3">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/80 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
               <AppIcon icon={Settings2} size={ICON_SM} />
               SACC
             </div>
-            <h1 className="mt-3 text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Super Admin Control Center
             </h1>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+              Access operational modules by function.
+            </p>
           </div>
 
           <button
             type="button"
             onClick={() => smartBack(navigate, "/app/admin")}
-            className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-800 dark:text-zinc-100 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99]"
+            aria-label="Back"
+            title="Back"
           >
             <AppIcon icon={ArrowLeft} size={ICON_MD} />
-            Back
           </button>
         </div>
 
@@ -154,13 +179,39 @@ export default function AdminSaccScreen() {
         ) : (
           <>
             <div className={`mt-5 ${card} p-4`}>
-              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                Control Modules
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    Control Modules
+                  </div>
+                  <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    {visibleModules.length} of {SACC_MODULES.length} modules
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {MODULE_GROUPS.map((group) => {
+                    const active = moduleGroup === group.key;
+                    return (
+                      <button
+                        key={group.key}
+                        type="button"
+                        onClick={() => setModuleGroup(group.key)}
+                        className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold transition ${
+                          active
+                            ? "border-emerald-200 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+                            : "border-zinc-200 bg-white/80 text-zinc-600 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300"
+                        }`}
+                      >
+                        {group.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
             <div className="mt-4 grid gap-3">
-              {SACC_MODULES.map((module) => (
+              {visibleModules.map((module) => (
                 <button
                   key={module.key}
                   type="button"
@@ -173,18 +224,14 @@ export default function AdminSaccScreen() {
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                          {module.title}
-                        </div>
-                        {module.badge ? (
-                          <span className="rounded-full border border-emerald-100 bg-emerald-50/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
-                            {module.badge}
-                          </span>
-                        ) : null}
+                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                        {module.title}
                       </div>
                       <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                         {module.description}
+                      </div>
+                      <div className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {MODULE_GROUPS.find((group) => group.key === module.group)?.label || "General"}
                       </div>
                     </div>
 

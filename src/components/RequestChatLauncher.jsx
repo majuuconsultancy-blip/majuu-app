@@ -133,7 +133,7 @@ export default function RequestChatLauncher({ requestId, variant = "default" }) 
     "w-full inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99]";
   const btnMain = "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700";
   const floatingBtn =
-    "relative inline-flex h-14 w-14 items-center justify-center rounded-full border border-emerald-200 bg-emerald-600 text-white shadow-[0_14px_30px_rgba(5,150,105,0.34)] transition hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 active:scale-[0.97]";
+    "relative inline-flex min-h-[3.75rem] items-center justify-center gap-2 rounded-full border border-emerald-200 bg-emerald-600 px-4 text-white shadow-[0_14px_30px_rgba(5,150,105,0.34)] transition hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 active:scale-[0.97]";
 
   const Modal = (
     <div className="fixed inset-0 z-[999999] pointer-events-none" aria-hidden={!open}>
@@ -153,7 +153,8 @@ export default function RequestChatLauncher({ requestId, variant = "default" }) 
           aria-label="Open chat"
           title="Chat"
         >
-          <IconChat className="h-6 w-6" />
+          <IconChat className="h-7 w-7" />
+          <span className="text-sm font-semibold">Chat</span>
           {unreadCount > 0 ? (
             <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-zinc-900" />
           ) : null}

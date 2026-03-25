@@ -7,8 +7,9 @@ import {
   updatePassword,
   sendPasswordResetEmail,
   updateEmail,
-  signOut,
 } from "firebase/auth";
+
+import CollapsibleSection from "../components/CollapsibleSection";
 import { auth } from "../firebase";
 import { smartBack } from "../utils/navBack";
 import {
@@ -18,7 +19,6 @@ import {
   getBiometricLockEnabled,
 } from "../services/biometricLockService";
 
-/* -------- Minimal icons (no emojis) -------- */
 function IconBack(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
@@ -72,55 +72,105 @@ function IconMail(props) {
   );
 }
 
-function IconLogout(props) {
+function IconEye(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
       <path
-        d="M10 7V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-1"
+        d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M12 15.4a3.4 3.4 0 1 0 0-6.8 3.4 3.4 0 0 0 0 6.8Z" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function IconEyeOff(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M3 3 21 21"
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"
       />
       <path
-        d="M3 12h10"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M6.5 9.5 3 12l3.5 2.5"
+        d="M10.6 6.3A10.7 10.7 0 0 1 12 6.2c6 0 9.5 5.8 9.5 5.8a15.7 15.7 0 0 1-4.1 4.2"
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+      <path
+        d="M6.2 7.4A15.8 15.8 0 0 0 2.5 12s3.5 5.8 9.5 5.8c.8 0 1.6-.1 2.3-.2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M9.9 9.8a3.4 3.4 0 0 0 4.3 4.3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
 
-function Tile({ title, subtitle, children }) {
+function ToggleSwitch({ checked, onChange, disabled = false }) {
   return (
-    <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-            {title}
-          </div>
-          {subtitle ? (
-            <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              {subtitle}
-            </div>
-          ) : null}
-        </div>
-      </div>
-      <div className="mt-4">{children}</div>
+    <button
+      type="button"
+      onClick={onChange}
+      disabled={disabled}
+      aria-pressed={checked}
+      className={`relative inline-flex h-8 w-14 shrink-0 items-center rounded-full border transition disabled:opacity-60 ${
+        checked
+          ? "border-emerald-500 bg-emerald-500"
+          : "border-zinc-300 bg-zinc-200 dark:border-zinc-700 dark:bg-zinc-800"
+      }`}
+    >
+      <span
+        className={`inline-flex h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${
+          checked ? "translate-x-7" : "translate-x-1"
+        }`}
+      />
+    </button>
+  );
+}
+
+function PasswordField({
+  value,
+  onChange,
+  placeholder,
+  disabled = false,
+  revealed = false,
+  onToggle,
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-zinc-200/80 bg-white/80 px-3.5 py-3 dark:border-zinc-800 dark:bg-zinc-950/40">
+      <IconLock className="h-5 w-5 text-zinc-500 dark:text-zinc-400" />
+      <input
+        type={revealed ? "text" : "password"}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        disabled={disabled}
+        className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+      />
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={disabled}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+        aria-label={revealed ? "Hide password" : "Show password"}
+      >
+        {revealed ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
+      </button>
     </div>
   );
 }
 
 function isEmailPasswordUser(user) {
   const providers = user?.providerData || [];
-  return providers.some((p) => p?.providerId === "password");
+  return providers.some((provider) => provider?.providerId === "password");
 }
 
 export default function SettingsScreen() {
@@ -130,15 +180,20 @@ export default function SettingsScreen() {
   const [userEmail, setUserEmail] = useState("");
   const [isPasswordUser, setIsPasswordUser] = useState(false);
 
-  // Change password
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
+
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newPassword2, setNewPassword2] = useState("");
-
-  // Change email
   const [newEmail, setNewEmail] = useState("");
+  const [emailPassword, setEmailPassword] = useState("");
 
-  // Secure app unlock
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showEmailPassword, setShowEmailPassword] = useState(false);
+
   const [bioEnabled, setBioEnabled] = useState(false);
   const [bioBusy, setBioBusy] = useState(false);
   const [bioLoading, setBioLoading] = useState(true);
@@ -151,32 +206,27 @@ export default function SettingsScreen() {
     code: "",
   });
 
-  // ✅ separate loading flags (fixes your issue)
   const [busyPw, setBusyPw] = useState(false);
   const [busyEmail, setBusyEmail] = useState(false);
   const [busyReset, setBusyReset] = useState(false);
-  const [busyOut, setBusyOut] = useState(false);
-
-  const anyBusy = busyPw || busyEmail || busyReset || busyOut || bioBusy;
-
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
 
   useEffect(() => {
     let cancelled = false;
 
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      if (!u) {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
         navigate("/login", { replace: true });
         return;
       }
 
-      setUserEmail(u.email || "");
-      setIsPasswordUser(isEmailPasswordUser(u));
+      setUserEmail(user.email || "");
+      setIsPasswordUser(isEmailPasswordUser(user));
 
       try {
         const [enabled, capability] = await Promise.all([
-          getBiometricLockEnabled(u.uid),
+          getBiometricLockEnabled(user.uid),
           getBiometricCapability(),
         ]);
         if (cancelled) return;
@@ -198,12 +248,12 @@ export default function SettingsScreen() {
     };
   }, [navigate]);
 
+  const anyBusy = busyPw || busyEmail || busyReset || bioBusy;
   const canUseSecureUnlock =
     bioCapability.supported && (bioCapability.available || bioCapability.deviceSecure);
 
   const canChangePassword = useMemo(() => {
-    if (!isPasswordUser) return false;
-    if (anyBusy) return false;
+    if (!isPasswordUser || anyBusy) return false;
     if (currentPassword.trim().length < 4) return false;
     if (newPassword.trim().length < 6) return false;
     if (newPassword !== newPassword2) return false;
@@ -211,32 +261,19 @@ export default function SettingsScreen() {
   }, [isPasswordUser, anyBusy, currentPassword, newPassword, newPassword2]);
 
   const canChangeEmail = useMemo(() => {
-    if (!isPasswordUser) return false;
-    if (anyBusy) return false;
-    if (!newEmail.trim()) return false;
-    if (!newEmail.includes("@")) return false;
+    if (!isPasswordUser || anyBusy) return false;
+    if (emailPassword.trim().length < 4) return false;
+    if (!newEmail.trim() || !newEmail.includes("@")) return false;
     return true;
-  }, [isPasswordUser, anyBusy, newEmail]);
+  }, [isPasswordUser, anyBusy, emailPassword, newEmail]);
 
-  const goBack = () => smartBack(navigate, "/app/home");
+  const goBack = () => smartBack(navigate, "/app/profile");
 
   const reauth = async (email, password) => {
     const user = auth.currentUser;
     if (!user) throw new Error("Not signed in.");
-    const cred = EmailAuthProvider.credential(email, password);
-    await reauthenticateWithCredential(user, cred);
-  };
-
-  const doSignOut = async () => {
-    setErr("");
-    setOk("");
-    setBusyOut(true);
-    try {
-      await signOut(auth);
-      navigate("/login", { replace: true });
-    } finally {
-      setBusyOut(false);
-    }
+    const credential = EmailAuthProvider.credential(email, password);
+    await reauthenticateWithCredential(user, credential);
   };
 
   const doToggleSecureUnlock = async () => {
@@ -288,14 +325,17 @@ export default function SettingsScreen() {
   const doResetPassword = async () => {
     setErr("");
     setOk("");
-    if (!userEmail) return setErr("No email found on this account.");
+    if (!userEmail) {
+      setErr("No email found on this account.");
+      return;
+    }
 
     setBusyReset(true);
     try {
       await sendPasswordResetEmail(auth, userEmail);
-      setOk("Password reset email sent. Check your inbox/spam.");
-    } catch (e) {
-      setErr(e?.message || "Failed to send reset email.");
+      setOk("Password reset email sent. Check your inbox or spam folder.");
+    } catch (error) {
+      setErr(error?.message || "Failed to send reset email.");
     } finally {
       setBusyReset(false);
     }
@@ -306,27 +346,35 @@ export default function SettingsScreen() {
     setOk("");
 
     const user = auth.currentUser;
-    if (!user) return setErr("Not signed in.");
-    if (!isPasswordUser)
-      return setErr("This account does not use password login.");
-
-    if (newPassword !== newPassword2) return setErr("Passwords do not match.");
-    if (newPassword.trim().length < 6)
-      return setErr("Password must be at least 6 characters.");
+    if (!user) {
+      setErr("Not signed in.");
+      return;
+    }
+    if (!isPasswordUser) {
+      setErr("This account does not use password login.");
+      return;
+    }
+    if (newPassword !== newPassword2) {
+      setErr("Passwords do not match.");
+      return;
+    }
+    if (newPassword.trim().length < 6) {
+      setErr("Password must be at least 6 characters.");
+      return;
+    }
 
     setBusyPw(true);
     try {
       await reauth(userEmail, currentPassword);
       await updatePassword(user, newPassword.trim());
-
       setCurrentPassword("");
       setNewPassword("");
       setNewPassword2("");
-
+      setPasswordOpen(false);
       setOk("Password updated successfully.");
-    } catch (e) {
+    } catch (error) {
       setErr(
-        e?.message ||
+        error?.message ||
           "Failed to update password. Try the reset email option if needed."
       );
     } finally {
@@ -339,23 +387,32 @@ export default function SettingsScreen() {
     setOk("");
 
     const user = auth.currentUser;
-    if (!user) return setErr("Not signed in.");
-    if (!isPasswordUser)
-      return setErr("This account does not use email/password login.");
+    if (!user) {
+      setErr("Not signed in.");
+      return;
+    }
+    if (!isPasswordUser) {
+      setErr("This account does not use email/password login.");
+      return;
+    }
 
-    const clean = String(newEmail || "").trim().toLowerCase();
-    if (!clean.includes("@")) return setErr("Enter a valid email.");
+    const cleanEmail = String(newEmail || "").trim().toLowerCase();
+    if (!cleanEmail.includes("@")) {
+      setErr("Enter a valid email.");
+      return;
+    }
 
     setBusyEmail(true);
     try {
-      await reauth(userEmail, currentPassword);
-      await updateEmail(user, clean);
-
+      await reauth(userEmail, emailPassword);
+      await updateEmail(user, cleanEmail);
       setNewEmail("");
-      setUserEmail(clean);
+      setEmailPassword("");
+      setUserEmail(cleanEmail);
+      setEmailOpen(false);
       setOk("Email updated successfully.");
-    } catch (e) {
-      setErr(e?.message || "Failed to update email.");
+    } catch (error) {
+      setErr(error?.message || "Failed to update email.");
     } finally {
       setBusyEmail(false);
     }
@@ -365,7 +422,7 @@ export default function SettingsScreen() {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
         <div className="mx-auto max-w-xl p-5">
-          <div className="animate-pulse rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-5 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <div className="animate-pulse rounded-3xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/60">
             <div className="h-6 w-40 rounded bg-zinc-200 dark:bg-zinc-700" />
             <div className="mt-2 h-4 w-64 rounded bg-zinc-200 dark:bg-zinc-700" />
             <div className="mt-6 h-24 rounded-2xl bg-zinc-200 dark:bg-zinc-700" />
@@ -377,14 +434,15 @@ export default function SettingsScreen() {
 
   const topBg =
     "bg-gradient-to-b from-emerald-50 via-white to-zinc-50 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
+  const card =
+    "rounded-3xl border border-zinc-200/80 bg-white/72 p-4 shadow-sm backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-900/58";
 
   return (
     <div className={`min-h-screen ${topBg}`}>
       <div className="mx-auto max-w-xl px-5 pb-10 pt-6">
-        {/* Top bar */}
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <h1 className="text-[2rem] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Settings
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
@@ -395,14 +453,14 @@ export default function SettingsScreen() {
           <button
             onClick={goBack}
             disabled={anyBusy}
-            className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-white disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
+            className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/80 px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-white disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 dark:hover:bg-zinc-900"
           >
             <IconBack className="h-5 w-5" />
             Back
           </button>
         </div>
 
-        {(err || ok) ? (
+        {err || ok ? (
           <div
             className={`mt-4 rounded-2xl border p-3 text-sm ${
               err
@@ -414,188 +472,167 @@ export default function SettingsScreen() {
           </div>
         ) : null}
 
-        {/* Account info */}
-        <div className="mt-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className={`mt-6 ${card}`}>
           <div className="flex items-center gap-3">
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60 text-emerald-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
               <IconMail className="h-5 w-5" />
             </span>
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                Signed in as
-              </div>
-              <div className="truncate text-sm text-zinc-600 dark:text-zinc-300">
-                {userEmail || "—"}
-              </div>
+              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Signed in as</div>
+              <div className="truncate text-sm text-zinc-600 dark:text-zinc-300">{userEmail || "-"}</div>
               <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                {" "}
-                {isPasswordUser
-                  ? "Email/Password"
-                  : "Other (Google/Phone/etc.)"}
+                {isPasswordUser ? "Email/Password" : "Other (Google/Phone/etc.)"}
               </div>
             </div>
           </div>
         </div>
 
-        <div className="mt-3">
-          <Tile
-            title="Secure app unlock"
-            subtitle="Require biometrics or device lock when reopening the app."
-          >
-            <div className="grid gap-3">
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3 py-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                    {bioEnabled ? "Enabled" : "Disabled"}
-                  </div>
-                  <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                    {bioLoading
-                      ? "Checking device security support..."
-                      : canUseSecureUnlock
-                      ? "Fingerprint, face, or phone PIN/pattern can be used."
-                      : "Set up phone security to enable this feature."}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={doToggleSecureUnlock}
-                  disabled={bioLoading || bioBusy || (!canUseSecureUnlock && !bioEnabled)}
-                  className={`shrink-0 rounded-xl border px-4 py-2 text-sm font-semibold transition disabled:opacity-60 ${
-                    bioEnabled
-                      ? "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-50"
-                      : "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
-                  }`}
-                >
-                  {bioBusy ? "Please wait..." : bioEnabled ? "Turn off" : "Turn on"}
-                </button>
+        <div className={`mt-3 ${card}`}>
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                Secure app unlock
               </div>
-
-              {!canUseSecureUnlock && !bioEnabled && !bioLoading ? (
-                <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Device support status: {bioCapability.reason || "No biometric/screen lock support detected."}
-                </div>
-              ) : null}
+              <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                Use phone's biometric lock for faster app reopens
+              </div>
             </div>
-          </Tile>
+
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+                {bioLoading ? "Checking..." : bioEnabled ? "On" : "Off"}
+              </span>
+              <ToggleSwitch
+                checked={bioEnabled}
+                onChange={doToggleSecureUnlock}
+                disabled={bioLoading || bioBusy || (!canUseSecureUnlock && !bioEnabled)}
+              />
+            </div>
+          </div>
+
+          {!canUseSecureUnlock && !bioEnabled && !bioLoading ? (
+            <div className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+              Device support status: {bioCapability.reason || "No biometric or screen lock support detected."}
+            </div>
+          ) : null}
         </div>
 
-        {/* Change password */}
-        <div className="mt-5">
-          <Tile
+        <div className={`mt-3 ${card}`}>
+          <CollapsibleSection
             title="Change password"
             subtitle={
               isPasswordUser
-                ? "Requires your current password (security)."
+                ? "Use your current password to protect this change."
                 : "Not available for this sign-in method."
             }
+            open={passwordOpen}
+            onToggle={setPasswordOpen}
+            disabled={!isPasswordUser}
+            bodyClassName="mt-4 grid gap-3"
           >
-            <div className="grid gap-3">
-              <div className="flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-950/40">
-                <IconLock className="h-5 w-5 text-zinc-500" />
-                <input
-                  type="password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  placeholder="Current password"
-                  disabled={!isPasswordUser || anyBusy}
-                  className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 dark:text-zinc-100"
-                />
-              </div>
+            <PasswordField
+              value={currentPassword}
+              onChange={setCurrentPassword}
+              placeholder="Current password"
+              disabled={!isPasswordUser || anyBusy}
+              revealed={showCurrentPassword}
+              onToggle={() => setShowCurrentPassword((value) => !value)}
+            />
+            <PasswordField
+              value={newPassword}
+              onChange={setNewPassword}
+              placeholder="New password"
+              disabled={!isPasswordUser || anyBusy}
+              revealed={showNewPassword}
+              onToggle={() => setShowNewPassword((value) => !value)}
+            />
+            <PasswordField
+              value={newPassword2}
+              onChange={setNewPassword2}
+              placeholder="Confirm new password"
+              disabled={!isPasswordUser || anyBusy}
+              revealed={showConfirmPassword}
+              onToggle={() => setShowConfirmPassword((value) => !value)}
+            />
 
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="New password (min 6 chars)"
-                disabled={!isPasswordUser || anyBusy}
-                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
-              />
+            <button
+              onClick={doChangePassword}
+              disabled={!canChangePassword}
+              className="w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-60"
+            >
+              {busyPw ? "Saving..." : "Update password"}
+            </button>
 
-              <input
-                type="password"
-                value={newPassword2}
-                onChange={(e) => setNewPassword2(e.target.value)}
-                placeholder="Confirm new password"
-                disabled={!isPasswordUser || anyBusy}
-                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
-              />
+            <button
+              onClick={doResetPassword}
+              disabled={anyBusy || !userEmail}
+              className="w-full rounded-2xl border border-zinc-200 bg-white/80 px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-white disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100 dark:hover:bg-zinc-950"
+            >
+              {busyReset ? "Please wait..." : "Send password reset email"}
+            </button>
 
-              <button
-                onClick={doChangePassword}
-                disabled={!canChangePassword}
-                className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
-              >
-                {busyPw ? "Saving..." : "Update password"}
-              </button>
-
-              <button
-                onClick={doResetPassword}
-                disabled={anyBusy || !userEmail}
-                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
-              >
-                {busyReset ? "Please wait..." : "Send password reset email"}
-              </button>
-
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                Tip: If you see “requires recent login”, use reset email.
-              </div>
+            <div className="text-xs text-zinc-500 dark:text-zinc-400">
+              Tip: If you see a recent login warning, use the reset email option.
             </div>
-          </Tile>
+          </CollapsibleSection>
         </div>
 
-        {/* Change email */}
-        <div className="mt-3">
-          <Tile
+        <div className={`mt-3 ${card}`}>
+          <CollapsibleSection
             title="Change email"
             subtitle={
               isPasswordUser
-                ? "Also requires your current password."
+                ? "Re-enter your password before updating your email address."
                 : "Not available for this sign-in method."
             }
+            open={emailOpen}
+            onToggle={setEmailOpen}
+            disabled={!isPasswordUser}
+            bodyClassName="mt-4 grid gap-3"
           >
-            <div className="grid gap-3">
-              <input
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                placeholder="New email address"
-                disabled={!isPasswordUser || anyBusy}
-                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
-              />
-
-              <button
-                onClick={doChangeEmail}
-                disabled={!canChangeEmail}
-                className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
-              >
-                {busyEmail ? "Saving..." : "Update email"}
-              </button>
-
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                Note: Changing email requires verification.
+            <div className="rounded-2xl border border-zinc-200/80 bg-white/80 px-3.5 py-3 dark:border-zinc-800 dark:bg-zinc-950/40">
+              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+                Current email
+              </div>
+              <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                {userEmail || "-"}
               </div>
             </div>
-          </Tile>
-        </div>
 
-        {/* Sign out */}
-        <div className="mt-3">
-          <Tile title="Sign out" subtitle>
+            <PasswordField
+              value={emailPassword}
+              onChange={setEmailPassword}
+              placeholder="Current password"
+              disabled={!isPasswordUser || anyBusy}
+              revealed={showEmailPassword}
+              onToggle={() => setShowEmailPassword((value) => !value)}
+            />
+
+            <div className="flex items-center gap-3 rounded-2xl border border-zinc-200/80 bg-white/80 px-3.5 py-3 dark:border-zinc-800 dark:bg-zinc-950/40">
+              <IconMail className="h-5 w-5 text-zinc-500 dark:text-zinc-400" />
+              <input
+                value={newEmail}
+                onChange={(event) => setNewEmail(event.target.value)}
+                placeholder="New email address"
+                disabled={!isPasswordUser || anyBusy}
+                className="w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+              />
+            </div>
+
             <button
-              onClick={doSignOut}
-              disabled={anyBusy}
-              className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-100"
+              onClick={doChangeEmail}
+              disabled={!canChangeEmail}
+              className="w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-60"
             >
-              <span className="inline-flex items-center justify-center gap-2">
-                <IconLogout className="h-5 w-5" />
-                {busyOut ? "Signing out..." : "Sign out"}
-              </span>
+              {busyEmail ? "Saving..." : "Update email"}
             </button>
-          </Tile>
-        </div>
 
+            <div className="text-xs text-zinc-500 dark:text-zinc-400">
+              Note: Changing email may require verification on your updated address.
+            </div>
+          </CollapsibleSection>
+        </div>
       </div>
     </div>
   );
 }
-

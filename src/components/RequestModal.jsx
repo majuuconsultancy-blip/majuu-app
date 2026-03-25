@@ -1736,14 +1736,14 @@ export default function RequestModal({
   };
 
   // lighter styles in standalone (no blur, no heavy shadows)
-  const overlayCls = STANDALONE ? "bg-black/40" : "bg-black/35 backdrop-blur-[2px]";
+  const overlayCls = STANDALONE ? "bg-black/40" : "bg-black/42";
   const panelCls = STANDALONE
     ? "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 dark:border-zinc-800 dark:bg-zinc-950 flex flex-col motion-modal-panel anim-in-pop"
-    : "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/75 dark:bg-zinc-900/60 shadow-lg backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/75 flex flex-col motion-modal-panel anim-in-pop";
+    : "w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 shadow-lg dark:border-zinc-800 dark:bg-zinc-950/80 flex flex-col motion-modal-panel anim-in-pop";
 
   const ctaWrapCls = STANDALONE
     ? "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 dark:border-zinc-800 dark:bg-zinc-950 px-3 py-3"
-    : "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/60 shadow-lg backdrop-blur px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950/70";
+    : "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950/80";
 
   const fieldWrap =
     "mt-2 mx-0.5 flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-3.5" +
@@ -1762,7 +1762,7 @@ export default function RequestModal({
     onFocus: (e) => scrollFieldIntoView(e.currentTarget, scrollRef.current),
     onPointerDownCapture: (e) => warmUpKeyboardOnceAndRefocus(e.currentTarget),
   };
-  const panelHeight = "min(79vh, calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 2rem))";
+  const panelHeight = "min(88vh, calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 1.5rem))";
 
   return (
     <div
@@ -1848,6 +1848,10 @@ export default function RequestModal({
               }}
             >
               <div className="grid gap-4">
+                <div className="pt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  Contact & Location
+                </div>
+
                 {/* Name */}
                 <div>
                   <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
@@ -2184,8 +2188,8 @@ export default function RequestModal({
                   <div className={ctaWrapCls}>
                     <div className="grid gap-2">
                       {paymentRequired && resolvedPaymentAmount ? (
-                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-center text-sm text-emerald-900">
-                          Unlock fee: <span className="font-semibold">{resolvedPaymentAmount}</span>
+                        <div className="px-1 text-center text-sm text-zinc-600 dark:text-zinc-300">
+                          Unlock fee <span className="font-semibold text-zinc-900 dark:text-zinc-100">{resolvedPaymentAmount}</span>
                         </div>
                       ) : null}
 

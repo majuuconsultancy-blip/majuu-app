@@ -200,6 +200,7 @@ export default function RequestDocumentFieldsSection({
   requestId = "",
   title = "Document fields",
   className = "",
+  showHeader = true,
   viewerRole = "user",
   attachments = null,
   attachmentsLoading = false,
@@ -440,16 +441,18 @@ export default function RequestDocumentFieldsSection({
 
   return (
     <div className={wrapperCls}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
-          {title}
+      {showHeader ? (
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
+            {title}
+          </div>
+          <div className="text-[11px] font-semibold text-zinc-400">
+            {effectiveDefinitionLoading
+              ? "Schema..."
+              : `${visibleAttachmentCount} attachment${visibleAttachmentCount === 1 ? "" : "s"}`}
+          </div>
         </div>
-        <div className="text-[11px] font-semibold text-zinc-400">
-          {effectiveDefinitionLoading
-            ? "Schema..."
-            : `${visibleAttachmentCount} attachment${visibleAttachmentCount === 1 ? "" : "s"}`}
-        </div>
-      </div>
+      ) : null}
 
       {canUseReviewTools && normalizedAttachments.length > 0 ? (
         <DocumentProofreadPanel
@@ -465,7 +468,7 @@ export default function RequestDocumentFieldsSection({
         </div>
       ) : null}
 
-      <div className="mt-3 grid gap-3">
+      <div className={`${showHeader ? "mt-3" : ""} grid gap-3`}>
         {groups.map((group) => {
           const hasItems = group.items.length > 0;
 

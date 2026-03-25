@@ -1135,16 +1135,52 @@ export default function ProgressScreen() {
           initial="hidden"
           animate="show"
         >
-          <div className="mb-3 text-center">
-            <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+          <div className="mb-4">
+            <h1 className="text-[2.2rem] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Progress
             </h1>
-            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
               Track your active work and reopen what matters quickly.
             </p>
           </div>
 
-          <div className="mt-3 flex justify-center">
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => navigate("/app/notifications")}
+              className="flex w-full items-center justify-between gap-3 rounded-3xl border border-zinc-200/70 bg-white/70 p-4 text-left shadow-sm transition hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/45 dark:hover:bg-zinc-900/60"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/80 text-emerald-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
+                  <AppIcon size={ICON_MD} icon={Bell} />
+                </span>
+
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    Notifications
+                  </div>
+                  <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    {unreadNotifCount ? "Tap to view new updates" : "Tap to view history"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {unreadNotifCount ? (
+                  <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-rose-600 px-2 text-[11px] font-semibold text-white">
+                    {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
+                  </span>
+                ) : (
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                    All caught up
+                  </span>
+                )}
+                <AppIcon size={ICON_SM} icon={ChevronRight} className="text-zinc-400 dark:text-zinc-500" />
+              </div>
+            </button>
+          </div>
+
+          <div className="mt-4 flex justify-center">
             <div className={`${cardBase} w-full max-w-sm`}>
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -1156,7 +1192,7 @@ export default function ProgressScreen() {
               </div>
 
               {hasActive ? (
-                <div className="mt-3 grid gap-2">
+                <div className="mt-3 grid gap-3">
                   <div className="grid gap-1.5 text-sm">
                     <div className="flex items-baseline gap-2 text-left">
                       <span className="text-zinc-500 dark:text-zinc-400">Track</span>
@@ -1195,42 +1231,6 @@ export default function ProgressScreen() {
             </div>
           </div>
 
-          <div className="mt-4">
-            <button
-              type="button"
-              onClick={() => navigate("/app/notifications")}
-              className="flex w-full items-center justify-between gap-3 rounded-3xl border border-zinc-200/70 bg-white/70 p-4 text-left shadow-sm transition hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/45 dark:hover:bg-zinc-900/60"
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/80 text-emerald-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
-                  <AppIcon size={ICON_MD} icon={Bell} />
-                </span>
-
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                    Notifications
-                  </div>
-                  <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    {unreadNotifCount ? "Tap to view new updates" : "Tap to view history"}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {unreadNotifCount ? (
-                  <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-rose-600 px-2 text-[11px] font-semibold text-white">
-                    {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
-                  </span>
-                ) : (
-                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                    All caught up
-                  </span>
-                )}
-                <AppIcon size={ICON_SM} icon={ChevronRight} className="text-zinc-400 dark:text-zinc-500" />
-              </div>
-            </button>
-          </div>
-
           {err ? (
             <div className="mt-4 rounded-3xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
               {err}
@@ -1239,19 +1239,6 @@ export default function ProgressScreen() {
 
           <div className="mt-6 flex justify-center">
             <div className="inline-flex rounded-full border border-zinc-200 bg-white/80 p-1 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60">
-              <button
-                type="button"
-                onClick={() => {
-                  setProgressTab("wehelp");
-                }}
-                className={`rounded-full px-4 py-2 font-semibold transition ${
-                  activeTab === "wehelp"
-                    ? "bg-emerald-600 text-white"
-                    : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                }`}
-              >
-                WeHelp
-              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -1264,6 +1251,19 @@ export default function ProgressScreen() {
                 }`}
               >
                 SelfHelp
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setProgressTab("wehelp");
+                }}
+                className={`rounded-full px-4 py-2 font-semibold transition ${
+                  activeTab === "wehelp"
+                    ? "bg-emerald-600 text-white"
+                    : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                }`}
+              >
+                WeHelp
               </button>
             </div>
           </div>
@@ -1282,18 +1282,18 @@ export default function ProgressScreen() {
                   <button
                     type="button"
                     onClick={() => setDraftsExpanded((current) => !current)}
-                    className="flex w-full items-center justify-between gap-3 rounded-3xl border border-zinc-200/80 bg-white/70 px-4 py-4 text-left shadow-sm transition hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/50 dark:hover:bg-zinc-900/65"
+                    className="flex w-full items-center justify-between gap-3 rounded-[1.6rem] border border-zinc-200/80 bg-white/70 px-4 py-3 text-left shadow-sm transition hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/50 dark:hover:bg-zinc-900/65"
                   >
-                    <div>
-                      <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
+                    <div className="min-w-0">
+                      <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                         Saved drafts
                       </h2>
-                      <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                        {visibleDraftCountLabel}. Paid drafts stay protected from deletion.
+                      <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                        {visibleDraftCountLabel}
                       </div>
                     </div>
 
-                    <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-3 py-1 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300">
+                    <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300">
                       {draftsExpanded ? "Hide" : "Show"}
                       <AppIcon
                         size={ICON_SM}
@@ -1531,7 +1531,9 @@ export default function ProgressScreen() {
                             </div>
 
                             <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                              {isFull ? "Full package" : `Single: ${request.serviceName || "-"}`}
+                              {isFull
+                                ? request.fullPackageItem || "Bundled request journey"
+                                : `Single: ${request.serviceName || "-"}`}
                             </div>
 
                             {isFull ? (
@@ -1607,12 +1609,6 @@ export default function ProgressScreen() {
                             </button>
                           ) : null}
                         </div>
-
-                        {status === "new" ? (
-                          <div className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
-                            Received - you will see updates here as we process it.
-                          </div>
-                        ) : null}
 
                         <button
                           type="button"

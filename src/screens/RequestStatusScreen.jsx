@@ -1,4 +1,4 @@
-// ✅ RequestStatusScreen.jsx (ORIGINAL LOGIC • POLISHED TILES • FLOATY INTERACTIONS • NO DOUBLE CHAT)
+﻿// ✅ RequestStatusScreen.jsx (ORIGINAL LOGIC • POLISHED TILES • FLOATY INTERACTIONS • NO DOUBLE CHAT)
 // What changed (UI only):
 // - Adds framer-motion for smooth entrance + floaty hover/tap on tiles
 // - Subtle background glow blobs (very light, not distracting)
@@ -17,8 +17,9 @@ import {
   orderBy,
   where,
 } from "firebase/firestore";
-import { motion, AnimatePresence } from "../utils/motionProxy";
+import { motion } from "../utils/motionProxy";
 import RequestChatLauncher from "../components/RequestChatLauncher";
+import CollapsibleSection from "../components/CollapsibleSection";
 import RequestDocumentFieldsSection from "../components/RequestDocumentFieldsSection";
 import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
 import RequestProgressUpdatesList from "../components/RequestProgressUpdatesList";
@@ -145,7 +146,48 @@ function IconChevronDown(props) {
   );
 }
 
+function IconCopy(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <rect x="9" y="9" width="10.5" height="10.5" rx="2.1" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M6.7 15H6A1.8 1.8 0 0 1 4.2 13.2V6A1.8 1.8 0 0 1 6 4.2h7.2A1.8 1.8 0 0 1 15 6v.7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /* ---------------- Helpers ---------------- */
+function safeStr(value, max = 240) {
+  return String(value || "").trim().slice(0, max);
+}
+
+function startCase(value) {
+  const text = safeStr(value, 120).toLowerCase();
+  if (!text) return "";
+  return text
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function truncateMiddle(value, lead = 10, tail = 8) {
+  const text = safeStr(value, 240);
+  if (!text || text.length <= lead + tail + 3) return text;
+  return `${text.slice(0, lead)}...${text.slice(-tail)}`;
+}
+
+function clampPercent(value) {
+  const num = Math.round(Number(value));
+  if (!Number.isFinite(num)) return null;
+  return Math.max(0, Math.min(100, num));
+}
+
 function statusUI(request) {
   const s = getUserRequestState(request);
 
@@ -231,6 +273,61 @@ function parseMissingItemsFromNote(note) {
   return Array.from(new Set(parts));
 }
 
+function buildProgressSummary(request, progressUpdates, workProgress) {
+  const updates = Array.isArray(progressUpdates)
+    ? progressUpdates.filter((row) => row && row.visibleToUser !== false)
+    : [];
+  const latestUpdate = updates[0] || null;
+  const updatesWithPercent = updates.filter((row) =>
+    Number.isFinite(Number(row?.progressPercent))
+  );
+  const latestPercentUpdate = updatesWithPercent[0] || null;
+  const previousPercentUpdate = updatesWithPercent[1] || null;
+  const latestPercent = clampPercent(
+    latestPercentUpdate?.progressPercent ?? workProgress?.progressPercent
+  );
+  const requestState = getUserRequestState(request);
+  const status = safeStr(request?.status, 80).toLowerCase();
+  const isFull =
+    Boolean(request?.isFullPackage) || safeStr(request?.requestType, 40).toLowerCase() === "full";
+
+  let percent = latestPercent;
+  if (percent == null) {
+    if (requestState === "completed" || status === "closed") percent = 100;
+    else if (requestState === "rejected" || status === "rejected") percent = 35;
+    else if (requestState === "in_progress" || workProgress?.isStarted) percent = 40;
+    else percent = 10;
+  }
+
+  const previousPercent = clampPercent(previousPercentUpdate?.progressPercent);
+  let helperText = "";
+  if (latestPercent != null && previousPercent != null && latestPercent !== previousPercent) {
+    helperText = `Updated from ${previousPercent}% to ${latestPercent}%`;
+  } else {
+    helperText = safeStr(latestUpdate?.content, 220);
+  }
+
+  if (!helperText) {
+    if (percent >= 100) {
+      helperText = isFull
+        ? "Request completed and ready for the next step."
+        : "Request completed successfully.";
+    } else if (requestState === "rejected" || status === "rejected") {
+      helperText = "Staff requested changes before the next step.";
+    } else if (requestState === "in_progress" || workProgress?.isStarted) {
+      helperText = "Documents received and under review.";
+    } else {
+      helperText = "Request received and waiting for staff review.";
+    }
+  }
+
+  return {
+    percent,
+    badgeLabel: percent >= 100 ? "Complete" : `${percent}%`,
+    helperText,
+  };
+}
+
 /* ---------------- Motion ---------------- */
 const pageIn = {
   hidden: { opacity: 0, y: 10 },
@@ -288,6 +385,9 @@ export default function RequestStatusScreen() {
   const [shareBusyId, setShareBusyId] = useState("");
   const [paymentsOpen, setPaymentsOpen] = useState(false);
   const [refundsOpen, setRefundsOpen] = useState(false);
+  const [documentsOpen, setDocumentsOpen] = useState(true);
+  const [adminDocumentsOpen, setAdminDocumentsOpen] = useState(false);
+  const [requestIdCopied, setRequestIdCopied] = useState(false);
   const [progressUpdates, setProgressUpdates] = useState([]);
   const [progressUpdatesErr, setProgressUpdatesErr] = useState("");
   const unreadRequestState = useNotifsV2Store(
@@ -481,7 +581,16 @@ export default function RequestStatusScreen() {
   useEffect(() => {
     setPaymentsOpen(false);
     setRefundsOpen(false);
+    setDocumentsOpen(true);
+    setAdminDocumentsOpen(false);
+    setRequestIdCopied(false);
   }, [validRequestId]);
+
+  useEffect(() => {
+    if (!requestIdCopied) return undefined;
+    const timer = window.setTimeout(() => setRequestIdCopied(false), 1400);
+    return () => window.clearTimeout(timer);
+  }, [requestIdCopied]);
 
   useEffect(() => {
     if (!validRequestId) return undefined;
@@ -647,7 +756,6 @@ export default function RequestStatusScreen() {
   const track = String(req?.track || "").toLowerCase();
   const safeTrack = track === "work" || track === "travel" ?track : "study";
   const st = String(req?.status || "new").toLowerCase();
-  const userRequestState = getUserRequestState(req);
   const country = String(req?.country || "Not selected");
 
   const adminNote = String(
@@ -722,11 +830,18 @@ export default function RequestStatusScreen() {
   };
 
   const serviceTitle = `${String(req?.track || "").toUpperCase()} • ${req?.country || "-"}`;
-  const serviceSub = isFull ?"Full package" : `Single service: ${req?.serviceName || "-"}`;
+  const requestTypeLabel = isFull
+    ? "Full package"
+    : startCase(req?.requestType || "single request") || "Single request";
+  const serviceNameLabel =
+    safeStr(req?.serviceName, 160) ||
+    safeStr(req?.fullPackageItem, 160) ||
+    (isFull ? "Bundled request journey" : "-");
   const workProgress = getRequestWorkProgress(req);
-  const showWorkProgressCard = Boolean(
-    workProgress.isStarted || workProgress.progressPercent || userRequestState === "in_progress"
-  );
+  const progressSummary = buildProgressSummary(req, progressUpdates, workProgress);
+  const showWorkProgressCard = Boolean(req);
+  const requestIdentifier = safeStr(req?.id || validRequestId, 240);
+  const requestIdLabel = truncateMiddle(requestIdentifier);
   const unlockPayment =
     payments.find((p) => String(p.paymentType || "").toLowerCase() === PAYMENT_TYPES.UNLOCK_REQUEST) ||
     null;
@@ -770,6 +885,12 @@ export default function RequestStatusScreen() {
       );
     }
     return false;
+  });
+  const historyPayments = visiblePayments.filter((payment) => {
+    const paymentId = String(payment?.id || "").trim();
+    if (!paymentId) return false;
+    if (paymentId === String(unlockPayment?.id || "").trim()) return false;
+    return !pendingUserPayments.some((row) => String(row?.id || "").trim() === paymentId);
   });
   const refundStatusByPaymentId = new Map();
   for (const row of refunds) {
@@ -905,6 +1026,28 @@ export default function RequestStatusScreen() {
     }
   };
 
+  const copyRequestId = async () => {
+    if (!requestIdentifier) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(requestIdentifier);
+      } else {
+        const input = document.createElement("textarea");
+        input.value = requestIdentifier;
+        input.setAttribute("readonly", "true");
+        input.style.position = "absolute";
+        input.style.left = "-9999px";
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand("copy");
+        document.body.removeChild(input);
+      }
+      setRequestIdCopied(true);
+    } catch (error) {
+      console.error("Failed to copy request ID:", error);
+    }
+  };
+
   const MotionDiv = motion.div;
 
   return (
@@ -925,15 +1068,18 @@ export default function RequestStatusScreen() {
         className={`max-w-xl mx-auto px-5 py-6 pb-24 relative ${enterWrap} ${enterCls}`}
       >
         {/* Header */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60">
-              <IconReceipt className="h-5 w-5 text-emerald-800" />
-            </span>
-            <div className="min-w-0">
-              <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Application Request</div>
-              <div className="text-xs text-zinc-500">Details & documents</div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/80 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+              <IconReceipt className="h-4 w-4" />
+              Request details
             </div>
+            <h1 className="mt-3 text-[2.1rem] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+              Application Request
+            </h1>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              Details, chat, and documents
+            </p>
           </div>
 
           <span className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${ui.badge}`}>
@@ -962,52 +1108,102 @@ export default function RequestStatusScreen() {
             <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">{serviceTitle}</div>
-                  <div className="mt-1 text-sm font-semibold text-zinc-700 dark:text-zinc-300">{serviceSub}</div>
-                </div>
-
-                <div className="shrink-0 text-right">
-                  <div className="text-[11px] text-zinc-500">Request ID</div>
-                  <div className="mt-1 font-mono text-[12px] text-zinc-800">{req?.id}</div>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-2 text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-zinc-500">Full name</span>
-                  <span className="font-medium text-zinc-900 dark:text-zinc-100">{req?.name || "-"}</span>
-                </div>
-
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-zinc-500">Phone</span>
-                  <span className="font-medium text-zinc-900 dark:text-zinc-100">{req?.phone || "-"}</span>
-                </div>
-
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-zinc-500">Email</span>
-                  <span className="font-medium text-zinc-900 dark:text-zinc-100">{req?.email || "-"}</span>
-                </div>
-
-                {req?.note ?(
-                  <div className="mt-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 transition hover:bg-white/70">
-                    <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                      <IconNote className="h-4 w-4 text-zinc-500" />
-                      Your note
-                    </div>
-                    <div className="mt-2 text-sm text-zinc-800 whitespace-pre-wrap">{req.note}</div>
+                  <div className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                    {serviceTitle}
                   </div>
-                ) : null}
+                  <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                    {serviceNameLabel}
+                  </div>
+                </div>
 
-                <RequestExtraDetailsSection
-                  request={req}
-                  title="Extra details"
-                  includeDocumentFields={false}
-                />
+                <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${ui.badge}`}>
+                  {requestTypeLabel}
+                </span>
               </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span className="rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/35 dark:text-zinc-200">
+                  Track: {startCase(req?.track) || "-"}
+                </span>
+                <span className="rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/35 dark:text-zinc-200">
+                  Country: {req?.country || "-"}
+                </span>
+                <span className="rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/35 dark:text-zinc-200">
+                  Service: {serviceNameLabel}
+                </span>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-zinc-200/80 bg-white/75 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950/35">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                    Request ID
+                  </div>
+                  <div className="mt-1 font-mono text-sm text-zinc-900 dark:text-zinc-100">
+                    {requestIdLabel || "-"}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void copyRequestId()}
+                  className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                >
+                  <IconCopy className="h-4 w-4" />
+                  {requestIdCopied ? "Copied" : "Copy"}
+                </button>
+              </div>
+
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <div className="rounded-2xl border border-zinc-200/80 bg-white/70 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950/35">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                    Full Name
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100 break-words">
+                    {req?.name || "-"}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-zinc-200/80 bg-white/70 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950/35">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                    Phone Number
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100 break-words">
+                    {req?.phone || "-"}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-zinc-200/80 bg-white/70 px-4 py-3 sm:col-span-2 dark:border-zinc-800 dark:bg-zinc-950/35">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                    Email
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100 break-words">
+                    {req?.email || "-"}
+                  </div>
+                </div>
+              </div>
+
+              {req?.note ?(
+                <div className="mt-4 rounded-2xl border border-zinc-200/80 bg-white/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/35">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                    <IconNote className="h-4 w-4 text-zinc-500" />
+                    Your note
+                  </div>
+                  <div className="mt-2 text-sm text-zinc-800 dark:text-zinc-100 whitespace-pre-wrap">
+                    {req.note}
+                  </div>
+                </div>
+              ) : null}
+
+              <RequestExtraDetailsSection
+                request={req}
+                title="Additional details"
+                includeDocumentFields={false}
+                className="mt-4 rounded-2xl border border-zinc-200/80 bg-white/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/35"
+              />
 
               {(st === "rejected" || st === "closed" || st === "contacted") && adminNote ?(
-                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 transition hover:bg-amber-50/80">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-amber-900">
+                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-amber-900">
                     <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-amber-200 bg-white/70 dark:bg-zinc-900/60">
                       <IconNote className="h-4 w-4 text-amber-800" />
                     </span>
@@ -1017,29 +1213,6 @@ export default function RequestStatusScreen() {
                 </div>
               ) : null}
 
-              {st === "new" ?(
-                <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-700 dark:text-zinc-300">
-                  Received. We’ll review and update you here.
-                </div>
-              ) : null}
-
-              {userRequestState === "in_progress" ?(
-                <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 text-sm text-emerald-900">
-                  In progress. Live staff updates will appear below.
-                </div>
-              ) : null}
-
-              {st === "closed" ?(
-                <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-900">
-                  {isFull ?"Approved. Continue with the next steps." : "Completed successfully."}
-                </div>
-              ) : null}
-
-              {st === "rejected" ?(
-                <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-800">
-                  Needs correction. Follow the note above.
-                </div>
-              ) : null}
             </motion.div>
           </motion.div>
 
@@ -1048,10 +1221,13 @@ export default function RequestStatusScreen() {
               <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
                 <RequestWorkProgressCard
                   request={req}
-                  title="Work progress"
-                  subtitle="Your staff member posts live progress updates here."
-                  showWhenIdle={userRequestState === "in_progress"}
-                  idleText="Your request is in progress. Live updates will appear here as work continues."
+                  title="Request progress"
+                  subtitle="A quick view of your application journey."
+                  showWhenIdle
+                  helperText={progressSummary.helperText}
+                  progressPercentOverride={progressSummary.percent}
+                  badgeLabelOverride={progressSummary.badgeLabel}
+                  idleText="Request received and waiting for staff review."
                   pendingText="Work has started. A percentage update has not been posted yet."
                 />
 
@@ -1064,7 +1240,7 @@ export default function RequestStatusScreen() {
                 <RequestProgressUpdatesList
                   updates={progressUpdates}
                   viewerRole="user"
-                  emptyText="No visible progress updates yet."
+                  emptyText="No visible progress notes yet."
                 />
               </motion.div>
             </motion.div>
@@ -1108,134 +1284,162 @@ export default function RequestStatusScreen() {
                   ) : null}
 
                   {pendingUserPayments.length > 0 ?(
-                    <div className="mt-4 grid gap-2">
-                      {pendingUserPayments.map((payment) => {
-                        const uiPayment = paymentStatusUi(payment.status);
-                        return (
-                          <div
-                            key={payment.id}
-                            className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="text-xs font-semibold text-amber-900">Payment required</div>
-                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                                  {payment.paymentLabel || "In-progress payment"}
-                                </div>
-                                <div className="mt-1 text-xs text-zinc-700 dark:text-zinc-300">
-                                  {payment.currency} {Number(payment.amount || 0).toLocaleString()}
-                                </div>
-                                {payment.note ?(
-                                  <div className="mt-1 text-xs text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">
-                                    {payment.note}
+                    <div className="mt-4">
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                          In-Progress Payment
+                        </div>
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {pendingUserPayments.length} pending
+                        </div>
+                      </div>
+
+                      <div className="grid gap-2">
+                        {pendingUserPayments.map((payment) => {
+                          const uiPayment = paymentStatusUi(payment.status);
+                          return (
+                            <div
+                              key={payment.id}
+                              className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-amber-900">Payment required</div>
+                                  <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                                    {payment.paymentLabel || "In-progress payment"}
                                   </div>
-                                ) : null}
+                                  <div className="mt-1 text-xs text-zinc-700 dark:text-zinc-300">
+                                    {payment.currency} {Number(payment.amount || 0).toLocaleString()}
+                                  </div>
+                                  {payment.note ?(
+                                    <div className="mt-1 text-xs text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">
+                                      {payment.note}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${uiPayment.cls}`}>
+                                  {uiPayment.label}
+                                </span>
                               </div>
-                              <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${uiPayment.cls}`}>
-                                {uiPayment.label}
-                              </span>
+                              <button
+                                type="button"
+                                onClick={() => openInProgressPayment(payment)}
+                                disabled={paymentBusyId === payment.id || shareBusyId === payment.id}
+                                className="mt-3 w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
+                              >
+                                {paymentBusyId === payment.id ? "Opening checkout..." : "Pay now"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => sharePayablePayment(payment)}
+                                disabled={paymentBusyId === payment.id || shareBusyId === payment.id}
+                                className="mt-2 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:opacity-60"
+                              >
+                                {shareBusyId === payment.id
+                                  ? "Preparing link..."
+                                  : "Share full payment link"}
+                              </button>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => openInProgressPayment(payment)}
-                              disabled={paymentBusyId === payment.id || shareBusyId === payment.id}
-                              className="mt-3 w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
-                            >
-                              {paymentBusyId === payment.id ? "Opening checkout..." : "Pay now"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => sharePayablePayment(payment)}
-                              disabled={paymentBusyId === payment.id || shareBusyId === payment.id}
-                              className="mt-2 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:opacity-60"
-                            >
-                              {shareBusyId === payment.id
-                                ? "Preparing link..."
-                                : "Share full payment link"}
-                            </button>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
                     </div>
                   ) : null}
 
                   {unlockPayment ?(
-                    <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-emerald-900">Unlock request payment</div>
-                          <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                            {unlockPayment.currency} {Number(unlockPayment.amount || 0).toLocaleString()}
-                          </div>
-                          {unlockPayment.transactionReference ?(
-                            <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                              Ref: <span className="font-semibold">{unlockPayment.transactionReference}</span>
+                    <div className="mt-4">
+                      <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                        Unlock Request Payment
+                      </div>
+
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-emerald-900">Payment status</div>
+                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                              {unlockPayment.currency} {Number(unlockPayment.amount || 0).toLocaleString()}
                             </div>
-                          ) : null}
+                            {unlockPayment.transactionReference ?(
+                              <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                                Ref: <span className="font-semibold">{unlockPayment.transactionReference}</span>
+                              </div>
+                            ) : null}
+                          </div>
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                              paymentStatusUi(unlockPayment.status).cls
+                            }`}
+                          >
+                            {paymentStatusUi(unlockPayment.status).label}
+                          </span>
                         </div>
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                            paymentStatusUi(unlockPayment.status).cls
-                          }`}
-                        >
-                          {paymentStatusUi(unlockPayment.status).label}
-                        </span>
                       </div>
                     </div>
                   ) : null}
 
-                  <div className="mt-4 grid gap-2">
-                    {visiblePayments.length === 0 ?(
-                      <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
-                        No payment records yet.
+                  <div className="mt-4">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                        Payment history
                       </div>
-                    ) : (
-                      visiblePayments.map((payment) => {
-                        const uiPayment = paymentStatusUi(payment.status);
-                        return (
-                          <div
-                            key={payment.id}
-                            className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
-                                  {payment.paymentLabel || "Payment"}
-                                </div>
-                                <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                                  {payment.currency} {Number(payment.amount || 0).toLocaleString()}
-                                </div>
-                                {payment.note ?(
-                                  <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
-                                    {payment.note}
+                      <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                        {historyPayments.length} records
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      {historyPayments.length === 0 ?(
+                        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
+                          No payment records yet.
+                        </div>
+                      ) : (
+                        historyPayments.map((payment) => {
+                          const uiPayment = paymentStatusUi(payment.status);
+                          return (
+                            <div
+                              key={payment.id}
+                              className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
+                                    {payment.paymentLabel || "Payment"}
                                   </div>
-                                ) : null}
-                                {payment.transactionReference ?(
                                   <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                                    Ref: <span className="font-semibold">{payment.transactionReference}</span>
+                                    {payment.currency} {Number(payment.amount || 0).toLocaleString()}
                                   </div>
-                                ) : null}
-                                {refundStatusByPaymentId.get(String(payment.id || "").trim()) ?(
-                                  <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                                    Refund:{" "}
-                                    <span className="font-semibold">
-                                      {
-                                        refundStatusUi(
-                                          refundStatusByPaymentId.get(String(payment.id || "").trim())
-                                        ).label
-                                      }
-                                    </span>
-                                  </div>
-                                ) : null}
+                                  {payment.note ?(
+                                    <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
+                                      {payment.note}
+                                    </div>
+                                  ) : null}
+                                  {payment.transactionReference ?(
+                                    <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                                      Ref: <span className="font-semibold">{payment.transactionReference}</span>
+                                    </div>
+                                  ) : null}
+                                  {refundStatusByPaymentId.get(String(payment.id || "").trim()) ?(
+                                    <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                                      Refund:{" "}
+                                      <span className="font-semibold">
+                                        {
+                                          refundStatusUi(
+                                            refundStatusByPaymentId.get(String(payment.id || "").trim())
+                                          ).label
+                                        }
+                                      </span>
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${uiPayment.cls}`}>
+                                  {uiPayment.label}
+                                </span>
                               </div>
-                              <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${uiPayment.cls}`}>
-                                {uiPayment.label}
-                              </span>
                             </div>
-                          </div>
-                        );
-                      })
-                    )}
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
 
                   <div className="mt-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4">
@@ -1409,101 +1613,92 @@ export default function RequestStatusScreen() {
           {/* Submitted documents by user */}
           <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
             <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
-              <RequestDocumentFieldsSection
-                request={req}
-                requestId={validRequestId}
-                title="Submitted document fields"
-                viewerRole="user"
-                attachments={attachments}
-                attachmentsLoading={false}
-                attachmentsError={fileErr}
-                className="p-0 border-0 bg-transparent shadow-none"
-              />
-              {showLegacySubmittedDocuments ? (
-              <>
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60">
-                    <IconFile className="h-5 w-5 text-emerald-800" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="font-semibold text-zinc-900 dark:text-zinc-100">Submitted documents</div>
-                    <div className="text-xs text-zinc-500">Your uploads for this request.</div>
-                  </div>
-                </div>
-                <span className="text-xs text-zinc-500 shrink-0">{attachments.length} files</span>
-              </div>
-
-              {fileErr ?(
-                <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-                  {fileErr}
-                </div>
-              ) : null}
-
-              <div className="mt-4 grid gap-2">
-                {attachments.length === 0 ?(
-                  <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
-                    No documents submitted yet.
-                  </div>
-                ) : (
-                  attachments.map((a, idx) => (
-                    <motion.div
-                      key={a.id}
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: Math.min(0.2, idx * 0.03), duration: 0.18 }}
-                      className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 break-words">
-                            {a.name || "PDF"}
-                          </div>
-                          <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                            Status:{" "}
-                            <span className="font-semibold text-zinc-800">
-                              {attachmentStatusLabel(a.status)}
-                            </span>{" "}
-                            · {bytesToLabel(a.size)}
-                          </div>
-                        </div>
-
-                        <span className="shrink-0 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-                          {String(a.status || "pending_upload").toLowerCase()}
-                        </span>
+              <CollapsibleSection
+                title="Submitted documents"
+                subtitle="Your uploads and document fields for this request."
+                meta={`${attachments.length} files`}
+                open={documentsOpen}
+                onToggle={setDocumentsOpen}
+                bodyClassName="mt-4 grid gap-4"
+              >
+                <RequestDocumentFieldsSection
+                  request={req}
+                  requestId={validRequestId}
+                  title="Submitted document fields"
+                  viewerRole="user"
+                  attachments={attachments}
+                  attachmentsLoading={false}
+                  attachmentsError={fileErr}
+                  showHeader={false}
+                  className="p-0 border-0 bg-transparent shadow-none"
+                />
+                {showLegacySubmittedDocuments ? (
+                  <>
+                    {fileErr ?(
+                      <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+                        {fileErr}
                       </div>
-                    </motion.div>
-                  ))
-                )}
-              </div>
-              </>
-              ) : null}
+                    ) : null}
+
+                    <div className="grid gap-2">
+                      {attachments.length === 0 ?(
+                        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
+                          No documents submitted yet.
+                        </div>
+                      ) : (
+                        attachments.map((a, idx) => (
+                          <motion.div
+                            key={a.id}
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: Math.min(0.2, idx * 0.03), duration: 0.18 }}
+                            className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 break-words">
+                                  {a.name || "PDF"}
+                                </div>
+                                <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                                  Status:{" "}
+                                  <span className="font-semibold text-zinc-800">
+                                    {attachmentStatusLabel(a.status)}
+                                  </span>{" "}
+                                  · {bytesToLabel(a.size)}
+                                </div>
+                              </div>
+
+                              <span className="shrink-0 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+                                {String(a.status || "pending_upload").toLowerCase()}
+                              </span>
+                            </div>
+                          </motion.div>
+                        ))
+                      )}
+                    </div>
+                  </>
+                ) : null}
+              </CollapsibleSection>
             </motion.div>
           </motion.div>
 
           {/* Documents from MAJUU */}
           <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
             <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60">
-                    <IconFile className="h-5 w-5 text-emerald-800" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="font-semibold text-zinc-900 dark:text-zinc-100">Documents from MAJUU</div>
-                    <div className="text-xs text-zinc-500">Templates, SOPs, forms.</div>
+              <CollapsibleSection
+                title="Documents from My Google"
+                subtitle="Shared templates and downloadable files."
+                meta={`${adminFiles.length} files`}
+                open={adminDocumentsOpen}
+                onToggle={setAdminDocumentsOpen}
+                bodyClassName="mt-4 grid gap-2"
+              >
+                {adminFilesErr ?(
+                  <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
+                    {adminFilesErr}
                   </div>
-                </div>
-                <span className="text-xs text-zinc-500 shrink-0">{adminFiles.length} files</span>
-              </div>
+                ) : null}
 
-              {adminFilesErr ?(
-                <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-                  {adminFilesErr}
-                </div>
-              ) : null}
-
-              <div className="mt-4 grid gap-2">
                 {adminFiles.length === 0 ?(
                   <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
                     No documents sent yet.
@@ -1535,7 +1730,7 @@ export default function RequestStatusScreen() {
                             rel="noreferrer"
                             className={`shrink-0 inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] ${
                               url
-                                ?"border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
+                                ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
                                 : "border-zinc-200 dark:border-zinc-800 bg-zinc-100 text-zinc-400 cursor-not-allowed pointer-events-none"
                             }`}
                           >
@@ -1546,7 +1741,7 @@ export default function RequestStatusScreen() {
                     );
                   })
                 )}
-              </div>
+              </CollapsibleSection>
             </motion.div>
           </motion.div>
         </motion.div>

@@ -118,6 +118,21 @@ function safeString(value, max = 180) {
   return String(value || "").trim().slice(0, max);
 }
 
+function getFirstName(value) {
+  const safe = safeString(value, 120);
+  if (!safe) return "";
+  return safe.split(/\s+/).filter(Boolean)[0] || "";
+}
+
+function getTrackGreeting(name) {
+  if (!name) return "Hello";
+  const hours = new Date().getHours();
+  if (hours >= 5 && hours < 12) return `Good morning, ${name}`;
+  if (hours >= 12 && hours < 18) return `Good afternoon, ${name}`;
+  if (hours >= 18 && hours < 24) return `Good evening, ${name}`;
+  return `Hello, ${name}`;
+}
+
 function getSimpleRequestIcon(definition) {
   const title = safeString(definition?.title, 120).toLowerCase();
   const tag = safeString(definition?.tag, 40).toLowerCase();
@@ -459,6 +474,11 @@ export default function TrackScreen({ track }) {
 
   const resolveAccentColor = (country) => resolveCountryAccentColor(countryMap, country, "");
   const profileAccentColor = resolveAccentColor(profileCountry);
+  const firstName = useMemo(
+    () => getFirstName(defaultName || userState?.name || auth.currentUser?.displayName || ""),
+    [defaultName, userState]
+  );
+  const greetingTitle = useMemo(() => getTrackGreeting(firstName), [firstName]);
   const topBg = "bg-white dark:bg-zinc-950";
   const countryCard =
     "relative group w-full overflow-hidden text-left rounded-3xl border bg-white/75 p-4 shadow-sm backdrop-blur transition will-change-transform dark:bg-zinc-900/55";
@@ -804,57 +824,58 @@ export default function TrackScreen({ track }) {
   return (
     <div className={`min-h-screen ${topBg}`}>
       <div className="mx-auto max-w-6xl px-5 py-6 pb-10">
-        <div className="relative overflow-hidden rounded-[32px] border border-zinc-200/80 bg-white/75 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
-          <Motion.div
-            aria-hidden="true"
-            className="pointer-events-none absolute -right-16 -top-12 h-44 w-44 rounded-full bg-emerald-300/20 blur-3xl"
-            animate={{ x: [0, -8, 0], y: [0, 10, 0] }}
-            transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
-          />
-          <Motion.div
-            aria-hidden="true"
-            className="pointer-events-none absolute -left-20 -bottom-16 h-48 w-48 rounded-full bg-sky-200/18 blur-3xl"
-            animate={{ x: [0, 8, 0], y: [0, -8, 0] }}
-            transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-          />
+        <div
+          className="sticky z-20"
+          style={{ top: "0.35rem" }}
+        >
+          <div
+            className="relative overflow-hidden rounded-[30px] border border-white/55 bg-white/60 px-4 py-4 shadow-[0_12px_40px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-900/58"
+          >
+            <Motion.div
+              aria-hidden="true"
+              className="pointer-events-none absolute -right-10 -top-8 h-32 w-32 rounded-full bg-emerald-300/14 blur-3xl"
+              animate={{ x: [0, -6, 0], y: [0, 8, 0] }}
+              transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+            />
 
-          <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-            <div className="min-w-0">
-              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-emerald-100 bg-white/70 dark:border-emerald-900/40 dark:bg-zinc-950/40">
-                  <AppIcon size={ICON_SM} icon={HeaderIcon} className="text-emerald-700 dark:text-emerald-200" />
-                </span>
-                {info.title}
+            <div className="relative">
+              <div className="min-w-0">
+                <h1 className="text-[1.85rem] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                  {greetingTitle}
+                </h1>
+                <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                  Choose a destination to start your journey
+                </p>
               </div>
 
-              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-                Request entry points
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm text-zinc-600 dark:text-zinc-300">
-                {info.subtitle}
-              </p>
-            </div>
+              <div className="mt-4 flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start gap-3">
+                    <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/70 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
+                      <AppIcon size={ICON_MD} icon={HeaderIcon} />
+                    </span>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <span
-                className="rounded-full border px-3 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-100"
-                style={
-                  profileCountry
-                    ? buildCountryAccentBadgeStyle(profileAccentColor, { strong: true })
-                    : undefined
-                }
-              >
-                Residence: {profileLoading ? "Loading..." : profileCountry || "Not set"}
-              </span>
-              <button
-                type="button"
-                onClick={goToTrackSelect}
-                disabled={saving}
-                className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/80 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100"
-              >
-                <AppIcon size={ICON_SM} icon={ArrowLeft} />
-                Go to Tracks
-              </button>
+                    <div className="min-w-0">
+                      <div className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+                        {info.title}
+                      </div>
+                      <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        Residence: {profileLoading ? "Loading..." : profileCountry || "Not set"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={goToTrackSelect}
+                  disabled={saving}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200/80 bg-white/82 px-3 py-1.5 text-sm font-semibold text-zinc-700 transition hover:border-emerald-200 hover:text-emerald-800 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/75 dark:text-zinc-100 dark:hover:border-emerald-900/40"
+                >
+                  <AppIcon size={ICON_SM} icon={ArrowLeft} />
+                  Tracks
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -958,7 +979,7 @@ export default function TrackScreen({ track }) {
           <section>
             <div className="mx-auto max-w-2xl text-center">
               <h2 className={sectionTitle}>{t("country_selection")}</h2>
-              <p className={sectionSubtitle}>Pick a destination first, then continue</p>
+              <p className={sectionSubtitle}>Choose a destination</p>
             </div>
 
             {!countriesLoading && hasManagedCountries && visibleCountries.length === 0 ? (
@@ -1027,20 +1048,6 @@ export default function TrackScreen({ track }) {
               <p className={sectionSubtitle}>
                 Direct entries that use your profile country automatically.
               </p>
-              <div className="mt-4 flex justify-center">
-                <span
-                  className="rounded-full border px-3 py-1 text-xs font-semibold text-zinc-700 dark:text-zinc-100"
-                  style={
-                    profileCountry
-                      ? buildCountryAccentBadgeStyle(profileAccentColor, { strong: true })
-                      : undefined
-                  }
-                >
-                  {profileLoading
-                    ? t("loading_profile")
-                    : `${t("country_label")}: ${profileCountry || t("not_set")}`}
-                </span>
-              </div>
             </div>
 
             {!profileCountry && !profileLoading ? (

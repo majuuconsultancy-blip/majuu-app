@@ -337,14 +337,14 @@ export default function SelfHelpDocumentsScreen({ track }) {
                 <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-emerald-100 bg-white/80 dark:border-emerald-900/40 dark:bg-zinc-950/50">
                   <AppIcon size={ICON_SM} icon={HeaderIcon} className="text-emerald-700 dark:text-emerald-200" />
                 </span>
-                {trackMeta.label} documents
+                {trackMeta.label} self-help
               </div>
 
               <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-                SelfHelp Documents
+                Self-Help Documents
               </h1>
               <p className="mt-2 max-w-2xl text-sm text-zinc-600 dark:text-zinc-300">
-                Keep lightweight document records tied to your {country || "journey"} milestones so the route stays organized.
+                Safely store destination-related documents here to stay organized and keep track of what comes next.
               </p>
             </div>
           </div>
@@ -373,13 +373,13 @@ export default function SelfHelpDocumentsScreen({ track }) {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
-                  Document flow
+                  Document Flow
                 </div>
                 <div className="mt-2 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
                   Organized around real journey milestones
                 </div>
                 <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                  Attach admission, visa, flight, accommodation, passport, and other records to the steps they support.
+                  Keep each record linked to the milestone it supports.
                 </div>
               </div>
 
@@ -393,15 +393,8 @@ export default function SelfHelpDocumentsScreen({ track }) {
               </button>
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2 text-xs">
-              {categories.map((category) => (
-                <span
-                  key={category.id}
-                  className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-200"
-                >
-                  {category.label}
-                </span>
-              ))}
+            <div className="mt-4 text-xs text-zinc-500 dark:text-zinc-400">
+              Categories stay in sync automatically as your journey updates.
             </div>
           </div>
 

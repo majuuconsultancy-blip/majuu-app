@@ -422,21 +422,21 @@ export default function AdminHomeDesignScreen() {
               Home Design
             </div>
             <h1 className="mt-3 text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-              SACC Home Design Module
+              SACC Home Design
             </h1>
             <p className="mt-1 max-w-3xl text-sm text-zinc-600 dark:text-zinc-300">
-              Control featured countries, carousel copy, metadata, and visuals for the track home
-              experience from one place.
+              Manage featured countries, messaging, and visual layout settings from one place.
             </p>
           </div>
 
           <button
             type="button"
             onClick={() => smartBack(navigate, "/app/admin/sacc")}
-            className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 bg-white/70 text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100"
+            aria-label="Back"
+            title="Back"
           >
             <AppIcon icon={ArrowLeft} size={ICON_MD} />
-            Back
           </button>
         </div>
 
@@ -498,7 +498,7 @@ export default function AdminHomeDesignScreen() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                      {editingId ? "Edit Home Design Module" : "Create Home Design Module"}
+                      {editingId ? "Edit Home Design" : "Create Home Design"}
                     </div>
                     <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                       Featured countries here feed the Track screen carousel directly.
@@ -642,8 +642,8 @@ export default function AdminHomeDesignScreen() {
                   {busy === "save"
                     ? "Saving..."
                     : editingId
-                    ? "Save Home Design Module"
-                    : "Create Home Design Module"}
+                    ? "Save Home Design"
+                    : "Create Home Design"}
                 </button>
               </div>
             ) : null}

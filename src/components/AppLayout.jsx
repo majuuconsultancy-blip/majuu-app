@@ -19,15 +19,15 @@ import OfflineBanner from "./OfflineBanner";
 import { authPersistenceReady } from "../firebase";
 
 const VALID_TRACKS = new Set(["study", "work", "travel"]);
+const TAB_KEYS = new Set(["home", "progress", "news", "profile"]);
 const AUTH_NULL_GRACE_MS = 1200;
-const TAB_RESET_DOUBLE_TAP_MS = 650;
 
 function matchTrackFromPath(pathname) {
   const match = String(pathname || "").match(/^\/app\/(study|work|travel)(?:\/|$)/i);
   return match?.[1] ? String(match[1]).toLowerCase() : "";
 }
 
-function tabKeyFromPathname(pathname) {
+function explicitTabKeyFromPathname(pathname) {
   const path = String(pathname || "");
   if (path.startsWith("/app/progress")) return "progress";
   if (path.startsWith("/app/news")) return "news";
@@ -35,13 +35,23 @@ function tabKeyFromPathname(pathname) {
   if (
     path.startsWith("/app/profile") ||
     path.startsWith("/app/settings") ||
-    path.startsWith("/app/notifications") ||
-    path.startsWith("/app/legal")
+    path === "/app/legal"
   ) {
     return "profile";
   }
 
-  return "home";
+  if (
+    path.startsWith("/app/home") ||
+    path.startsWith("/app/study") ||
+    path.startsWith("/app/work") ||
+    path.startsWith("/app/travel") ||
+    path.startsWith("/app/full-package") ||
+    path.startsWith("/app/service-partner/onboarding")
+  ) {
+    return "home";
+  }
+
+  return "";
 }
 
 function IconHome(props) {
@@ -121,6 +131,12 @@ export default function AppLayout() {
   const [hasActiveProcess, setHasActiveProcess] = useState(false);
   const unreadNotifCount = useNotifsV2Store((s) => Number(s.unreadNotifCount || 0) || 0);
   const [scrollY, setScrollY] = useState(0);
+  const [tabContext, setTabContext] = useState(() => {
+    const explicit = explicitTabKeyFromPathname(location.pathname);
+    const hinted = String(location.state?.tabContext || "");
+    if (TAB_KEYS.has(hinted)) return hinted;
+    return explicit || "home";
+  });
 
   const tabMemoryRef = useRef({
     home: null,
@@ -128,8 +144,6 @@ export default function AppLayout() {
     news: null,
     profile: null,
   });
-
-  const lastTabTapRef = useRef({ key: "", at: 0 });
 
   const rafRef = useRef(null);
   useEffect(() => {
@@ -266,17 +280,33 @@ export default function AppLayout() {
     };
   }, [navigate]);
 
-  const activeTabKey = useMemo(() => tabKeyFromPathname(location.pathname), [location.pathname]);
+  useEffect(() => {
+    const explicit = explicitTabKeyFromPathname(location.pathname);
+    if (explicit) {
+      setTabContext(explicit);
+      return;
+    }
+
+    const hinted = String(location.state?.tabContext || "");
+    if (TAB_KEYS.has(hinted)) {
+      setTabContext(hinted);
+    }
+  }, [location.pathname, location.state]);
+
+  const activeTabKey = useMemo(
+    () => explicitTabKeyFromPathname(location.pathname) || tabContext || "home",
+    [location.pathname, tabContext]
+  );
 
   useEffect(() => {
-    const tabKey = tabKeyFromPathname(location.pathname);
+    const tabKey = explicitTabKeyFromPathname(location.pathname) || tabContext || "home";
     tabMemoryRef.current[tabKey] = {
       pathname: location.pathname,
       search: location.search || "",
       hash: location.hash || "",
       state: location.state,
     };
-  }, [location.hash, location.key, location.pathname, location.search, location.state]);
+  }, [location.hash, location.key, location.pathname, location.search, location.state, tabContext]);
 
   const resolveHomeRootPath = () => {
     const preferred = journeyTrack || activeTrack || selectedTrack || matchTrackFromPath(location.pathname);
@@ -308,24 +338,22 @@ export default function AppLayout() {
     const key = String(tabKey || "");
     if (!key) return;
 
-    const now = Math.round(Number(event?.timeStamp || 0));
     const sameTab = activeTabKey === key;
-    const wasSameTabRecently =
-      now > 0 &&
-      lastTabTapRef.current.at > 0 &&
-      lastTabTapRef.current.key === key &&
-      now - lastTabTapRef.current.at <= TAB_RESET_DOUBLE_TAP_MS;
+    const root = tabRoot(key);
 
-    lastTabTapRef.current = { key, at: now };
-
-    if (sameTab && wasSameTabRecently) {
-      navigateStored(tabRoot(key), { replace: true });
+    if (sameTab) {
+      const currentHref = `${location.pathname}${location.search || ""}${location.hash || ""}`;
+      const rootHref = `${root.pathname}${root.search || ""}${root.hash || ""}`;
+      if (currentHref === rootHref) {
+        window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+        return;
+      }
+      navigateStored(root, { replace: true });
       return;
     }
 
-    const stored = tabMemoryRef.current[key] || tabRoot(key);
-
-    if (sameTab) return;
+    const stored = tabMemoryRef.current[key] || root;
+    setTabContext(key);
     navigateStored(stored, { replace: false });
   };
 
@@ -367,10 +395,10 @@ export default function AppLayout() {
   }
 
   const itemBase =
-    "flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2.5 py-2 text-[13px] font-semibold transition duration-150 t-fade active:scale-[0.99]";
+    "flex min-h-[3rem] w-full flex-col items-center justify-center gap-1 rounded-[1rem] px-2 py-1.5 text-[11px] font-semibold leading-none transition duration-150 t-fade active:scale-[0.99]";
   const itemOn = "bg-emerald-600 text-white shadow-sm";
   const itemOff =
-    "text-zinc-700 dark:text-zinc-300 hover:bg-emerald-50/70 dark:text-zinc-200 dark:hover:bg-zinc-900/60";
+    "text-zinc-700 hover:bg-emerald-50/70 dark:text-zinc-200 dark:hover:bg-zinc-900/60";
 
   return (
     <div className="app-shell min-h-screen overflow-x-hidden bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
@@ -413,19 +441,19 @@ export default function AppLayout() {
       >
         <div className="max-w-xl mx-auto">
           <div
-            className="app-bottom-nav-inner rounded-2xl border border-white/50 dark:border-zinc-700/45 bg-white/15 dark:bg-zinc-900/18 px-2 py-1.5 shadow-[0_6px_18px_rgba(15,23,42,0.10)] t-pop"
+            className="app-bottom-nav-inner rounded-[1.55rem] border border-white/55 bg-white/18 px-2.5 py-1.5 shadow-[0_10px_26px_rgba(15,23,42,0.12)] t-pop dark:border-zinc-700/45 dark:bg-zinc-900/20"
             style={{
-              WebkitBackdropFilter: "blur(10px)",
-              backdropFilter: "blur(10px)",
+              WebkitBackdropFilter: "blur(14px)",
+              backdropFilter: "blur(14px)",
             }}
           >
-            <div className="grid grid-cols-4 gap-1">
+            <div className="grid grid-cols-4 gap-2">
               <button
                 type="button"
                 onClick={(event) => handleTabPress("home", event)}
                 className={`${itemBase} ${homeActive ? itemOn : itemOff}`}
               >
-                <IconHome className="h-5 w-5" />
+                <IconHome className="h-[1.15rem] w-[1.15rem]" />
                 <span>Home</span>
               </button>
 
@@ -435,10 +463,10 @@ export default function AppLayout() {
                 className={`${itemBase} ${progressActive ? itemOn : itemOff} relative`}
               >
                 <span className="relative">
-                  <IconProgress className="h-5 w-5" />
+                  <IconProgress className="h-[1.15rem] w-[1.15rem]" />
                   {unreadNotifCount > 0 ? (
                     <span
-                      className={`absolute -top-2 -right-19 h-2.5 w-2.5 rounded-full ${
+                      className={`absolute -right-2 -top-1.5 h-2.5 w-2.5 rounded-full ${
                         progressActive ? "bg-white dark:bg-zinc-900/60" : "bg-rose-600"
                       }`}
                       aria-label="Unread notifications"
@@ -455,7 +483,7 @@ export default function AppLayout() {
                 onClick={(event) => handleTabPress("news", event)}
                 className={`${itemBase} ${newsActive ? itemOn : itemOff}`}
               >
-                <IconNews className="h-5 w-5" />
+                <IconNews className="h-[1.15rem] w-[1.15rem]" />
                 <span>News</span>
               </button>
 
@@ -464,7 +492,7 @@ export default function AppLayout() {
                 onClick={(event) => handleTabPress("profile", event)}
                 className={`${itemBase} ${profileActive ? itemOn : itemOff}`}
               >
-                <IconUser className="h-5 w-5" />
+                <IconUser className="h-[1.15rem] w-[1.15rem]" />
                 <span>Profile</span>
               </button>
             </div>

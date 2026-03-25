@@ -91,7 +91,13 @@ export default function JourneyChecklistSheet({
           />
 
           <Motion.div
-            className="relative w-full max-w-xl rounded-t-[28px] border border-zinc-200 bg-white px-5 pb-5 pt-4 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 sm:mb-6 sm:rounded-[28px]"
+            className="relative flex w-full max-w-xl flex-col overflow-hidden rounded-t-[28px] border border-zinc-200 bg-white px-5 pb-5 pt-4 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 sm:mb-6 sm:rounded-[28px]"
+            style={{
+              height:
+                "min(62vh, calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 2rem))",
+              maxHeight:
+                "min(62vh, calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 2rem))",
+            }}
             variants={panelMotion}
             initial="hidden"
             animate="show"
@@ -117,68 +123,70 @@ export default function JourneyChecklistSheet({
                 {trackLabel} {country ? `for ${country}` : "journey"}
               </h2>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                Progress is based on the milestones you confirm here, not on resource clicks.
+                Select the documents you already have and we'll help find the best next step.
               </p>
             </div>
 
-            <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 dark:border-emerald-900/35 dark:bg-emerald-950/20">
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">
-                    Saved progress
+            <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 dark:border-emerald-900/35 dark:bg-emerald-950/20">
+                <div className="flex items-end justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">
+                      Saved progress
+                    </div>
+                    <div className="mt-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+                      {summary.completed}/{summary.total}
+                    </div>
                   </div>
-                  <div className="mt-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-                    {summary.completed}/{summary.total}
+                  <div className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+                    {summary.percent}%
                   </div>
-                </div>
-                <div className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
-                  {summary.percent}%
                 </div>
               </div>
-            </div>
 
-            <div className="mt-4 grid max-h-[52vh] gap-3 overflow-y-auto pr-1">
-              {orderedSteps.map((step) => {
-                const checked = selectedIds.has(step.id);
-                return (
-                  <button
-                    key={step.id}
-                    type="button"
-                    onClick={() =>
-                      setSelectedIds((current) => {
-                        const next = new Set(current);
-                        if (next.has(step.id)) next.delete(step.id);
-                        else next.add(step.id);
-                        return next;
-                      })
-                    }
-                    className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-left transition ${
-                      checked
-                        ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/35 dark:bg-emerald-950/18"
-                        : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/35"
-                    }`}
-                  >
-                    <span
-                      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border ${
+              <div className="mt-4 grid gap-3">
+                {orderedSteps.map((step) => {
+                  const checked = selectedIds.has(step.id);
+                  return (
+                    <button
+                      key={step.id}
+                      type="button"
+                      onClick={() =>
+                        setSelectedIds((current) => {
+                          const next = new Set(current);
+                          if (next.has(step.id)) next.delete(step.id);
+                          else next.add(step.id);
+                          return next;
+                        })
+                      }
+                      className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-left transition ${
                         checked
-                          ? "border-emerald-200 bg-emerald-600 text-white dark:border-emerald-900/40"
-                          : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950/50 dark:text-zinc-200"
+                          ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/35 dark:bg-emerald-950/18"
+                          : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/35"
                       }`}
                     >
-                      {checked ? <AppIcon size={ICON_SM} icon={Check} /> : step.stepNumber}
-                    </span>
+                      <span
+                        className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border ${
+                          checked
+                            ? "border-emerald-200 bg-emerald-600 text-white dark:border-emerald-900/40"
+                            : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950/50 dark:text-zinc-200"
+                        }`}
+                      >
+                        {checked ? <AppIcon size={ICON_SM} icon={Check} /> : step.stepNumber}
+                      </span>
 
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        {step.title}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                          {step.title}
+                        </div>
+                        <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                          {step.description}
+                        </div>
                       </div>
-                      <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                        {step.description}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="mt-5 grid gap-2 sm:grid-cols-2">

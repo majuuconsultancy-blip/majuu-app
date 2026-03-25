@@ -21,6 +21,7 @@ import {
 import { routeUnroutedNewRequests } from "../services/adminroutingservice";
 import { setStaffAccessByEmail } from "../services/staffservice";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
+import { listAssignedAdmins } from "../services/assignedadminservice";
 import { STAFF_SPECIALITY_OPTIONS } from "../constants/staffSpecialities";
 import {
   applyUnlockAutoRefundSweep,
@@ -655,9 +656,12 @@ export default function AdminRequestsScreen() {
     from: "", // yyyy-mm-dd
     to: "", // yyyy-mm-dd
     assigned: "any", // any | assigned | unassigned
+    assignedAdminUid: "any", // super-admin only
     staffDecision: "any", // any | recommend_accept | recommend_reject | none
     staffStatus: "any", // any | assigned | in_progress | done
   });
+  const [assignedAdminOptions, setAssignedAdminOptions] = useState([]);
+  const [assignedAdminFilterLoading, setAssignedAdminFilterLoading] = useState(false);
   const [deletingId, setDeletingId] = useState("");
   const [staffEmailByUid, setStaffEmailByUid] = useState({});
   const [pinsByTab, setPinsByTab] = useState(() => readAdminTabPins());
@@ -708,6 +712,52 @@ export default function AdminRequestsScreen() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!roleCtx?.isSuperAdmin) {
+      setAssignedAdminOptions([]);
+      setAssignedAdminFilterLoading(false);
+      setFilters((current) =>
+        current.assignedAdminUid === "any"
+          ? current
+          : { ...current, assignedAdminUid: "any" }
+      );
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setAssignedAdminFilterLoading(true);
+    listAssignedAdmins({ max: 200 })
+      .then((rows) => {
+        if (cancelled) return;
+        const options = (Array.isArray(rows) ? rows : [])
+          .map((row) => {
+            const uid = String(row?.uid || "").trim();
+            if (!uid) return null;
+            const email = String(row?.email || "").trim().toLowerCase();
+            const name =
+              String(row?.displayName || row?.name || "").trim() || email || uid;
+            return { uid, email, name };
+          })
+          .filter(Boolean)
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setAssignedAdminOptions(options);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn("Assigned admin filter options load failed:", error?.message || error);
+        setAssignedAdminOptions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setAssignedAdminFilterLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [roleCtx?.isSuperAdmin]);
 
   useEffect(() => {
     setVisibleCount(INITIAL_RENDER_COUNT);
@@ -1157,6 +1207,14 @@ export default function AdminRequestsScreen() {
       if (filters.assigned === "assigned" && !assignedTo) return false;
       if (filters.assigned === "unassigned" && assignedTo) return false;
 
+      if (roleCtx?.isSuperAdmin && filters.assignedAdminUid !== "any") {
+        const wantAdminUid = String(filters.assignedAdminUid || "").trim();
+        const currentAdminUid = String(r?.currentAdminUid || "").trim();
+        const assignedAdminUid = String(r?.assignedAdminId || "").trim();
+        if (!wantAdminUid) return false;
+        if (currentAdminUid !== wantAdminUid && assignedAdminUid !== wantAdminUid) return false;
+      }
+
       if (filters.staffStatus !== "any") {
         if (!assignedTo) return false;
         const want = filters.staffStatus;
@@ -1198,7 +1256,7 @@ export default function AdminRequestsScreen() {
       .map((x) => x.r);
     endPerf(timer);
     return out;
-  }, [searched, filters, pinsByTab, status]);
+  }, [searched, filters, pinsByTab, roleCtx?.isSuperAdmin, status]);
 
   const visibleFiltered = useMemo(() => {
     const timer = `${PERF_TAG} render:list-window`;
@@ -1386,16 +1444,18 @@ export default function AdminRequestsScreen() {
       !!filters.from ||
       !!filters.to ||
       filters.assigned !== "any" ||
+      (roleCtx?.isSuperAdmin && filters.assignedAdminUid !== "any") ||
       filters.staffDecision !== "any" ||
       filters.staffStatus !== "any"
     );
-  }, [filters]);
+  }, [filters, roleCtx?.isSuperAdmin]);
 
   const resetFilters = () => {
     setFilters({
       from: "",
       to: "",
       assigned: "any",
+      assignedAdminUid: "any",
       staffDecision: "any",
       staffStatus: "any",
     });
@@ -1439,7 +1499,7 @@ export default function AdminRequestsScreen() {
 
             <button
               onClick={load}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-800 shadow-sm backdrop-blur transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/45 dark:text-zinc-100 dark:hover:bg-zinc-900"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-700 transition hover:bg-zinc-100 active:scale-[0.99] dark:text-zinc-200 dark:hover:bg-zinc-900"
               type="button"
               aria-label="Refresh"
               title="Refresh"
@@ -1447,8 +1507,6 @@ export default function AdminRequestsScreen() {
               <AppIcon size={ICON_MD} className="text-emerald-700 dark:text-emerald-200" icon={RefreshCw} />
             </button>
           </div>
-
-          <div className="mt-3 h-px w-full bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent dark:via-emerald-500/20" />
         </div>
 
         {roleCtx?.isSuperAdmin ?<AssignedAdminAccessPanel /> : null}
@@ -1504,7 +1562,7 @@ export default function AdminRequestsScreen() {
         {roleCtx?.isAssignedAdmin ?<StaffAccessPanel /> : null}
 
         {/* Tabs */}
-        <div className="mt-6 flex flex-wrap gap-2">
+        <div className="mt-5 flex flex-wrap gap-2">
           {TABS.map((t) => {
             const showDot = !!tabHasDot?.[t.key];
             return (
@@ -1524,7 +1582,7 @@ export default function AdminRequestsScreen() {
         </div>
 
         {/* Search + Filters */}
-        <div className="mt-5">
+        <div className="mt-4">
           <label className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Search</label>
 
           <div className="mt-2 flex items-center gap-2">
@@ -1682,12 +1740,38 @@ export default function AdminRequestsScreen() {
                       </select>
                     </label>
 
-                    <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 dark:text-zinc-200">
-                      Soon...
-                      <div className="mt-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-300">
-                        More filters to come.
+                    {roleCtx?.isSuperAdmin ? (
+                      <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 dark:text-zinc-200">
+                        Assigned Admin
+                        <select
+                          value={filters.assignedAdminUid}
+                          onChange={(e) =>
+                            setFilters((p) => ({ ...p, assignedAdminUid: e.target.value }))
+                          }
+                          className="mt-2 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 shadow-sm outline-none transition focus:border-emerald-200 focus:ring-4 focus:ring-emerald-100/60 dark:border-zinc-700 dark:bg-zinc-900/45 dark:text-zinc-100 dark:focus:ring-emerald-500/10"
+                        >
+                          <option value="any">Any</option>
+                          {assignedAdminOptions.map((admin) => (
+                            <option key={admin.uid} value={admin.uid}>
+                              {admin.name}
+                              {admin.email ? ` (${admin.email})` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="mt-1 text-[11px] font-normal text-zinc-500 dark:text-zinc-400">
+                          {assignedAdminFilterLoading
+                            ? "Loading assigned admins..."
+                            : "Filter using Manage Admins assignments."}
+                        </div>
+                      </label>
+                    ) : (
+                      <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 dark:text-zinc-200">
+                        Filter scope
+                        <div className="mt-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-300">
+                          Filters adapt to your admin role.
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               </motion.div>
@@ -1709,7 +1793,10 @@ export default function AdminRequestsScreen() {
             {visibleRenderRows.map((r) => {
               const p = pill(r.status);
               const left = `${String(r.track || "").toUpperCase()} • ${r.country || "-"}`;
-              const right = r.requestType === "full" ?"Full Package" : `Single: ${r.serviceName || "-"}`;
+              const right =
+                r.requestType === "full"
+                  ? (r.serviceName ? `Package: ${r.serviceName}` : "Package request")
+                  : `Single: ${r.serviceName || "-"}`;
               const accentColor = resolveCountryAccentColor(countryMap, r?.country, "");
 
               const rid = String(r.id || "");

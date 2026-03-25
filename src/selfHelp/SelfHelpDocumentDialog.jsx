@@ -101,7 +101,13 @@ export default function SelfHelpDocumentDialog({
           />
 
           <Motion.div
-            className="relative w-full max-w-xl rounded-t-[28px] border border-zinc-200 bg-white px-5 pb-5 pt-4 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 sm:mb-6 sm:rounded-[28px]"
+            className="relative flex w-full max-w-xl flex-col overflow-hidden rounded-t-[28px] border border-zinc-200 bg-white px-5 pb-5 pt-4 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 sm:mb-6 sm:rounded-[28px]"
+            style={{
+              height:
+                "min(74vh, calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 2rem))",
+              maxHeight:
+                "min(74vh, calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 2rem))",
+            }}
             variants={panelMotion}
             initial="hidden"
             animate="show"
@@ -131,122 +137,124 @@ export default function SelfHelpDocumentDialog({
               </p>
             </div>
 
-            <div className="mt-5 grid gap-3">
-              <label className="grid gap-1.5">
-                <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Category</span>
-                <select
-                  value={values.category}
-                  onChange={(event) =>
-                    setValues((current) => ({ ...current, category: event.target.value }))
-                  }
-                  className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
-                >
-                  <option value="">Choose category</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <div className="mt-5 min-h-0 flex-1 overflow-y-auto pr-1">
+              <div className="grid gap-3">
+                <label className="grid gap-1.5">
+                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Category</span>
+                  <select
+                    value={values.category}
+                    onChange={(event) =>
+                      setValues((current) => ({ ...current, category: event.target.value }))
+                    }
+                    className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
+                  >
+                    <option value="">Choose category</option>
+                    {categories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-              <label className="grid gap-1.5">
-                <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Linked step</span>
-                <select
-                  value={values.stepId}
-                  onChange={(event) =>
-                    setValues((current) => ({ ...current, stepId: event.target.value }))
-                  }
-                  className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
-                >
-                  <option value="">Not linked to a step</option>
-                  {steps.map((step) => (
-                    <option key={step.id} value={step.id}>
-                      {step.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <label className="grid gap-1.5">
+                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Linked step</span>
+                  <select
+                    value={values.stepId}
+                    onChange={(event) =>
+                      setValues((current) => ({ ...current, stepId: event.target.value }))
+                    }
+                    className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
+                  >
+                    <option value="">Not linked to a step</option>
+                    {steps.map((step) => (
+                      <option key={step.id} value={step.id}>
+                        {step.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-              <label className="grid gap-1.5">
-                <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Document type</span>
-                <input
-                  value={values.documentType}
-                  onChange={(event) =>
-                    setValues((current) => ({ ...current, documentType: safeString(event.target.value, 80) }))
-                  }
-                  placeholder="Admission letter, visa approval, booking confirmation..."
-                  className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
-                />
-              </label>
+                <label className="grid gap-1.5">
+                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Document type</span>
+                  <input
+                    value={values.documentType}
+                    onChange={(event) =>
+                      setValues((current) => ({ ...current, documentType: safeString(event.target.value, 80) }))
+                    }
+                    placeholder="Admission letter, visa approval, booking confirmation..."
+                    className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
+                  />
+                </label>
 
-              <label className="grid gap-1.5">
-                <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">File metadata</span>
-                <div className="rounded-2xl border border-zinc-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-zinc-950/40">
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-200">
-                    <AppIcon size={ICON_SM} icon={Upload} />
-                    Pick file metadata
-                    <input
-                      type="file"
-                      className="hidden"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        if (!file) return;
-                        setValues((current) => ({
-                          ...current,
-                          fileName: safeString(file.name, 180),
-                          fileType: safeString(file.type, 80),
-                          fileSize: Number(file.size || 0) || 0,
-                        }));
-                      }}
-                    />
-                  </label>
+                <label className="grid gap-1.5">
+                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">File metadata</span>
+                  <div className="rounded-2xl border border-zinc-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-zinc-950/40">
+                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-200">
+                      <AppIcon size={ICON_SM} icon={Upload} />
+                      Pick file metadata
+                      <input
+                        type="file"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (!file) return;
+                          setValues((current) => ({
+                            ...current,
+                            fileName: safeString(file.name, 180),
+                            fileType: safeString(file.type, 80),
+                            fileSize: Number(file.size || 0) || 0,
+                          }));
+                        }}
+                      />
+                    </label>
 
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <input
-                      value={values.fileName}
-                      onChange={(event) =>
-                        setValues((current) => ({ ...current, fileName: safeString(event.target.value, 180) }))
-                      }
-                      placeholder="File name"
-                      className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
-                    />
-                    <input
-                      value={values.fileType}
-                      onChange={(event) =>
-                        setValues((current) => ({ ...current, fileType: safeString(event.target.value, 80) }))
-                      }
-                      placeholder="File type"
-                      className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
-                    />
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <input
+                        value={values.fileName}
+                        onChange={(event) =>
+                          setValues((current) => ({ ...current, fileName: safeString(event.target.value, 180) }))
+                        }
+                        placeholder="File name"
+                        className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
+                      />
+                      <input
+                        value={values.fileType}
+                        onChange={(event) =>
+                          setValues((current) => ({ ...current, fileType: safeString(event.target.value, 80) }))
+                        }
+                        placeholder="File type"
+                        className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
+                      />
+                    </div>
                   </div>
-                </div>
-              </label>
+                </label>
 
-              <label className="grid gap-1.5">
-                <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Local reference</span>
-                <input
-                  value={values.localRef}
-                  onChange={(event) =>
-                    setValues((current) => ({ ...current, localRef: safeString(event.target.value, 320) }))
-                  }
-                  placeholder="Optional folder, drive note, or reference"
-                  className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
-                />
-              </label>
+                <label className="grid gap-1.5">
+                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Local reference</span>
+                  <input
+                    value={values.localRef}
+                    onChange={(event) =>
+                      setValues((current) => ({ ...current, localRef: safeString(event.target.value, 320) }))
+                    }
+                    placeholder="Optional folder, drive note, or reference"
+                    className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
+                  />
+                </label>
 
-              <label className="grid gap-1.5">
-                <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Notes</span>
-                <textarea
-                  value={values.notes}
-                  onChange={(event) =>
-                    setValues((current) => ({ ...current, notes: safeString(event.target.value, 1200) }))
-                  }
-                  rows={4}
-                  placeholder="Optional notes about what this document confirms"
-                  className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
-                />
-              </label>
+                <label className="grid gap-1.5">
+                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Notes</span>
+                  <textarea
+                    value={values.notes}
+                    onChange={(event) =>
+                      setValues((current) => ({ ...current, notes: safeString(event.target.value, 1200) }))
+                    }
+                    rows={4}
+                    placeholder="Optional notes about what this document confirms"
+                    className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
+                  />
+                </label>
+              </div>
             </div>
 
             <div className="mt-5 grid gap-2 sm:grid-cols-2">

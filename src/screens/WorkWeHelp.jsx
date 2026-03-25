@@ -19,7 +19,6 @@ import {
   ArrowLeft,
   Search,
   X,
-  Sparkles,
   Package,
   BadgeCheck,
   MapPinned,
@@ -464,6 +463,13 @@ export default function WorkWeHelp() {
   }, [requestMeta, t]);
 
   const modalSubtitle = useMemo(() => `Work Abroad • ${country}`, [country]);
+  const headerDescription = useMemo(() => {
+    const safeCountry = String(country || "").trim();
+    if (!safeCountry || safeCountry.toLowerCase() === "not selected") {
+      return "Get help with your work process";
+    }
+    return `Get help with your ${safeCountry} work process`;
+  }, [country]);
 
   const openDefinition = async (definition) => {
     const title = String(definition?.title || definition || "").trim();
@@ -777,7 +783,7 @@ export default function WorkWeHelp() {
         </button>
 
         {/* Header */}
-        <div className="flex items-start justify-between gap-3">
+        <div className="mt-3 flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-900">
               <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/80 dark:bg-zinc-900/60 border border-emerald-100">
@@ -786,17 +792,14 @@ export default function WorkWeHelp() {
               Work · We-Help
             </div>
 
-            <h1 className="mt-3 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-              Get help with your work process
+            <h1 className="mt-4 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+              WeHelp
             </h1>
 
-            <p className="mt-1 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
-              <AppIcon size={ICON_SM} icon={MapPinned} className="text-emerald-700" />
-              {t("country_label")}: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{country}</span>
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+              {headerDescription}
             </p>
           </div>
-
-          <div className="shrink-0 h-12 w-12 rounded-3xl border border-emerald-100 bg-emerald-50/80 shadow-sm" />
         </div>
 
         <JourneyBanner journey={journey} track="work" country={country} />
@@ -862,7 +865,7 @@ export default function WorkWeHelp() {
           whileHover={canUseWeHelp ? "hover" : "rest"}
           whileTap={canUseWeHelp ? "tap" : "rest"}
           className={[
-            "rounded-3xl border p-5 shadow-[0_18px_55px_rgba(0,0,0,0.10)] backdrop-blur-xl h-full",
+            "rounded-3xl border p-4 shadow-[0_18px_40px_rgba(0,0,0,0.09)] h-full",
             canUseWeHelp
               ? "border-emerald-200/80 bg-white/75 dark:bg-zinc-900/60"
               : "border-zinc-200/70 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 opacity-70",
@@ -870,19 +873,26 @@ export default function WorkWeHelp() {
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1.5 text-xs font-semibold text-emerald-900">
-                <AppIcon size={ICON_SM} icon={Sparkles} />
+              <div className="hidden inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1.5 text-xs font-semibold text-emerald-900">
+                <AppIcon size={ICON_SM} icon={BadgeCheck} />
                 Full package · Best value
               </div>
 
-              <h2 className="mt-3 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1.5 text-xs font-semibold text-emerald-900">
+                  Full Package
+                </span>
+                <span className="inline-flex items-center rounded-full border border-emerald-100 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-zinc-950/45 dark:text-emerald-200">
+                  Best Value
+                </span>
+              </div>
+
+              <h2 className="mt-2.5 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
                 End to end support with your work application process
               </h2>
             </div>
 
-            <span className="shrink-0 inline-flex h-12 w-12 items-center justify-center rounded-3xl border border-emerald-100 bg-emerald-50/80 text-emerald-800 shadow-sm">
-              <AppIcon size={ICON_LG} icon={ClipboardCheck} />
-            </span>
+            <AppIcon size={ICON_LG} icon={ClipboardCheck} className="mt-1 shrink-0 text-emerald-700 dark:text-emerald-200" />
           </div>
 
           <button
@@ -924,7 +934,7 @@ export default function WorkWeHelp() {
                 : "border-zinc-200 dark:border-zinc-800 bg-zinc-100 text-zinc-400 cursor-not-allowed",
             ].join(" ")}
           >
-            Request full package
+            Request Full Package
           </button>
 
           {!canUseWeHelp ? (

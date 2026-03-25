@@ -10,7 +10,7 @@
   --app-viewport-height: 100vh;
   --app-top-content-offset: 0.72rem;
   --app-bottom-content-offset: 1.1rem;
-  --app-bottom-nav-core-height: 3.95rem;
+  --app-bottom-nav-core-height: 3.2rem;
   --app-bottom-nav-safe-height: calc(var(--app-bottom-nav-core-height) + var(--app-safe-bottom));
   --app-active-track-offset: calc(var(--app-bottom-nav-safe-height) + 0.3rem + var(--app-bottom-content-offset));
   --app-floating-offset: calc(var(--app-bottom-nav-safe-height) + 0.65rem + var(--app-bottom-content-offset));

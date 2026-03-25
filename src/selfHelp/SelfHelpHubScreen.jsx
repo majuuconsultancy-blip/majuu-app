@@ -11,10 +11,10 @@ import {
   ChevronRight,
   CircleCheck,
   DollarSign,
-  EllipsisVertical,
   ExternalLink,
   FileText,
   GraduationCap,
+  ListChecks,
   Plane,
   ShieldCheck,
 } from "lucide-react";
@@ -94,6 +94,14 @@ function buildRouteSearch(country) {
   const params = new URLSearchParams();
   if (country) params.set("country", country);
   return params.toString() ? `?${params.toString()}` : "";
+}
+
+function buildSelfHelpUiStateKey({ uid, track, country }) {
+  const safeUid = safeString(uid, 120);
+  const safeTrack = safeString(track, 20).toLowerCase();
+  const safeCountry = safeString(country, 80).toLowerCase();
+  if (!safeUid || !safeTrack || !safeCountry) return "";
+  return `majuu:selfhelp:ui:${safeUid}:${safeTrack}:${safeCountry}`;
 }
 
 function getLatestByResource(history) {
@@ -292,6 +300,7 @@ export default function SelfHelpHubScreen({ track }) {
   const [verifiedPathOpen, setVerifiedPathOpen] = useState(false);
 
   const lastOpenedKeyRef = useRef("");
+  const uiStateRestoredRef = useRef("");
 
   const fallbackCountry = useMemo(() => {
     const lastContextCountry =
@@ -311,6 +320,10 @@ export default function SelfHelpHubScreen({ track }) {
   }, [progress?.lastContext?.country, progress?.lastContext?.track, progress?.routeStates, track]);
 
   const country = requestedCountry || fallbackCountry;
+  const uiStateKey = useMemo(
+    () => buildSelfHelpUiStateKey({ uid, track, country }),
+    [country, track, uid]
+  );
 
   useEffect(() => {
     if (!uid) return;
@@ -456,6 +469,45 @@ export default function SelfHelpHubScreen({ track }) {
       state: location.state,
     });
   }, [fallbackCountry, location.state, navigate, requestedCountry, track]);
+
+  useEffect(() => {
+    if (!uiStateKey) return;
+    if (uiStateRestoredRef.current === uiStateKey) return;
+    if (typeof window === "undefined") return;
+
+    uiStateRestoredRef.current = uiStateKey;
+    try {
+      const raw =
+        window.sessionStorage.getItem(uiStateKey) ||
+        window.localStorage.getItem(uiStateKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const restoredSection = safeString(parsed?.sectionId, 40);
+      if (restoredSection === CLOSED_SECTION_ID) {
+        setManualSectionId(CLOSED_SECTION_ID);
+        return;
+      }
+      if (restoredSection) {
+        setManualSectionId(restoredSection);
+      }
+    } catch (error) {
+      console.warn("SelfHelp ui state restore skipped:", error);
+    }
+  }, [uiStateKey]);
+
+  useEffect(() => {
+    if (!uiStateKey) return;
+    if (typeof window === "undefined") return;
+
+    const payload = JSON.stringify({
+      sectionId: safeString(manualSectionId, 40) || "",
+    });
+    try {
+      window.sessionStorage.setItem(uiStateKey, payload);
+    } catch (error) {
+      console.warn("SelfHelp ui state cache skipped:", error);
+    }
+  }, [manualSectionId, uiStateKey]);
 
   useEffect(() => {
     if (!uid) return undefined;
@@ -788,12 +840,12 @@ export default function SelfHelpHubScreen({ track }) {
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="min-h-screen bg-gradient-to-b from-emerald-50/55 via-white to-white pb-8 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
         <div className="mx-auto max-w-3xl px-5 py-6">
-          <div className="sticky top-0 z-30 -mx-5 px-5 pb-3 pt-2 bg-white/72 backdrop-blur supports-[backdrop-filter]:bg-white/50 dark:bg-zinc-950/72 dark:supports-[backdrop-filter]:bg-zinc-950/40">
+          <div className="sticky top-0 z-30 -mx-5 px-5 pb-3 pt-1.5 bg-white/72 backdrop-blur supports-[backdrop-filter]:bg-white/50 dark:bg-zinc-950/72 dark:supports-[backdrop-filter]:bg-zinc-950/40">
             <div className="flex items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={goBack}
-                className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-3 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
               >
                 <AppIcon size={ICON_SM} icon={ArrowLeft} />
                 Back
@@ -803,46 +855,34 @@ export default function SelfHelpHubScreen({ track }) {
                 <button
                   type="button"
                   onClick={openMoneyTools}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50/80 text-emerald-900 transition hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-100"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1.5 text-xs font-semibold text-emerald-900 transition hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-100"
                   aria-label="Open money tools"
                 >
                   <AppIcon size={ICON_SM} icon={DollarSign} />
+                  Money Tools
                 </button>
 
                 <button
                   type="button"
                   onClick={openChecklist}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/80 text-zinc-800 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 text-xs font-semibold text-zinc-800 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
                   aria-label="Open journey checklist"
                 >
-                  <AppIcon size={ICON_SM} icon={EllipsisVertical} />
+                  <AppIcon size={ICON_SM} icon={ListChecks} />
+                  Jenny Checklist
                 </button>
               </div>
             </div>
 
-            <div className="mt-3 flex items-end justify-between gap-4">
-              <div className="min-w-0">
-                <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-                  {country || "Choose a destination"}
-                </h1>
-              </div>
-
-              <div className="shrink-0 self-end">
-                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-100">
-                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-emerald-100 bg-white/80 dark:border-emerald-900/40 dark:bg-zinc-950/50">
-                    <AppIcon size={ICON_SM} icon={HeaderIcon} className="text-emerald-700 dark:text-emerald-200" />
-                  </span>
-                  {trackMeta.label} self-help
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-              <span className="rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 font-semibold text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-200">
-                {resourceCount} resources
-              </span>
-              <span className="rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 font-semibold text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-200">
-                {verifiedSummary.completedCount}/{verifiedSummary.totalCount} verified
+            <div className="mt-4 min-w-0">
+              <h1 className="text-[1.45rem] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                {country || "Choose a destination"}
+              </h1>
+              <span className="mt-2 inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-100">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-emerald-100 bg-white/80 dark:border-emerald-900/40 dark:bg-zinc-950/50">
+                  <AppIcon size={ICON_SM} icon={HeaderIcon} className="text-emerald-700 dark:text-emerald-200" />
+                </span>
+                {trackMeta.label} Self-Help
               </span>
             </div>
 
@@ -893,8 +933,9 @@ export default function SelfHelpHubScreen({ track }) {
                 </div>
               ) : null}
             </div>
-
-            <div className="mt-4 h-px w-full bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent dark:via-zinc-700/70" />
+            <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+              {resourceCount} verified resources
+            </div>
           </div>
 
           {latestContextEntry ? (
@@ -999,7 +1040,11 @@ export default function SelfHelpHubScreen({ track }) {
           </div>
 
           <div className="mt-6 text-xs text-zinc-500 dark:text-zinc-400">
-            All links here are official and direct. Avoid phishing links and scams.
+            Verified links here are safer than random links from other places. Stay in this guided flow for safer steps.
+          </div>
+
+          <div className="mt-4 text-[11px] text-zinc-400 dark:text-zinc-500">
+            © 2026 All rights reserved
           </div>
         </div>
       </div>
@@ -1016,10 +1061,11 @@ export default function SelfHelpHubScreen({ track }) {
             create: false,
           })
         }
-        className="fixed bottom-28 right-5 z-40 inline-flex h-16 w-16 items-center justify-center rounded-full border border-emerald-200 bg-emerald-600 text-white shadow-lg transition hover:bg-emerald-700 dark:border-emerald-900/40"
-        aria-label="Open SelfHelp documents"
+        className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-emerald-700 dark:border-emerald-900/40"
+        aria-label="Open Self-Help Documents"
       >
-        <AppIcon size={22} icon={FileText} />
+        <AppIcon size={ICON_MD} icon={FileText} />
+        Self-Help Documents
       </button>
 
       <SmartStayDialog

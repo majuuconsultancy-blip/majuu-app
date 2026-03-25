@@ -13,20 +13,26 @@ export default function RequestWorkProgressCard({
   showWhenIdle = false,
   idleText = "Work has not started yet.",
   pendingText = "Work started. Progress update pending.",
+  helperText = "",
+  progressPercentOverride = null,
+  badgeLabelOverride = "",
   children = null,
   inProgressTone = "blue",
 }) {
   const progress = getRequestWorkProgress(request);
   const { countryMap } = useCountryDirectory();
   const accentColor = resolveCountryAccentColor(countryMap, request?.country, "");
-  const progressPercent = progress.progressPercent;
-  const hasPercent = Number.isFinite(progressPercent) && progressPercent > 0;
+  const progressPercent = Number.isFinite(Number(progressPercentOverride))
+    ? Math.max(0, Math.min(100, Math.round(Number(progressPercentOverride))))
+    : progress.progressPercent;
+  const hasPercent = Number.isFinite(progressPercent) && progressPercent >= 0;
   const shouldRender = showWhenIdle || progress.isStarted || hasPercent || children;
   const showHeader = Boolean(title || subtitle);
 
   if (!shouldRender) return null;
 
-  const badgeLabel = hasPercent ? `${progressPercent}%` : progress.isInProgress ? "Live" : "Waiting";
+  const badgeLabel =
+    badgeLabelOverride || (hasPercent ? `${progressPercent}%` : progress.isInProgress ? "Live" : "Waiting");
   const inProgressBadgeCls =
     inProgressTone === "red"
       ? "border-rose-200 bg-rose-50 text-rose-700"
@@ -37,11 +43,13 @@ export default function RequestWorkProgressCard({
     ? inProgressBadgeCls
     : "border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300";
 
-  const helperText = hasPercent
-    ? "Updated directly by staff."
-    : progress.isStarted || progress.isInProgress
-    ? pendingText
-    : idleText;
+  const resolvedHelperText =
+    helperText ||
+    (hasPercent
+      ? "Updated directly by staff."
+      : progress.isStarted || progress.isInProgress
+      ? pendingText
+      : idleText);
 
   return (
     <div className={className} style={buildCountryAccentSurfaceStyle(accentColor)}>
@@ -59,7 +67,7 @@ export default function RequestWorkProgressCard({
         </span>
       </div>
 
-      <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-zinc-200/80 dark:bg-zinc-800/80">
+      <div className="mt-4 h-3.5 overflow-hidden rounded-full bg-zinc-200/80 dark:bg-zinc-800/80">
         {hasPercent ? (
           <div
             className="h-full rounded-full transition-[width] duration-300 ease-out"
@@ -71,7 +79,7 @@ export default function RequestWorkProgressCard({
         ) : null}
       </div>
 
-      <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">{helperText}</div>
+      <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">{resolvedHelperText}</div>
 
       {children ? <div className="mt-4">{children}</div> : null}
     </div>

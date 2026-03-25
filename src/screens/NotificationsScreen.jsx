@@ -365,7 +365,7 @@ export default function NotificationsScreen() {
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
               {selectionMode
                 ? `${selectedIds.length} selected`
-                : "Open updates or long press to select."}
+                : "See your latest alerts, activity updates, and request notifications."}
             </p>
           </div>
 
