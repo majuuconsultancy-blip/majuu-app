@@ -5,6 +5,10 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { db } from "../firebase";
 import { buildFullPackageHubPath } from "../services/fullpackageservice";
 import { reconcilePaymentReference } from "../services/paymentservice";
+import {
+  saveWorkflowDraft,
+  WORKFLOW_DRAFT_STATUSES,
+} from "../services/workflowdraftservice";
 import { markDummyPaymentPaid } from "../utils/dummyPayment";
 
 function safeStr(value, max = 600) {
@@ -72,6 +76,20 @@ function buildFullPackageResumePath({ fullPackageId, track, country, draftId }) 
     url.searchParams.set("fpDraft", safeDraftId);
   }
   return `${url.pathname}${url.search}`;
+}
+
+function resolvePaidWorkflowDraftStatus({ verificationResult, returnTo }) {
+  const flowType = safeStr(verificationResult?.flowType, 80).toLowerCase();
+  if (flowType === "full_package_unlock") {
+    return WORKFLOW_DRAFT_STATUSES.FULL_PACKAGE_PAID_PENDING_DIAGNOSTICS;
+  }
+
+  const returnUrl = parseUrlLike(returnTo);
+  if (safeStr(returnUrl?.pathname, 300).toLowerCase().includes("/full-package/")) {
+    return WORKFLOW_DRAFT_STATUSES.FULL_PACKAGE_PAID_PENDING_DIAGNOSTICS;
+  }
+
+  return WORKFLOW_DRAFT_STATUSES.UNLOCK_PAID_PENDING_SUBMISSION;
 }
 
 async function resolveFullPackageResumePath({
@@ -185,6 +203,10 @@ export default function PaymentCallbackScreen() {
         }
 
         if (nextDraftId) {
+          const paidDraftStatus = resolvePaidWorkflowDraftStatus({
+            verificationResult: result,
+            returnTo: nextReturnTo,
+          });
           markDummyPaymentPaid(nextDraftId, {
             status: "paid",
             method: "paystack",
@@ -192,6 +214,33 @@ export default function PaymentCallbackScreen() {
             transactionReference: reference,
             requestId: nextRequestId,
             paymentId: safeStr(result?.paymentId, 180),
+          });
+
+          void saveWorkflowDraft(nextDraftId, {
+            linkedRequestId: nextRequestId,
+            status: paidDraftStatus,
+            paymentState: "paid",
+            paymentReference: reference,
+            fullPackageUnlockPaid:
+              paidDraftStatus ===
+              WORKFLOW_DRAFT_STATUSES.FULL_PACKAGE_PAID_PENDING_DIAGNOSTICS,
+            linkedPayment: {
+              requestId: nextRequestId,
+              paymentId: safeStr(result?.paymentId, 180),
+              paymentType: "unlock_request",
+              status: "paid",
+              paymentState: "paid",
+              amount: Number(result?.amount || 0) || 0,
+              currency: safeStr(result?.currency || "KES", 8).toUpperCase() || "KES",
+              reference,
+              paidAtMs: Date.now(),
+              verifiedAtMs: Date.now(),
+            },
+          }).catch((draftError) => {
+            console.warn(
+              "Payment callback draft reconciliation failed:",
+              draftError?.message || draftError
+            );
           });
         }
 

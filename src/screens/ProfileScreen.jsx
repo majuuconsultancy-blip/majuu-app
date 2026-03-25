@@ -35,6 +35,7 @@ import {
 } from "../services/adminroleservice";
 import ThemeToggle from "../components/ThemeToggle";
 import { journeyDisplayCountry, normalizeJourney, normalizeJourneyTrack } from "../journey/journeyModel";
+import { getProfileLanguageLabel } from "../utils/userProfile";
 
 const PERF_TAG = "[perf][ProfileScreen]";
 const PROFILE_CACHE_PREFIX = "majuu_profile_cache_";
@@ -71,6 +72,7 @@ function readProfileCache(uid) {
       countryOfResidence: String(parsed?.countryOfResidence || ""),
       county: String(parsed?.county || ""),
       town: String(parsed?.town || ""),
+      language: String(parsed?.language || ""),
       role: String(parsed?.role || ""),
       activeTrack: String(parsed?.activeTrack || "").toLowerCase(),
       updatedAt: Number(parsed?.updatedAt || 0) || 0,
@@ -89,6 +91,7 @@ function writeProfileCache(uid, payload) {
       countryOfResidence: String(payload?.countryOfResidence || ""),
       county: String(payload?.county || ""),
       town: String(payload?.town || ""),
+      language: String(payload?.language || ""),
       role: String(payload?.role || ""),
       activeTrack: String(payload?.activeTrack || "").toLowerCase(),
       updatedAt: Date.now(),
@@ -127,6 +130,7 @@ export default function ProfileScreen() {
   const [countryOfResidence, setCountryOfResidence] = useState("");
   const [county, setCounty] = useState("");
   const [town, setTown] = useState("");
+  const [language, setLanguage] = useState("");
   const [role, setRole] = useState("");
 
   // ✅ for back target
@@ -199,6 +203,7 @@ export default function ProfileScreen() {
         setCountryOfResidence(cached.countryOfResidence || "");
         setCounty(cached.county || "");
         setTown(cached.town || "");
+        setLanguage(cached.language || "");
         setRole(
           resolveRoleFromUserDoc({
             role: cached.role || "",
@@ -226,6 +231,7 @@ export default function ProfileScreen() {
         const c = s?.countryOfResidence || "";
         const countyValue = s?.county || "";
         const townValue = s?.town || "";
+        const languageValue = getProfileLanguageLabel(s?.profile?.language || "");
         const roleValue = resolveRoleFromUserDoc({
           role: s?.role,
           email: user.email || s?.email || "",
@@ -239,6 +245,7 @@ export default function ProfileScreen() {
         setCountryOfResidence(c);
         setCounty(countyValue);
         setTown(townValue);
+        setLanguage(languageValue);
         setRole(roleValue);
         setJourney(normalizeJourney(s?.journey));
 
@@ -252,6 +259,7 @@ export default function ProfileScreen() {
           countryOfResidence: c,
           county: countyValue,
           town: townValue,
+          language: languageValue,
           role: roleValue,
           activeTrack: t,
         });
@@ -523,6 +531,28 @@ export default function ProfileScreen() {
                 </div>
                 <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                   {town?.trim() ? town : "Not set"}
+                </div>
+              </div>
+            </div>
+          </Motion.div>
+
+          <Motion.div
+            variants={floatCard}
+            initial="rest"
+            whileHover="hover"
+            whileTap="tap"
+            className={`${tile} p-4`}
+          >
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100/70 bg-emerald-50/70 text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
+                <AppIcon size={ICON_MD} icon={Flag} />
+              </span>
+              <div className="min-w-0">
+                <div className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
+                  Language
+                </div>
+                <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  {language?.trim() ? language : "Not set"}
                 </div>
               </div>
             </div>

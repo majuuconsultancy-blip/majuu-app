@@ -1,0 +1,131 @@
+.global-loader-root {
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 1;
+  transition: opacity 220ms ease;
+}
+
+.global-loader-root--overlay {
+  position: fixed;
+  z-index: 1200;
+  background:
+    radial-gradient(circle at top, rgba(16, 185, 129, 0.08), transparent 40%),
+    rgba(255, 255, 255, 0.92);
+}
+
+.dark .global-loader-root--overlay {
+  background:
+    radial-gradient(circle at top, rgba(16, 185, 129, 0.16), transparent 40%),
+    rgba(9, 9, 11, 0.94);
+}
+
+.global-loader-root--screen {
+  position: relative;
+  min-height: var(--app-viewport-height);
+  width: 100%;
+  background: transparent;
+}
+
+.global-loader-root--inactive {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.global-loader-panel {
+  width: min(100%, 22rem);
+  padding: 1.25rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.global-loader-mark {
+  font-size: clamp(3.35rem, 10vw, 4.7rem);
+  line-height: 0.8;
+  font-weight: 700;
+  letter-spacing: -0.14em;
+  color: rgb(5 150 105);
+  text-shadow: 0 0 14px rgba(5, 150, 105, 0.12);
+  animation: global-loader-pulse 1.2s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.dark .global-loader-mark {
+  color: rgb(52 211 153);
+  text-shadow: 0 0 16px rgba(52, 211, 153, 0.16);
+}
+
+.global-loader-mark--static {
+  animation: none;
+  opacity: 1;
+  transform: scale(1);
+}
+
+.global-loader-brand {
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgb(113 113 122);
+}
+
+.dark .global-loader-brand {
+  color: rgb(161 161 170);
+}
+
+.global-loader-text-wrap {
+  min-height: 1.45rem;
+  margin-top: 0.7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.global-loader-text {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: rgb(63 63 70);
+  animation: global-loader-text-in 180ms ease;
+}
+
+.dark .global-loader-text {
+  color: rgb(228 228 231);
+}
+
+.global-loader-caption {
+  margin-top: 0.35rem;
+  max-width: 20rem;
+  font-size: 0.8rem;
+  color: rgb(113 113 122);
+}
+
+.dark .global-loader-caption {
+  color: rgb(161 161 170);
+}
+
+@keyframes global-loader-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.98);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes global-loader-text-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

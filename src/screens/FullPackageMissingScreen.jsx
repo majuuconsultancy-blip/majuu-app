@@ -479,6 +479,7 @@ export default function FullPackageMissingScreen() {
       county: String(county || "").trim(),
       town: String(town || "").trim(),
       city: String(town || "").trim(),
+      countryOfResidence: String(userState?.countryOfResidence || "").trim(),
       paid: false,
       paymentMeta: null,
       requestUploadMeta: requestUploadMeta || { count: 0, files: [] },
@@ -798,7 +799,6 @@ export default function FullPackageMissingScreen() {
         paymentRequired={false}
         initialState={requestModalResumeState?.formState || null}
         onStateChange={setRequestModalResumeState}
-        enableAttachments={true}
         maxPdfMb={10}
       />
     </div>

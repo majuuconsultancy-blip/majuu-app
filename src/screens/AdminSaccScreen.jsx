@@ -6,6 +6,7 @@ import {
   Coins,
   FileText,
   Globe2,
+  ImagePlus,
   Link2,
   Newspaper,
   Settings2,
@@ -18,9 +19,76 @@ import { ICON_MD, ICON_SM } from "../constants/iconSizes";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import { smartBack } from "../utils/navBack";
 
+const SACC_MODULES = [
+  {
+    key: "partnerships",
+    title: "Partnerships",
+    description: "Manage partner accounts, coverage, and routing eligibility.",
+    path: "/app/admin/sacc/partnerships",
+    icon: Link2,
+  },
+  {
+    key: "finances",
+    title: "Finances",
+    description: "Control payment rules, payouts, and finance records.",
+    path: "/app/admin/sacc/finances",
+    icon: ShieldCheck,
+  },
+  {
+    key: "countries",
+    title: "Country Management",
+    description: "Set up supported countries, tracks, and local settings.",
+    path: "/app/admin/sacc/countries",
+    icon: Globe2,
+  },
+  {
+    key: "request-management",
+    title: "Request Management",
+    description: "Build modular request types and extra fields.",
+    path: "/app/admin/sacc/request-management",
+    icon: FileText,
+  },
+  {
+    key: "pricing",
+    title: "Pricing Controls",
+    description: "Set request prices for checkout and package sales.",
+    path: "/app/admin/sacc/pricing",
+    icon: Coins,
+    badge: "Live",
+  },
+  {
+    key: "analytics",
+    title: "Analytics",
+    description: "Track demand, usage, and request outcomes.",
+    path: "/app/admin/sacc/analytics",
+    icon: BarChart3,
+  },
+  {
+    key: "home-design",
+    title: "Home Design Module",
+    description: "Control featured country carousels, metadata, and visuals.",
+    path: "/app/admin/sacc/home-design",
+    icon: ImagePlus,
+  },
+  {
+    key: "news",
+    title: "News Management",
+    description: "Publish migration updates and announcements.",
+    path: "/app/admin/sacc/news",
+    icon: Newspaper,
+    badge: "Live",
+  },
+  {
+    key: "selfhelp-links",
+    title: "SelfHelp Links Management",
+    description: "Manage links shown across SelfHelp resources.",
+    path: "/app/admin/sacc/selfhelp-links",
+    icon: Link2,
+  },
+];
+
 export default function AdminSaccScreen() {
   const navigate = useNavigate();
-
   const [checkingRole, setCheckingRole] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
@@ -53,7 +121,7 @@ export default function AdminSaccScreen() {
 
   return (
     <div className={pageBg}>
-      <div className="max-w-xl mx-auto px-5 py-6">
+      <div className="app-page-shell app-page-shell--medium">
         <div className="flex items-end justify-between gap-3">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/80 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
@@ -92,199 +160,38 @@ export default function AdminSaccScreen() {
             </div>
 
             <div className="mt-4 grid gap-3">
-              <button
-                type="button"
-                onClick={() => navigate("/app/admin/sacc/request-management")}
-                className={`${card} w-full px-4 py-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50 active:scale-[0.99] dark:hover:bg-zinc-900/80`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
-                    <AppIcon icon={FileText} size={ICON_MD} />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                      Request Management
+              {SACC_MODULES.map((module) => (
+                <button
+                  key={module.key}
+                  type="button"
+                  onClick={() => navigate(module.path)}
+                  className={`${card} w-full px-4 py-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50 active:scale-[0.99] dark:hover:bg-zinc-900/80`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                      <AppIcon icon={module.icon} size={ICON_MD} />
                     </div>
-                    <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                      Manage request definitions by title, track, country, and extra request-specific fields while leaving the current core request flow untouched.
-                    </div>
-                  </div>
 
-                  <AppIcon icon={ChevronRight} size={ICON_MD} className="text-zinc-400" />
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => navigate("/app/admin/sacc/analytics")}
-                className={`${card} w-full px-4 py-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50 active:scale-[0.99] dark:hover:bg-zinc-900/80`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
-                    <AppIcon icon={BarChart3} size={ICON_MD} />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                      Analytics
-                    </div>
-                    <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                      View high-signal product metrics like signups, journey demand, SelfHelp/WeHelp usage, top countries, and request outcomes.
-                    </div>
-                  </div>
-
-                  <AppIcon icon={ChevronRight} size={ICON_MD} className="text-zinc-400" />
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => navigate("/app/admin/sacc/countries")}
-                className={`${card} w-full px-4 py-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50 active:scale-[0.99] dark:hover:bg-zinc-900/80`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
-                    <AppIcon icon={Globe2} size={ICON_MD} />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                      Country Management
-                    </div>
-                    <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                      Create, edit, activate/deactivate countries, set supported tracks, and assign currency context for downstream modules.
-                    </div>
-                  </div>
-
-                  <AppIcon icon={ChevronRight} size={ICON_MD} className="text-zinc-400" />
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => navigate("/app/admin/sacc/partnerships")}
-                className={`${card} w-full px-4 py-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50 active:scale-[0.99] dark:hover:bg-zinc-900/80`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
-                    <AppIcon icon={Link2} size={ICON_MD} />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                      Partnerships
-                    </div>
-                    <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                      Onboard partners, manage status, configure track and geographic coverage, and feed admin partner binding plus preferred-agent routing.
-                    </div>
-                  </div>
-
-                  <AppIcon icon={ChevronRight} size={ICON_MD} className="text-zinc-400" />
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => navigate("/app/admin/sacc/pricing")}
-                className={`${card} w-full px-4 py-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50 active:scale-[0.99] dark:hover:bg-zinc-900/80`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
-                    <AppIcon icon={Coins} size={ICON_MD} />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        Pricing Controls
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                          {module.title}
+                        </div>
+                        {module.badge ? (
+                          <span className="rounded-full border border-emerald-100 bg-emerald-50/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                            {module.badge}
+                          </span>
+                        ) : null}
                       </div>
-                      <span className="rounded-full border border-emerald-100 bg-emerald-50/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
-                        Live
-                      </span>
-                    </div>
-                    <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                      View request pricing, edit amounts inline, and publish updates instantly across request checkout flows.
-                    </div>
-                  </div>
-
-                  <AppIcon icon={ChevronRight} size={ICON_MD} className="text-zinc-400" />
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => navigate("/app/admin/sacc/finances")}
-                className={`${card} w-full px-4 py-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50 active:scale-[0.99] dark:hover:bg-zinc-900/80`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
-                    <AppIcon icon={ShieldCheck} size={ICON_MD} />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                      Finances
-                    </div>
-                    <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                      Configure provider readiness, partner financial profiles, payout queue rules, settlement visibility, and finance audit evidence without mixing them into pricing.
-                    </div>
-                  </div>
-
-                  <AppIcon icon={ChevronRight} size={ICON_MD} className="text-zinc-400" />
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => navigate("/app/admin/sacc/news")}
-                className={`${card} w-full px-4 py-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50 active:scale-[0.99] dark:hover:bg-zinc-900/80`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
-                    <AppIcon icon={Newspaper} size={ICON_MD} />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        News Management
+                      <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                        {module.description}
                       </div>
-                      <span className="rounded-full border border-emerald-100 bg-emerald-50/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
-                        Live
-                      </span>
                     </div>
-                    <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                      Create, edit, publish, unpublish, and prioritize migration news updates.
-                    </div>
+
+                    <AppIcon icon={ChevronRight} size={ICON_MD} className="text-zinc-400" />
                   </div>
-
-                  <AppIcon icon={ChevronRight} size={ICON_MD} className="text-zinc-400" />
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => navigate("/app/admin/sacc/selfhelp-links")}
-                className={`${card} w-full px-4 py-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50 active:scale-[0.99] dark:hover:bg-zinc-900/80`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
-                    <AppIcon icon={Link2} size={ICON_MD} />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                      SelfHelp Links Management
-                    </div>
-                    <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                      Control SelfHelp resource links, partner flags, countries, track routing, and click counts from SACC.
-                    </div>
-                  </div>
-
-                  <AppIcon icon={ChevronRight} size={ICON_MD} className="text-zinc-400" />
-                </div>
-              </button>
+                </button>
+              ))}
             </div>
           </>
         )}

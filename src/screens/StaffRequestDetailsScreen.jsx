@@ -794,7 +794,7 @@ export default function StaffRequestDetailsScreen() {
   if (checkingAuth) {
     return (
       <div className={softBg}>
-        <div className="max-w-xl mx-auto px-5 py-6">
+        <div className="app-page-shell app-page-shell--wide">
           <div className={`${card} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>Preparing…</div>
         </div>
       </div>
@@ -814,9 +814,9 @@ export default function StaffRequestDetailsScreen() {
 
   return (
     <div className={softBg}>
-      <div className={`max-w-xl mx-auto px-5 py-6 ${enterWrap} ${enterCls}`}>
+      <div className={`app-page-shell app-page-shell--wide ${enterWrap} ${enterCls}`}>
         {/* Sticky top header */}
-        <div className="sticky top-0 z-10 -mx-5 px-5 pb-3 pt-2 backdrop-blur supports-[backdrop-filter]:bg-white/50 dark:supports-[backdrop-filter]:bg-zinc-950/40">
+        <div className="sticky top-0 z-10 -mx-[clamp(1rem,2.8vw,1.5rem)] px-[clamp(1rem,2.8vw,1.5rem)] pb-3 pt-2 backdrop-blur supports-[backdrop-filter]:bg-white/50 dark:supports-[backdrop-filter]:bg-zinc-950/40">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <button type="button" onClick={() => smartBack(navigate, "/staff/tasks")} className={btnGhost}>
@@ -1011,14 +1011,14 @@ export default function StaffRequestDetailsScreen() {
             <StaffCollapsibleSectionCard
               className={`mt-6 ${floatCard} p-5`}
               title="Applicant"
-              subtitle=""
+              subtitle="Details and document fields."
               open={openSections.applicant}
               onToggle={() => toggleSection("applicant")}
             >
               <div className="mt-4 flex justify-end">
                 <button
                   type="button"
-                  onClick={() => navigate(`/staff/request/${req?.id}/documents`)}
+                  onClick={() => navigate(`/staff/request/${requestId}/documents`)}
                   className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3.5 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/60 active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100 dark:hover:bg-zinc-900"
                 >
                   Applicant docs
@@ -1049,7 +1049,11 @@ export default function StaffRequestDetailsScreen() {
                   <div className={warnBox}>No note provided.</div>
                 )}
 
-                <RequestExtraDetailsSection request={req} title="Extra details" />
+                <RequestExtraDetailsSection
+                  request={req}
+                  title="Extra details"
+                  includeDocumentFields={false}
+                />
               </div>
             </StaffCollapsibleSectionCard>
 
@@ -1390,8 +1394,6 @@ export default function StaffRequestDetailsScreen() {
                 </div>
               </div>
             </div>
-
-            <div className="h-10" />
           </>
         )}
       </div>

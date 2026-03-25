@@ -20,6 +20,7 @@ import {
   KENYA_COUNTY_OPTIONS,
   normalizeCountyList,
 } from "../constants/kenyaCounties";
+import { EAST_AFRICA_RESIDENCE_COUNTRIES } from "../constants/eastAfricaProfile";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import { subscribeAllCountries } from "../services/countryService";
 import {
@@ -201,6 +202,8 @@ export default function AdminPartnershipsScreen() {
   const [editingId, setEditingId] = useState("");
   const [draft, setDraft] = useState(createEmptyPartnerDraft());
   const [metadataRows, setMetadataRows] = useState(metaRowsFromObject({}));
+  const [homeCountrySearch, setHomeCountrySearch] = useState("");
+  const [homeCountryPick, setHomeCountryPick] = useState("");
   const [countrySearch, setCountrySearch] = useState("");
   const [countryPick, setCountryPick] = useState("");
   const [countySearch, setCountySearch] = useState("");
@@ -288,6 +291,7 @@ export default function AdminPartnershipsScreen() {
           partner?.displayName,
           partner?.internalName,
           partner?.notes,
+          ...(partner?.homeCountries || []),
           ...(partner?.supportedCountries || []),
           ...(partner?.supportedCounties || []),
         ]
@@ -306,6 +310,15 @@ export default function AdminPartnershipsScreen() {
     () => partners.filter((partner) => partner?.isActive !== false).length,
     [partners]
   );
+
+  const filteredHomeCountryOptions = useMemo(() => {
+    const needle = safeString(homeCountrySearch, 120).toLowerCase();
+    return EAST_AFRICA_RESIDENCE_COUNTRIES.filter(
+      (country) =>
+        !(draft?.homeCountries || []).includes(country) &&
+        country.toLowerCase().includes(needle)
+    );
+  }, [draft?.homeCountries, homeCountrySearch]);
 
   const filteredCountryOptions = useMemo(() => {
     const needle = safeString(countrySearch, 120).toLowerCase();
@@ -351,6 +364,21 @@ export default function AdminPartnershipsScreen() {
     setCountryPick("");
   };
 
+  const toggleHomeCountry = (countryName) => {
+    setDraft((current) => {
+      const set = new Set(current?.homeCountries || []);
+      if (set.has(countryName)) set.delete(countryName);
+      else set.add(countryName);
+      return { ...current, homeCountries: Array.from(set).sort((a, b) => a.localeCompare(b)) };
+    });
+  };
+
+  const addHomeCountry = () => {
+    if (!homeCountryPick) return;
+    toggleHomeCountry(homeCountryPick);
+    setHomeCountryPick("");
+  };
+
   const toggleCounty = (countyName) => {
     setDraft((current) => {
       const set = new Set(normalizeCountyList(current?.supportedCounties || []));
@@ -385,6 +413,8 @@ export default function AdminPartnershipsScreen() {
     setEditingId("");
     setDraft(createEmptyPartnerDraft());
     setMetadataRows(metaRowsFromObject({}));
+    setHomeCountrySearch("");
+    setHomeCountryPick("");
     setCountrySearch("");
     setCountryPick("");
     setCountySearch("");
@@ -400,6 +430,8 @@ export default function AdminPartnershipsScreen() {
     setEditingId(partner?.id || "");
     setDraft({ ...draftFromPartner(partner), branches: partner?.branches || [] });
     setMetadataRows(metaRowsFromObject(partner?.metadata));
+    setHomeCountrySearch("");
+    setHomeCountryPick("");
     setCountrySearch("");
     setCountryPick("");
     setCountySearch("");
@@ -417,6 +449,8 @@ export default function AdminPartnershipsScreen() {
     setEditingId("");
     setDraft(createEmptyPartnerDraft());
     setMetadataRows(metaRowsFromObject({}));
+    setHomeCountrySearch("");
+    setHomeCountryPick("");
     setCountrySearch("");
     setCountryPick("");
     setCountySearch("");
@@ -479,7 +513,7 @@ export default function AdminPartnershipsScreen() {
               SACC Partnerships
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              County-based partner coverage for request routing, preferred agents, and admin binding.
+              Home-country eligibility, destination coverage, and county routing for partner assignment.
             </p>
           </div>
           <button
@@ -560,6 +594,29 @@ export default function AdminPartnershipsScreen() {
                       </button>
                     ))}
                   </div>
+                </Section>
+
+                <Section
+                  title="Home Countries"
+                  subtitle="Only users whose residence country matches one of these countries will see this partner."
+                >
+                  <SelectionDropdown
+                    label="Home country list"
+                    inputClass={input}
+                    searchValue={homeCountrySearch}
+                    onSearchChange={setHomeCountrySearch}
+                    searchPlaceholder="Search home countries"
+                    selectValue={homeCountryPick}
+                    onSelectValueChange={setHomeCountryPick}
+                    onAdd={addHomeCountry}
+                    selectPlaceholder={
+                      filteredHomeCountryOptions.length ? "Select home country" : "No more countries"
+                    }
+                    options={filteredHomeCountryOptions}
+                    selectedValues={draft?.homeCountries || []}
+                    emptyLabel="No home countries selected yet."
+                    onRemove={toggleHomeCountry}
+                  />
                 </Section>
 
                 <Section title="Country Coverage" subtitle="Select the destination countries this partner can handle.">
@@ -694,7 +751,7 @@ export default function AdminPartnershipsScreen() {
                     Partners ({activeCount} active / {partners.length} total)
                   </div>
                   <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                    County coverage is the routing source of truth.
+                    Home-country eligibility is applied before county routing.
                   </div>
                 </div>
                 <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -736,6 +793,9 @@ export default function AdminPartnershipsScreen() {
                           </div>
                           <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
                             <MetaPill>Tracks: {(partner?.supportedTracks || []).map((track) => APP_TRACK_META[track]?.label || track).join(", ") || "None"}</MetaPill>
+                            <MetaPill>
+                              Home Countries: {(partner?.homeCountries || []).join(", ") || "None"}
+                            </MetaPill>
                             <MetaPill>Countries: {(partner?.supportedCountries || []).length}</MetaPill>
                             <MetaPill>Counties: {(partner?.supportedCounties || []).length}</MetaPill>
                             <MetaPill>Branches: {(partner?.branches || []).length}</MetaPill>

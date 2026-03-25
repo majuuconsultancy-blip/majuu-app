@@ -5,9 +5,9 @@ import { db } from "../firebase";
 import { smartBack } from "../utils/navBack";
 import DocumentExtractPanel from "../components/DocumentExtractPanel";
 import DocumentProofreadPanel from "../components/DocumentProofreadPanel";
+import RequestDocumentFieldsSection from "../components/RequestDocumentFieldsSection";
 import { normalizeTextDeep } from "../utils/textNormalizer";
 
-/* ---------- Minimal icons ---------- */
 function IconBack(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
@@ -45,12 +45,7 @@ function IconFile(props) {
 function IconDownload(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M12 3.8v10.2"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-      />
+      <path d="M12 3.8v10.2" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
       <path
         d="M8.5 10.8 12 14.3l3.5-3.5"
         stroke="currentColor"
@@ -68,10 +63,9 @@ function IconDownload(props) {
   );
 }
 
-/* ---------- Helpers ---------- */
 function bytesToLabel(bytes) {
   const b = Number(bytes || 0);
-  if (b <= 0) return "—";
+  if (b <= 0) return "-";
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${Math.round(b / 1024)} KB`;
   return `${Math.round((b / 1024 / 1024) * 10) / 10} MB`;
@@ -90,16 +84,25 @@ function safeStr(x) {
   return String(x || "").trim();
 }
 
+function isExtraFieldAttachment(item) {
+  const kind = safeStr(item?.kind).toLowerCase();
+  return Boolean(
+    safeStr(item?.fieldId) ||
+      safeStr(item?.fieldLabel || item?.label) ||
+      kind === "extra_field_document"
+  );
+}
+
 export default function AdminRequestDocumentsScreen() {
   const navigate = useNavigate();
   const { requestId } = useParams();
 
   const validId = useMemo(() => {
     const id = String(requestId || "").trim();
-    return id ?id : null;
+    return id || null;
   }, [requestId]);
 
-  const [loading, setLoading] = useState(true);
+  const [attachmentRequestId, setAttachmentRequestId] = useState("");
   const [err, setErr] = useState("");
   const [attachments, setAttachments] = useState([]);
   const [requestData, setRequestData] = useState(null);
@@ -115,7 +118,7 @@ export default function AdminRequestDocumentsScreen() {
       try {
         const snap = await getDoc(doc(db, "serviceRequests", validId));
         if (!active) return;
-        setRequestData(snap.exists() ?normalizeTextDeep(snap.data() || null) : null);
+        setRequestData(snap.exists() ? normalizeTextDeep(snap.data() || null) : null);
       } catch (error) {
         console.error("request fetch error:", error);
         if (active) setRequestData(null);
@@ -128,14 +131,7 @@ export default function AdminRequestDocumentsScreen() {
   }, [validId]);
 
   useEffect(() => {
-    if (!validId) {
-      setErr("Missing request ID.");
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setErr("");
+    if (!validId) return undefined;
 
     const colRef = collection(db, "serviceRequests", validId, "attachments");
     const qy = query(colRef, orderBy("createdAt", "desc"));
@@ -143,27 +139,37 @@ export default function AdminRequestDocumentsScreen() {
     const unsub = onSnapshot(
       qy,
       (snap) => {
+        setAttachmentRequestId(validId);
         setAttachments(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
-        setLoading(false);
+        setErr("");
       },
-      (e) => {
-        console.error("attachments snapshot error:", e);
-        setErr(e?.message || "Failed to load uploaded documents.");
-        setLoading(false);
+      (error) => {
+        console.error("attachments snapshot error:", error);
+        setAttachmentRequestId(validId);
+        setErr(error?.message || "Failed to load uploaded documents.");
+        setAttachments([]);
       }
     );
 
     return () => unsub();
   }, [validId]);
 
+  const legacyAttachments = useMemo(
+    () => attachments.filter((item) => !isExtraFieldAttachment(item)),
+    [attachments]
+  );
+  const effectiveError = validId && attachmentRequestId === validId ? err : "";
+  const loading = Boolean(validId) && attachmentRequestId !== validId && !effectiveError;
+  const pageError = !validId ? "Missing request ID." : effectiveError;
+
   const cardBase =
     "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur";
-  const softBg = "bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
+  const softBg =
+    "bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
 
   return (
     <div className={`min-h-screen ${softBg}`}>
-      <div className="px-5 py-6 max-w-xl mx-auto">
-        {/* Header */}
+      <div className="app-page-shell app-page-shell--wide">
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800">
@@ -178,8 +184,7 @@ export default function AdminRequestDocumentsScreen() {
             </h1>
 
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              Request ID:{" "}
-              <span className="font-mono break-all">{validId || "-"}</span>
+              Request ID: <span className="font-mono break-all">{validId || "-"}</span>
             </p>
           </div>
 
@@ -193,49 +198,63 @@ export default function AdminRequestDocumentsScreen() {
           </button>
         </div>
 
-        {err ?(
+        {pageError ? (
           <div className="mt-6 rounded-2xl border border-rose-100 bg-rose-50/70 p-4 text-sm text-rose-700">
-            {err}
+            {pageError}
           </div>
         ) : null}
 
-        <div className={`mt-6 ${cardBase} p-5`}>
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-semibold text-zinc-900 dark:text-zinc-100">Files</div>
-              <div className="text-xs text-zinc-500">attachments subcollection</div>
-            </div>
-            <span className="text-xs text-zinc-500">{attachments.length} files</span>
-          </div>
+        {validId ? (
+          <>
+            <RequestDocumentFieldsSection
+              request={requestData}
+              requestId={validId}
+              title="Document fields"
+              viewerRole="admin"
+              attachments={attachments}
+              attachmentsLoading={loading}
+              attachmentsError={effectiveError}
+              showLegacySection={false}
+              className={`mt-6 ${cardBase} p-5`}
+            />
 
-          <DocumentProofreadPanel
-            requestId={validId}
-            request={requestData}
-            attachments={attachments}
-          />
+            <div className={`mt-4 ${cardBase} p-5`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                    Legacy upload records
+                  </div>
+                  <div className="text-xs text-zinc-500">Preserved request-level attachments</div>
+                </div>
+                <span className="text-xs text-zinc-500">{legacyAttachments.length} files</span>
+              </div>
 
-          {loading ?(
-            <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
-              Loading…
-            </div>
-          ) : attachments.length === 0 ?(
-            <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
-              No documents uploaded yet.
-            </div>
-          ) : (
-            <div className="mt-4 grid gap-2">
-              {attachments.map((a) => {
-                // support multiple legacy field names
+              {legacyAttachments.length > 0 ? (
+                <DocumentProofreadPanel
+                  requestId={validId}
+                  request={requestData}
+                  attachments={legacyAttachments}
+                />
+              ) : null}
+
+              {loading ? (
+                <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
+                  Loading...
+                </div>
+              ) : legacyAttachments.length === 0 ? (
+                <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
+                  No legacy upload records.
+                </div>
+              ) : (
+                <div className="mt-4 grid gap-2">
+                  {legacyAttachments.map((a) => {
                 const url = safeStr(a?.url || a?.downloadUrl || a?.fileUrl);
                 const hasLink = url.startsWith("http");
-
                 const contentType = safeStr(a?.contentType || a?.type || "file");
                 const name = safeStr(a?.name || a?.filename || "Document");
-
-                // ✅ “dumb upload doccs thingy” metadata (we’ll save these later)
-                const label = safeStr(a?.label); // e.g. "Passport", "Bank statement"
+                const label = safeStr(a?.label);
                 const metaNote = safeStr(a?.metaNote || a?.note);
-                const kind = safeStr(a?.kind); // e.g. "user_dummy_upload"
+                const kind = safeStr(a?.kind);
 
                 return (
                   <div
@@ -252,32 +271,31 @@ export default function AdminRequestDocumentsScreen() {
                           {bytesToLabel(a.size)} · {contentType}
                         </div>
 
-                        {/* Optional metadata pills */}
                         <div className="mt-2 flex flex-wrap gap-2">
                           <span className="inline-flex rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                             {attStatusLabel(a.status)}
                           </span>
 
-                          {label ?(
+                          {label ? (
                             <span className="inline-flex rounded-full border border-emerald-100 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
                               {label}
                             </span>
                           ) : null}
 
-                          {kind ?(
+                          {kind ? (
                             <span className="inline-flex rounded-full border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
                               {kind}
                             </span>
                           ) : null}
                         </div>
 
-                        {metaNote ?(
+                        {metaNote ? (
                           <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
                             {metaNote}
                           </div>
                         ) : null}
 
-                        {hasLink ?(
+                        {hasLink ? (
                           <a
                             href={url}
                             target="_blank"
@@ -307,15 +325,13 @@ export default function AdminRequestDocumentsScreen() {
                     </div>
                   </div>
                 );
-              })}
+                  })}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-
-        <div className="h-10" />
+          </>
+        ) : null}
       </div>
     </div>
   );
 }
-
-

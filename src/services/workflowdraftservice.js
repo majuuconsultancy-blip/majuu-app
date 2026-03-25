@@ -16,6 +16,7 @@ import { auth, db } from "../firebase";
 import { normalizeCountyName } from "../constants/kenyaCounties";
 import { resolveFullPackageCoverageState } from "./fullpackageservice";
 import { isUnsubmittedGhostRequest } from "../utils/requestGhosts";
+import { getDummyPaymentState } from "../utils/dummyPayment";
 
 export const WORKFLOW_DRAFTS_COLLECTION = "workflowDrafts";
 const WORKFLOW_DRAFT_LOCAL_PREFIX = "workflowDraft";
@@ -45,6 +46,11 @@ export const WORKFLOW_DRAFT_STATUSES = {
   READY_TO_GENERATE_REQUESTS: "ready_to_generate_requests",
   REQUESTS_GENERATED: "requests_generated",
 };
+
+const PAID_WORKFLOW_DRAFT_STATUSES = new Set([
+  WORKFLOW_DRAFT_STATUSES.UNLOCK_PAID_PENDING_SUBMISSION,
+  WORKFLOW_DRAFT_STATUSES.FULL_PACKAGE_PAID_PENDING_DIAGNOSTICS,
+]);
 
 function getStorage() {
   if (typeof window === "undefined") return null;
@@ -185,6 +191,9 @@ function normalizeRequestModalState(input) {
       step: "",
       formState: null,
       selectedItem: "",
+      definitionKey: "",
+      definitionCountry: "",
+      pricingKey: "",
     };
   }
   return {
@@ -194,6 +203,9 @@ function normalizeRequestModalState(input) {
     step: safeString(input?.step, 80),
     formState: normalizeFormState(input?.formState),
     selectedItem: safeString(input?.selectedItem, 140),
+    definitionKey: safeString(input?.definitionKey, 200),
+    definitionCountry: safeString(input?.definitionCountry, 120),
+    pricingKey: safeString(input?.pricingKey, 200),
   };
 }
 
@@ -260,6 +272,89 @@ function normalizeLinkedPayment(input) {
     payload.amount > 0 ||
     payload.paidAtMs > 0;
   return hasAny ? payload : null;
+}
+
+function getDummyPaymentPaidAtMs(dummyPayment) {
+  return (
+    Number(dummyPayment?.paidAtMs || 0) ||
+    Number(dummyPayment?.paidAt || 0) ||
+    toMillis(dummyPayment?.paidAt)
+  );
+}
+
+function isDummyPaymentMarkedPaid(dummyPayment) {
+  return (
+    lower(dummyPayment?.status, 80) === "paid" ||
+    getDummyPaymentPaidAtMs(dummyPayment) > 0
+  );
+}
+
+function buildDummyLinkedPayment(draft, dummyPayment) {
+  if (!isDummyPaymentMarkedPaid(dummyPayment)) return null;
+
+  return normalizeLinkedPayment({
+    ...(draft?.linkedPayment || {}),
+    requestId:
+      safeString(dummyPayment?.requestId, 180) ||
+      safeString(draft?.linkedRequestId, 180) ||
+      safeString(draft?.linkedPayment?.requestId, 180),
+    paymentId:
+      safeString(dummyPayment?.paymentId, 180) ||
+      safeString(draft?.linkedPayment?.paymentId, 180),
+    paymentType:
+      safeString(dummyPayment?.paymentType, 60) ||
+      safeString(draft?.linkedPayment?.paymentType, 60) ||
+      "unlock_request",
+    status: "paid",
+    paymentState: "paid",
+    amount:
+      Number(draft?.paymentAmount || draft?.linkedPayment?.amount || dummyPayment?.amount || 0) ||
+      0,
+    currency:
+      safeString(
+        draft?.paymentCurrency || draft?.linkedPayment?.currency || dummyPayment?.currency || "KES",
+        8
+      ).toUpperCase() || "KES",
+    reference:
+      safeString(
+        dummyPayment?.transactionReference ||
+          dummyPayment?.reference ||
+          draft?.paymentReference ||
+          draft?.linkedPayment?.reference,
+        180
+      ) || "",
+    paidAtMs: getDummyPaymentPaidAtMs(dummyPayment),
+    verifiedAtMs: Number(dummyPayment?.verifiedAtMs || 0) || 0,
+  });
+}
+
+export function getWorkflowDraftPaymentFacts(rawDraft) {
+  const draft = normalizeDraftRow(rawDraft);
+  const dummyPayment = draft?.draftId ? getDummyPaymentState(draft.draftId) : null;
+  const draftStatus = normalizeStatus(draft?.status, WORKFLOW_DRAFT_STATUSES.DRAFT);
+  const draftPaymentState = normalizePaymentState(draft?.paymentState);
+  const linkedPaymentState = normalizePaymentState(
+    draft?.linkedPayment?.paymentState || draft?.linkedPayment?.status
+  );
+  const dummyPaymentPaid = isDummyPaymentMarkedPaid(dummyPayment);
+  const actuallyPaid =
+    draftPaymentState === "paid" ||
+    linkedPaymentState === "paid" ||
+    dummyPaymentPaid ||
+    PAID_WORKFLOW_DRAFT_STATUSES.has(draftStatus);
+
+  return {
+    draftStatus,
+    draftPaymentState,
+    linkedPaymentState,
+    dummyPayment,
+    dummyPaymentPaid,
+    actuallyPaid,
+  };
+}
+
+export function isWorkflowDraftActuallyPaid(rawDraft) {
+  return getWorkflowDraftPaymentFacts(rawDraft).actuallyPaid;
 }
 
 function normalizeDraftRow(row = {}) {
@@ -576,8 +671,7 @@ function sanitizeDraftPatch(draftId, patch = {}) {
       safeString(raw?.paymentCurrency || payment?.currency || "KES", 8).toUpperCase() || "KES",
     paymentReference:
       safeString(raw?.paymentReference || payment?.reference, 180) || "",
-    fullPackageUnlockPaid:
-      raw?.fullPackageUnlockPaid === true || normalizePaymentState(raw?.paymentState) === "paid",
+    fullPackageUnlockPaid: raw?.fullPackageUnlockPaid === true,
     resumeState,
     archived: raw?.archived === true,
     archivedReason: safeString(raw?.archivedReason, 200),
@@ -749,19 +843,49 @@ export async function hydrateWorkflowDraft(rawDraft) {
       : Promise.resolve({ fullPackage: null, effectiveStatus: draft.status }),
   ]);
 
-  const effectiveStatus =
+  let effectiveStatus =
     draft.flowFamily === WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE
       ? fullPackageState.effectiveStatus
       : requestState.effectiveStatus;
 
-  const linkedPayment =
-    normalizeLinkedPayment(requestState.linkedPayment) || draft.linkedPayment;
+  const requestLinkedPayment = normalizeLinkedPayment(requestState.linkedPayment);
+  const paymentFacts = getWorkflowDraftPaymentFacts({
+    ...draft,
+    linkedPayment: requestLinkedPayment || draft.linkedPayment,
+    status: effectiveStatus,
+  });
+  const dummyLinkedPayment = buildDummyLinkedPayment(draft, paymentFacts.dummyPayment);
+  const linkedPayment = dummyLinkedPayment || requestLinkedPayment || draft.linkedPayment;
+  const actuallyPaid = isWorkflowDraftActuallyPaid({
+    ...draft,
+    linkedPayment,
+    status: effectiveStatus,
+    paymentState: linkedPayment
+      ? normalizePaymentState(linkedPayment?.paymentState || linkedPayment?.status)
+      : draft.paymentState,
+  });
+
+  if (actuallyPaid && effectiveStatus !== WORKFLOW_DRAFT_STATUSES.SUBMITTED) {
+    if (draft.flowFamily === WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE) {
+      const shouldHoldPaidState =
+        effectiveStatus !== WORKFLOW_DRAFT_STATUSES.READY_TO_GENERATE_REQUESTS &&
+        effectiveStatus !== WORKFLOW_DRAFT_STATUSES.REQUESTS_GENERATED &&
+        effectiveStatus !== WORKFLOW_DRAFT_STATUSES.DIAGNOSTICS_IN_PROGRESS;
+      if (shouldHoldPaidState) {
+        effectiveStatus = WORKFLOW_DRAFT_STATUSES.FULL_PACKAGE_PAID_PENDING_DIAGNOSTICS;
+      }
+    } else {
+      effectiveStatus = WORKFLOW_DRAFT_STATUSES.UNLOCK_PAID_PENDING_SUBMISSION;
+    }
+  }
 
   return normalizeDraftRow({
     ...draft,
     status: effectiveStatus,
     linkedPayment,
-    paymentState: linkedPayment
+    paymentState: actuallyPaid
+      ? "paid"
+      : linkedPayment
       ? normalizePaymentState(linkedPayment?.paymentState || linkedPayment?.status)
       : draft.paymentState,
     paymentAmount: Number(linkedPayment?.amount || draft.paymentAmount || 0) || 0,
@@ -773,11 +897,8 @@ export async function hydrateWorkflowDraft(rawDraft) {
       180
     ),
     fullPackageUnlockPaid:
-      draft.fullPackageUnlockPaid ||
-      resolveFullPackageCoverageState(
-        fullPackageState.fullPackage,
-        draft.selectedItems
-      ).isCovered,
+      draft.fullPackageUnlockPaid === true ||
+      (draft.flowFamily === WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE && actuallyPaid),
   });
 }
 
@@ -955,36 +1076,77 @@ export function buildWorkflowDraftContinueTarget(rawDraft) {
 
   const track = normalizeTrack(draft.track);
   const country = safeString(draft.country, 120);
-  const encodedCountry = country ? `country=${encodeURIComponent(country)}` : "";
+
+  if (draft.flowFamily === WORKFLOW_DRAFT_FLOW_FAMILIES.NORMAL_REQUEST) {
+    const requestModalState = draft.resumeState?.requestModal || null;
+    const savedRoutePath = safeString(draft.routePath, 240);
+    const usesTrackScreen = savedRoutePath === `/app/${track}`;
+    const query = new URLSearchParams(
+      usesTrackScreen ? safeString(draft.routeSearch, 600).replace(/^\?/, "") : ""
+    );
+    if (!usesTrackScreen && country) query.set("country", country);
+    query.set("draft", draft.draftId);
+    if (draft.serviceName) query.set("open", draft.serviceName);
+    query.set("autoOpen", "1");
+    if (requestModalState?.definitionKey) {
+      query.set("definitionKey", requestModalState.definitionKey);
+    }
+    if (requestModalState?.definitionCountry) {
+      query.set("definitionCountry", requestModalState.definitionCountry);
+    }
+    if (requestModalState?.pricingKey) {
+      query.set("pricingKey", requestModalState.pricingKey);
+    }
+    return {
+      path: usesTrackScreen ? savedRoutePath : `/app/${track}/we-help`,
+      search: query.toString() ? `?${query.toString()}` : "",
+      state: usesTrackScreen
+        ? {
+            resumeTrackSimple: {
+              track,
+              country,
+              requestModal: {
+                open: true,
+                serviceName: draft.serviceName,
+                requestType: draft.requestType || "single",
+                step:
+                  draft.resumeState?.requestModal?.step ||
+                  (draft.status === WORKFLOW_DRAFT_STATUSES.UNLOCK_PAID_PENDING_SUBMISSION
+                    ? "submit"
+                    : "form"),
+                formState: draft.resumeState?.requestModal?.formState || null,
+                definitionKey: draft.resumeState?.requestModal?.definitionKey || "",
+                definitionCountry: draft.resumeState?.requestModal?.definitionCountry || "",
+                pricingKey: draft.resumeState?.requestModal?.pricingKey || "",
+              },
+            },
+          }
+        : {
+            resumeWeHelp: {
+              track,
+              country,
+              requestModal: {
+                open: true,
+                serviceName: draft.serviceName,
+                requestType: draft.requestType || "single",
+                step:
+                  draft.resumeState?.requestModal?.step ||
+                  (draft.status === WORKFLOW_DRAFT_STATUSES.UNLOCK_PAID_PENDING_SUBMISSION
+                    ? "submit"
+                    : "form"),
+                formState: draft.resumeState?.requestModal?.formState || null,
+                definitionKey: draft.resumeState?.requestModal?.definitionKey || "",
+                definitionCountry: draft.resumeState?.requestModal?.definitionCountry || "",
+                pricingKey: draft.resumeState?.requestModal?.pricingKey || "",
+              },
+            },
+          },
+    };
+  }
+
   const query = new URLSearchParams();
   if (country) query.set("country", country);
   query.set("draft", draft.draftId);
-
-  if (draft.flowFamily === WORKFLOW_DRAFT_FLOW_FAMILIES.NORMAL_REQUEST) {
-    if (draft.serviceName) query.set("open", draft.serviceName);
-    query.set("autoOpen", "1");
-    return {
-      path: `/app/${track}/we-help`,
-      search: query.toString() ? `?${query.toString()}` : encodedCountry ? `?${encodedCountry}` : "",
-      state: {
-        resumeWeHelp: {
-          track,
-          country,
-          requestModal: {
-            open: true,
-            serviceName: draft.serviceName,
-            requestType: draft.requestType || "single",
-            step:
-              draft.resumeState?.requestModal?.step ||
-              (draft.status === WORKFLOW_DRAFT_STATUSES.UNLOCK_PAID_PENDING_SUBMISSION
-                ? "submit"
-                : "form"),
-            formState: draft.resumeState?.requestModal?.formState || null,
-          },
-        },
-      },
-    };
-  }
 
   const fullPackageId = safeString(draft.fullPackageId, 180);
   const selectedItem =
@@ -998,12 +1160,22 @@ export function buildWorkflowDraftContinueTarget(rawDraft) {
       draft.status === WORKFLOW_DRAFT_STATUSES.DIAGNOSTICS_IN_PROGRESS ||
       draft.status === WORKFLOW_DRAFT_STATUSES.FULL_PACKAGE_PAID_PENDING_DIAGNOSTICS)
   ) {
+    const requestModalState = draft.resumeState?.fullPackage?.requestModal || null;
     query.set("fullPackageId", fullPackageId);
     query.set("track", track);
     query.set("fpDraft", draft.draftId);
     if (selectedItem) {
       query.set("autoOpen", "1");
       query.set("item", selectedItem);
+      if (requestModalState?.definitionKey) {
+        query.set("definitionKey", requestModalState.definitionKey);
+      }
+      if (requestModalState?.definitionCountry) {
+        query.set("definitionCountry", requestModalState.definitionCountry);
+      }
+      if (requestModalState?.pricingKey) {
+        query.set("pricingKey", requestModalState.pricingKey);
+      }
     }
     return {
       path: `/app/full-package/${track}`,
@@ -1019,6 +1191,10 @@ export function buildWorkflowDraftContinueTarget(rawDraft) {
             step: draft.resumeState?.fullPackage?.requestModal?.step || "",
             formState: draft.resumeState?.fullPackage?.requestModal?.formState || null,
             selectedItem,
+            definitionKey: draft.resumeState?.fullPackage?.requestModal?.definitionKey || "",
+            definitionCountry:
+              draft.resumeState?.fullPackage?.requestModal?.definitionCountry || "",
+            pricingKey: draft.resumeState?.fullPackage?.requestModal?.pricingKey || "",
           },
         },
       },
@@ -1044,6 +1220,10 @@ export function buildWorkflowDraftContinueTarget(rawDraft) {
             step: draft.resumeState?.fullPackage?.requestModal?.step || "",
             formState: draft.resumeState?.fullPackage?.requestModal?.formState || null,
             selectedItem,
+            definitionKey: draft.resumeState?.fullPackage?.requestModal?.definitionKey || "",
+            definitionCountry:
+              draft.resumeState?.fullPackage?.requestModal?.definitionCountry || "",
+            pricingKey: draft.resumeState?.fullPackage?.requestModal?.pricingKey || "",
           },
           unlock: {
             requestDraftId: draft.draftId,

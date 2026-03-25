@@ -2,22 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebase";
+import { useI18n } from "../lib/i18n";
 import { getUserState, updateUserProfile } from "../services/userservice";
 import { smartBack } from "../utils/navBack";
 import { KENYA_COUNTY_OPTIONS, normalizeCountyName } from "../constants/kenyaCounties";
-
-const RESIDENCE_COUNTRIES = [
-  "Kenya",
-  "Uganda",
-  "Tanzania",
-  "Rwanda",
-  "Burundi",
-  "South Sudan",
-  "Ethiopia",
-  "Somalia",
-  "DRC",
-  "Other",
-];
+import { EAST_AFRICA_RESIDENCE_COUNTRIES } from "../constants/eastAfricaProfile";
+import {
+  PROFILE_LANGUAGE_OPTIONS,
+  getDefaultLanguageForCountry,
+  normalizeProfileLanguage,
+} from "../utils/userProfile";
 
 function onlyDigits(s) {
   return String(s || "").replace(/\D+/g, "");
@@ -55,6 +49,7 @@ function validateNonKenyaPhone(raw) {
 
 export default function EditProfileScreen() {
   const navigate = useNavigate();
+  const { t } = useI18n();
 
   const [uid, setUid] = useState(null);
   const [email, setEmail] = useState("");
@@ -65,12 +60,21 @@ export default function EditProfileScreen() {
 
   const [name, setName] = useState("");
   const [residence, setResidence] = useState("");
+  const [language, setLanguage] = useState("");
   const [phone, setPhone] = useState("");
   const [county, setCounty] = useState("");
   const [town, setTown] = useState("");
+  const languageTouchedRef = useRef(false);
 
   // originals (for "changed" detection + reset)
-  const originalRef = useRef({ name: "", residence: "", phone: "", county: "", town: "" });
+  const originalRef = useRef({
+    name: "",
+    residence: "",
+    language: "",
+    phone: "",
+    county: "",
+    town: "",
+  });
 
   const isKenya = residence === "Kenya";
 
@@ -79,11 +83,20 @@ export default function EditProfileScreen() {
     return (
       normalizeName(name) !== normalizeName(o.name) ||
       String(residence || "") !== String(o.residence || "") ||
+      String(language || "") !== String(o.language || "") ||
       String(phone || "").trim() !== String(o.phone || "").trim() ||
       String(county || "").trim() !== String(o.county || "").trim() ||
       String(town || "").trim() !== String(o.town || "").trim()
     );
-  }, [name, residence, phone, county, town]);
+  }, [name, residence, language, phone, county, town]);
+
+  useEffect(() => {
+    if (!residence) return;
+    const suggestedLanguage = getDefaultLanguageForCountry(residence);
+    if (suggestedLanguage && (!String(language || "").trim() || !languageTouchedRef.current)) {
+      setLanguage(suggestedLanguage);
+    }
+  }, [language, residence]);
 
   // ✅ Soft auth init (reduces “random logout feeling” on resume)
   useEffect(() => {
@@ -108,18 +121,31 @@ export default function EditProfileScreen() {
         if (!alive) return;
 
         const n = s?.name || "";
-        const r = s?.countryOfResidence || "";
+        const r = s?.profile?.homeCountry || s?.countryOfResidence || "";
+        const l =
+          normalizeProfileLanguage(s?.profile?.language, "") ||
+          getDefaultLanguageForCountry(r) ||
+          "";
         const p = s?.phone || "";
         const cty = s?.county || "";
         const twn = s?.town || "";
 
         setName(n);
         setResidence(r);
+        setLanguage(l);
         setPhone(p);
         setCounty(cty);
         setTown(twn);
+        languageTouchedRef.current = Boolean(normalizeProfileLanguage(s?.profile?.language, ""));
 
-        originalRef.current = { name: n, residence: r, phone: p, county: cty, town: twn };
+        originalRef.current = {
+          name: n,
+          residence: r,
+          language: l,
+          phone: p,
+          county: cty,
+          town: twn,
+        };
       } catch (e) {
         console.error(e);
         setErr(e?.message || "Failed to load profile.");
@@ -138,6 +164,7 @@ export default function EditProfileScreen() {
     const o = originalRef.current;
     setName(o.name || "");
     setResidence(o.residence || "");
+    setLanguage(o.language || "");
     setPhone(o.phone || "");
     setCounty(o.county || "");
     setTown(o.town || "");
@@ -152,23 +179,29 @@ export default function EditProfileScreen() {
 
     try {
       const cleanName = normalizeName(name);
-      if (cleanName.length < 3) throw new Error("Full name must be at least 3 characters.");
+      if (!cleanName) throw new Error("Name is required.");
       if (!String(residence || "").trim()) throw new Error("Select country of residence.");
+      const cleanLanguage = normalizeProfileLanguage(language, "");
+      if (!cleanLanguage) throw new Error("Select language.");
 
       let finalPhone = String(phone || "").trim();
 
-      if (residence === "Kenya") {
-        finalPhone = normalizeKenyaPhone(finalPhone);
-      } else {
-        finalPhone = validateNonKenyaPhone(finalPhone);
+      if (finalPhone) {
+        if (residence === "Kenya") {
+          finalPhone = normalizeKenyaPhone(finalPhone);
+        } else {
+          finalPhone = validateNonKenyaPhone(finalPhone);
+        }
       }
 
       setSaving(true);
 
       await updateUserProfile(uid, {
         name: cleanName,
+        language: cleanLanguage,
         phone: finalPhone,
         countryOfResidence: String(residence || "").trim(),
+        homeCountry: String(residence || "").trim(),
         county: normalizeCountyName(county),
         town: String(town || "").trim(),
       });
@@ -177,6 +210,7 @@ export default function EditProfileScreen() {
       originalRef.current = {
         name: cleanName,
         residence,
+        language: cleanLanguage,
         phone: finalPhone,
         county: normalizeCountyName(county),
         town: String(town || "").trim(),
@@ -269,7 +303,7 @@ export default function EditProfileScreen() {
 
             <div className="rounded-2xl border border-white/40 bg-white/55 dark:bg-zinc-900/60 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
               <div className="text-[11px] font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
-                Country of residence
+                Country of residence / home country
               </div>
               <select
                 value={residence}
@@ -277,7 +311,7 @@ export default function EditProfileScreen() {
                 className="mt-2 w-full rounded-xl border border-zinc-200/80 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
               >
                 <option value="">Select…</option>
-                {RESIDENCE_COUNTRIES.map((c) => (
+                {EAST_AFRICA_RESIDENCE_COUNTRIES.map((c) => (
                   <option key={c} value={c}>
                     {c}
                   </option>
@@ -287,7 +321,28 @@ export default function EditProfileScreen() {
 
             <div className="rounded-2xl border border-white/40 bg-white/55 dark:bg-zinc-900/60 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
               <div className="text-[11px] font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
-                Phone / WhatsApp
+                Language
+              </div>
+              <select
+                value={language}
+                onChange={(e) => {
+                  languageTouchedRef.current = true;
+                  setLanguage(e.target.value);
+                }}
+                className="mt-2 w-full rounded-xl border border-zinc-200/80 bg-white/75 dark:bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
+              >
+                <option value="">Select language</option>
+                {PROFILE_LANGUAGE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="rounded-2xl border border-white/40 bg-white/55 dark:bg-zinc-900/60 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
+              <div className="text-[11px] font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
+                Phone / WhatsApp (optional)
               </div>
 
               {isKenya ? (
@@ -387,7 +442,7 @@ export default function EditProfileScreen() {
                   className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100"
                   type="button"
                 >
-                  Cancel
+                  {t("cancel")}
                 </button>
               </div>
 
@@ -402,4 +457,3 @@ export default function EditProfileScreen() {
     </div>
   );
 }
-

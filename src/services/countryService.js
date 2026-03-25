@@ -14,10 +14,58 @@ import {
 import { APP_TRACK_OPTIONS, normalizeTrackType } from "../constants/migrationOptions";
 import { auth, db } from "../firebase";
 import { getCurrentUserRoleContext } from "./adminroleservice";
+import { DEFAULT_COUNTRY_ACCENT, normalizeHexColor } from "../utils/countryAccent";
 
 export const COUNTRY_COLLECTION = "countries";
 export const COUNTRY_TRACK_OPTIONS = APP_TRACK_OPTIONS;
 export const COUNTRY_CURRENCY_SUGGESTIONS = ["KES", "UGX", "TZS", "RWF"];
+
+const COUNTRY_ACCENT_PRESETS = {
+  AU: "#244B95",
+  BI: "#B5424C",
+  CA: "#C93B47",
+  DE: "#B58A1F",
+  DRC: "#356FD0",
+  ET: "#2E7D4A",
+  FR: "#3159A8",
+  GB: "#274B91",
+  IE: "#24946A",
+  IT: "#1D8A55",
+  JP: "#C54854",
+  KE: "#157347",
+  NZ: "#274B91",
+  RW: "#3974C7",
+  SO: "#4A90E2",
+  SS: "#187258",
+  TZ: "#1C8C73",
+  UG: "#C9981A",
+  UK: "#274B91",
+  US: "#B33A46",
+};
+
+const COUNTRY_NAME_ACCENT_PRESETS = {
+  Australia: COUNTRY_ACCENT_PRESETS.AU,
+  Burundi: COUNTRY_ACCENT_PRESETS.BI,
+  Canada: COUNTRY_ACCENT_PRESETS.CA,
+  DRC: COUNTRY_ACCENT_PRESETS.DRC,
+  Ethiopia: COUNTRY_ACCENT_PRESETS.ET,
+  France: COUNTRY_ACCENT_PRESETS.FR,
+  Germany: COUNTRY_ACCENT_PRESETS.DE,
+  Ireland: COUNTRY_ACCENT_PRESETS.IE,
+  Italy: COUNTRY_ACCENT_PRESETS.IT,
+  Japan: COUNTRY_ACCENT_PRESETS.JP,
+  Kenya: COUNTRY_ACCENT_PRESETS.KE,
+  "New Zealand": COUNTRY_ACCENT_PRESETS.NZ,
+  Rwanda: COUNTRY_ACCENT_PRESETS.RW,
+  Somalia: COUNTRY_ACCENT_PRESETS.SO,
+  "South Sudan": COUNTRY_ACCENT_PRESETS.SS,
+  Tanzania: COUNTRY_ACCENT_PRESETS.TZ,
+  Uganda: COUNTRY_ACCENT_PRESETS.UG,
+  UK: COUNTRY_ACCENT_PRESETS.UK,
+  USA: COUNTRY_ACCENT_PRESETS.US,
+  "United Kingdom": COUNTRY_ACCENT_PRESETS.UK,
+  "United States": COUNTRY_ACCENT_PRESETS.US,
+};
 
 function safeString(value, max = 240) {
   return String(value || "").trim().slice(0, max);
@@ -49,6 +97,37 @@ function normalizeCurrencyCode(value) {
   return safeString(value, 12).toUpperCase().replace(/[^A-Z]/g, "").slice(0, 8);
 }
 
+function normalizeAccentColor(value, fallback = "") {
+  return normalizeHexColor(value, fallback || DEFAULT_COUNTRY_ACCENT) || DEFAULT_COUNTRY_ACCENT;
+}
+
+export function suggestCountryAccentColor(input = {}) {
+  const safeCode = normalizeCountryCode(input?.code || input?.countryCode || "");
+  const safeName = safeString(input?.name || input?.country || "", 120);
+  return (
+    COUNTRY_ACCENT_PRESETS[safeCode] ||
+    COUNTRY_NAME_ACCENT_PRESETS[safeName] ||
+    normalizeAccentColor(input?.accentColor, DEFAULT_COUNTRY_ACCENT)
+  );
+}
+
+export function getCountryAccentSuggestions(input = {}) {
+  const suggested = suggestCountryAccentColor(input);
+  const pool = [
+    suggested,
+    "#C93B47",
+    "#244B95",
+    "#157347",
+    "#C9981A",
+    DEFAULT_COUNTRY_ACCENT,
+  ];
+
+  return Array.from(new Set(pool.map((color) => normalizeAccentColor(color)).filter(Boolean))).slice(
+    0,
+    6
+  );
+}
+
 function normalizeSupportedTracks(value) {
   if (!Array.isArray(value)) return [];
   const set = new Set();
@@ -72,6 +151,10 @@ function normalizeCountryRecord(docId, raw = {}) {
   const code = normalizeCountryCode(source?.code);
   const flag = safeString(source?.flag, 32);
   const currency = normalizeCurrencyCode(source?.currency);
+  const accentColor = normalizeAccentColor(
+    source?.accentColor,
+    suggestCountryAccentColor({ name, code, flag })
+  );
   const isActive = normalizeBoolean(source?.isActive, true);
   const supportedTracks = normalizeSupportedTracks(source?.supportedTracks);
 
@@ -81,6 +164,7 @@ function normalizeCountryRecord(docId, raw = {}) {
     code,
     flag,
     currency,
+    accentColor,
     isActive,
     supportedTracks,
     createdAtMs: toTimestampMs(source?.createdAt) || Number(source?.createdAtMs || 0) || 0,
@@ -103,14 +187,22 @@ export function createEmptyCountryDraft({
   code = "",
   flag = "",
   currency = "KES",
+  accentColor = "",
   isActive = true,
   supportedTracks = COUNTRY_TRACK_OPTIONS,
 } = {}) {
+  const safeName = safeString(name, 120);
+  const safeCode = normalizeCountryCode(code);
+  const safeFlag = safeString(flag, 32);
   return {
-    name: safeString(name, 120),
-    code: normalizeCountryCode(code),
-    flag: safeString(flag, 32),
+    name: safeName,
+    code: safeCode,
+    flag: safeFlag,
     currency: normalizeCurrencyCode(currency) || "KES",
+    accentColor: normalizeAccentColor(
+      accentColor,
+      suggestCountryAccentColor({ name: safeName, code: safeCode, flag: safeFlag })
+    ),
     isActive: normalizeBoolean(isActive, true),
     supportedTracks: normalizeSupportedTracks(supportedTracks),
   };
@@ -123,6 +215,7 @@ export function draftFromCountry(country) {
     code: safe?.code,
     flag: safe?.flag,
     currency: safe?.currency,
+    accentColor: safe?.accentColor,
     isActive: safe?.isActive,
     supportedTracks: safe?.supportedTracks,
   });
@@ -133,6 +226,10 @@ function toCountryPayload(input = {}) {
   const code = normalizeCountryCode(input?.code);
   const currency = normalizeCurrencyCode(input?.currency);
   const flag = safeString(input?.flag, 32);
+  const accentColor = normalizeAccentColor(
+    input?.accentColor,
+    suggestCountryAccentColor({ name, code, flag })
+  );
   const isActive = normalizeBoolean(input?.isActive, true);
   const supportedTracks = normalizeSupportedTracks(input?.supportedTracks);
 
@@ -146,6 +243,7 @@ function toCountryPayload(input = {}) {
     code,
     flag,
     currency,
+    accentColor,
     isActive,
     supportedTracks,
   };

@@ -8,6 +8,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { auth } from "../firebase";
 import { isStandalone } from "../utils/isStandalone";
 import { KENYA_COUNTY_OPTIONS, normalizeCountyName } from "../constants/kenyaCounties";
 import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
@@ -36,6 +37,8 @@ import {
   preferredAgentReasonLabel,
   validatePreferredAgentSelection,
 } from "../services/partnershipService";
+import { useI18n } from "../lib/i18n";
+import { getUserState } from "../services/userservice";
 
 const STANDALONE = isStandalone();
 
@@ -434,7 +437,6 @@ export default function RequestModal({
   paymentAmount = "",
   paymentRequired = true,
   maxPdfMb = 10,
-  enableAttachments = true,
 
   // NEW: optional "where to go back to when closing"
   // Example:
@@ -447,6 +449,7 @@ export default function RequestModal({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useI18n();
 
   const panelRef = useRef(null);
   const scrollRef = useRef(null);
@@ -499,13 +502,12 @@ export default function RequestModal({
   const [agentOptions, setAgentOptions] = useState([]);
   const [agentLoading, setAgentLoading] = useState(false);
   const [preferredAgentWarning, setPreferredAgentWarning] = useState("");
+  const [countryOfResidence, setCountryOfResidence] = useState("");
 
   const [requestDefinition, setRequestDefinition] = useState(null);
   const [definitionLoading, setDefinitionLoading] = useState(false);
   const [extraFieldValues, setExtraFieldValues] = useState({});
 
-  const [pickedFiles, setPickedFiles] = useState([]);
-  const [pickedFileMetas, setPickedFileMetas] = useState([]);
   const [paid, setPaid] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -529,13 +531,36 @@ export default function RequestModal({
     return stripModalTitlePrefix(title);
   }, [paymentContext, title]);
 
+  const definitionCountry = useMemo(() => {
+    return String(
+      paymentContext?.requestDefinitionCountry ||
+        paymentContext?.definitionCountry ||
+        paymentContext?.country ||
+        ""
+    ).trim();
+  }, [
+    paymentContext?.country,
+    paymentContext?.definitionCountry,
+    paymentContext?.requestDefinitionCountry,
+  ]);
+
   const definitionKey = useMemo(() => {
+    const direct = String(
+      paymentContext?.requestDefinitionKey || paymentContext?.definitionKey || ""
+    ).trim();
+    if (direct) return direct;
     return buildRequestDefinitionKey({
       title: definitionTitle,
       trackType: paymentContext?.track,
-      country: paymentContext?.country,
+      country: definitionCountry,
     });
-  }, [definitionTitle, paymentContext?.track, paymentContext?.country]);
+  }, [
+    definitionCountry,
+    definitionTitle,
+    paymentContext?.definitionKey,
+    paymentContext?.requestDefinitionKey,
+    paymentContext?.track,
+  ]);
 
   // Optional fallback: allow track+country "default" definitions like "Study Australia".
   // This keeps strict matching by serviceName, but enables a safe, predictable fallback
@@ -555,9 +580,28 @@ export default function RequestModal({
     return buildRequestDefinitionKey({
       title: fallbackDefinitionTitle,
       trackType: paymentContext?.track,
-      country: paymentContext?.country,
+      country: definitionCountry,
     });
-  }, [fallbackDefinitionTitle, paymentContext?.track, paymentContext?.country]);
+  }, [definitionCountry, fallbackDefinitionTitle, paymentContext?.track]);
+
+  const routeResidenceCountry = useMemo(() => {
+    return String(
+      paymentContext?.countryOfResidence || initialState?.countryOfResidence || countryOfResidence || ""
+    ).trim();
+  }, [countryOfResidence, initialState?.countryOfResidence, paymentContext?.countryOfResidence]);
+  const partnerFilterMode = useMemo(() => {
+    const raw = String(paymentContext?.partnerFilterMode || "").trim().toLowerCase();
+    return raw === "home_country" ? "home_country" : "destination_country";
+  }, [paymentContext?.partnerFilterMode]);
+  const routeTrackType = useMemo(
+    () => String(paymentContext?.track || "").trim().toLowerCase(),
+    [paymentContext?.track]
+  );
+  const routeCountry = useMemo(
+    () => String(paymentContext?.country || "").trim(),
+    [paymentContext?.country]
+  );
+  const preferredAgentLookupReady = Boolean(routeTrackType && routeCountry && routeResidenceCountry);
 
   const liveRequestPricing = useRequestPricingEntry({
     pricingKey: paymentContext?.pricingKey,
@@ -571,6 +615,40 @@ export default function RequestModal({
     const clean = String(paymentAmount || "").trim();
     return clean || liveRequestPricing.amountText || "";
   }, [paymentAmount, liveRequestPricing.amountText]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const seededCountry = String(
+      paymentContext?.countryOfResidence || initialState?.countryOfResidence || ""
+    ).trim();
+    if (seededCountry) {
+      setCountryOfResidence(seededCountry);
+      return undefined;
+    }
+
+    const uid = String(auth.currentUser?.uid || "").trim();
+    if (!uid) {
+      setCountryOfResidence("");
+      return undefined;
+    }
+
+    let cancelled = false;
+    getUserState(uid)
+      .then((userState) => {
+        if (cancelled) return;
+        setCountryOfResidence(String(userState?.countryOfResidence || "").trim());
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn("RequestModal residence country lookup failed:", error?.message || error);
+        setCountryOfResidence("");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, initialState?.countryOfResidence, paymentContext?.countryOfResidence]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -664,11 +742,6 @@ export default function RequestModal({
       : storedDraft && typeof storedDraft === "object"
         ? storedDraft
         : null;
-    const seededMetasRaw = Array.isArray(seeded?.fileMetas) ? seeded.fileMetas : [];
-    const storedMetasRaw = Array.isArray(storedForm?.fileMetas) ? storedForm.fileMetas : [];
-    const restoredMetas = (seededMetasRaw.length ? seededMetasRaw : storedMetasRaw)
-      .map(normalizeFileMeta)
-      .filter(Boolean);
     const seededExtraRaw = seeded?.extraFieldValues ?? storedForm?.extraFieldValues ?? {};
     const storedPayment = getDummyPaymentState(draftId);
     const paidFromStorage = String(storedPayment?.status || "").toLowerCase() === "paid";
@@ -688,8 +761,6 @@ export default function RequestModal({
       String(seeded?.preferredAgentId ?? storedForm?.preferredAgentId ?? "").trim()
     );
     setExtraFieldValues(normalizeExtraFieldSnapshot(seededExtraRaw));
-    setPickedFiles([]);
-    setPickedFileMetas(restoredMetas);
     setPaid(Boolean(forcePaid || seeded?.paid || storedForm?.paid || paidFromStorage));
     setPreferredAgentWarning("");
     setErr("");
@@ -731,6 +802,8 @@ export default function RequestModal({
     const extraFieldSnapshot = serializeExtraFieldSnapshot(extraFieldValues);
     const payload = {
       open: Boolean(open),
+      serviceName: String(paymentContext?.serviceName || definitionTitle || "").trim(),
+      requestType: String(paymentContext?.requestType || "single").trim(),
       step: forcePaid || paid ? "submit" : "form",
       formState: {
         name: String(name || ""),
@@ -741,11 +814,15 @@ export default function RequestModal({
         city: String(town || ""),
         note: String(note || ""),
         preferredAgentId: String(preferredAgentId || ""),
-        fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        fileMetas: [],
         extraFieldValues: extraFieldSnapshot,
         paid: Boolean(forcePaid || paid),
         requestDraftId: String(requestDraftId || ""),
       },
+      selectedItem: String(paymentContext?.selectedItem || "").trim(),
+      definitionKey: String(definitionKey || ""),
+      definitionCountry: String(definitionCountry || ""),
+      pricingKey: String(paymentContext?.pricingKey || "").trim(),
     };
 
     const serialized = JSON.stringify(payload);
@@ -763,14 +840,20 @@ export default function RequestModal({
     open,
     paid,
     forcePaid,
+    definitionCountry,
+    definitionKey,
+    definitionTitle,
     name,
     phone,
     email,
     county,
     town,
     note,
+    paymentContext?.pricingKey,
+    paymentContext?.requestType,
+    paymentContext?.selectedItem,
+    paymentContext?.serviceName,
     preferredAgentId,
-    pickedFileMetas,
     requestDraftId,
     extraFieldValues,
   ]);
@@ -791,7 +874,7 @@ export default function RequestModal({
         city: String(town || ""),
         note: String(note || ""),
         preferredAgentId: String(preferredAgentId || ""),
-        fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        fileMetas: [],
         extraFieldValues: extraFieldSnapshot,
         paid: Boolean(forcePaid || paid),
         requestDraftId: String(requestDraftId || ""),
@@ -810,7 +893,6 @@ export default function RequestModal({
     town,
     note,
     preferredAgentId,
-    pickedFileMetas,
     paid,
     forcePaid,
     paymentContext,
@@ -839,12 +921,15 @@ export default function RequestModal({
         city: String(town || ""),
         note: String(note || ""),
         preferredAgentId: String(preferredAgentId || ""),
-        fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        fileMetas: [],
         extraFieldValues: serializeExtraFieldSnapshot(extraFieldValues),
         paid: effectivePaid,
         requestDraftId: String(requestDraftId || ""),
       },
       selectedItem: String(paymentContext?.selectedItem || "").trim(),
+      definitionKey: String(definitionKey || ""),
+      definitionCountry: String(definitionCountry || ""),
+      pricingKey: String(paymentContext?.pricingKey || "").trim(),
     };
 
     const timer = setTimeout(() => {
@@ -928,12 +1013,13 @@ export default function RequestModal({
     town,
     note,
     preferredAgentId,
-    pickedFileMetas,
     extraFieldValues,
     paymentRequired,
     resolvedPaymentAmount,
     forcePaid,
     paid,
+    definitionCountry,
+    definitionKey,
   ]);
 
   const persistDraftBeforeClose = () => {
@@ -957,12 +1043,15 @@ export default function RequestModal({
         city: String(town || ""),
         note: String(note || ""),
         preferredAgentId: String(preferredAgentId || ""),
-        fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        fileMetas: [],
         extraFieldValues: extraFieldSnapshot,
         paid: effectivePaid,
         requestDraftId: String(requestDraftId || ""),
       },
       selectedItem: String(paymentContext?.selectedItem || "").trim(),
+      definitionKey: String(definitionKey || ""),
+      definitionCountry: String(definitionCountry || ""),
+      pricingKey: String(paymentContext?.pricingKey || "").trim(),
     };
 
     setDummyPaymentDraft(requestDraftId, {
@@ -1106,7 +1195,7 @@ export default function RequestModal({
     definitionLoading,
   ]);
 
-  const doPay = () => {
+  const doPay = async () => {
     if (!paymentRequired) return;
     const cleanName = String(name || "").trim();
     const cleanPhone = normalizePhone(phone);
@@ -1142,16 +1231,13 @@ export default function RequestModal({
     }
 
     const { extraFieldAnswers, extraDocMetas } = buildExtraFieldPayload();
-    const mergedFileMetas = [
-      ...(Array.isArray(pickedFileMetas) ? pickedFileMetas : []),
-      ...(Array.isArray(extraDocMetas) ? extraDocMetas : []),
-    ];
+    const mergedFileMetas = Array.isArray(extraDocMetas) ? extraDocMetas : [];
     const requestUploadMeta =
       mergedFileMetas.length > 0
         ? {
             count: mergedFileMetas.length,
             files: mergedFileMetas,
-            note: "User selected PDF files (metadata only).",
+            note: "Document field PDFs selected (metadata only).",
           }
         : null;
 
@@ -1192,7 +1278,7 @@ export default function RequestModal({
         city: cleanTown,
         note: String(note || ""),
         preferredAgentId: String(preferredAgentId || ""),
-        fileMetas: Array.isArray(pickedFileMetas) ? pickedFileMetas : [],
+        fileMetas: [],
         extraFieldValues: extraFieldSnapshot,
         paid: Boolean(forcePaid || paid),
         requestDraftId: draftId,
@@ -1220,81 +1306,81 @@ export default function RequestModal({
       paymentContext: paymentContext && typeof paymentContext === "object" ? paymentContext : null,
     };
 
-    Promise.resolve(onPay?.(payPayload))
-      .then((result) => {
-        void saveWorkflowDraft(draftId, {
-          flowFamily:
-            flow === "fullpackage"
-              ? WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE
-              : WORKFLOW_DRAFT_FLOW_FAMILIES.NORMAL_REQUEST,
-          flowKind:
-            flow === "fullpackage"
-              ? WORKFLOW_DRAFT_FLOW_KINDS.FULL_PACKAGE_ITEM_REQUEST
-              : WORKFLOW_DRAFT_FLOW_KINDS.WEHELP_REQUEST,
-          status: WORKFLOW_DRAFT_STATUSES.PAYMENT_INITIATED,
-          linkedRequestId: String(result?.requestId || "").trim(),
-          linkedPayment: {
-            requestId: String(result?.requestId || "").trim(),
-            paymentId: String(result?.paymentId || "").trim(),
-            paymentType: "unlock_request",
-            status: "payment_session_created",
-            paymentState: "pending",
-            amount: Number(result?.amount || 0) || parseAmountNumber(amountText),
-            currency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
-            reference: String(result?.reference || "").trim(),
-          },
+    try {
+      const result = await Promise.resolve(onPay?.(payPayload));
+
+      void saveWorkflowDraft(draftId, {
+        flowFamily:
+          flow === "fullpackage"
+            ? WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE
+            : WORKFLOW_DRAFT_FLOW_FAMILIES.NORMAL_REQUEST,
+        flowKind:
+          flow === "fullpackage"
+            ? WORKFLOW_DRAFT_FLOW_KINDS.FULL_PACKAGE_ITEM_REQUEST
+            : WORKFLOW_DRAFT_FLOW_KINDS.WEHELP_REQUEST,
+        status: WORKFLOW_DRAFT_STATUSES.PAYMENT_INITIATED,
+        linkedRequestId: String(result?.requestId || "").trim(),
+        linkedPayment: {
+          requestId: String(result?.requestId || "").trim(),
+          paymentId: String(result?.paymentId || "").trim(),
+          paymentType: "unlock_request",
+          status: "payment_session_created",
           paymentState: "pending",
+          amount: Number(result?.amount || 0) || parseAmountNumber(amountText),
+          currency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
+          reference: String(result?.reference || "").trim(),
+        },
+        paymentState: "pending",
+        paymentAmount: Number(result?.amount || 0) || parseAmountNumber(amountText),
+        paymentCurrency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
+        paymentReference: String(result?.reference || "").trim(),
+      }).catch((error) => {
+        console.warn("Failed to link workflow draft to payment session:", error?.message || error);
+      });
+
+      const inlinePaymentReceipt = normalizeUnlockPaymentReceipt(
+        result?.inlinePaymentReceipt || result?.unlockPaymentReceipt
+      );
+      if (inlinePaymentReceipt) {
+        setDummyPaymentState(draftId, inlinePaymentReceipt);
+        setPaid(true);
+        setErr("");
+        void saveWorkflowDraft(draftId, {
+          status: WORKFLOW_DRAFT_STATUSES.UNLOCK_PAID_PENDING_SUBMISSION,
+          paymentState: "paid",
           paymentAmount: Number(result?.amount || 0) || parseAmountNumber(amountText),
           paymentCurrency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
-          paymentReference: String(result?.reference || "").trim(),
-        }).catch((error) => {
-          console.warn("Failed to link workflow draft to payment session:", error?.message || error);
-        });
-
-        const inlinePaymentReceipt = normalizeUnlockPaymentReceipt(
-          result?.inlinePaymentReceipt || result?.unlockPaymentReceipt
-        );
-        if (inlinePaymentReceipt) {
-          setDummyPaymentState(draftId, inlinePaymentReceipt);
-          setPaid(true);
-          setErr("");
-          void saveWorkflowDraft(draftId, {
-            status: WORKFLOW_DRAFT_STATUSES.UNLOCK_PAID_PENDING_SUBMISSION,
+          paymentReference: String(
+            inlinePaymentReceipt.transactionReference || result?.reference || ""
+          ).trim(),
+          linkedPayment: {
+            requestId: String(result?.requestId || inlinePaymentReceipt.requestId || "").trim(),
+            paymentId: String(result?.paymentId || inlinePaymentReceipt.paymentId || "").trim(),
+            paymentType: "unlock_request",
+            status: "paid",
             paymentState: "paid",
-            paymentAmount: Number(result?.amount || 0) || parseAmountNumber(amountText),
-            paymentCurrency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
-            paymentReference: String(
+            amount: Number(result?.amount || 0) || parseAmountNumber(amountText),
+            currency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
+            reference: String(
               inlinePaymentReceipt.transactionReference || result?.reference || ""
             ).trim(),
-            linkedPayment: {
-              requestId: String(result?.requestId || inlinePaymentReceipt.requestId || "").trim(),
-              paymentId: String(result?.paymentId || inlinePaymentReceipt.paymentId || "").trim(),
-              paymentType: "unlock_request",
-              status: "paid",
-              paymentState: "paid",
-              amount: Number(result?.amount || 0) || parseAmountNumber(amountText),
-              currency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
-              reference: String(
-                inlinePaymentReceipt.transactionReference || result?.reference || ""
-              ).trim(),
-              method: String(inlinePaymentReceipt.method || "").trim(),
-            },
-          }).catch((error) => {
-            console.warn("Failed to mark workflow draft as paid:", error?.message || error);
-          });
-          return;
-        }
+            method: String(inlinePaymentReceipt.method || "").trim(),
+          },
+        }).catch((error) => {
+          console.warn("Failed to mark workflow draft as paid:", error?.message || error);
+        });
+        return;
+      }
 
-        const redirectUrl = String(result?.authorizationUrl || result?.redirectUrl || "").trim();
-        if (redirectUrl && typeof window !== "undefined") {
-          window.location.assign(redirectUrl);
-          return;
-        }
-        throw new Error("Hosted checkout URL was not returned by the backend.");
-      })
-      .catch((error) => {
-        setErr(error?.message || "Failed to start payment. Please try again.");
-      });
+      const redirectUrl = String(result?.authorizationUrl || result?.redirectUrl || "").trim();
+      if (redirectUrl && typeof window !== "undefined") {
+        window.location.assign(redirectUrl);
+        return;
+      }
+      throw new Error("Hosted checkout URL was not returned by the backend.");
+    } catch (error) {
+      setErr(error?.message || "Failed to start payment. Please try again.");
+    }
   };
 
   const openLegalDoc = (docKey) => {
@@ -1305,11 +1391,7 @@ export default function RequestModal({
 
   useEffect(() => {
     if (!open) return undefined;
-    const trackType = String(paymentContext?.track || "").trim().toLowerCase();
-    const routeCountry = String(paymentContext?.country || "").trim();
-    const routeCounty = normalizeCountyName(county);
-
-    if (!trackType || !routeCountry || !routeCounty) {
+    if (!preferredAgentLookupReady) {
       setAgentOptions([]);
       setAgentLoading(false);
       setPreferredAgentWarning("");
@@ -1322,9 +1404,11 @@ export default function RequestModal({
     (async () => {
       try {
         const rows = await listEligiblePreferredAgents({
-          trackType,
+          trackType: routeTrackType,
           country: routeCountry,
-          county: routeCounty,
+          county: "",
+          countryOfResidence: routeResidenceCountry,
+          filterMode: partnerFilterMode,
           max: 250,
         });
         if (cancelled) return;
@@ -1341,7 +1425,14 @@ export default function RequestModal({
     return () => {
       cancelled = true;
     };
-  }, [open, paymentContext?.track, paymentContext?.country, county]);
+  }, [
+    open,
+    partnerFilterMode,
+    preferredAgentLookupReady,
+    routeCountry,
+    routeResidenceCountry,
+    routeTrackType,
+  ]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -1355,12 +1446,8 @@ export default function RequestModal({
       return undefined;
     }
 
-    const trackType = String(paymentContext?.track || "").trim().toLowerCase();
-    const routeCountry = String(paymentContext?.country || "").trim();
-    const routeCounty = normalizeCountyName(county);
-
-    if (!trackType || !routeCountry || !routeCounty) {
-      setPreferredAgentWarning("Selected agent will be rechecked when the route is complete.");
+    if (!preferredAgentLookupReady) {
+      setPreferredAgentWarning(t("selected_agent_recheck"));
       return undefined;
     }
 
@@ -1369,9 +1456,11 @@ export default function RequestModal({
       try {
         const validation = await validatePreferredAgentSelection({
           partnerId: safePreferredAgentId,
-          trackType,
+          trackType: routeTrackType,
           country: routeCountry,
-          county: routeCounty,
+          county: "",
+          countryOfResidence: routeResidenceCountry,
+          filterMode: partnerFilterMode,
         });
         if (cancelled) return;
         setPreferredAgentWarning(
@@ -1379,14 +1468,24 @@ export default function RequestModal({
         );
       } catch {
         if (cancelled) return;
-        setPreferredAgentWarning("Selected agent will be validated during routing.");
+        setPreferredAgentWarning(t("selected_agent_validation_pending"));
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [open, preferredAgentId, agentOptions, paymentContext?.track, paymentContext?.country, county]);
+  }, [
+    open,
+    preferredAgentId,
+    agentOptions,
+    partnerFilterMode,
+    preferredAgentLookupReady,
+    routeCountry,
+    routeResidenceCountry,
+    routeTrackType,
+    t,
+  ]);
 
   const updateExtraFieldValue = (fieldId, patch) => {
     if (!fieldId) return;
@@ -1578,27 +1677,8 @@ export default function RequestModal({
     const { extraFieldAnswers, extraDocFiles, extraDocMetas } =
       buildExtraFieldPayload();
 
-    let fileMetas = [];
-    let attachmentFiles = [];
-    if (enableAttachments) {
-      const maxBytes = maxPdfMb * 1024 * 1024;
-
-      const badType = pickedFiles.find((f) => !isPdfFile(f));
-      if (badType) return setErr("Only PDF files are allowed for now.");
-
-      const tooBig = pickedFiles.find((f) => (f?.size || 0) > maxBytes);
-      if (tooBig) return setErr(`One file is too large. Max size is ${maxPdfMb}MB.`);
-
-      const liveMetas = Array.isArray(pickedFiles) ? pickedFiles.map(fileToMeta) : [];
-      fileMetas = liveMetas.length ? liveMetas : (Array.isArray(pickedFileMetas) ? pickedFileMetas : []);
-      attachmentFiles = Array.isArray(pickedFiles) ? pickedFiles : [];
-    } else {
-      if (pickedFiles.length) setPickedFiles([]);
-      if (pickedFileMetas.length) setPickedFileMetas([]);
-    }
-
-    const mergedFileMetas = [...fileMetas, ...(extraDocMetas || [])];
-    const mergedFiles = [...attachmentFiles, ...(extraDocFiles || [])];
+    const mergedFileMetas = Array.isArray(extraDocMetas) ? extraDocMetas : [];
+    const mergedFiles = Array.isArray(extraDocFiles) ? extraDocFiles : [];
 
     setLoading(true);
     try {
@@ -1625,7 +1705,7 @@ export default function RequestModal({
             ? {
                 count: mergedFileMetas.length,
                 files: mergedFileMetas,
-                note: "User selected PDF files (metadata only).",
+                note: "Document field PDFs selected (metadata only).",
               }
             : null,
         extraFieldAnswers: extraFieldAnswers || null,
@@ -1884,7 +1964,7 @@ export default function RequestModal({
 
                 <div>
                   <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                    Preferred agent (optional)
+                    {t("preferred_agent_optional")}
                   </label>
                   <div className={fieldWrap}>
                     <IconUser className="h-5 w-5 text-zinc-500" />
@@ -1892,36 +1972,40 @@ export default function RequestModal({
                       className={inputBase}
                       value={preferredAgentId}
                       onChange={(e) => setPreferredAgentId(String(e.target.value || ""))}
-                      disabled={loading || agentLoading || !String(county || "").trim()}
+                      disabled={
+                        loading ||
+                        agentLoading ||
+                        !preferredAgentLookupReady
+                      }
                       {...focusProps}
                     >
-                      <option value="">No preference</option>
+                      <option value="">{t("no_preference")}</option>
                       {preferredAgentId &&
                       !agentOptions.some((row) => row.id === preferredAgentId) ? (
                         <option value={preferredAgentId}>Previously selected agent</option>
                       ) : null}
                       {agentOptions.map((agent) => (
                         <option key={agent.id} value={agent.id}>
-                          {agent.displayName}
+                          {agent.displayName || agent.agentLabel}
                         </option>
                       ))}
                     </select>
                   </div>
-                  {!String(county || "").trim() ? (
+                  {!routeResidenceCountry ? (
                     <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      Select your county first to see matching agents.
+                      {t("add_profile_country_for_agents")}
                     </div>
                   ) : agentLoading ? (
                     <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      Loading available agents...
+                      {t("loading_agents")}
                     </div>
                   ) : agentOptions.length === 0 ? (
                     <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      No matched agents right now. You can still send the request.
+                      {t("no_matched_agents")}
                     </div>
                   ) : (
                     <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      This only sets a preference. Routing will still be validated.
+                      {t("preferred_agent_hint")}
                     </div>
                   )}
                   {preferredAgentWarning ? (
@@ -2071,46 +2155,6 @@ export default function RequestModal({
                   </>
                 ) : null}
 
-                {/* Upload PDFs */}
-                {enableAttachments ? (
-                  <div>
-                    <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                      Upload documents (optional)
-                    </label>
-                    <div className="mt-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950">
-                      <input
-                        type="file"
-                        multiple
-                        accept="application/pdf"
-                        disabled={loading}
-                        onChange={(e) => {
-                          const arr = Array.from(e.target.files || []);
-                          setPickedFiles(arr);
-                          setPickedFileMetas(arr.map(fileToMeta));
-                        }}
-                        className="w-full text-sm text-zinc-900 dark:text-zinc-100"
-                      />
-
-                      <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                        PDFs only. Max {maxPdfMb}MB each.
-                      </div>
-
-                      {pickedFileMetas.length ? (
-                        <div className="mt-3 grid gap-2">
-                          {pickedFileMetas.map((f, idx) => (
-                            <div
-                              key={`${f.name}-${idx}`}
-                              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
-                            >
-                              {f.name} - {Math.round((f.size || 0) / 1024)} KB
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-
                 {/* Note */}
                 <div>
                   <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
@@ -2166,7 +2210,7 @@ export default function RequestModal({
                             disabled={!canSubmit}
                             className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                           >
-                            {loading ? "Sending..." : "Send request"}
+                            {loading ? t("sending") : t("send_request")}
                           </button>
                         </div>
                       ) : (
@@ -2176,7 +2220,7 @@ export default function RequestModal({
                           disabled={!canSubmit}
                           className="w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                         >
-                          {loading ? "Sending..." : "Send request"}
+                          {loading ? t("sending") : t("send_request")}
                         </button>
                       )}
 
@@ -2186,7 +2230,7 @@ export default function RequestModal({
                         disabled={loading}
                         className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-zinc-50 active:scale-[0.99] disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
                       >
-                        Cancel
+                        {t("cancel")}
                       </button>
 
                       {paymentRequired ? (

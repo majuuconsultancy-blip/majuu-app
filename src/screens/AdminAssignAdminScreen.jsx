@@ -3,6 +3,7 @@ import { ArrowLeft, CheckCircle2, ChevronDown, UserPlus } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import AppIcon from "../components/AppIcon";
+import { EAST_AFRICA_RESIDENCE_COUNTRIES } from "../constants/eastAfricaProfile";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
 import {
   getNearbyCountySuggestions,
@@ -39,6 +40,7 @@ export default function AdminAssignAdminScreen() {
 
   const [email, setEmail] = useState("");
   const [partners, setPartners] = useState([]);
+  const [country, setCountry] = useState("");
   const [partnerId, setPartnerId] = useState("");
   const [primaryCounty, setPrimaryCounty] = useState("");
   const [neighboringCounties, setNeighboringCounties] = useState([]);
@@ -101,10 +103,35 @@ export default function AdminAssignAdminScreen() {
     [neighboringCounties, primaryCounty]
   );
 
+  const countryOptions = useMemo(() => {
+    const partnerCountries = new Set(
+      partners.flatMap((partner) =>
+        (Array.isArray(partner?.homeCountries) ? partner.homeCountries : [])
+          .map((value) => safeStr(value).toLowerCase())
+          .filter(Boolean)
+      )
+    );
+    return EAST_AFRICA_RESIDENCE_COUNTRIES.filter((value) =>
+      partnerCountries.has(safeStr(value).toLowerCase())
+    );
+  }, [partners]);
+
+  const selectedCountryLower = safeStr(country).toLowerCase();
+  const filteredPartners = useMemo(() => {
+    if (!selectedCountryLower) return partners;
+    return partners.filter((partner) =>
+      (Array.isArray(partner?.homeCountries) ? partner.homeCountries : []).some(
+        (value) => safeStr(value).toLowerCase() === selectedCountryLower
+      )
+    );
+  }, [partners, selectedCountryLower]);
+
   const selectedPartner = useMemo(
-    () => partners.find((partner) => partner.id === partnerId) || null,
-    [partnerId, partners]
+    () => filteredPartners.find((partner) => partner.id === partnerId) || null,
+    [filteredPartners, partnerId]
   );
+
+  const isKenyaScope = selectedCountryLower === "kenya";
 
   const partnerCountyOptions = useMemo(
     () =>
@@ -114,7 +141,8 @@ export default function AdminAssignAdminScreen() {
     [selectedPartner]
   );
 
-  const countyFieldsEnabled = Boolean(partnerId) && Boolean(selectedPartner) && partnerCountyOptions.length > 0;
+  const countyFieldsEnabled =
+    isKenyaScope && Boolean(partnerId) && Boolean(selectedPartner) && partnerCountyOptions.length > 0;
   const neighboringFieldsEnabled = countyFieldsEnabled && Boolean(primaryCounty) && partnerCountyOptions.length > 1;
 
   const filteredCounties = useMemo(() => {
@@ -151,6 +179,25 @@ export default function AdminAssignAdminScreen() {
     }
   }, [partnerCountyOptions, partnerId]);
 
+  useEffect(() => {
+    if (!partnerId) return;
+    const stillVisible = filteredPartners.some((partner) => partner.id === partnerId);
+    if (stillVisible) return;
+    setPartnerId("");
+    setPrimaryCounty("");
+    setNeighboringCounties([]);
+    setCountySearch("");
+    setCountyOpen(false);
+  }, [filteredPartners, partnerId]);
+
+  useEffect(() => {
+    if (isKenyaScope) return;
+    setPrimaryCounty("");
+    setNeighboringCounties([]);
+    setCountySearch("");
+    setCountyOpen(false);
+  }, [isKenyaScope]);
+
   const toggleCounty = (countyName) => {
     const normalized = normalizeCountyList([...selectedNeighboringCounties, countyName])
       .filter((county) => county !== primaryCounty);
@@ -171,11 +218,15 @@ export default function AdminAssignAdminScreen() {
       setErr("Enter a valid admin email.");
       return;
     }
+    if (!safeStr(country)) {
+      setErr("Select a stationed country.");
+      return;
+    }
     if (!safeStr(partnerId)) {
       setErr("Select a partner.");
       return;
     }
-    if (!safeStr(primaryCounty)) {
+    if (isKenyaScope && !safeStr(primaryCounty)) {
       setErr("Select a primary county.");
       return;
     }
@@ -205,6 +256,8 @@ export default function AdminAssignAdminScreen() {
       await setAssignedAdminByEmail({
         email: safeEmail,
         action: "upsert",
+        stationedCountry: country,
+        country,
         partnerId,
         primaryCounty,
         neighboringCounties: selectedNeighboringCounties,
@@ -272,6 +325,31 @@ export default function AdminAssignAdminScreen() {
 
             <div className="grid gap-3">
               <div className="grid gap-1.5">
+                <div className={label}>Stationed Country</div>
+                <select
+                  className={input}
+                  value={country}
+                  onChange={(event) => setCountry(event.target.value)}
+                >
+                  <option value="">Select stationed country</option>
+                  {countryOptions.map((countryName) => (
+                    <option key={countryName} value={countryName}>
+                      {countryName}
+                    </option>
+                  ))}
+                </select>
+                {countryOptions.length === 0 ? (
+                  <div className="text-xs text-amber-700 dark:text-amber-200">
+                    No partner home countries are configured yet. Update SACC Partnerships first.
+                  </div>
+                ) : (
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                    This stations the admin in one partner home country for routing.
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-1.5">
                 <div className={label}>Input Email</div>
                 <input
                   className={input}
@@ -295,7 +373,7 @@ export default function AdminAssignAdminScreen() {
                   }}
                 >
                   <option value="">Select partner</option>
-                  {partners.map((partner) => (
+                  {filteredPartners.map((partner) => (
                     <option key={partner.id} value={partner.id}>
                       {partner.displayName}
                     </option>
@@ -305,126 +383,148 @@ export default function AdminAssignAdminScreen() {
                   <div className="text-xs text-amber-700 dark:text-amber-200">
                     No active partners yet. Create one first in SACC Partnerships.
                   </div>
+                ) : !country ? (
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Select a stationed country first to narrow partners by home-country coverage.
+                  </div>
+                ) : filteredPartners.length === 0 ? (
+                  <div className="text-xs text-amber-700 dark:text-amber-200">
+                    No active partners support {country} in their home-country coverage yet.
+                  </div>
                 ) : !partnerId ? (
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Select a partner first. Primary and neighboring counties unlock from that partner's county coverage.
+                    {isKenyaScope
+                      ? "Select a partner first. Primary and neighboring counties unlock from that partner's county coverage."
+                      : "Select a partner to bind this admin to the chosen home-country scope."}
                   </div>
                 ) : !selectedPartner ? (
                   <div className="text-xs text-amber-700 dark:text-amber-200">
                     The selected partner is unavailable. Pick an active partner.
                   </div>
-                ) : partnerCountyOptions.length === 0 ? (
+                ) : isKenyaScope && partnerCountyOptions.length === 0 ? (
                   <div className="text-xs text-amber-700 dark:text-amber-200">
                     This partner has no county coverage yet. Add counties in SACC Partnerships first.
                   </div>
                 ) : null}
               </div>
 
-              <div className="grid gap-1.5">
-                <div className={label}>Primary County</div>
-                <select
-                  className={input}
-                  value={primaryCounty}
-                  disabled={!countyFieldsEnabled}
-                  onChange={(event) => {
-                    const nextPrimary = event.target.value;
-                    setPrimaryCounty(nextPrimary);
-                    setNeighboringCounties((prev) =>
-                      normalizeCountyList(prev).filter((county) => county !== nextPrimary)
-                    );
-                  }}
-                >
-                  <option value="">
-                    {countyFieldsEnabled ? "Select primary county" : "Select partner first"}
-                  </option>
-                  {partnerCountyOptions.map((countyName) => (
-                    <option key={countyName} value={countyName}>
-                      {countyName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div ref={countyRef} className="relative grid gap-1.5">
-                <div className={label}>Neighboring Counties</div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!neighboringFieldsEnabled) return;
-                    setCountyOpen((value) => !value);
-                  }}
-                  disabled={!neighboringFieldsEnabled}
-                  className={`${input} inline-flex items-center justify-between text-left`}
-                >
-                  <span className="truncate">
-                    {!countyFieldsEnabled
-                      ? "Select partner first"
-                      : !primaryCounty
-                      ? "Select primary county first"
-                      : selectedNeighboringCounties.length
-                      ? selectedNeighboringCounties.join(", ")
-                      : "Select neighboring counties"}
-                  </span>
-                  <AppIcon icon={ChevronDown} size={ICON_SM} className={countyOpen ? "rotate-180 transition" : "transition"} />
-                </button>
-
-                {countyOpen ? (
-                  <div className="absolute left-0 right-0 top-full z-[10040] mt-2 rounded-2xl border border-zinc-200 bg-white/96 p-3 shadow-xl backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/96">
-                    <input
+              {isKenyaScope ? (
+                <>
+                  <div className="grid gap-1.5">
+                    <div className={label}>Primary County</div>
+                    <select
                       className={input}
-                      placeholder="Search counties..."
-                      value={countySearch}
-                      onChange={(event) => setCountySearch(event.target.value)}
-                    />
+                      value={primaryCounty}
+                      disabled={!countyFieldsEnabled}
+                      onChange={(event) => {
+                        const nextPrimary = event.target.value;
+                        setPrimaryCounty(nextPrimary);
+                        setNeighboringCounties((prev) =>
+                          normalizeCountyList(prev).filter((county) => county !== nextPrimary)
+                        );
+                      }}
+                    >
+                      <option value="">
+                        {countyFieldsEnabled ? "Select primary county" : "Select partner first"}
+                      </option>
+                      {partnerCountyOptions.map((countyName) => (
+                        <option key={countyName} value={countyName}>
+                          {countyName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                    {recommendedCounties.length ? (
-                      <div className="mt-3">
-                        <div className="mb-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
-                          Nearby county suggestions
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {recommendedCounties.map((countyName) => (
-                            <button
-                              key={`rec-${countyName}`}
-                              type="button"
-                              onClick={() => toggleCounty(countyName)}
-                              className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
-                            >
-                              + {countyName}
-                            </button>
-                          ))}
+                  <div ref={countyRef} className="relative grid gap-1.5">
+                    <div className={label}>Neighboring Counties</div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!neighboringFieldsEnabled) return;
+                        setCountyOpen((value) => !value);
+                      }}
+                      disabled={!neighboringFieldsEnabled}
+                      className={`${input} inline-flex items-center justify-between text-left`}
+                    >
+                      <span className="truncate">
+                        {!countyFieldsEnabled
+                          ? "Select partner first"
+                          : !primaryCounty
+                          ? "Select primary county first"
+                          : selectedNeighboringCounties.length
+                          ? selectedNeighboringCounties.join(", ")
+                          : "Select neighboring counties"}
+                      </span>
+                      <AppIcon
+                        icon={ChevronDown}
+                        size={ICON_SM}
+                        className={countyOpen ? "rotate-180 transition" : "transition"}
+                      />
+                    </button>
+
+                    {countyOpen ? (
+                      <div className="absolute left-0 right-0 top-full z-[10040] mt-2 rounded-2xl border border-zinc-200 bg-white/96 p-3 shadow-xl backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/96">
+                        <input
+                          className={input}
+                          placeholder="Search counties..."
+                          value={countySearch}
+                          onChange={(event) => setCountySearch(event.target.value)}
+                        />
+
+                        {recommendedCounties.length ? (
+                          <div className="mt-3">
+                            <div className="mb-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                              Nearby county suggestions
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {recommendedCounties.map((countyName) => (
+                                <button
+                                  key={`rec-${countyName}`}
+                                  type="button"
+                                  onClick={() => toggleCounty(countyName)}
+                                  className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+                                >
+                                  + {countyName}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div className="mt-3 grid max-h-56 gap-1 overflow-y-auto">
+                          {filteredCounties.map((countyName) => {
+                            const selected = selectedNeighboringCounties.includes(countyName);
+                            return (
+                              <button
+                                key={countyName}
+                                type="button"
+                                onClick={() => toggleCounty(countyName)}
+                                className={[
+                                  "rounded-xl border px-3 py-2 text-left text-sm font-medium transition",
+                                  selected
+                                    ? "border-emerald-200 bg-emerald-50/80 text-emerald-800 shadow-[0_0_0_1px_rgba(16,185,129,0.15)] dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+                                    : "border-zinc-200 bg-white/80 text-zinc-800 hover:border-emerald-200 dark:border-zinc-700 dark:bg-zinc-900/75 dark:text-zinc-100",
+                                ].join(" ")}
+                              >
+                                {countyName}
+                              </button>
+                            );
+                          })}
+                          {!filteredCounties.length ? (
+                            <div className="rounded-xl border border-dashed border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                              No more counties available for this partner.
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     ) : null}
-
-                    <div className="mt-3 max-h-56 overflow-y-auto grid gap-1">
-                      {filteredCounties.map((countyName) => {
-                        const selected = selectedNeighboringCounties.includes(countyName);
-                        return (
-                          <button
-                            key={countyName}
-                            type="button"
-                            onClick={() => toggleCounty(countyName)}
-                            className={[
-                              "rounded-xl border px-3 py-2 text-left text-sm font-medium transition",
-                              selected
-                                ? "border-emerald-200 bg-emerald-50/80 text-emerald-800 shadow-[0_0_0_1px_rgba(16,185,129,0.15)] dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
-                                : "border-zinc-200 bg-white/80 text-zinc-800 hover:border-emerald-200 dark:border-zinc-700 dark:bg-zinc-900/75 dark:text-zinc-100",
-                            ].join(" ")}
-                          >
-                            {countyName}
-                          </button>
-                        );
-                      })}
-                      {!filteredCounties.length ? (
-                        <div className="rounded-xl border border-dashed border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-                          No more counties available for this partner.
-                        </div>
-                      ) : null}
-                    </div>
                   </div>
-                ) : null}
-              </div>
+                </>
+              ) : country ? (
+                <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/70 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/45 dark:text-zinc-300">
+                  County subdivision routing remains Kenya-only for now. This admin will route by stationed country and partner match.
+                </div>
+              ) : null}
 
               <div className="grid gap-1.5">
                 <div className={label}>Select Town or City</div>
@@ -515,6 +615,10 @@ export default function AdminAssignAdminScreen() {
               </div>
               <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 break-all">
                 {safeStr(email).toLowerCase()}
+              </div>
+              <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
+                    {country ? `Stationed country: ${country}` : "Stationed country not selected"}
+                {isKenyaScope && primaryCounty ? ` | County: ${primaryCounty}` : ""}
               </div>
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <button

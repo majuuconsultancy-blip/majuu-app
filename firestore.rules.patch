@@ -425,6 +425,11 @@ service cloud.firestore {
       allow create, update, delete: if isSuperAdmin();
     }
 
+    match /homeDesignModules/{moduleId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isSuperAdmin();
+    }
+
     match /countries/{countryId} {
       allow read: if signedIn();
       allow create, update, delete: if isSuperAdmin();
@@ -678,8 +683,14 @@ service cloud.firestore {
     match /workflowDrafts/{draftId} {
       function workflowDraftIsPaid(data) {
         return data != null && (
-          data.fullPackageUnlockPaid == true ||
           lower(data.paymentState) == "paid" ||
+          (
+            data.linkedPayment != null &&
+            (
+              lower(data.linkedPayment.paymentState) == "paid" ||
+              lower(data.linkedPayment.status) == "paid"
+            )
+          ) ||
           lower(data.status) == "unlock_paid_pending_submission" ||
           lower(data.status) == "full_package_paid_pending_diagnostics"
         );

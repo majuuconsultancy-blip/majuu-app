@@ -9,6 +9,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { motion as Motion, AnimatePresence } from "../utils/motionProxy";
+import { useI18n } from "../lib/i18n";
 
 function cleanStr(x, max = 80) {
   return String(x || "").trim().slice(0, max);
@@ -137,6 +138,7 @@ function deriveTrackPath(pathname) {
 export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
 
   const safeCountry = useMemo(() => cleanStr(country, 40), [country]);
@@ -339,7 +341,11 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
                   </span>
                 </span>
 
-                {busy ? <Spinner className="h-4 w-4" /> : <span className="text-[12px] opacity-95">Continue</span>}
+                {busy ? (
+                  <Spinner className="h-4 w-4" />
+                ) : (
+                  <span className="text-[12px] opacity-95">{t("continue")}</span>
+                )}
               </Motion.button>
 
               {/* We-Help */}
@@ -365,7 +371,11 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
                   </span>
                 </span>
 
-                {busy ? <Spinner className="h-4 w-4 text-zinc-700 dark:text-zinc-300" /> : <span className="text-[12px]">Continue</span>}
+                {busy ? (
+                  <Spinner className="h-4 w-4 text-zinc-700 dark:text-zinc-300" />
+                ) : (
+                  <span className="text-[12px]">{t("continue")}</span>
+                )}
               </Motion.button>
 
               {/* Cancel -> TrackScreen */}
@@ -375,7 +385,7 @@ export default function HelpChoiceModal({ country, onSelfHelp, onWeHelp, onClose
                 disabled={busy}
                 className="mt-1 w-full rounded-2xl px-4 py-2.5 text-sm font-semibold text-zinc-600 dark:text-zinc-300 transition hover:text-zinc-900 active:scale-[0.99] disabled:opacity-60"
               >
-                Cancel
+                {t("cancel")}
               </button>
             </div>
           </div>

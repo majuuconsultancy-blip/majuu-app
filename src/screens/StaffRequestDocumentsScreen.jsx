@@ -1,21 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import {
-  collection,
-  doc,
-  getDoc,
-  onSnapshot,
-  orderBy,
-  query,
-} from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, orderBy, query } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { smartBack } from "../utils/navBack";
 import DocumentExtractPanel from "../components/DocumentExtractPanel";
 import DocumentProofreadPanel from "../components/DocumentProofreadPanel";
+import RequestDocumentFieldsSection from "../components/RequestDocumentFieldsSection";
 import { normalizeTextDeep } from "../utils/textNormalizer";
 
-/* ---------- Minimal icons ---------- */
 function IconBack(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
@@ -71,10 +64,9 @@ function IconDownload(props) {
   );
 }
 
-/* ---------- Helpers ---------- */
 function bytesToLabel(bytes) {
   const b = Number(bytes || 0);
-  if (b <= 0) return "—";
+  if (b <= 0) return "-";
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${Math.round(b / 1024)} KB`;
   return `${Math.round((b / 1024 / 1024) * 10) / 10} MB`;
@@ -93,26 +85,32 @@ function safeStr(x) {
   return String(x || "").trim();
 }
 
+function isExtraFieldAttachment(item) {
+  const kind = safeStr(item?.kind).toLowerCase();
+  return Boolean(
+    safeStr(item?.fieldId) ||
+      safeStr(item?.fieldLabel || item?.label) ||
+      kind === "extra_field_document"
+  );
+}
+
 export default function StaffRequestDocumentsScreen() {
   const navigate = useNavigate();
   const { requestId } = useParams();
 
   const validId = useMemo(() => {
     const id = String(requestId || "").trim();
-    return id ?id : null;
+    return id || null;
   }, [requestId]);
 
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [uid, setUid] = useState("");
-
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [attachments, setAttachments] = useState([]);
   const [requestData, setRequestData] = useState(null);
-
   const [allowed, setAllowed] = useState(false);
 
-  // ✅ Auth guard
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       if (!user) {
@@ -125,7 +123,6 @@ export default function StaffRequestDocumentsScreen() {
     return () => unsub();
   }, [navigate]);
 
-  // ✅ Permission check: staff must be assigned to this request
   useEffect(() => {
     (async () => {
       if (!validId || !uid) {
@@ -141,37 +138,33 @@ export default function StaffRequestDocumentsScreen() {
         const reqSnap = await getDoc(doc(db, "serviceRequests", validId));
         if (!reqSnap.exists()) throw new Error("Request not found");
 
-        const req = reqSnap.data();
-        setRequestData(normalizeTextDeep(req || null));
+        const req = reqSnap.data() || {};
+        setRequestData(normalizeTextDeep(req));
         const assignedTo = safeStr(req?.assignedTo);
 
-        // allow if request is assigned to this staff
         if (assignedTo && assignedTo === uid) {
           setAllowed(true);
           return;
         }
 
-        // fallback allow if staff task doc exists
         const taskSnap = await getDoc(doc(db, "staff", uid, "tasks", validId));
         if (taskSnap.exists()) {
           setAllowed(true);
           return;
         }
 
-        setAllowed(false);
         setErr("You are not assigned to this request.");
-      } catch (e) {
-        console.error(e);
+      } catch (error) {
+        console.error(error);
         setAllowed(false);
         setRequestData(null);
-        setErr(e?.message || "Access check failed.");
+        setErr(error?.message || "Access check failed.");
       }
     })();
   }, [validId, uid]);
 
-  // ✅ Live attachments list (only if allowed)
   useEffect(() => {
-    if (!validId || !allowed) return;
+    if (!validId || !allowed) return undefined;
 
     setLoading(true);
     setErr("");
@@ -185,24 +178,31 @@ export default function StaffRequestDocumentsScreen() {
         setAttachments(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
         setLoading(false);
       },
-      (e) => {
-        console.error("attachments snapshot error:", e);
-        setErr(e?.message || "Failed to load uploaded documents.");
+      (error) => {
+        console.error("attachments snapshot error:", error);
+        setErr(error?.message || "Failed to load uploaded documents.");
         setLoading(false);
       }
     );
 
     return () => unsub();
-  }, [validId, allowed]);
+  }, [allowed, validId]);
 
-  const cardBase = "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur";
-  const softBg = "bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
+  const legacyAttachments = useMemo(
+    () => attachments.filter((item) => !isExtraFieldAttachment(item)),
+    [attachments]
+  );
+
+  const cardBase =
+    "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur";
+  const softBg =
+    "bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
 
   if (checkingAuth) {
     return (
       <div className={`min-h-screen ${softBg}`}>
-        <div className="px-5 py-6 max-w-xl mx-auto">
-          <div className={`${cardBase} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>Preparing…</div>
+        <div className="app-page-shell app-page-shell--wide">
+          <div className={`${cardBase} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>Preparing...</div>
         </div>
       </div>
     );
@@ -210,8 +210,7 @@ export default function StaffRequestDocumentsScreen() {
 
   return (
     <div className={`min-h-screen ${softBg}`}>
-      <div className="px-5 py-6 max-w-xl mx-auto">
-        {/* Header */}
+      <div className="app-page-shell app-page-shell--wide">
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/60 px-3 py-1.5 text-xs font-semibold text-emerald-800">
@@ -240,130 +239,146 @@ export default function StaffRequestDocumentsScreen() {
           </button>
         </div>
 
-        {err ?(
+        {err ? (
           <div className="mt-6 rounded-2xl border border-rose-100 bg-rose-50/70 p-4 text-sm text-rose-700">
             {err}
           </div>
         ) : null}
 
-        {!allowed ?(
+        {!allowed ? (
           <div className={`mt-6 ${cardBase} p-5`}>
             <div className="text-sm text-zinc-600 dark:text-zinc-300">
               You can only view documents for requests assigned to you.
             </div>
           </div>
         ) : (
-          <div className={`mt-6 ${cardBase} p-5`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-semibold text-zinc-900 dark:text-zinc-100">Files</div>
-                <div className="text-xs text-zinc-500">attachments subcollection</div>
-              </div>
-              <span className="text-xs text-zinc-500">{attachments.length} files</span>
-            </div>
-
-            <DocumentProofreadPanel
-              requestId={validId}
+          <>
+            <RequestDocumentFieldsSection
               request={requestData}
+              requestId={validId}
+              title="Document fields"
+              viewerRole="staff"
               attachments={attachments}
+              attachmentsLoading={loading}
+              attachmentsError={err}
+              showLegacySection={false}
+              className={`mt-6 ${cardBase} p-5`}
             />
 
-            {loading ?(
-              <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
-                Loading…
+            <div className={`mt-4 ${cardBase} p-5`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                    Legacy upload records
+                  </div>
+                  <div className="text-xs text-zinc-500">Preserved request-level attachments</div>
+                </div>
+                <span className="text-xs text-zinc-500">{legacyAttachments.length} files</span>
               </div>
-            ) : attachments.length === 0 ?(
-              <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
-                No documents uploaded yet.
-              </div>
-            ) : (
-              <div className="mt-4 grid gap-2">
-                {attachments.map((a) => {
-                  const url = safeStr(a?.url || a?.downloadUrl || a?.fileUrl);
-                  const hasLink = url.startsWith("http");
 
-                  const contentType = safeStr(a?.contentType || a?.type || "file");
-                  const name = safeStr(a?.name || a?.filename || "Document");
+              {legacyAttachments.length > 0 ? (
+                <DocumentProofreadPanel
+                  requestId={validId}
+                  request={requestData}
+                  attachments={legacyAttachments}
+                />
+              ) : null}
 
-                  const label = safeStr(a?.label);
-                  const metaNote = safeStr(a?.metaNote || a?.note);
-                  const kind = safeStr(a?.kind);
+              {loading ? (
+                <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
+                  Loading...
+                </div>
+              ) : legacyAttachments.length === 0 ? (
+                <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
+                  No legacy upload records.
+                </div>
+              ) : (
+                <div className="mt-4 grid gap-2">
+                  {legacyAttachments.map((a) => {
+                    const url = safeStr(a?.url || a?.downloadUrl || a?.fileUrl);
+                    const hasLink = url.startsWith("http");
+                    const contentType = safeStr(a?.contentType || a?.type || "file");
+                    const name = safeStr(a?.name || a?.filename || "Document");
+                    const label = safeStr(a?.label);
+                    const metaNote = safeStr(a?.metaNote || a?.note);
+                    const kind = safeStr(a?.kind);
 
-                  return (
-                    <div
-                      key={a.id}
-                      className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 transition hover:border-emerald-200 hover:bg-white"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 break-words">{name}</div>
-
-                          <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                            {bytesToLabel(a.size)} · {contentType}
-                          </div>
-
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <span className="inline-flex rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-                              {attStatusLabel(a.status)}
-                            </span>
-
-                            {label ?(
-                              <span className="inline-flex rounded-full border border-emerald-100 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
-                                {label}
-                              </span>
-                            ) : null}
-
-                            {kind ?(
-                              <span className="inline-flex rounded-full border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
-                                {kind}
-                              </span>
-                            ) : null}
-                          </div>
-
-                          {metaNote ?(
-                            <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">{metaNote}</div>
-                          ) : null}
-
-                          {hasLink ?(
-                            <a
-                              href={url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800"
-                            >
-                              <IconDownload className="h-5 w-5" />
-                              Open / Download
-                            </a>
-                          ) : (
-                            <div className="mt-3 text-sm font-semibold text-zinc-400">
-                              Download link not available yet
+                    return (
+                      <div
+                        key={a.id}
+                        className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 transition hover:border-emerald-200 hover:bg-white"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 break-words">
+                              {name}
                             </div>
-                          )}
 
-                          <DocumentExtractPanel
-                            requestId={validId}
-                            request={requestData}
-                            attachment={a}
-                            role="staff"
-                          />
+                            <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                              {bytesToLabel(a.size)} · {contentType}
+                            </div>
+
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <span className="inline-flex rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+                                {attStatusLabel(a.status)}
+                              </span>
+
+                              {label ? (
+                                <span className="inline-flex rounded-full border border-emerald-100 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
+                                  {label}
+                                </span>
+                              ) : null}
+
+                              {kind ? (
+                                <span className="inline-flex rounded-full border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
+                                  {kind}
+                                </span>
+                              ) : null}
+                            </div>
+
+                            {metaNote ? (
+                              <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">
+                                {metaNote}
+                              </div>
+                            ) : null}
+
+                            {hasLink ? (
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+                              >
+                                <IconDownload className="h-5 w-5" />
+                                Open / Download
+                              </a>
+                            ) : (
+                              <div className="mt-3 text-sm font-semibold text-zinc-400">
+                                Download link not available yet
+                              </div>
+                            )}
+
+                            <DocumentExtractPanel
+                              requestId={validId}
+                              request={requestData}
+                              attachment={a}
+                              role="staff"
+                            />
+                          </div>
+
+                          <span className="shrink-0 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 text-xs font-semibold text-emerald-800">
+                            Applicant
+                          </span>
                         </div>
-
-                        <span className="shrink-0 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 text-xs font-semibold text-emerald-800">
-                          Applicant
-                        </span>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </>
         )}
-
-        <div className="h-10" />
       </div>
     </div>
   );
 }
-
-

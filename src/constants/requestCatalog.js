@@ -43,7 +43,7 @@ export function normalizeRequestCatalogRequestType(value) {
 }
 
 export function normalizeRequestCatalogCountry(value) {
-  return normalizeDestinationCountry(value);
+  return normalizeDestinationCountry(value) || safeString(value, 120);
 }
 
 export function buildPricingKey({

@@ -14,6 +14,7 @@ import {
   Bell,
   Bookmark,
   BookmarkCheck,
+  ChevronDown,
   ChevronRight,
   Compass,
   ExternalLink,
@@ -26,6 +27,7 @@ import { motion as Motion } from "../utils/motionProxy";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { auth, db } from "../firebase";
+import { useCountryDirectory } from "../hooks/useCountryDirectory";
 import { useNotifsV2Store } from "../services/notifsV2Store";
 import { clearActiveProcess, getUserState } from "../services/userservice";
 import { getMyApplications } from "../services/progressservice";
@@ -59,11 +61,17 @@ import {
 import {
   buildWorkflowDraftContinueTarget,
   deleteWorkflowDraft,
+  isWorkflowDraftActuallyPaid,
   isWorkflowDraftVisible,
   markWorkflowDraftResumed,
   subscribeMyWorkflowDrafts,
   workflowDraftStatusUi,
 } from "../services/workflowdraftservice";
+import {
+  buildCountryAccentRailStyle,
+  buildCountryAccentSurfaceStyle,
+  resolveCountryAccentColor,
+} from "../utils/countryAccent";
 
 const REQUESTS_INITIAL_RENDER = 5;
 const PROGRESS_CACHE_PREFIX = "majuu_progress_cache_";
@@ -305,17 +313,6 @@ function workflowDraftSubtitle(draft) {
     return `Setup Â· ${formatTrackCountry(draft?.track, draft?.country)}`;
   }
   return formatTrackCountry(draft?.track, draft?.country);
-}
-
-function isPaidWorkflowDraft(draft) {
-  const paymentState = safeString(draft?.paymentState, 40).toLowerCase();
-  const draftStatus = safeString(draft?.status, 80).toLowerCase();
-  return (
-    draft?.fullPackageUnlockPaid === true ||
-    paymentState === "paid" ||
-    draftStatus === "unlock_paid_pending_submission" ||
-    draftStatus === "full_package_paid_pending_diagnostics"
-  );
 }
 
 function matchesSelfHelpSearch(item, query) {
@@ -573,6 +570,7 @@ export default function ProgressScreen() {
   const [deletingId, setDeletingId] = useState("");
   const [draftBusyId, setDraftBusyId] = useState("");
   const [draftDeleteBusyId, setDraftDeleteBusyId] = useState("");
+  const [draftsExpanded, setDraftsExpanded] = useState(false);
   const [pinnedIds, setPinnedIds] = useState([]);
   const [visibleCount, setVisibleCount] = useState(REQUESTS_INITIAL_RENDER);
   const [selfHelpProgress, setSelfHelpProgress] = useState(null);
@@ -610,6 +608,7 @@ export default function ProgressScreen() {
 
   const unreadNotifCount = useNotifsV2Store((store) => Number(store.unreadNotifCount || 0) || 0);
   const unreadByRequest = useNotifsV2Store((store) => store.unreadByRequest || {});
+  const { countryMap } = useCountryDirectory();
 
   useEffect(() => {
     pinnedIdsRef.current = pinnedIds;
@@ -798,21 +797,16 @@ export default function ProgressScreen() {
     return requests.length === 1 ? "1 request" : `${requests.length} requests`;
   }, [requests.length]);
 
-  const visibleWorkflowDrafts = useMemo(() => {
-    const submittedRequestIds = new Set(
-      (Array.isArray(requests) ? requests : [])
-        .map((row) => safeString(row?.id, 180))
-        .filter(Boolean)
-    );
+  const visibleWorkflowDrafts = useMemo(
+    () => (Array.isArray(workflowDrafts) ? workflowDrafts : []).filter(isWorkflowDraftVisible),
+    [workflowDrafts]
+  );
 
-    return (Array.isArray(workflowDrafts) ? workflowDrafts : [])
-      .filter(isWorkflowDraftVisible)
-      .filter((draft) => {
-        const linkedRequestId = safeString(draft?.linkedRequestId, 180);
-        if (!linkedRequestId) return true;
-        return !submittedRequestIds.has(linkedRequestId);
-      });
-  }, [workflowDrafts, requests]);
+  const visibleDraftCountLabel = useMemo(() => {
+    return visibleWorkflowDrafts.length === 1
+      ? "1 saved draft"
+      : `${visibleWorkflowDrafts.length} saved drafts`;
+  }, [visibleWorkflowDrafts.length]);
 
   const requestsSorted = useMemo(() => {
     const pinSet = new Set((pinnedIds || []).map((item) => String(item)));
@@ -830,6 +824,9 @@ export default function ProgressScreen() {
     () => requestsSorted.slice(0, visibleCount),
     [requestsSorted, visibleCount]
   );
+
+  const resolveAccentColor = (country) =>
+    resolveCountryAccentColor(countryMap, country, "");
 
   const continueSelfHelpTarget = useMemo(() => {
     const lastContext = selfHelpProgress?.lastContext || {};
@@ -941,7 +938,7 @@ export default function ProgressScreen() {
   const deleteUnpaidWorkflowDraft = async (draft) => {
     const draftId = safeString(draft?.draftId || draft?.id, 180);
     if (!draftId) return;
-    if (isPaidWorkflowDraft(draft)) {
+    if (isWorkflowDraftActuallyPaid(draft)) {
       setErr("Paid drafts cannot be deleted.");
       return;
     }
@@ -1282,88 +1279,106 @@ export default function ProgressScreen() {
               <div>
               {visibleWorkflowDrafts.length ? (
                 <div className="mb-5">
-                  <div className="flex items-end justify-between">
-                    <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
-                      Saved drafts
-                    </h2>
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                      {visibleWorkflowDrafts.length} saved
+                  <button
+                    type="button"
+                    onClick={() => setDraftsExpanded((current) => !current)}
+                    className="flex w-full items-center justify-between gap-3 rounded-3xl border border-zinc-200/80 bg-white/70 px-4 py-4 text-left shadow-sm transition hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/50 dark:hover:bg-zinc-900/65"
+                  >
+                    <div>
+                      <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
+                        Saved drafts
+                      </h2>
+                      <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        {visibleDraftCountLabel}. Paid drafts stay protected from deletion.
+                      </div>
+                    </div>
+
+                    <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-3 py-1 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300">
+                      {draftsExpanded ? "Hide" : "Show"}
+                      <AppIcon
+                        size={ICON_SM}
+                        icon={ChevronDown}
+                        className={`transition-transform ${draftsExpanded ? "rotate-180" : ""}`}
+                      />
                     </span>
-                  </div>
+                  </button>
 
-                  <div className="mt-3 grid gap-3">
-                    {visibleWorkflowDrafts.map((draft) => {
-                      const draftId = safeString(draft?.draftId || draft?.id, 180);
-                      const status = workflowDraftStatusUi(draft);
-                      const updatedLabel = formatCreatedAt(
-                        Number(draft?.updatedAtMs || 0) || Number(draft?.createdAtMs || 0)
-                      );
-                      const isBusy = draftBusyId === draftId;
-                      const isDeleteBusy = draftDeleteBusyId === draftId;
-                      const isFullPackage =
-                        safeString(draft?.flowFamily, 80).toLowerCase() === "full_package";
-                      const canDeleteDraft = !isPaidWorkflowDraft(draft);
+                  {draftsExpanded ? (
+                    <div className="mt-3 grid gap-3">
+                      {visibleWorkflowDrafts.map((draft) => {
+                        const draftId = safeString(draft?.draftId || draft?.id, 180);
+                        const status = workflowDraftStatusUi(draft);
+                        const updatedLabel = formatCreatedAt(
+                          Number(draft?.updatedAtMs || 0) || Number(draft?.createdAtMs || 0)
+                        );
+                        const isBusy = draftBusyId === draftId;
+                        const isDeleteBusy = draftDeleteBusyId === draftId;
+                        const isFullPackage =
+                          safeString(draft?.flowFamily, 80).toLowerCase() === "full_package";
+                        const canDeleteDraft = !isWorkflowDraftActuallyPaid(draft);
+                        const accentColor = resolveAccentColor(draft?.country);
 
-                      return (
-                        <div
-                          key={draftId}
-                          className={`${cardBase} relative overflow-hidden ${
-                            isFullPackage
-                              ? "border-emerald-300/80 bg-emerald-50/45 dark:border-emerald-800/60 dark:bg-emerald-950/20"
-                              : ""
-                          }`}
-                        >
-                          {isFullPackage ? (
-                            <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5 rounded-l-3xl bg-emerald-500/80 dark:bg-emerald-400/70" />
-                          ) : null}
+                        return (
+                          <div
+                            key={draftId}
+                            className={`${cardBase} relative overflow-hidden`}
+                            style={buildCountryAccentSurfaceStyle(accentColor, {
+                              strong: isFullPackage,
+                            })}
+                          >
+                            <span
+                              className="pointer-events-none absolute inset-y-0 left-0 w-1.5 rounded-l-3xl"
+                              style={buildCountryAccentRailStyle(accentColor)}
+                            />
 
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                                {workflowDraftTitle(draft)}
-                              </div>
-                              <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                                {workflowDraftSubtitle(draft)}
-                              </div>
-                              {updatedLabel ? (
-                                <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-                                  Updated: <span className="font-medium">{updatedLabel}</span>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                                  {workflowDraftTitle(draft)}
                                 </div>
-                              ) : null}
+                                <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                                  {workflowDraftSubtitle(draft)}
+                                </div>
+                                {updatedLabel ? (
+                                  <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+                                    Updated: <span className="font-medium">{updatedLabel}</span>
+                                  </div>
+                                ) : null}
+                              </div>
+
+                              <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${status.className}`}>
+                                {status.label}
+                              </span>
                             </div>
 
-                            <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${status.className}`}>
-                              {status.label}
-                            </span>
-                          </div>
-
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() => void continueWorkflowDraft(draft)}
-                              disabled={isBusy || isDeleteBusy}
-                              className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3.5 py-2 text-sm font-semibold text-emerald-900 transition hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-100 dark:hover:bg-emerald-950/40"
-                            >
-                              {isBusy ? "Opening..." : "Continue"}
-                              <AppIcon size={ICON_SM} icon={ChevronRight} />
-                            </button>
-
-                            {canDeleteDraft ? (
+                            <div className="mt-4 flex flex-wrap gap-2">
                               <button
                                 type="button"
-                                onClick={() => void deleteUnpaidWorkflowDraft(draft)}
+                                onClick={() => void continueWorkflowDraft(draft)}
                                 disabled={isBusy || isDeleteBusy}
-                                className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/80 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60 dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-200 dark:hover:bg-rose-950/40"
+                                className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3.5 py-2 text-sm font-semibold text-emerald-900 transition hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-100 dark:hover:bg-emerald-950/40"
                               >
-                                <AppIcon size={ICON_SM} icon={Trash2} />
-                                {isDeleteBusy ? "Deleting..." : "Delete"}
+                                {isBusy ? "Opening..." : "Continue"}
+                                <AppIcon size={ICON_SM} icon={ChevronRight} />
                               </button>
-                            ) : null}
+
+                              {canDeleteDraft ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void deleteUnpaidWorkflowDraft(draft)}
+                                  disabled={isBusy || isDeleteBusy}
+                                  className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/80 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60 dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-200 dark:hover:bg-rose-950/40"
+                                >
+                                  <AppIcon size={ICON_SM} icon={Trash2} />
+                                  {isDeleteBusy ? "Deleting..." : "Delete"}
+                                </button>
+                              ) : null}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -1413,6 +1428,7 @@ export default function ProgressScreen() {
                     const requestId = String(request.id || "");
                     const hasUnread = Boolean(unreadByRequest?.[requestId]?.unread);
                     const isPinned = (pinnedIds || []).includes(requestId);
+                    const accentColor = resolveAccentColor(request?.country);
 
                     const handleTryAgain = () => {
                       const country = request.country || "Not selected";
@@ -1490,21 +1506,17 @@ export default function ProgressScreen() {
                     return (
                       <div
                         key={request.id}
-                        className={`${cardBase} relative overflow-hidden ${
-                          isFull
-                            ? "border-emerald-300/80 bg-emerald-50/45 dark:border-emerald-800/60 dark:bg-emerald-950/20"
-                            : ""
-                        }`}
+                        className={`${cardBase} relative overflow-hidden`}
+                        style={buildCountryAccentSurfaceStyle(accentColor, { strong: isFull })}
                       >
-                        {isFull || hasUnread ? (
-                          <span
-                            className={`pointer-events-none absolute inset-y-0 left-0 w-1.5 rounded-l-3xl ${
-                              isFull
-                                ? "bg-emerald-500/80 dark:bg-emerald-400/70"
-                                : "bg-rose-600/80"
-                            }`}
-                          />
-                        ) : null}
+                        <span
+                          className="pointer-events-none absolute inset-y-0 left-0 w-1.5 rounded-l-3xl"
+                          style={
+                            hasUnread && !isFull
+                              ? { backgroundColor: "rgba(225, 29, 72, 0.82)" }
+                              : buildCountryAccentRailStyle(accentColor)
+                          }
+                        />
 
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">

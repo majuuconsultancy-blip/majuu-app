@@ -86,6 +86,7 @@ export default function RequestExtraDetailsSection({
   request,
   title = "Extra details",
   className = "",
+  includeDocumentFields = true,
 } = {}) {
   const extra =
     request?.extraFieldAnswers &&
@@ -93,36 +94,31 @@ export default function RequestExtraDetailsSection({
     !Array.isArray(request.extraFieldAnswers)
       ? request.extraFieldAnswers
       : null;
-
-  if (!extra) return null;
   const answers = useMemo(() => {
+    if (!extra) return [];
     const list = Array.isArray(extra?.answers) ? extra.answers : [];
     return list
       .map(normalizeAnswer)
       .filter((row) => row.id)
+      .filter((row) => includeDocumentFields || row.type !== "document")
       .sort(sortByOrderThenLabel);
-  }, [extra]);
+  }, [extra, includeDocumentFields]);
 
   const definitionKey = useMemo(() => buildKeyFromRequest(extra, request), [extra, request]);
-  const [definition, setDefinition] = useState(null);
-  const [schemaLoading, setSchemaLoading] = useState(false);
+  const [definitionState, setDefinitionState] = useState(() => ({
+    key: "",
+    row: null,
+  }));
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!definitionKey) {
-      setDefinition(null);
-      setSchemaLoading(false);
-      return () => {
-        cancelled = true;
-      };
-    }
+    if (!definitionKey) return undefined;
 
-    setSchemaLoading(true);
     fetchRequestDefinitionByKey(definitionKey)
       .then((row) => {
         if (cancelled) return;
-        setDefinition(row || null);
+        setDefinitionState({ key: definitionKey, row: row || null });
       })
       .catch((error) => {
         if (cancelled) return;
@@ -130,16 +126,18 @@ export default function RequestExtraDetailsSection({
         if (code && code !== "permission-denied") {
           console.warn("extra details schema lookup failed:", error?.message || error);
         }
-        setDefinition(null);
-      })
-      .finally(() => {
-        if (!cancelled) setSchemaLoading(false);
+        setDefinitionState({ key: definitionKey, row: null });
       });
 
     return () => {
       cancelled = true;
     };
   }, [definitionKey]);
+
+  const effectiveDefinition =
+    definitionKey && definitionState.key === definitionKey ? definitionState.row : null;
+  const effectiveSchemaLoading =
+    Boolean(definitionKey) && definitionState.key !== definitionKey;
 
   const rows = useMemo(() => {
     const answerById = new Map();
@@ -148,7 +146,9 @@ export default function RequestExtraDetailsSection({
       answerById.set(answer.id, answer);
     });
 
-    const schemaFields = Array.isArray(definition?.extraFields) ? definition.extraFields : null;
+    const schemaFields = Array.isArray(effectiveDefinition?.extraFields)
+      ? effectiveDefinition.extraFields
+      : null;
     if (!schemaFields || schemaFields.length === 0) {
       return answers.filter((row) => row.hasContent);
     }
@@ -168,6 +168,11 @@ export default function RequestExtraDetailsSection({
       const schemaType = safeStr(field?.type, 24).toLowerCase();
       const isActive = field?.isActive !== false;
       const answer = answerById.get(fieldId) || null;
+
+      if (!includeDocumentFields && schemaType === "document") {
+        if (answer && answer.hasContent) seen.add(fieldId);
+        return;
+      }
 
       if (answer && answer.hasContent) {
         out.push({
@@ -200,7 +205,7 @@ export default function RequestExtraDetailsSection({
       .forEach((row) => out.push(row));
 
     return out.sort(sortByOrderThenLabel);
-  }, [answers, definition]);
+  }, [answers, effectiveDefinition, includeDocumentFields]);
 
   const shouldRender = rows.length > 0;
   if (!shouldRender) return null;
@@ -215,7 +220,7 @@ export default function RequestExtraDetailsSection({
         <div className="text-xs font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
           {title}
         </div>
-        {schemaLoading ? (
+        {effectiveSchemaLoading ? (
           <div className="text-[11px] font-semibold text-zinc-400">Loading...</div>
         ) : null}
       </div>

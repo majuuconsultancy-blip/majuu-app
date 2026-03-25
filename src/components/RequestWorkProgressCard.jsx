@@ -1,4 +1,9 @@
+import { useCountryDirectory } from "../hooks/useCountryDirectory";
 import { getRequestWorkProgress } from "../utils/requestWorkProgress";
+import {
+  buildCountryAccentSurfaceStyle,
+  resolveCountryAccentColor,
+} from "../utils/countryAccent";
 
 export default function RequestWorkProgressCard({
   request,
@@ -12,6 +17,8 @@ export default function RequestWorkProgressCard({
   inProgressTone = "blue",
 }) {
   const progress = getRequestWorkProgress(request);
+  const { countryMap } = useCountryDirectory();
+  const accentColor = resolveCountryAccentColor(countryMap, request?.country, "");
   const progressPercent = progress.progressPercent;
   const hasPercent = Number.isFinite(progressPercent) && progressPercent > 0;
   const shouldRender = showWhenIdle || progress.isStarted || hasPercent || children;
@@ -37,7 +44,7 @@ export default function RequestWorkProgressCard({
     : idleText;
 
   return (
-    <div className={className}>
+    <div className={className} style={buildCountryAccentSurfaceStyle(accentColor)}>
       <div className={showHeader ? "flex items-start justify-between gap-3" : "flex justify-end"}>
         {showHeader ? (
           <div className="min-w-0">
@@ -55,8 +62,11 @@ export default function RequestWorkProgressCard({
       <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-zinc-200/80 dark:bg-zinc-800/80">
         {hasPercent ? (
           <div
-            className="h-full rounded-full bg-emerald-500 transition-[width] duration-300 ease-out dark:bg-emerald-400"
-            style={{ width: `${progressPercent}%` }}
+            className="h-full rounded-full transition-[width] duration-300 ease-out"
+            style={{
+              width: `${progressPercent}%`,
+              backgroundColor: accentColor || "#10b981",
+            }}
           />
         ) : null}
       </div>

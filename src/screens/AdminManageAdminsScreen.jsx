@@ -46,6 +46,19 @@ function timeoutToMinutes(value, unit) {
   return toBoundedInt(raw, 0, 5, 240);
 }
 
+function normalizeCountryOptions(values = []) {
+  const seen = new Set();
+  return (Array.isArray(values) ? values : [])
+    .map((value) => safeStr(value))
+    .filter((value) => {
+      const key = value.toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.localeCompare(b));
+}
+
 function makeDraft(row) {
   const scope = row?.adminScope || {};
   const timeout = timeoutToUnit(scope?.responseTimeoutMinutes);
@@ -53,6 +66,7 @@ function makeDraft(row) {
   return {
     partnerId: safeStr(scope?.partnerId),
     availability: safeStr(scope?.availability || "active").toLowerCase() || "active",
+    stationedCountry: safeStr(scope?.stationedCountry || scope?.country),
     town: safeStr(scope?.town),
     primaryCounty: safeStr(scope?.primaryCounty || scope?.counties?.[0]),
     neighboringCounties: normalizeCountyList(
@@ -242,6 +256,8 @@ export default function AdminManageAdminsScreen() {
     const uid = safeStr(row?.uid);
     const email = safeStr(row?.email).toLowerCase();
     const draft = draftByUid?.[uid] || makeDraft(row);
+    const stationedCountry = safeStr(draft?.stationedCountry || draft?.country);
+    const isKenyaScope = stationedCountry.toLowerCase() === "kenya";
     const primaryCounty = safeStr(draft?.primaryCounty);
     const neighboringCounties = normalizeCountyList(draft?.neighboringCounties || []).filter(
       (county) => county !== primaryCounty
@@ -254,7 +270,11 @@ export default function AdminManageAdminsScreen() {
       setErr("Select a partner.");
       return;
     }
-    if (!primaryCounty) {
+    if (!stationedCountry) {
+      setErr("Select a stationed country.");
+      return;
+    }
+    if (isKenyaScope && !primaryCounty) {
       setErr("Select a primary county.");
       return;
     }
@@ -280,6 +300,7 @@ export default function AdminManageAdminsScreen() {
         email,
         action: "upsert",
         partnerId: safeStr(draft?.partnerId),
+        stationedCountry,
         primaryCounty,
         neighboringCounties,
         town: safeStr(draft?.town),
@@ -373,12 +394,17 @@ export default function AdminManageAdminsScreen() {
                     "No partner";
                   const selectedPartner =
                     partners.find((partner) => partner.id === safeStr(draft?.partnerId)) || null;
+                  const stationedCountry = safeStr(draft?.stationedCountry || draft?.country);
+                  const isKenyaScope = stationedCountry.toLowerCase() === "kenya";
+                  const partnerStationedCountryOptions = selectedPartner?.isActive === false
+                    ? []
+                    : normalizeCountryOptions(selectedPartner?.homeCountries || []);
                   const partnerCountyOptions =
                     selectedPartner?.isActive === false
                       ? []
                       : normalizeCountyList(selectedPartner?.supportedCounties || []);
                   const countyFieldsEnabled =
-                    Boolean(selectedPartner?.id) && partnerCountyOptions.length > 0;
+                    Boolean(selectedPartner?.id) && isKenyaScope && partnerCountyOptions.length > 0;
                   const neighboringFieldsEnabled =
                     countyFieldsEnabled &&
                     Boolean(safeStr(draft?.primaryCounty)) &&
@@ -417,6 +443,7 @@ export default function AdminManageAdminsScreen() {
                             </div>
                             <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                               {partnerName}
+                              {stationedCountry ? ` • ${stationedCountry}` : ""}
                               {safeStr(scope?.primaryCounty) ? ` • ${safeStr(scope?.primaryCounty)}` : ""}
                             </div>
                           </div>
@@ -451,6 +478,7 @@ export default function AdminManageAdminsScreen() {
                                 onChange={(event) => {
                                   setDraft(uid, {
                                     partnerId: event.target.value,
+                                    stationedCountry: "",
                                     primaryCounty: "",
                                     neighboringCounties: [],
                                     countySearch: "",
@@ -468,13 +496,17 @@ export default function AdminManageAdminsScreen() {
                               </select>
                               {!draft?.partnerId ? (
                                 <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                                  Select a partner first. County fields unlock from that partner's county coverage.
+                                  Select a partner first. Stationed country and county fields unlock from that partner.
                                 </div>
                               ) : !selectedPartner ? (
                                 <div className="text-xs text-amber-700 dark:text-amber-200">
                                   Choose an active partner before editing counties.
                                 </div>
-                              ) : partnerCountyOptions.length === 0 ? (
+                              ) : partnerStationedCountryOptions.length === 0 ? (
+                                <div className="text-xs text-amber-700 dark:text-amber-200">
+                                  This partner has no home-country coverage yet. Add home countries in SACC Partnerships first.
+                                </div>
+                              ) : isKenyaScope && partnerCountyOptions.length === 0 ? (
                                 <div className="text-xs text-amber-700 dark:text-amber-200">
                                   This partner has no county coverage yet. Add counties in SACC Partnerships first.
                                 </div>
@@ -495,110 +527,163 @@ export default function AdminManageAdminsScreen() {
                             </div>
 
                             <div className="grid gap-1.5">
-                              <div className={label}>Primary County</div>
+                              <div className={label}>Stationed Country</div>
                               <select
                                 className={input}
-                                value={draft?.primaryCounty || ""}
-                                disabled={!countyFieldsEnabled}
+                                value={stationedCountry}
+                                disabled={!selectedPartner}
                                 onChange={(event) =>
                                   setDraft(uid, {
-                                    primaryCounty: event.target.value,
-                                    neighboringCounties: normalizeCountyList(
-                                      draft?.neighboringCounties || []
-                                    ).filter((county) => county !== event.target.value),
+                                    stationedCountry: event.target.value,
+                                    primaryCounty: "",
+                                    neighboringCounties: [],
+                                    countySearch: "",
                                   })
                                 }
                               >
                                 <option value="">
-                                  {countyFieldsEnabled ? "Select primary county" : "Select partner first"}
+                                  {selectedPartner ? "Select stationed country" : "Select partner first"}
                                 </option>
-                                {partnerCountyOptions.map((countyName) => (
-                                  <option key={`${uid}-primary-${countyName}`} value={countyName}>
-                                    {countyName}
+                                {partnerStationedCountryOptions.map((countryName) => (
+                                  <option key={`${uid}-stationed-${countryName}`} value={countryName}>
+                                    {countryName}
                                   </option>
                                 ))}
                               </select>
+                              {!selectedPartner ? (
+                                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                                  Select a partner first to choose a stationed country.
+                                </div>
+                              ) : partnerStationedCountryOptions.length === 0 ? (
+                                <div className="text-xs text-amber-700 dark:text-amber-200">
+                                  This partner has no home-country coverage configured yet.
+                                </div>
+                              ) : (
+                                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                                  Assigned admins can be stationed in one partner home country at a time.
+                                </div>
+                              )}
                             </div>
 
-                            <div className="grid gap-1.5">
-                              <div className={label}>Neighboring Counties</div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!neighboringFieldsEnabled) return;
-                                  toggleCountyDropdown(uid);
-                                }}
-                                disabled={!neighboringFieldsEnabled}
-                                className={`${input} inline-flex items-center justify-between text-left`}
-                              >
-                                <span className="truncate">
-                                  {!countyFieldsEnabled
-                                    ? "Select partner first"
-                                    : !safeStr(draft?.primaryCounty)
-                                    ? "Select primary county first"
-                                    : (draft?.neighboringCounties || []).length
-                                    ? `${(draft?.neighboringCounties || []).length} neighboring counties selected`
-                                    : "Select neighboring counties"}
-                                </span>
-                                <AppIcon
-                                  icon={ChevronDown}
-                                  size={ICON_SM}
-                                  className={countyOpen ? "rotate-180 transition" : "transition"}
-                                />
-                              </button>
-
-                              {countyOpen ? (
-                                <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-3">
-                                  <input
+                            {isKenyaScope ? (
+                              <>
+                                <div className="grid gap-1.5">
+                                  <div className={label}>Primary County</div>
+                                  <select
                                     className={input}
-                                    placeholder="Search counties..."
-                                    value={draft?.countySearch || ""}
-                                    onChange={(event) => setDraft(uid, { countySearch: event.target.value })}
-                                  />
+                                    value={draft?.primaryCounty || ""}
+                                    disabled={!countyFieldsEnabled}
+                                    onChange={(event) =>
+                                      setDraft(uid, {
+                                        primaryCounty: event.target.value,
+                                        neighboringCounties: normalizeCountyList(
+                                          draft?.neighboringCounties || []
+                                        ).filter((county) => county !== event.target.value),
+                                      })
+                                    }
+                                  >
+                                    <option value="">
+                                      {countyFieldsEnabled
+                                        ? "Select primary county"
+                                        : "Select partner first"}
+                                    </option>
+                                    {partnerCountyOptions.map((countyName) => (
+                                      <option key={`${uid}-primary-${countyName}`} value={countyName}>
+                                        {countyName}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
 
-                                  {recommendations.length ? (
-                                    <div className="mt-3 flex flex-wrap gap-1.5">
-                                      {recommendations.map((countyName) => (
-                                        <button
-                                          key={`rec-${uid}-${countyName}`}
-                                          type="button"
-                                          onClick={() => toggleCounty(uid, countyName)}
-                                          className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
-                                        >
-                                          + {countyName}
-                                        </button>
-                                      ))}
+                                <div className="grid gap-1.5">
+                                  <div className={label}>Neighboring Counties</div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (!neighboringFieldsEnabled) return;
+                                      toggleCountyDropdown(uid);
+                                    }}
+                                    disabled={!neighboringFieldsEnabled}
+                                    className={`${input} inline-flex items-center justify-between text-left`}
+                                  >
+                                    <span className="truncate">
+                                      {!countyFieldsEnabled
+                                        ? "Select partner first"
+                                        : !safeStr(draft?.primaryCounty)
+                                        ? "Select primary county first"
+                                        : (draft?.neighboringCounties || []).length
+                                        ? `${(draft?.neighboringCounties || []).length} neighboring counties selected`
+                                        : "Select neighboring counties"}
+                                    </span>
+                                    <AppIcon
+                                      icon={ChevronDown}
+                                      size={ICON_SM}
+                                      className={countyOpen ? "rotate-180 transition" : "transition"}
+                                    />
+                                  </button>
+
+                                  {countyOpen ? (
+                                    <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-3">
+                                      <input
+                                        className={input}
+                                        placeholder="Search counties..."
+                                        value={draft?.countySearch || ""}
+                                        onChange={(event) =>
+                                          setDraft(uid, { countySearch: event.target.value })
+                                        }
+                                      />
+
+                                      {recommendations.length ? (
+                                        <div className="mt-3 flex flex-wrap gap-1.5">
+                                          {recommendations.map((countyName) => (
+                                            <button
+                                              key={`rec-${uid}-${countyName}`}
+                                              type="button"
+                                              onClick={() => toggleCounty(uid, countyName)}
+                                              className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+                                            >
+                                              + {countyName}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      ) : null}
+
+                                      <div className="mt-3 grid max-h-44 overflow-y-auto gap-1 sm:grid-cols-2">
+                                        {filteredCounties.map((countyName) => {
+                                          const selected = (draft?.neighboringCounties || []).includes(
+                                            countyName
+                                          );
+                                          return (
+                                            <button
+                                              key={`${uid}-${countyName}`}
+                                              type="button"
+                                              onClick={() => toggleCounty(uid, countyName)}
+                                              className={[
+                                                "rounded-xl border px-3 py-2 text-left text-sm font-medium transition",
+                                                selected
+                                                  ? "border-emerald-200 bg-emerald-50/80 text-emerald-800 shadow-[0_0_0_1px_rgba(16,185,129,0.15)] dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+                                                  : "border-zinc-200 bg-white/80 text-zinc-800 hover:border-emerald-200 dark:border-zinc-700 dark:bg-zinc-900/75 dark:text-zinc-100",
+                                              ].join(" ")}
+                                            >
+                                              {countyName}
+                                            </button>
+                                          );
+                                        })}
+                                        {!filteredCounties.length ? (
+                                          <div className="rounded-xl border border-dashed border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                                            No more counties available for this partner.
+                                          </div>
+                                        ) : null}
+                                      </div>
                                     </div>
                                   ) : null}
-
-                                  <div className="mt-3 max-h-44 overflow-y-auto grid gap-1 sm:grid-cols-2">
-                                    {filteredCounties.map((countyName) => {
-                                      const selected = (draft?.neighboringCounties || []).includes(countyName);
-                                      return (
-                                        <button
-                                          key={`${uid}-${countyName}`}
-                                          type="button"
-                                          onClick={() => toggleCounty(uid, countyName)}
-                                          className={[
-                                            "rounded-xl border px-3 py-2 text-left text-sm font-medium transition",
-                                            selected
-                                              ? "border-emerald-200 bg-emerald-50/80 text-emerald-800 shadow-[0_0_0_1px_rgba(16,185,129,0.15)] dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
-                                              : "border-zinc-200 bg-white/80 text-zinc-800 hover:border-emerald-200 dark:border-zinc-700 dark:bg-zinc-900/75 dark:text-zinc-100",
-                                          ].join(" ")}
-                                        >
-                                          {countyName}
-                                        </button>
-                                      );
-                                    })}
-                                    {!filteredCounties.length ? (
-                                      <div className="rounded-xl border border-dashed border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-                                        No more counties available for this partner.
-                                      </div>
-                                    ) : null}
-                                  </div>
                                 </div>
-                              ) : null}
-                            </div>
+                              </>
+                            ) : stationedCountry ? (
+                              <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/70 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/45 dark:text-zinc-300">
+                                County subdivision routing remains Kenya-only. This admin will route by stationed country and the existing partner filters.
+                              </div>
+                            ) : null}
 
                             <div className="grid gap-1.5">
                               <div className={label}>Max Requests</div>

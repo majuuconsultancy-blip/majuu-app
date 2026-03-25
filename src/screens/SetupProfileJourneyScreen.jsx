@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { Briefcase, GraduationCap, Plane, Compass, ChevronRight } from "lucide-react";
 
 import AppIcon from "../components/AppIcon";
 import AppLoading from "../components/AppLoading";
+import { useI18n } from "../lib/i18n";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import {
   EAST_AFRICA_PHONE_CODES,
@@ -13,15 +14,24 @@ import {
   getEastAfricaPhoneCode,
   getEastAfricaResidenceFromPhoneCode,
 } from "../constants/eastAfricaProfile";
+import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
 import { auth } from "../firebase";
 import { useManagedDestinationCountries } from "../hooks/useManagedDestinationCountries";
-import { normalizeJourney, normalizeJourneyTrack } from "../journey/journeyModel";
 import { resolveLandingPathFromUserState } from "../journey/journeyLanding";
-import { JOURNEY_COUNTRY_TYPES, JOURNEY_SOURCES } from "../journey/journeyModel";
+import {
+  JOURNEY_COUNTRY_TYPES,
+  JOURNEY_SOURCES,
+  normalizeJourney,
+  normalizeJourneyTrack,
+} from "../journey/journeyModel";
+import { buildTrackEventKey, logAnalyticsEvent } from "../services/analyticsService";
 import { markProfileJourneySetupCompleted, updateUserJourney } from "../services/journeyService";
 import { getUserState, updateUserProfile } from "../services/userservice";
-import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
-import { buildTrackEventKey, logAnalyticsEvent } from "../services/analyticsService";
+import {
+  PROFILE_LANGUAGE_OPTIONS,
+  getDefaultLanguageForCountry,
+  normalizeProfileLanguage,
+} from "../utils/userProfile";
 
 const PROCESS_OPTIONS = [
   { key: "study", label: "Study", Icon: GraduationCap },
@@ -134,54 +144,76 @@ function ChoiceCard({ active, title, description, icon: Icon, onClick, disabled 
   );
 }
 
+function fieldClass(invalid = false) {
+  return [
+    "mt-2 w-full rounded-2xl border bg-white/70 px-3 py-3 text-sm text-zinc-900 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 dark:bg-zinc-950/30 dark:text-zinc-100",
+    invalid
+      ? "border-rose-300 focus:border-rose-300 focus:ring-rose-100 dark:border-rose-900/60"
+      : "border-zinc-200 dark:border-zinc-800",
+  ].join(" ");
+}
+
 export default function SetupProfileJourneyScreen() {
   const navigate = useNavigate();
+  const { t } = useI18n();
 
   const [uid, setUid] = useState("");
   const [userEmail, setUserEmail] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [showValidation, setShowValidation] = useState(false);
 
-  // Profile (optional)
   const [name, setName] = useState("");
   const [countryOfResidence, setCountryOfResidence] = useState("");
+  const [language, setLanguage] = useState("");
   const [phoneCode, setPhoneCode] = useState(EAST_AFRICA_PHONE_CODES.Kenya);
   const [phoneDigits, setPhoneDigits] = useState("");
   const [county, setCounty] = useState("");
   const [town, setTown] = useState("");
 
-  // Journey
-  const [process, setProcess] = useState(""); // study|work|travel|exploring|""
+  const [process, setProcess] = useState("");
+  const [countryChoice, setCountryChoice] = useState("");
+  const [countryCustom, setCountryCustom] = useState("");
+  const [stage, setStage] = useState("");
+
+  const languageTouchedRef = useRef(false);
+
   const journeyTrack = useMemo(
     () => (process === "study" || process === "work" || process === "travel" ? process : ""),
     [process]
   );
-
   const { countries, loading: countriesLoading } = useManagedDestinationCountries({
     trackType: journeyTrack,
   });
 
-  const [countryChoice, setCountryChoice] = useState(""); // managed country name or "__other__"
-  const [countryCustom, setCountryCustom] = useState("");
-  const [stage, setStage] = useState("");
-
   const showJourneySetup = Boolean(journeyTrack);
   const usingOther = countryChoice === "__other__";
-  const journeyCountryType = usingOther ? JOURNEY_COUNTRY_TYPES.custom : JOURNEY_COUNTRY_TYPES.managed;
   const journeyCountry = usingOther ? safeString(countryCustom, 80) : safeString(countryChoice, 80);
+  const journeyCountryType = journeyCountry
+    ? usingOther
+      ? JOURNEY_COUNTRY_TYPES.custom
+      : JOURNEY_COUNTRY_TYPES.managed
+    : "";
 
   const residenceOptions = EAST_AFRICA_RESIDENCE_COUNTRIES;
   const hasCustomResidence =
-    Boolean(countryOfResidence) && !residenceOptions.includes(String(countryOfResidence || "").trim());
+    Boolean(countryOfResidence) &&
+    !residenceOptions.includes(String(countryOfResidence || "").trim());
 
   const countyOptions = useMemo(() => {
-    const opts = getEastAfricaCountyOptions(countryOfResidence);
-    return Array.isArray(opts) ? opts : [];
+    const options = getEastAfricaCountyOptions(countryOfResidence);
+    return Array.isArray(options) ? options : [];
   }, [countryOfResidence]);
 
   const hasCustomCounty =
-    Boolean(county) && Boolean(countryOfResidence) && !countyOptions.includes(String(county || "").trim());
+    Boolean(county) &&
+    Boolean(countryOfResidence) &&
+    !countyOptions.includes(String(county || "").trim());
+
+  const missingName = showValidation && !safeString(name, 80);
+  const missingCountry = showValidation && !safeString(countryOfResidence, 80);
+  const missingLanguage = showValidation && !safeString(language, 20);
 
   useEffect(() => {
     if (!uid) return;
@@ -194,12 +226,19 @@ export default function SetupProfileJourneyScreen() {
 
   useEffect(() => {
     if (!countryOfResidence) return;
+
     const nextCode = getEastAfricaPhoneCode(countryOfResidence);
     if (nextCode && nextCode !== phoneCode) setPhoneCode(nextCode);
-  }, [countryOfResidence, phoneCode]);
+
+    const suggestedLanguage = getDefaultLanguageForCountry(countryOfResidence);
+    if (suggestedLanguage && (!safeString(language, 20) || !languageTouchedRef.current)) {
+      setLanguage(suggestedLanguage);
+    }
+  }, [countryOfResidence, language, phoneCode]);
 
   useEffect(() => {
     let cancelled = false;
+
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (cancelled) return;
       if (!user) {
@@ -216,13 +255,24 @@ export default function SetupProfileJourneyScreen() {
         const state = await getUserState(user.uid, user.email || "");
         if (cancelled) return;
 
+        const homeCountry =
+          safeString(state?.profile?.homeCountry, 80) || safeString(state?.countryOfResidence, 80);
+        const savedLanguage =
+          normalizeProfileLanguage(state?.profile?.language, "") ||
+          getDefaultLanguageForCountry(homeCountry) ||
+          "";
+
         setName(state?.name || "");
-        setCountryOfResidence(state?.countryOfResidence || "");
+        setCountryOfResidence(homeCountry);
+        setLanguage(savedLanguage);
         setCounty(state?.county || "");
         setTown(state?.town || "");
+        languageTouchedRef.current = Boolean(
+          normalizeProfileLanguage(state?.profile?.language, "")
+        );
 
         const parts = splitPhoneParts({
-          countryOfResidence: state?.countryOfResidence || "",
+          countryOfResidence: homeCountry,
           phoneRaw: state?.phone || "",
         });
         setPhoneCode(parts.phoneCode);
@@ -239,7 +289,6 @@ export default function SetupProfileJourneyScreen() {
         }
         if (journey.stage) setStage(journey.stage);
 
-        // If onboarding is already complete, this route is no longer required.
         const landing = resolveLandingPathFromUserState(state || {});
         if (landing !== "/setup") {
           navigate(landing, { replace: true });
@@ -259,69 +308,56 @@ export default function SetupProfileJourneyScreen() {
     };
   }, [navigate]);
 
-  const skip = async () => {
-    if (!uid || saving) return;
-    setSaving(true);
-    setError("");
-    try {
-      await markProfileJourneySetupCompleted(uid);
-      navigate("/dashboard", { replace: true });
-    } catch (err) {
-      console.error(err);
-      setError(err?.message || "Could not skip setup.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const saveAndContinue = async () => {
     if (!uid || saving) return;
-    setSaving(true);
+
+    setShowValidation(true);
     setError("");
 
-    const profilePatch = {};
-    if (safeString(name, 80)) profilePatch.name = name;
-    if (safeString(countryOfResidence, 80)) profilePatch.countryOfResidence = countryOfResidence;
+    const cleanName = safeString(name, 80);
+    const cleanHomeCountry = safeString(countryOfResidence, 80);
+    const cleanLanguage = normalizeProfileLanguage(language, "");
+
+    if (!cleanName || !cleanHomeCountry || !cleanLanguage) {
+      setError("Complete your name, country of residence, and language to continue.");
+      return;
+    }
+
+    setSaving(true);
 
     const nextPhone = buildPhoneValue(phoneCode, phoneDigits);
-    if (safeString(nextPhone, 60)) profilePatch.phone = nextPhone;
-    if (!safeString(countryOfResidence, 80) && safeString(nextPhone, 60)) {
-      const inferred = getEastAfricaResidenceFromPhoneCode(phoneCode);
-      if (safeString(inferred, 80)) profilePatch.countryOfResidence = inferred;
-    }
-    if (safeString(county, 80)) profilePatch.county = county;
-    if (safeString(town, 80)) profilePatch.town = town;
 
     try {
-      if (Object.keys(profilePatch).length) {
-        await updateUserProfile(uid, profilePatch);
-      }
+      await updateUserProfile(uid, {
+        name: cleanName,
+        countryOfResidence: cleanHomeCountry,
+        homeCountry: cleanHomeCountry,
+        language: cleanLanguage,
+        phone: nextPhone,
+        county,
+        town,
+      });
 
-      if (process === "exploring" || !normalizeJourneyTrack(journeyTrack)) {
+      if (process !== "exploring" && normalizeJourneyTrack(journeyTrack)) {
+        await updateUserJourney(
+          uid,
+          {
+            track: journeyTrack,
+            countryType: journeyCountryType,
+            country: journeyCountryType === JOURNEY_COUNTRY_TYPES.managed ? journeyCountry : "",
+            countryCustom: journeyCountryType === JOURNEY_COUNTRY_TYPES.custom ? journeyCountry : "",
+            stage,
+          },
+          { source: JOURNEY_SOURCES.setup }
+        );
+
         await markProfileJourneySetupCompleted(uid);
-        navigate("/dashboard", { replace: true });
+        navigate(`/app/${journeyTrack}`, { replace: true });
         return;
       }
-
-      if (!journeyCountry) {
-        setError("Select a journey country (or choose Other / Not listed). You can also skip for now.");
-        return;
-      }
-
-      await updateUserJourney(
-        uid,
-        {
-          track: journeyTrack,
-          countryType: journeyCountryType,
-          country: journeyCountryType === JOURNEY_COUNTRY_TYPES.managed ? journeyCountry : "",
-          countryCustom: journeyCountryType === JOURNEY_COUNTRY_TYPES.custom ? journeyCountry : "",
-          stage,
-        },
-        { source: JOURNEY_SOURCES.setup }
-      );
 
       await markProfileJourneySetupCompleted(uid);
-      navigate(`/app/${journeyTrack}`, { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       console.error(err);
       setError(err?.message || "Could not save your setup.");
@@ -337,25 +373,14 @@ export default function SetupProfileJourneyScreen() {
 
   return (
     <div className={`min-h-screen ${topBg}`}>
-      <div className="max-w-xl mx-auto px-5 py-8 pb-12">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-              Setup Profile &amp; Journey
-            </h1>
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              Keep it lightweight. You can update this later in Profile.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={skip}
-            disabled={saving}
-            className="shrink-0 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 shadow-sm transition hover:bg-white active:scale-[0.99] disabled:opacity-60"
-          >
-            Skip
-          </button>
+      <div className="mx-auto max-w-xl px-5 py-8 pb-12">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+            Setup Profile
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+            Finish three quick fields to continue. Everything else can be updated later.
+          </p>
         </div>
 
         {error ? (
@@ -364,55 +389,101 @@ export default function SetupProfileJourneyScreen() {
           </div>
         ) : null}
 
-        {/* Profile */}
-        <div className="mt-6 rounded-3xl border border-zinc-200 bg-white/70 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Profile basics (optional)</h2>
+        <section className="mt-6 border-t border-zinc-200/80 pt-6 dark:border-zinc-800">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Required to continue
+          </h2>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            These help us personalize your experience and support you when needed.
+            Name, home country, and language are required before entering the app.
           </p>
 
-          <div className="mt-4 grid gap-3">
+          <div className="mt-4 grid gap-4">
             <div>
-              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Full name</label>
+              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                Name
+              </label>
               <input
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(event) => setName(event.target.value)}
                 disabled={saving}
-                placeholder="Your name"
-                className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white/70 px-3 py-3 text-sm text-zinc-900 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100"
+                placeholder="Your name or nickname"
+                className={fieldClass(missingName)}
               />
+              <div className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                A full legal name is not required here.
+              </div>
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Country of residence</label>
+              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                Country of residence (home country)
+              </label>
               <select
                 value={countryOfResidence}
-                onChange={(e) => {
-                  setCountryOfResidence(e.target.value);
+                onChange={(event) => {
+                  setCountryOfResidence(event.target.value);
                   setCounty("");
                 }}
                 disabled={saving}
-                className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white/70 px-3 py-3 text-sm text-zinc-900 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100"
+                className={fieldClass(missingCountry)}
               >
-                <option value="">Select a country</option>
+                <option value="">{t("select_country")}</option>
                 {hasCustomResidence ? (
                   <option value={countryOfResidence}>{countryOfResidence}</option>
                 ) : null}
-                {residenceOptions.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
+                {residenceOptions.map((country) => (
+                  <option key={country} value={country}>
+                    {country}
                   </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Phone number</label>
+              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                Language
+              </label>
+              <select
+                value={language}
+                onChange={(event) => {
+                  languageTouchedRef.current = true;
+                  setLanguage(event.target.value);
+                }}
+                disabled={saving}
+                className={fieldClass(missingLanguage)}
+              >
+                <option value="">Select language</option>
+                {PROFILE_LANGUAGE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <div className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                We auto-select a language from your country when we can, but you can change it.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-6 border-t border-zinc-200/80 pt-6 dark:border-zinc-800">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Optional details
+          </h2>
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            These stay optional and can be completed later.
+          </p>
+
+          <div className="mt-4 grid gap-4">
+            <div>
+              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                Phone number
+              </label>
               <div className="mt-2 flex gap-2">
                 <select
                   value={phoneCode}
-                  onChange={(e) => {
-                    const nextCode = e.target.value;
+                  onChange={(event) => {
+                    const nextCode = event.target.value;
                     setPhoneCode(nextCode);
                     if (!countryOfResidence) {
                       const inferred = getEastAfricaResidenceFromPhoneCode(nextCode);
@@ -430,7 +501,7 @@ export default function SetupProfileJourneyScreen() {
                 </select>
                 <input
                   value={phoneDigits}
-                  onChange={(e) => setPhoneDigits(onlyDigits(e.target.value))}
+                  onChange={(event) => setPhoneDigits(onlyDigits(event.target.value))}
                   disabled={saving}
                   inputMode="tel"
                   placeholder="Phone digits"
@@ -438,20 +509,24 @@ export default function SetupProfileJourneyScreen() {
                 />
               </div>
               {userEmail ? (
-                <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">Signed in as {userEmail}</div>
+                <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+                  Signed in as {userEmail}
+                </div>
               ) : null}
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">County</label>
+              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                County / Region
+              </label>
               <select
                 value={county}
-                onChange={(e) => setCounty(e.target.value)}
+                onChange={(event) => setCounty(event.target.value)}
                 disabled={saving || !countryOfResidence}
                 className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white/70 px-3 py-3 text-sm text-zinc-900 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100"
               >
                 <option value="">
-                  {countryOfResidence ? "Select a county" : "Select country first"}
+                  {countryOfResidence ? "Select a county / region" : "Select country first"}
                 </option>
                 {hasCustomCounty ? <option value={county}>{county}</option> : null}
                 {countyOptions.map((value) => (
@@ -463,55 +538,56 @@ export default function SetupProfileJourneyScreen() {
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Town / City</label>
+              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                Town / City
+              </label>
               <input
                 value={town}
-                onChange={(e) => setTown(e.target.value)}
+                onChange={(event) => setTown(event.target.value)}
                 disabled={saving}
                 placeholder="e.g. Westlands, Eldoret, Kampala"
                 className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white/70 px-3 py-3 text-sm text-zinc-900 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100"
               />
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* Journey */}
-        <div className="mt-4 rounded-3xl border border-zinc-200 bg-white/70 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
+        <section className="mt-6 border-t border-zinc-200/80 pt-6 dark:border-zinc-800">
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-            What process are you currently in?
+            Current process (optional)
           </h2>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            This helps us route you faster and show the right guidance in Self-Help and We-Help.
+            This helps us route you faster, but it will not block entry.
           </p>
 
           <div className="mt-4 grid gap-3">
-            {PROCESS_OPTIONS.map((opt) => (
+            {PROCESS_OPTIONS.map((option) => (
               <ChoiceCard
-                key={opt.key}
-                active={process === opt.key}
-                title={opt.label}
+                key={option.key}
+                active={process === option.key}
+                title={option.label}
                 description={
-                  opt.key === "exploring"
-                    ? "Browse freely with no setup."
-                    : "Set your track and country for better routing."
+                  option.key === "exploring"
+                    ? "Browse freely without setting a track."
+                    : "Set your track now and add a country if you want."
                 }
-                icon={opt.Icon}
+                icon={option.Icon}
                 disabled={saving}
                 onClick={() => {
                   setError("");
-                  setProcess(opt.key);
+                  setProcess(option.key);
                   setCountryChoice("");
                   setCountryCustom("");
 
-                  if (opt.key === "study" || opt.key === "work" || opt.key === "travel") {
+                  if (option.key === "study" || option.key === "work" || option.key === "travel") {
                     void logAnalyticsEvent({
                       uid,
                       eventType: ANALYTICS_EVENT_TYPES.JOURNEY_TRACK_SELECTED,
                       eventKey: buildTrackEventKey(
                         ANALYTICS_EVENT_TYPES.JOURNEY_TRACK_SELECTED,
-                        opt.key
+                        option.key
                       ),
-                      trackType: opt.key,
+                      trackType: option.key,
                       sourceScreen: "SetupProfileJourneyScreen",
                     });
                   }
@@ -521,29 +597,31 @@ export default function SetupProfileJourneyScreen() {
           </div>
 
           {showJourneySetup ? (
-            <div className="mt-5 rounded-3xl border border-emerald-100 bg-emerald-50/50 p-4 dark:border-emerald-900/35 dark:bg-emerald-950/15">
-              <div className="text-xs font-semibold text-emerald-900 dark:text-emerald-100">
-                Journey setup
+            <div className="mt-5 border-t border-zinc-200/70 pt-5 dark:border-zinc-800">
+              <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                Journey details
               </div>
 
-              <div className="mt-3">
+              <div className="mt-4">
                 <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
                   Journey country
                 </label>
                 <select
                   value={countryChoice}
-                  onChange={(e) => {
+                  onChange={(event) => {
                     setError("");
-                    setCountryChoice(e.target.value);
-                    if (e.target.value !== "__other__") setCountryCustom("");
+                    setCountryChoice(event.target.value);
+                    if (event.target.value !== "__other__") setCountryCustom("");
                   }}
                   disabled={saving || countriesLoading}
                   className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white/70 px-3 py-3 text-sm text-zinc-900 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100"
                 >
-                  <option value="">{countriesLoading ? "Loading countries..." : "Select a country"}</option>
-                  {countries.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
+                  <option value="">
+                    {countriesLoading ? "Loading countries..." : t("select_country")}
+                  </option>
+                  {countries.map((country) => (
+                    <option key={country} value={country}>
+                      {country}
                     </option>
                   ))}
                   <option value="__other__">Other / Not listed</option>
@@ -553,14 +631,13 @@ export default function SetupProfileJourneyScreen() {
                   <div className="mt-3">
                     <input
                       value={countryCustom}
-                      onChange={(e) => setCountryCustom(e.target.value)}
+                      onChange={(event) => setCountryCustom(event.target.value)}
                       disabled={saving}
                       placeholder="Type your country"
                       className="w-full rounded-2xl border border-zinc-200 bg-white/70 px-3 py-3 text-sm text-zinc-900 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100"
                     />
-                    <div className="mt-2 text-[11px] text-emerald-900/90 dark:text-emerald-100/90">
-                      Journey tracking currently works best for supported countries. You can still continue using MAJUU
-                      normally.
+                    <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+                      Supported-country routing works best with listed destinations, but this field is optional.
                     </div>
                   </div>
                 ) : null}
@@ -568,11 +645,11 @@ export default function SetupProfileJourneyScreen() {
 
               <div className="mt-4">
                 <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                  Current stage (optional)
+                  Current stage
                 </label>
                 <input
                   value={stage}
-                  onChange={(e) => setStage(e.target.value)}
+                  onChange={(event) => setStage(event.target.value)}
                   disabled={saving}
                   placeholder="e.g. Visa submitted"
                   className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white/70 px-3 py-3 text-sm text-zinc-900 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-100"
@@ -580,24 +657,16 @@ export default function SetupProfileJourneyScreen() {
               </div>
             </div>
           ) : null}
-        </div>
+        </section>
 
-        <div className="mt-5 grid gap-2">
+        <div className="mt-6">
           <button
             type="button"
             onClick={saveAndContinue}
             disabled={saving}
             className="w-full rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
           >
-            {saving ? "Saving..." : "Continue"}
-          </button>
-          <button
-            type="button"
-            onClick={skip}
-            disabled={saving}
-            className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-white active:scale-[0.99] disabled:opacity-60"
-          >
-            Skip for now
+            {saving ? "Saving..." : t("continue")}
           </button>
         </div>
       </div>

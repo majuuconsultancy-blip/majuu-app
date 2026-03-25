@@ -23,6 +23,12 @@ import { getCurrentUserRoleContext } from "./adminroleservice";
 
 export const REQUEST_DEFINITION_COLLECTION = "requestDefinitions";
 export const REQUEST_EXTRA_FIELD_TYPE_OPTIONS = ["text", "textarea", "number", "document"];
+export const REQUEST_DEFINITION_ENTRY_PLACEMENTS = ["wehelp_country", "track_simple"];
+export const REQUEST_DEFINITION_COUNTRY_SOURCES = [
+  "selected_country",
+  "profile_country_of_residence",
+];
+export const REQUEST_DEFINITION_PROFILE_COUNTRY_SCOPE = "Profile Country";
 
 function safeString(value, max = 400) {
   return String(value || "").trim().slice(0, max);
@@ -76,12 +82,58 @@ function normalizeExtraFieldType(value) {
   return REQUEST_EXTRA_FIELD_TYPE_OPTIONS.includes(raw) ? raw : "text";
 }
 
+function normalizeDefinitionEntryPlacement(value) {
+  const raw = safeString(value, 40).toLowerCase();
+  return REQUEST_DEFINITION_ENTRY_PLACEMENTS.includes(raw) ? raw : "wehelp_country";
+}
+
+function normalizeDefinitionCountrySource(value, placement = "wehelp_country") {
+  if (normalizeDefinitionEntryPlacement(placement) === "track_simple") {
+    return "profile_country_of_residence";
+  }
+  const raw = safeString(value, 60).toLowerCase();
+  if (REQUEST_DEFINITION_COUNTRY_SOURCES.includes(raw)) return raw;
+  return "selected_country";
+}
+
 function normalizeRequestDefinitionTrackType(value) {
   return normalizeTrackType(value || "study");
 }
 
-function normalizeRequestDefinitionCountry(value) {
-  return normalizeDestinationCountry(value) || APP_DESTINATION_COUNTRIES[0];
+function normalizeRequestDefinitionTrackTypes(value, fallbackTrackType = "study") {
+  const list = Array.isArray(value) ? value : [value];
+  const seen = new Set();
+  const rows = [];
+  list.forEach((entry) => {
+    const raw = safeString(entry, 20).toLowerCase();
+    const track = APP_TRACK_OPTIONS.includes(raw) ? raw : "";
+    if (!track || seen.has(track)) return;
+    seen.add(track);
+    rows.push(track);
+  });
+  if (!rows.length) {
+    return [normalizeRequestDefinitionTrackType(fallbackTrackType)];
+  }
+  return APP_TRACK_OPTIONS.filter((track) => seen.has(track));
+}
+
+function normalizeRequestDefinitionCountry(
+  value,
+  {
+    entryPlacement = "wehelp_country",
+    countrySource = "selected_country",
+    fallback = APP_DESTINATION_COUNTRIES[0],
+  } = {}
+) {
+  if (
+    normalizeDefinitionEntryPlacement(entryPlacement) === "track_simple" ||
+    normalizeDefinitionCountrySource(countrySource, entryPlacement) ===
+      "profile_country_of_residence"
+  ) {
+    return "";
+  }
+
+  return normalizeDestinationCountry(value) || safeString(value, 120) || fallback;
 }
 
 function normalizeLengthValue(value, fallback = 0) {
@@ -126,12 +178,22 @@ function compareRequestDefinitions(left, right) {
   const activeGap = Number(Boolean(right?.isActive)) - Number(Boolean(left?.isActive));
   if (activeGap !== 0) return activeGap;
 
+  const leftTracks = getRequestDefinitionTrackTypes(left);
+  const rightTracks = getRequestDefinitionTrackTypes(right);
   const trackGap =
-    APP_TRACK_OPTIONS.indexOf(left?.trackType) - APP_TRACK_OPTIONS.indexOf(right?.trackType);
+    APP_TRACK_OPTIONS.indexOf(leftTracks[0]) - APP_TRACK_OPTIONS.indexOf(rightTracks[0]);
   if (trackGap !== 0) return trackGap;
+
+  const placementGap = safeString(left?.entryPlacement, 40).localeCompare(
+    safeString(right?.entryPlacement, 40)
+  );
+  if (placementGap !== 0) return placementGap;
 
   const countryGap = safeString(left?.country, 80).localeCompare(safeString(right?.country, 80));
   if (countryGap !== 0) return countryGap;
+
+  const sortGap = Number(left?.sortOrder || 0) - Number(right?.sortOrder || 0);
+  if (sortGap !== 0) return sortGap;
 
   return safeString(left?.title, 140).localeCompare(safeString(right?.title, 140));
 }
@@ -143,16 +205,37 @@ export function buildRequestDefinitionKey({
 } = {}) {
   const safeTitle = slugify(title);
   const safeTrackType = normalizeRequestDefinitionTrackType(trackType);
-  const safeCountry = slugify(normalizeRequestDefinitionCountry(country));
+  const safeCountry = slugify(
+    normalizeRequestDefinitionCountry(country, { fallback: "" })
+  );
   if (!safeTitle || !safeTrackType || !safeCountry) return "";
   return [safeTrackType, safeCountry, safeTitle].join("__");
 }
 
 function buildRequestDefinitionPayload(input = {}) {
-  const trackType = normalizeRequestDefinitionTrackType(input?.trackType);
-  const country = normalizeRequestDefinitionCountry(input?.country);
   const title = safeString(input?.title, 140);
-  const definitionKey = buildRequestDefinitionKey({ title, trackType, country });
+  const entryPlacement = normalizeDefinitionEntryPlacement(input?.entryPlacement);
+  const countrySource = normalizeDefinitionCountrySource(
+    input?.countrySource,
+    entryPlacement
+  );
+  const trackTypes = normalizeRequestDefinitionTrackTypes(
+    input?.trackTypes,
+    input?.trackType
+  );
+  const trackType = trackTypes[0];
+  const country = normalizeRequestDefinitionCountry(input?.country, {
+    entryPlacement,
+    countrySource,
+  });
+  const definitionKey = buildRequestDefinitionKey({
+    title,
+    trackType,
+    country:
+      entryPlacement === "track_simple"
+        ? REQUEST_DEFINITION_PROFILE_COUNTRY_SCOPE
+        : country,
+  });
 
   const extraFields = (Array.isArray(input?.extraFields) ? input.extraFields : [])
     .map((field, index) => normalizeExtraFieldRecord(field, index))
@@ -166,9 +249,15 @@ function buildRequestDefinitionPayload(input = {}) {
     title,
     titleLower: title.toLowerCase(),
     trackType,
+    trackTypes,
     country,
     countryLower: safeString(country, 80).toLowerCase(),
     definitionKey,
+    summary: safeParagraphText(input?.summary, 220),
+    tag: safeString(input?.tag, 40),
+    entryPlacement,
+    countrySource,
+    sortOrder: toWholeNumber(input?.sortOrder, 0, { min: 0, max: 5000 }),
     isActive: normalizeBoolean(input?.isActive, true),
     extraFields,
   };
@@ -216,7 +305,13 @@ export function normalizeRequestDefinitionRecord(id, raw = {}) {
   const payload = buildRequestDefinitionPayload({
     title: raw?.title,
     trackType: raw?.trackType,
+    trackTypes: raw?.trackTypes,
     country: raw?.country,
+    summary: raw?.summary,
+    tag: raw?.tag,
+    entryPlacement: raw?.entryPlacement,
+    countrySource: raw?.countrySource,
+    sortOrder: raw?.sortOrder,
     isActive: raw?.isActive,
     extraFields: raw?.extraFields,
   });
@@ -260,10 +355,20 @@ export function createEmptyRequestDefinitionDraft({
   trackType = "study",
   country = APP_DESTINATION_COUNTRIES[0],
 } = {}) {
+  const trackTypes = normalizeRequestDefinitionTrackTypes(trackType);
   return {
     title: "",
-    trackType: normalizeRequestDefinitionTrackType(trackType),
-    country: normalizeRequestDefinitionCountry(country),
+    trackType: trackTypes[0],
+    trackTypes,
+    country: normalizeRequestDefinitionCountry(country, {
+      entryPlacement: "wehelp_country",
+      countrySource: "selected_country",
+    }),
+    summary: "",
+    tag: "",
+    entryPlacement: "wehelp_country",
+    countrySource: "selected_country",
+    sortOrder: "",
     isActive: true,
     extraFields: [],
   };
@@ -274,7 +379,13 @@ export function draftFromRequestDefinition(definition) {
   return {
     title: clean.title,
     trackType: clean.trackType,
+    trackTypes: getRequestDefinitionTrackTypes(clean),
     country: clean.country,
+    summary: clean.summary,
+    tag: clean.tag,
+    entryPlacement: clean.entryPlacement,
+    countrySource: clean.countrySource,
+    sortOrder: clean.sortOrder > 0 ? String(clean.sortOrder) : "",
     isActive: clean.isActive,
     extraFields: clean.extraFields.map((field) => ({
       ...field,
@@ -300,6 +411,8 @@ function normalizeDraftExtraFieldForSave(field, index = 0) {
 export function toRequestDefinitionPayload(input = {}) {
   const payload = buildRequestDefinitionPayload({
     ...input,
+    trackTypes: normalizeRequestDefinitionTrackTypes(input?.trackTypes, input?.trackType),
+    sortOrder: input?.sortOrder === "" ? 0 : input?.sortOrder,
     extraFields: (Array.isArray(input?.extraFields) ? input.extraFields : []).map((field, index) =>
       normalizeDraftExtraFieldForSave(field, index)
     ),
@@ -343,6 +456,29 @@ export function getRequestDefinitionTrackLabel(trackType) {
   return APP_TRACK_META[safeTrack]?.label || "Study";
 }
 
+export function getRequestDefinitionTrackTypes(definition) {
+  return normalizeRequestDefinitionTrackTypes(
+    definition?.trackTypes,
+    definition?.trackType
+  );
+}
+
+export function getRequestDefinitionTrackLabels(definition) {
+  return getRequestDefinitionTrackTypes(definition).map((track) =>
+    getRequestDefinitionTrackLabel(track)
+  );
+}
+
+export function requestDefinitionSupportsTrackType(definition, trackType) {
+  const safeTrack = normalizeRequestDefinitionTrackType(trackType);
+  return getRequestDefinitionTrackTypes(definition).includes(safeTrack);
+}
+
+export function isRequestDefinitionProfileCountry(country) {
+  const safeCountry = safeString(country, 120).toLowerCase();
+  return !safeCountry || safeCountry === REQUEST_DEFINITION_PROFILE_COUNTRY_SCOPE.toLowerCase();
+}
+
 export function subscribeAllRequestDefinitions({ onData, onError } = {}) {
   return onSnapshot(
     collection(db, REQUEST_DEFINITION_COLLECTION),
@@ -362,10 +498,16 @@ export function subscribeAllRequestDefinitions({ onData, onError } = {}) {
 }
 
 export function subscribeActiveRequestDefinitions(
-  { trackType = "", country = "", onData, onError } = {}
+  { trackType = "", country = "", entryPlacement = "", countrySource = "", onData, onError } = {}
 ) {
   const safeTrackType = trackType ? normalizeRequestDefinitionTrackType(trackType) : "";
   const safeCountry = country ? normalizeRequestDefinitionCountry(country) : "";
+  const safeEntryPlacement = entryPlacement
+    ? normalizeDefinitionEntryPlacement(entryPlacement)
+    : "";
+  const safeCountrySource = countrySource
+    ? normalizeDefinitionCountrySource(countrySource, safeEntryPlacement || "wehelp_country")
+    : "";
   const definitionsQuery = query(
     collection(db, REQUEST_DEFINITION_COLLECTION),
     where("isActive", "==", true)
@@ -377,8 +519,21 @@ export function subscribeActiveRequestDefinitions(
       const rows = snapshot.docs
         .map((row) => normalizeRequestDefinitionRecord(row.id, row.data() || {}))
         .filter((row) => row.isActive)
-        .filter((row) => (safeTrackType ? row.trackType === safeTrackType : true))
-        .filter((row) => (safeCountry ? row.country === safeCountry : true))
+        .filter((row) =>
+          safeTrackType ? requestDefinitionSupportsTrackType(row, safeTrackType) : true
+        )
+        .filter((row) => {
+          if (!safeCountry) return true;
+          if (
+            safeEntryPlacement === "track_simple" &&
+            safeCountrySource === "profile_country_of_residence"
+          ) {
+            return true;
+          }
+          return row.country === safeCountry;
+        })
+        .filter((row) => (safeEntryPlacement ? row.entryPlacement === safeEntryPlacement : true))
+        .filter((row) => (safeCountrySource ? row.countrySource === safeCountrySource : true))
         .sort(compareRequestDefinitions);
 
       onData?.(rows);

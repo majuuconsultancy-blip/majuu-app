@@ -11,18 +11,22 @@ import { useNavigate } from "react-router-dom";
 
 import AppIcon from "../components/AppIcon";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
-import { useManagedDestinationCountries } from "../hooks/useManagedDestinationCountries";
+import { EAST_AFRICA_RESIDENCE_COUNTRIES } from "../constants/eastAfricaProfile";
+import { useCountryDirectory } from "../hooks/useCountryDirectory";
 import {
   APP_TRACK_META,
   APP_TRACK_OPTIONS,
 } from "../constants/migrationOptions";
-import { buildRequestPricingKey, findRequestCatalogEntry } from "../constants/requestCatalog";
+import { buildRequestPricingKey } from "../constants/requestCatalog";
 import {
   useFullPackagePricingList,
   useRequestPricingList,
 } from "../hooks/useRequestPricing";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
-import { subscribeAllRequestDefinitions } from "../services/requestDefinitionService";
+import {
+  getRequestDefinitionTrackTypes,
+  subscribeAllRequestDefinitions,
+} from "../services/requestDefinitionService";
 import {
   formatPricingMoney,
   normalizePricingAmountValue,
@@ -35,6 +39,20 @@ function safeString(value, max = 200) {
   return String(value || "").trim().slice(0, max);
 }
 
+function getRowTracks(row) {
+  if (Array.isArray(row?.tracks) && row.tracks.length) {
+    return row.tracks.map((track) => safeString(track, 20).toLowerCase()).filter(Boolean);
+  }
+  const track = safeString(row?.track, 20).toLowerCase();
+  return track ? [track] : [];
+}
+
+function formatTrackLabelList(tracks) {
+  return getRowTracks({ tracks })
+    .map((track) => APP_TRACK_META[track]?.label || track)
+    .join(" / ");
+}
+
 function matchesSearch(row, search) {
   const needle = safeString(search, 120).toLowerCase();
   if (!needle) return true;
@@ -44,8 +62,9 @@ function matchesSearch(row, search) {
     row?.label,
     row?.note,
     row?.tag,
+    row?.displayCountry,
     row?.country,
-    APP_TRACK_META[row?.track]?.label || row?.track,
+    formatTrackLabelList(getRowTracks(row)),
   ]
     .filter(Boolean)
     .join(" ")
@@ -107,10 +126,11 @@ function PricingRowsTable({
       {rows.map((row, index) => {
         const draftValue = safeString(drafts[row.pricingKey], 20);
         const parsedDraft = normalizePricingAmountValue(draftValue, 0);
-        const dirty = parsedDraft > 0 && parsedDraft !== Number(row.amount || 0);
+        const dirty =
+          parsedDraft > 0 && (Boolean(row.amountMixed) || parsedDraft !== Number(row.amount || 0));
         const rowBusy = busyKey === row.pricingKey;
         const isActive = activeRowKey === row.pricingKey;
-        const trackLabel = APP_TRACK_META[row.track]?.label || row.track;
+        const trackLabel = formatTrackLabelList(getRowTracks(row));
 
         return (
           <div
@@ -130,7 +150,7 @@ function PricingRowsTable({
                     {trackLabel}
                   </span>
                   <span className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300">
-                    {row.country}
+                    {row.displayCountry || row.country}
                   </span>
                   {row.tag ? (
                     <span className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300">
@@ -152,11 +172,27 @@ function PricingRowsTable({
                 <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
                   Current:{" "}
                   <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                    {Number(row.amount || 0) > 0
+                    {row.amountMixed
+                      ? "Mixed by track"
+                      : Number(row.amount || 0) > 0
                       ? formatPricingMoney(row.amount, row.currency)
                       : "Not set"}
                   </span>
                 </div>
+                {Array.isArray(row.currentAmounts) && row.currentAmounts.length > 1 ? (
+                  <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    {row.currentAmounts
+                      .map((entry) => {
+                        const label = APP_TRACK_META[entry.track]?.label || entry.track;
+                        return `${label}: ${
+                          Number(entry.amount || 0) > 0
+                            ? formatPricingMoney(entry.amount, entry.currency)
+                            : "Not set"
+                        }`;
+                      })
+                      .join(" | ")}
+                  </div>
+                ) : null}
               </div>
 
               <div className="grid gap-2 sm:grid-cols-[minmax(0,180px)_auto] lg:min-w-[320px]">
@@ -210,7 +246,7 @@ export default function AdminPricingControlsScreen() {
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
 
-  const { countries: managedCountries } = useManagedDestinationCountries();
+  const { countries: allCountries } = useCountryDirectory();
 
   const singlePricing = useRequestPricingList({
     track: singleTrack,
@@ -259,98 +295,176 @@ export default function AdminPricingControlsScreen() {
   }, [isSuperAdmin]);
 
   const customDefinitionRows = useMemo(() => {
-    const existingKeys = new Set(
+    const pricingRowsByKey = new Map(
       (Array.isArray(singlePricing.rows) ? singlePricing.rows : [])
-        .map((row) => safeString(row?.pricingKey, 200))
-        .filter(Boolean)
+        .map((row) => [safeString(row?.pricingKey, 200), row])
+        .filter(([pricingKey]) => Boolean(pricingKey))
     );
 
     const trackFilter = safeString(singleTrack, 20).toLowerCase();
     const countryFilter = safeString(singleCountry, 120);
+    const residenceCountries = (Array.isArray(EAST_AFRICA_RESIDENCE_COUNTRIES)
+      ? EAST_AFRICA_RESIDENCE_COUNTRIES
+      : []
+    )
+      .map((country) => safeString(country, 120))
+      .filter(Boolean);
 
     const defs = Array.isArray(requestDefinitions) ? requestDefinitions : [];
 
     return defs
-      .filter((def) => {
+      .flatMap((def) => {
         const title = safeString(def?.title, 140);
-        const track = safeString(def?.trackType, 20).toLowerCase();
-        const country = safeString(def?.country, 120);
-        if (!title || !track || !country) return false;
+        const placement = safeString(def?.entryPlacement, 40).toLowerCase();
+        const countries =
+          placement === "track_simple"
+            ? residenceCountries
+            : [safeString(def?.country, 120)].filter(Boolean);
+        if (!title || !countries.length) return [];
 
-        if (trackFilter && track !== trackFilter) return false;
-        if (countryFilter && country !== countryFilter) return false;
+        return countries.flatMap((country) =>
+          getRequestDefinitionTrackTypes(def).map((track) => {
+          const pricingKey = buildRequestPricingKey({
+            track,
+            requestType: "single",
+            country,
+            serviceName: title,
+          });
+          if (!pricingKey) return null;
 
-        const builtInEntry = findRequestCatalogEntry({
-          track,
-          requestType: "single",
-          country,
-          serviceName: title,
-        });
-        if (builtInEntry) return false;
+          const pricingRow = pricingRowsByKey.get(pricingKey) || null;
+          const activeNote = def?.isActive === false ? "Inactive definition" : "";
+          const placementNote =
+            placement === "track_simple"
+              ? "Track simple request by home country"
+              : "Country WeHelp request";
+          const summaryNote = safeString(def?.summary, 220);
+          const note = [summaryNote, placementNote, activeNote].filter(Boolean).join(" · ");
 
-        const pricingKey = buildRequestPricingKey({
-          track,
-          requestType: "single",
-          country,
-          serviceName: title,
-        });
-        if (!pricingKey) return false;
-        if (existingKeys.has(pricingKey)) return false;
-
-        return true;
+          return {
+            pricingKey,
+            scope: "single_request",
+            requestType: "single",
+            track,
+            country,
+            displayCountry: country,
+            serviceName: title,
+            label: title,
+            note: note || "SACC request",
+            tag: safeString(def?.tag, 40) || (placement === "track_simple" ? "Simple" : "SACC"),
+            currency: safeString(pricingRow?.currency || "KES", 8) || "KES",
+            amount: Number(pricingRow?.amount || 0),
+            defaultAmount: Number(pricingRow?.defaultAmount || 0),
+            sortOrder: Number(pricingRow?.sortOrder || def?.sortOrder || 0),
+            source: pricingRow?.source || "definition",
+          };
+          })
+        );
       })
-      .map((def) => {
-        const title = safeString(def?.title, 140);
-        const track = safeString(def?.trackType, 20).toLowerCase();
-        const country = safeString(def?.country, 120);
-        const pricingKey = buildRequestPricingKey({
-          track,
-          requestType: "single",
-          country,
-          serviceName: title,
-        });
-
-        const extraCount = Number(def?.activeExtraFieldCount ?? def?.extraFieldCount ?? 0);
-        const extraNote = extraCount > 0 ? `${extraCount} extra fields` : "No extra fields";
-        const activeNote = def?.isActive === false ? "Inactive definition" : "";
-        const note = ["SACC request", extraNote, activeNote].filter(Boolean).join(" • ");
-
-        return {
-          pricingKey,
-          scope: "single_request",
-          requestType: "single",
-          track,
-          country,
-          serviceName: title,
-          label: title,
-          note,
-          tag: "SACC",
-          currency: "KES",
-          amount: 0,
-          defaultAmount: 0,
-          source: "definition",
-        };
+      .filter(Boolean)
+      .filter((row) => {
+        if (trackFilter && row.track !== trackFilter) return false;
+        if (countryFilter && row.country !== countryFilter) return false;
+        return true;
       })
       .sort((a, b) => {
         const trackGap = safeString(a?.track, 20).localeCompare(safeString(b?.track, 20));
         if (trackGap !== 0) return trackGap;
-        const countryGap = safeString(a?.country, 120).localeCompare(safeString(b?.country, 120));
+        const countryGap = safeString(a?.displayCountry, 120).localeCompare(
+          safeString(b?.displayCountry, 120)
+        );
         if (countryGap !== 0) return countryGap;
+        const sortGap = Number(a?.sortOrder || 0) - Number(b?.sortOrder || 0);
+        if (sortGap !== 0) return sortGap;
         return safeString(a?.serviceName, 160).localeCompare(safeString(b?.serviceName, 160));
       });
   }, [requestDefinitions, singleCountry, singlePricing.rows, singleTrack]);
 
   const combinedSingleRows = useMemo(() => {
-    const base = Array.isArray(singlePricing.rows) ? singlePricing.rows : [];
     const custom = Array.isArray(customDefinitionRows) ? customDefinitionRows : [];
-    return [...base, ...custom].sort((a, b) => {
-      const trackGap = safeString(a?.track, 20).localeCompare(safeString(b?.track, 20));
-      if (trackGap !== 0) return trackGap;
-      const countryGap = safeString(a?.country, 120).localeCompare(safeString(b?.country, 120));
+    const grouped = new Map();
+
+    custom.forEach((row) => {
+      const groupKey = [
+        "single_request_group",
+        safeString(row?.serviceName, 160),
+        safeString(row?.country, 120),
+      ]
+        .filter(Boolean)
+        .join("::");
+      if (!groupKey) return;
+
+      const existing = grouped.get(groupKey);
+      const entry = {
+        pricingKey: safeString(row?.pricingKey, 200),
+        track: safeString(row?.track, 20).toLowerCase(),
+        country: safeString(row?.country, 120),
+        requestType: safeString(row?.requestType, 20) || "single",
+        serviceName: safeString(row?.serviceName, 160),
+        label: safeString(row?.label, 160),
+        note: safeString(row?.note, 240),
+        tag: safeString(row?.tag, 40),
+        currency: safeString(row?.currency || "KES", 8) || "KES",
+        amount: Number(row?.amount || 0),
+        defaultAmount: Number(row?.defaultAmount || 0),
+        sortOrder: Number(row?.sortOrder || 0),
+        source: safeString(row?.source, 40) || "definition",
+      };
+
+      if (!existing) {
+        grouped.set(groupKey, {
+          pricingKey: groupKey,
+          scope: "single_request_group",
+          requestType: entry.requestType,
+          track: entry.track,
+          tracks: entry.track ? [entry.track] : [],
+          pricingEntries: entry.pricingKey ? [entry] : [],
+          country: entry.country,
+          displayCountry: safeString(row?.displayCountry || row?.country, 120),
+          serviceName: entry.serviceName,
+          label: entry.label,
+          note: entry.note,
+          tag: entry.tag,
+          currency: entry.currency,
+          amount: entry.amount,
+          amountMixed: false,
+          currentAmounts: entry.track
+            ? [{ track: entry.track, amount: entry.amount, currency: entry.currency }]
+            : [],
+          defaultAmount: entry.defaultAmount,
+          sortOrder: entry.sortOrder,
+          source: entry.source,
+        });
+        return;
+      }
+
+      if (entry.track && !existing.tracks.includes(entry.track)) {
+        existing.tracks.push(entry.track);
+      }
+      if (entry.pricingKey) {
+        existing.pricingEntries.push(entry);
+      }
+      existing.currentAmounts.push({
+        track: entry.track,
+        amount: entry.amount,
+        currency: entry.currency,
+      });
+      if (Number(existing.amount || 0) !== entry.amount) {
+        existing.amountMixed = true;
+        existing.amount = 0;
+      }
+    });
+
+    return Array.from(grouped.values()).sort((a, b) => {
+      const countryGap = safeString(a?.displayCountry, 120).localeCompare(
+        safeString(b?.displayCountry, 120)
+      );
       if (countryGap !== 0) return countryGap;
+      const sortGap = Number(a?.sortOrder || 0) - Number(b?.sortOrder || 0);
+      if (sortGap !== 0) return sortGap;
       return safeString(a?.serviceName, 160).localeCompare(safeString(b?.serviceName, 160));
     });
-  }, [customDefinitionRows, singlePricing.rows]);
+  }, [customDefinitionRows]);
 
   const allRows = useMemo(
     () => [...combinedSingleRows, ...fullPricing.rows],
@@ -396,14 +510,34 @@ export default function AdminPricingControlsScreen() {
     [trackOptions]
   );
   const countryOptions = useMemo(
-    () => [
-      { value: "", label: "All countries" },
-      ...managedCountries.map((country) => ({
-        value: country,
-        label: country,
-      })),
-    ],
-    [managedCountries]
+    () => {
+      const countrySet = new Set();
+      (Array.isArray(EAST_AFRICA_RESIDENCE_COUNTRIES) ? EAST_AFRICA_RESIDENCE_COUNTRIES : []).forEach(
+        (country) => {
+          const name = safeString(country, 120);
+          if (name) countrySet.add(name);
+        }
+      );
+      (Array.isArray(allCountries) ? allCountries : []).forEach((country) => {
+        const name = safeString(country?.name, 120);
+        if (name) countrySet.add(name);
+      });
+      (Array.isArray(requestDefinitions) ? requestDefinitions : []).forEach((definition) => {
+        const name = safeString(definition?.country, 120);
+        if (name) countrySet.add(name);
+      });
+
+      return [
+        { value: "", label: "All countries" },
+        ...Array.from(countrySet)
+          .sort((left, right) => left.localeCompare(right))
+          .map((country) => ({
+            value: country,
+            label: country,
+          })),
+      ];
+    },
+    [allCountries, requestDefinitions]
   );
   const fullCountryOptions = useMemo(
     () => [{ value: "", label: "Select country" }, ...countryOptions.slice(1)],
@@ -438,6 +572,40 @@ export default function AdminPricingControlsScreen() {
     setMsg("");
 
     try {
+      if (row.scope === "single_request_group") {
+        const entries = Array.isArray(row.pricingEntries) ? row.pricingEntries : [];
+        if (!entries.length) {
+          throw new Error("No pricing entries were found for this request.");
+        }
+        await Promise.all(
+          entries.map((entry) =>
+            updateRequestPricing({
+              pricingKey: entry.pricingKey,
+              track: entry.track,
+              country: entry.country,
+              serviceName: entry.serviceName,
+              requestType: entry.requestType,
+              label: entry.label,
+              note: row.note,
+              tag: row.tag,
+              amount: nextAmount,
+              currency: entry.currency || row.currency,
+            })
+          )
+        );
+
+        setDrafts((current) => ({
+          ...current,
+          [row.pricingKey]: String(nextAmount),
+        }));
+        setMsg(
+          `${row.serviceName} (${row.country}) updated for ${getRowTracks(row).length} track${
+            getRowTracks(row).length === 1 ? "" : "s"
+          } to ${formatPricingMoney(nextAmount, row.currency)}.`
+        );
+        return;
+      }
+
       const updater =
         row.scope === "full_package_item" ? updateFullPackagePricing : updateRequestPricing;
       const updatedRow = await updater({
@@ -473,7 +641,7 @@ export default function AdminPricingControlsScreen() {
 
   return (
     <div className={pageBg}>
-      <div className="mx-auto max-w-5xl px-5 py-6">
+      <div className="app-page-shell app-page-shell--wide">
         <div className="flex items-end justify-between gap-3">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/80 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">

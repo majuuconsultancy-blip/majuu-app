@@ -1,12 +1,21 @@
 import { KENYA_COUNTY_OPTIONS } from "./kenyaCounties";
 
-export const EAST_AFRICA_RESIDENCE_COUNTRIES = ["Kenya", "Uganda", "Tanzania", "Rwanda"];
+export const EAST_AFRICA_RESIDENCE_COUNTRIES = [
+  "Kenya",
+  "Uganda",
+  "Tanzania",
+  "Rwanda",
+  "Namibia",
+  "Ethiopia",
+];
 
 export const EAST_AFRICA_PHONE_CODES = {
   Kenya: "+254",
   Uganda: "+256",
   Tanzania: "+255",
   Rwanda: "+250",
+  Namibia: "+264",
+  Ethiopia: "+251",
 };
 
 export const EAST_AFRICA_COUNTY_OPTIONS = {
@@ -51,6 +60,37 @@ export const EAST_AFRICA_COUNTY_OPTIONS = {
     "Southern Province",
     "Eastern Province",
     "Western Province",
+  ],
+  Namibia: [
+    "Erongo",
+    "Hardap",
+    "Karas",
+    "Kavango East",
+    "Kavango West",
+    "Khomas",
+    "Kunene",
+    "Ohangwena",
+    "Omaheke",
+    "Omusati",
+    "Oshana",
+    "Oshikoto",
+    "Otjozondjupa",
+    "Zambezi",
+  ],
+  Ethiopia: [
+    "Addis Ababa",
+    "Afar",
+    "Amhara",
+    "Benishangul-Gumuz",
+    "Dire Dawa",
+    "Gambela",
+    "Harari",
+    "Oromia",
+    "Sidama",
+    "Somali",
+    "South Ethiopia",
+    "South West Ethiopia Peoples'",
+    "Tigray",
   ],
 };
 

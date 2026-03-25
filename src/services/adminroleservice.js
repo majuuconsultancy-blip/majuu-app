@@ -42,6 +42,12 @@ export function normalizeAdminAvailability(value) {
 
 export function normalizeAdminScope(rawScope) {
   const scope = rawScope && typeof rawScope === "object" ? rawScope : {};
+  const stationedCountry = safeStr(scope?.stationedCountry || scope?.country);
+  const stationedCountryLower = lower(
+    scope?.stationedCountryLower || scope?.countryLower || stationedCountry
+  );
+  const country = stationedCountry;
+  const countryLower = stationedCountryLower;
   const primaryCounty = safeStr(scope?.primaryCounty || scope?.county);
   const primaryCountyLower = lower(scope?.primaryCountyLower || primaryCounty);
   const neighboringCounties = Array.isArray(scope?.neighboringCounties)
@@ -87,6 +93,10 @@ export function normalizeAdminScope(rawScope) {
     partnerId: safeStr(scope?.partnerId, 140),
     partnerName: safeStr(scope?.partnerName || scope?.partnerDisplayName, 120),
     partnerStatus: safeStr(scope?.partnerStatus || "active", 20).toLowerCase() || "active",
+    stationedCountry,
+    stationedCountryLower,
+    country,
+    countryLower,
     primaryCounty,
     primaryCountyLower,
     neighboringCounties,
@@ -129,7 +139,11 @@ export function resolveRoleFromUserDoc({
   // treat as assigned admin so access does not break.
   if (normalizedRole === "user") {
     const scope = normalizeAdminScope(adminScope);
-    const hasScopeSignal = Array.isArray(scope?.counties) && scope.counties.length > 0 && scope.active !== false;
+    const hasScopeSignal =
+      scope.active !== false &&
+      Boolean(safeStr(scope?.partnerId)) &&
+      (Boolean(safeStr(scope?.stationedCountry || scope?.country)) ||
+        (Array.isArray(scope?.counties) && scope.counties.length > 0));
     const hasAdminAuditSignal = Boolean(safeStr(adminUpdatedBy)) || Boolean(adminUpdatedAt);
     if (hasScopeSignal && hasAdminAuditSignal) return "assignedAdmin";
   }

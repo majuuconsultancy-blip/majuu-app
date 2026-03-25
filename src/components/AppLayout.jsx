@@ -9,6 +9,7 @@ import ScreenLoader from "./ScreenLoader";
 
 import { AnimatePresence } from "../utils/motionProxy";
 import PageTransitions from "./PageTransitions";
+import { resolveLandingPathFromUserState } from "../journey/journeyLanding";
 
 // ✅ offline banner + online status
 import { useNetworkStatus } from "../hooks/useNetworkStatus";
@@ -226,6 +227,12 @@ export default function AppLayout() {
           doc(db, "users", user.uid),
           (snap) => {
             const state = snap.exists() ? snap.data() : null;
+            const landing = resolveLandingPathFromUserState(state || {});
+            if (landing === "/setup") {
+              setCheckingAuth(false);
+              navigate("/setup", { replace: true });
+              return;
+            }
             const active = String(state?.activeTrack || "").toLowerCase();
             const selected = String(state?.selectedTrack || "").toLowerCase();
             const journey = String(state?.journey?.track || "").toLowerCase();
@@ -333,6 +340,25 @@ export default function AppLayout() {
   const newsActive = activeTabKey === "news";
   const profileActive = activeTabKey === "profile";
   const homeActive = activeTabKey === "home";
+  const routeShellClass = useMemo(() => {
+    const path = String(location.pathname || "").toLowerCase();
+    if (
+      path.startsWith("/app/admin") ||
+      path.startsWith("/app/request/") ||
+      path.startsWith("/app/progress") ||
+      path.startsWith("/app/full-package/")
+    ) {
+      return "max-w-7xl";
+    }
+    if (
+      path.startsWith("/app/study/we-help") ||
+      path.startsWith("/app/work/we-help") ||
+      path.startsWith("/app/travel/we-help")
+    ) {
+      return "max-w-5xl";
+    }
+    return "max-w-4xl";
+  }, [location.pathname]);
 
   if (checkingAuth) {
     return (
@@ -353,7 +379,7 @@ export default function AppLayout() {
       <div
         className="app-shell-content min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950"
       >
-        <div className="max-w-xl mx-auto min-h-screen">
+        <div className={`mx-auto min-h-screen w-full ${routeShellClass}`}>
           <AnimatePresence initial={false} mode="sync">
             <PageTransitions key={location.pathname}>
               <Outlet />

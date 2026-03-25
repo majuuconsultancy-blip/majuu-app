@@ -13,6 +13,7 @@ import {
 import { auth, db } from "../firebase";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
+import { resolveLandingPathFromUserState } from "../journey/journeyLanding";
 import { getUserState, setSelectedTrack } from "../services/userservice";
 import { getResumeTarget, setSnapshot } from "../resume/resumeEngine";
 import { waitForAuthRestore } from "../utils/authRestore";
@@ -103,6 +104,11 @@ export default function TrackSelectScreen() {
         try {
           const state = await getUserState(user.uid);
           if (!cancelled) {
+            const landing = resolveLandingPathFromUserState(state || {});
+            if (landing === "/setup") {
+              navigate("/setup", { replace: true });
+              return;
+            }
             setUserState(state || null);
             setSoftMsg("");
           }
@@ -208,8 +214,9 @@ export default function TrackSelectScreen() {
   if (loading) {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
-        <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950 flex items-center justify-center px-5">
-          <div className="w-full max-w-md rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-6 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
+          <div className="app-page-shell app-page-shell--wide flex min-h-screen items-center justify-center">
+            <div className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white/70 p-6 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60">
             <div className="flex items-center gap-3">
               <div className="h-11 w-11 rounded-2xl border border-emerald-100 bg-emerald-50/60 dark:border-zinc-800 dark:bg-zinc-950/40 animate-pulse" />
               <div className="min-w-0">
@@ -223,6 +230,7 @@ export default function TrackSelectScreen() {
               <div className="h-20 rounded-3xl bg-zinc-100 dark:bg-zinc-900/40 animate-pulse" />
               <div className="h-20 rounded-3xl bg-zinc-100 dark:bg-zinc-900/40 animate-pulse" />
             </div>
+          </div>
           </div>
         </div>
       </div>
@@ -280,22 +288,22 @@ export default function TrackSelectScreen() {
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
-        <div className="max-w-xl mx-auto px-5 py-8">
-          <div className="flex items-end justify-between gap-3">
-            <div>
+        <div className="app-page-shell app-page-shell--wide">
+          <div className="mx-auto flex min-h-[calc(var(--app-viewport-height)-var(--app-safe-top)-var(--app-safe-bottom)-2.5rem)] w-full max-w-5xl flex-col gap-6">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div className="min-w-0">
               <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Choose your path
               </h1>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">Study / Work / Travel</p>
+              </div>
+
+              <div className="h-11 w-11 rounded-2xl border border-emerald-100 bg-emerald-50/60 dark:border-zinc-800 dark:bg-zinc-950/40" />
             </div>
 
-            <div className="h-11 w-11 rounded-2xl border border-emerald-100 bg-emerald-50/60 dark:border-zinc-800 dark:bg-zinc-950/40" />
-          </div>
-
-          <div className="pt-20 sm:pt-24">
-            <div aria-hidden="true" className="mb-4 h-8" />
-            {isStaff ? (
-              <div className={`transition ${mounted ? "opacity-100" : "opacity-0"}`}>
+            <div className="flex flex-1 flex-col justify-center gap-6">
+              {isStaff ? (
+                <div className={`transition ${mounted ? "opacity-100" : "opacity-0"}`}>
                 <button
                   type="button"
                   onClick={() => navigate("/staff/tasks")}
@@ -315,71 +323,69 @@ export default function TrackSelectScreen() {
                 <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
                   Visible to staff accounts only.
                 </div>
+                </div>
+              ) : null}
+
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <Tile
+                  icon={BookOpen}
+                  title="Study abroad"
+                  desc="Admissions, visas, scholarships."
+                  onClick={() => go("study")}
+                  active={going === "study"}
+                  delay={0}
+                />
+
+                <Tile
+                  icon={Briefcase}
+                  title="Work abroad"
+                  desc="Jobs, CV support, work permits."
+                  onClick={() => go("work")}
+                  active={going === "work"}
+                  delay={60}
+                />
+
+                <Tile
+                  icon={Plane}
+                  title="Travel abroad"
+                  desc="Trips, tours, travel planning."
+                  onClick={() => go("travel")}
+                  active={going === "travel"}
+                  delay={120}
+                />
               </div>
-            ) : null}
 
-            <div className={[isStaff ? "mt-4" : "", "grid gap-3"].join(" ").trim()}>
-              <Tile
-                icon={BookOpen}
-                title="Study abroad"
-                desc="Admissions, visas, scholarships."
-                onClick={() => go("study")}
-                active={going === "study"}
-                delay={0}
-              />
+              {showSkip ? (
+                <div
+                  className={[
+                    "rounded-3xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur transition dark:border-zinc-800 dark:bg-zinc-900/60",
+                    mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
+                  ].join(" ")}
+                >
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    You have something in progress
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{skipLabel}</div>
 
-              <Tile
-                icon={Briefcase}
-                title="Work abroad"
-                desc="Jobs, CV support, work permits."
-                onClick={() => go("work")}
-                active={going === "work"}
-                delay={60}
-              />
+                  <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                    <button
+                      onClick={() => navigate("/app/progress")}
+                      className="flex-1 min-w-0 rounded-2xl border border-zinc-200 bg-white/50 px-3 py-2.5 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                    >
+                      View progress
+                    </button>
 
-              <Tile
-                icon={Plane}
-                title="Travel abroad"
-                desc="Trips, tours, travel planning."
-                onClick={() => go("travel")}
-                active={going === "travel"}
-                delay={120}
-              />
+                    <button
+                      onClick={skipToOngoing}
+                      className="flex-1 min-w-0 rounded-2xl border border-emerald-200 bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99]"
+                    >
+                      Continue
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
-
-            {showSkip ? (
-              <div
-                className={[
-                  "mt-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur transition",
-                  "dark:border-zinc-800 dark:bg-zinc-900/60",
-                  mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
-                ].join(" ")}
-              >
-                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                  You have something in progress
-                </div>
-                <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{skipLabel}</div>
-
-                <div className="mt-4 flex gap-3">
-                  <button
-                    onClick={() => navigate("/app/progress")}
-                    className="flex-1 min-w-0 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/60 px-3 py-2.5 text-sm font-semibold text-zinc-900 dark:text-zinc-100 transition hover:bg-zinc-50 active:scale-[0.99] dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-100 dark:hover:bg-zinc-900"
-                  >
-                    View progress
-                  </button>
-
-                  <button
-                    onClick={skipToOngoing}
-                    className="flex-1 min-w-0 rounded-2xl border border-emerald-200 bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99]"
-                  >
-                    Continue
-                  </button>
-                </div>
-              </div>
-            ) : null}
           </div>
-
-          <div className="h-6" />
         </div>
       </div>
     </div>

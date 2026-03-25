@@ -35,8 +35,10 @@ import JourneyBanner from "../components/JourneyBanner";
 import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
 
 import { auth } from "../firebase";
+import { useCountryDirectory } from "../hooks/useCountryDirectory";
 import RequestModal from "../components/RequestModal";
 import FullPackageDiagnosticModal from "../components/FullPackageDiagnosticModal";
+import { useI18n } from "../lib/i18n";
 
 import { createServiceRequest } from "../services/requestservice";
 import {
@@ -67,6 +69,10 @@ import { normalizeJourney } from "../journey/journeyModel";
 import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
 import { logAnalyticsEvent } from "../services/analyticsService";
 import { archiveWorkflowDraft } from "../services/workflowdraftservice";
+import {
+  buildCountryAccentSurfaceStyle,
+  resolveCountryAccentColor,
+} from "../utils/countryAccent";
 
 const FULL_PACKAGE = [
   "Consultation & country selection",
@@ -89,8 +95,11 @@ const floatCard = {
   tap: { scale: 0.996 },
 };
 
-function buildSingleRequestMeta(serviceName, country = "") {
+function buildSingleRequestMeta(serviceName, country = "", overrides = {}) {
   const fallbackName = String(serviceName || "").trim();
+  const directPricingKey = String(overrides?.pricingKey || "").trim();
+  const directDefinitionKey = String(overrides?.requestDefinitionKey || "").trim();
+  const directDefinitionCountry = String(overrides?.requestDefinitionCountry || country || "").trim();
   const entry = findRequestCatalogEntry({
     track: "study",
     requestType: "single",
@@ -102,15 +111,18 @@ function buildSingleRequestMeta(serviceName, country = "") {
     requestType: "single",
     serviceName: entry?.serviceName || fallbackName,
     pricingKey:
+      directPricingKey ||
       entry?.pricingKey ||
       buildRequestPricingKey({
         track: "study",
         requestType: "single",
-        country,
+        country: directDefinitionCountry || country,
         serviceName: entry?.serviceName || fallbackName,
       }) ||
       "",
-    isCustom: !entry,
+    requestDefinitionKey: directDefinitionKey,
+    requestDefinitionCountry: directDefinitionCountry,
+    isCustom: Boolean(directDefinitionKey) || !entry,
   };
 }
 
@@ -126,7 +138,7 @@ function ServiceIcon({ tag, title }) {
   return <AppIcon size={ICON_SM} icon={Package} />;
 }
 
-function ServiceTile({ s, disabled, onClick }) {
+function ServiceTile({ s, disabled, onClick, accentColor = "" }) {
   const serviceName = s.serviceName || s.title;
   const isDocReview = serviceName === "Document Review";
   const showTag = Boolean(String(s?.tag || "").trim());
@@ -145,6 +157,7 @@ function ServiceTile({ s, disabled, onClick }) {
           ? "border-zinc-200/70 dark:border-zinc-800 bg-white/55 dark:bg-zinc-900/60 opacity-60 cursor-not-allowed"
           : "border-zinc-200/70 dark:border-zinc-800 bg-white/72 dark:bg-zinc-900/60 hover:border-emerald-200 hover:bg-white/85",
       ].join(" ")}
+      style={buildCountryAccentSurfaceStyle(accentColor)}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -169,7 +182,9 @@ function ServiceTile({ s, disabled, onClick }) {
           <div className={`${showTag || isDocReview ? "mt-2 " : ""}font-semibold text-zinc-900 dark:text-zinc-100`}>
             {serviceName}
           </div>
-          <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{s.note}</div>
+          {s.note ? (
+            <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{s.note}</div>
+          ) : null}
         </div>
 
         <span className="inline-flex h-11 w-11 items-center justify-center rounded-3xl border border-emerald-100 bg-emerald-50/70 text-emerald-800 shadow-sm">
@@ -183,13 +198,19 @@ function ServiceTile({ s, disabled, onClick }) {
 export default function StudyWeHelp() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useI18n();
 
   const qs = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const country = qs.get("country") || "Not selected";
+  const { countryMap } = useCountryDirectory();
+  const accentColor = resolveCountryAccentColor(countryMap, country, "");
 
   // ✅ Retry support: auto-open RequestModal from RequestStatusScreen
   const shouldAutoOpen = qs.get("autoOpen") === "1";
   const openService = String(qs.get("open") || "").trim();
+  const queryDefinitionKey = String(qs.get("definitionKey") || "").trim();
+  const queryDefinitionCountry = String(qs.get("definitionCountry") || "").trim();
+  const queryPricingKey = String(qs.get("pricingKey") || "").trim();
 
   const [uid, setUid] = useState(null);
   const [email, setEmail] = useState("");
@@ -319,6 +340,7 @@ export default function StudyWeHelp() {
     return subscribeActiveRequestDefinitions({
       trackType: "study",
       country,
+      entryPlacement: "wehelp_country",
       onData: (rows) => {
         setActiveDefinitions(Array.isArray(rows) ? rows : []);
         setDefinitionsLoading(false);
@@ -350,7 +372,13 @@ export default function StudyWeHelp() {
         setToast("Complete your profile first - then you can submit this request.");
         setTimeout(() => setToast(""), 2600);
       } else {
-        setRequestMeta(buildSingleRequestMeta(modalState.serviceName, country));
+        setRequestMeta(
+          buildSingleRequestMeta(modalState.serviceName, country, {
+            requestDefinitionKey: modalState.definitionKey,
+            requestDefinitionCountry: modalState.definitionCountry,
+            pricingKey: modalState.pricingKey,
+          })
+        );
         setModalResumeState(modalState);
         setModalOpen(true);
         setAutoOpened(true);
@@ -373,6 +401,10 @@ export default function StudyWeHelp() {
           requestType: requestMeta?.requestType || "",
           step: modalResumeState?.step || (modalOpen ? "form" : "closed"),
           formState: modalResumeState?.formState || null,
+          definitionKey: requestMeta?.requestDefinitionKey || modalResumeState?.definitionKey || "",
+          definitionCountry:
+            requestMeta?.requestDefinitionCountry || modalResumeState?.definitionCountry || "",
+          pricingKey: requestMeta?.pricingKey || modalResumeState?.pricingKey || "",
         },
         fullPackage: {
           screen: "main",
@@ -405,15 +437,31 @@ export default function StudyWeHelp() {
       return;
     }
 
-    setRequestMeta(buildSingleRequestMeta(openService, country));
+    setRequestMeta(
+      buildSingleRequestMeta(openService, country, {
+        requestDefinitionKey: queryDefinitionKey,
+        requestDefinitionCountry: queryDefinitionCountry,
+        pricingKey: queryPricingKey,
+      })
+    );
     setModalOpen(true);
     setAutoOpened(true);
-  }, [autoOpened, shouldAutoOpen, openService, profileChecked, missing.length]);
+  }, [
+    autoOpened,
+    shouldAutoOpen,
+    openService,
+    profileChecked,
+    missing.length,
+    country,
+    queryDefinitionKey,
+    queryDefinitionCountry,
+    queryPricingKey,
+  ]);
 
   const modalTitle = useMemo(() => {
-    if (!requestMeta) return "Request";
-    return `Request: ${requestMeta.serviceName}`;
-  }, [requestMeta]);
+    if (!requestMeta) return t("request");
+    return `${t("request_label")}: ${requestMeta.serviceName}`;
+  }, [requestMeta, t]);
 
   const modalSubtitle = useMemo(() => `Study Abroad • ${country}`, [country]);
 
@@ -426,7 +474,10 @@ export default function StudyWeHelp() {
       return;
     }
 
-    const meta = buildSingleRequestMeta(title, country);
+    const meta = buildSingleRequestMeta(title, country, {
+      requestDefinitionKey: String(definition?.definitionKey || "").trim(),
+      requestDefinitionCountry: String(definition?.country || country || "").trim(),
+    });
 
     // Custom requests need a pricingRules row (they're not part of the built-in catalog).
     if (meta?.isCustom) {
@@ -464,8 +515,6 @@ export default function StudyWeHelp() {
 
   const goToProfile = () => navigate("/app/profile");
 
-  // ✅ Attachments on all single-package requests
-  const enableAttachments = requestMeta?.requestType === "single";
   const singlePackages = useMemo(() => {
     const defs = Array.isArray(activeDefinitions) ? activeDefinitions : [];
     return defs
@@ -478,11 +527,7 @@ export default function StudyWeHelp() {
     return singlePackages.filter((def) => {
       if (!needle) return true;
       const title = String(def?.title || "").trim().toLowerCase();
-      const note =
-        Number(def?.activeExtraFieldCount || 0) > 0
-          ? `${Number(def?.activeExtraFieldCount || 0)} extra fields`
-          : "No extra fields configured yet";
-      return `${title} ${note}`.includes(needle);
+      return title.includes(needle);
     });
   }, [singlePackages, q]);
 
@@ -568,6 +613,8 @@ export default function StudyWeHelp() {
             county: String(county || "").trim(),
             town: String(town || "").trim(),
             city: String(town || "").trim(),
+            countryOfResidence: String(userState?.countryOfResidence || "").trim(),
+            partnerFilterMode: "destination_country",
             preferredAgentId: String(preferredAgentId || "").trim(),
             paid: false,
             paymentMeta: null,
@@ -687,6 +734,8 @@ export default function StudyWeHelp() {
       county: String(county || "").trim(),
       town: String(town || "").trim(),
       city: String(town || "").trim(),
+      countryOfResidence: String(userState?.countryOfResidence || "").trim(),
+      partnerFilterMode: "destination_country",
       preferredAgentId: String(preferredAgentId || "").trim(),
       paid: false,
       paymentMeta: null,
@@ -718,7 +767,7 @@ export default function StudyWeHelp() {
         variants={pageIn}
         initial="hidden"
         animate="show"
-        className="px-5 py-6 max-w-xl mx-auto"
+        className="app-page-shell app-page-shell--wide"
       >
         {/* Back */}
         <button
@@ -745,7 +794,7 @@ export default function StudyWeHelp() {
 
             <p className="mt-1 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
               <AppIcon size={ICON_SM} icon={MapPinned} className="text-emerald-700" />
-              Destination: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{country}</span>
+              {t("country_label")}: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{country}</span>
             </p>
           </div>
 
@@ -807,6 +856,7 @@ export default function StudyWeHelp() {
           </motion.div>
         ) : null}
 
+        <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] xl:items-start">
         {/* Full package hero */}
         <motion.div
           variants={floatCard}
@@ -814,7 +864,7 @@ export default function StudyWeHelp() {
           whileHover={canUseWeHelp ? "hover" : "rest"}
           whileTap={canUseWeHelp ? "tap" : "rest"}
           className={[
-            "mt-6 rounded-3xl border p-5 shadow-[0_18px_55px_rgba(0,0,0,0.10)] backdrop-blur-xl",
+            "rounded-3xl border p-5 shadow-[0_18px_55px_rgba(0,0,0,0.10)] backdrop-blur-xl h-full",
             canUseWeHelp
               ? "border-emerald-200/80 bg-white/75 dark:bg-zinc-900/60"
               : "border-zinc-200/70 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 opacity-70",
@@ -887,7 +937,7 @@ export default function StudyWeHelp() {
         </motion.div>
 
         {/* Single-package requests configured in SACC */}
-        <div className="mt-6">
+        <div className="min-w-0">
           <div className="flex items-end justify-between gap-3">
             <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
               Single packages
@@ -943,17 +993,17 @@ export default function StudyWeHelp() {
               No single packages match your search yet.
             </div>
           ) : (
-            <div className="mt-4 grid gap-3">
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
               {filteredSinglePackages.map((def) => {
-                const count = Number(def?.activeExtraFieldCount || 0);
-                const note = count > 0 ? `${count} extra fields` : "No extra fields configured yet";
                 return (
                   <ServiceTile
                     key={def.definitionKey || def.id}
                     s={{
                       serviceName: def.title,
-                      note,
+                      note: def.summary || "",
+                      tag: def.tag || "",
                     }}
+                    accentColor={accentColor}
                     disabled={!canUseWeHelp}
                     onClick={() => void openDefinition(def)}
                   />
@@ -961,6 +1011,7 @@ export default function StudyWeHelp() {
               })}
             </div>
           )}
+        </div>
         </div>
 
         {/*
@@ -1076,7 +1127,6 @@ export default function StudyWeHelp() {
           </div>
         */}
 
-        <div className="h-10" />
       </motion.div>
 
       {/* Full Package diagnostic modal */}
@@ -1104,13 +1154,16 @@ export default function StudyWeHelp() {
           flow: "weHelp",
           track: "study",
           country,
+          countryOfResidence: String(userState?.countryOfResidence || "").trim(),
+          partnerFilterMode: "destination_country",
           requestType: requestMeta?.requestType || "single",
           serviceName: requestMeta?.serviceName || "",
           pricingKey: requestMeta?.pricingKey || "",
+          requestDefinitionKey: requestMeta?.requestDefinitionKey || "",
+          requestDefinitionCountry: requestMeta?.requestDefinitionCountry || "",
         }}
         initialState={modalResumeState?.formState || null}
         onStateChange={setModalResumeState}
-        enableAttachments={enableAttachments}
         maxPdfMb={10}
       />
     </div>

@@ -22,6 +22,10 @@ import { getCurrentUserRoleContext } from "./adminroleservice";
 export const PARTNERS_COLLECTION = "partners";
 export const PARTNER_COVERAGE_COLLECTION = "partnerCoverage";
 export const PARTNER_STATUS_OPTIONS = ["active", "inactive"];
+export const PARTNER_FILTER_MODES = {
+  HOME_COUNTRY: "home_country",
+  DESTINATION_COUNTRY: "destination_country",
+};
 
 function safeString(value, max = 400) {
   return String(value || "").trim().slice(0, max);
@@ -93,6 +97,25 @@ function normalizeCountryList(value) {
     rows.push(clean);
   });
   return rows.sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeHomeCountryList(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const rows = [];
+  value.forEach((country) => {
+    const clean = safeString(country, 120);
+    const key = lower(clean, 120);
+    if (!clean || seen.has(key)) return;
+    seen.add(key);
+    rows.push(clean);
+  });
+  return rows.sort((a, b) => a.localeCompare(b));
+}
+
+function normalizePartnerFilterMode(value, fallback = PARTNER_FILTER_MODES.DESTINATION_COUNTRY) {
+  const raw = lower(value, 40);
+  return Object.values(PARTNER_FILTER_MODES).includes(raw) ? raw : fallback;
 }
 
 function mergeCoverageCounties(supportedCounties = []) {
@@ -169,6 +192,7 @@ function normalizePartnerCorePayload(input = {}, { existingId = "" } = {}) {
 function normalizePartnerCoveragePayload(input = {}, { partnerId = "" } = {}) {
   const supportedTracks = normalizeTrackList(input?.supportedTracks);
   const supportedCountries = normalizeCountryList(input?.supportedCountries);
+  const homeCountries = normalizeHomeCountryList(input?.homeCountries);
   const supportedCounties = normalizeCountyList(input?.supportedCounties || []);
   const neighboringCounties = [];
   const coverageCounties = mergeCoverageCounties(supportedCounties);
@@ -182,6 +206,9 @@ function normalizePartnerCoveragePayload(input = {}, { partnerId = "" } = {}) {
   if (!supportedCountries.length) {
     throw new Error("Select at least one supported country.");
   }
+  if (!homeCountries.length) {
+    throw new Error("Select at least one home country.");
+  }
   if (!supportedCounties.length) {
     throw new Error("Select at least one supported county.");
   }
@@ -190,6 +217,8 @@ function normalizePartnerCoveragePayload(input = {}, { partnerId = "" } = {}) {
     id: partnerId,
     partnerId,
     supportedTracks,
+    homeCountries,
+    homeCountriesLower: homeCountries.map((country) => lower(country, 120)),
     supportedCountries,
     supportedCountriesLower: supportedCountries.map((country) => lower(country, 120)),
     supportedCounties,
@@ -273,6 +302,12 @@ function safeMergePartnerAndCoverage(id, partnerData = {}, coverageData = {}) {
       branches: normalizeBranchList(partnerSource?.branches),
       branchCount: normalizeBranchList(partnerSource?.branches).length,
       supportedTracks: normalizeTrackList(coverageSource?.supportedTracks || partnerSource?.supportedTracks),
+      homeCountries: normalizeHomeCountryList(
+        coverageSource?.homeCountries || partnerSource?.homeCountries
+      ),
+      homeCountriesLower: normalizeHomeCountryList(
+        coverageSource?.homeCountries || partnerSource?.homeCountries
+      ).map((country) => lower(country, 120)),
       supportedCountries: normalizeCountryList(
         coverageSource?.supportedCountries || partnerSource?.supportedCountries
       ),
@@ -367,6 +402,7 @@ export function createEmptyPartnerDraft() {
     status: "active",
     notes: "",
     supportedTracks: [],
+    homeCountries: [],
     supportedCountries: [],
     supportedCounties: [],
     neighboringCounties: [],
@@ -383,6 +419,7 @@ export function draftFromPartner(partner) {
     status: normalizePartnerStatus(clean?.status, clean?.isActive === false ? "inactive" : "active"),
     notes: safeParagraph(clean?.notes, 2000),
     supportedTracks: normalizeTrackList(clean?.supportedTracks),
+    homeCountries: normalizeHomeCountryList(clean?.homeCountries),
     supportedCountries: normalizeCountryList(clean?.supportedCountries),
     supportedCounties: normalizeCountyList(clean?.supportedCounties || []),
     neighboringCounties: [],
@@ -412,49 +449,67 @@ export async function fetchPartnerById(partnerId = "") {
 
 export function evaluatePartnerRequestCompatibility(
   partner,
-  { trackType = "", country = "", county = "" } = {}
+  {
+    trackType = "",
+    country = "",
+    county = "",
+    countryOfResidence = "",
+    filterMode = PARTNER_FILTER_MODES.DESTINATION_COUNTRY,
+  } = {}
 ) {
   const safePartner = partner && typeof partner === "object" ? partner : {};
+  const safeFilterMode = normalizePartnerFilterMode(filterMode);
   const safeTrack = normalizeTrackValue(trackType);
   const safeCountry = normalizeCountryValue(country);
   const safeCountryLower = lower(safeCountry, 120);
-  const safeCounty = safeString(county, 120);
-  const safeCountyLower = lower(safeCounty, 120);
+  const safeResidenceCountry = safeString(countryOfResidence, 120);
+  const safeResidenceLower = lower(safeResidenceCountry, 120);
 
   const supportedTracks = normalizeTrackList(safePartner?.supportedTracks);
+  const homeCountries = normalizeHomeCountryList(safePartner?.homeCountries);
+  const homeCountriesLower = homeCountries.map((value) => lower(value, 120));
   const supportedCountries = normalizeCountryList(safePartner?.supportedCountries);
   const supportedCountriesLower = supportedCountries.map((value) => lower(value, 120));
-  const supportedCounties = normalizeCountyList(safePartner?.supportedCounties || []);
-  const supportedCountiesLower = normalizeCountyLowerList(supportedCounties);
   const partnerActive =
     normalizePartnerStatus(safePartner?.status, safePartner?.isActive === false ? "inactive" : "active") ===
     "active";
 
   const trackOk = Boolean(safeTrack) && supportedTracks.includes(safeTrack);
-  const countryOk = Boolean(safeCountryLower) && supportedCountriesLower.includes(safeCountryLower);
-  const countyDirect = Boolean(safeCountyLower) && supportedCountiesLower.includes(safeCountyLower);
-  const countyNeighbor = false;
-  const countyOk = countyDirect;
+  const residenceHomeCountryOk = Boolean(safeResidenceLower) && homeCountriesLower.includes(safeResidenceLower);
+  const targetCoverageOk = Boolean(safeCountryLower) && supportedCountriesLower.includes(safeCountryLower);
+  const usesHomeCountryFilter = safeFilterMode === PARTNER_FILTER_MODES.HOME_COUNTRY;
+  const homeCountryOk = residenceHomeCountryOk;
+  const countryOk = usesHomeCountryFilter
+    ? true
+    : targetCoverageOk;
+  const hasResidenceCountry = Boolean(safeResidenceLower);
+  const hasDestinationCountry = Boolean(safeCountryLower);
 
   const reasons = [];
   if (!partnerActive) reasons.push("partner_inactive");
   if (!safeTrack || !trackOk) reasons.push("track_not_supported");
-  if (!safeCountryLower || !countryOk) reasons.push("country_not_supported");
-  if (!safeCountyLower || !countyOk) reasons.push("county_not_supported");
+  if (hasResidenceCountry && !homeCountryOk) {
+    reasons.push("home_country_not_supported");
+  }
+  if (!usesHomeCountryFilter && hasDestinationCountry && !countryOk) {
+    reasons.push("country_not_supported");
+  }
 
   return {
     partnerId: safeString(safePartner?.id, 140),
     partnerName: safeString(safePartner?.displayName, 120),
     eligible: reasons.length === 0,
     reasons,
-    countyMatchType: countyDirect ? "direct" : "",
+    countyMatchType: "",
     matches: {
       active: partnerActive,
       track: trackOk,
+      filterMode: safeFilterMode,
+      homeCountry: homeCountryOk,
       country: countryOk,
-      county: countyOk,
-      countyDirect,
-      countyNeighbor,
+      county: true,
+      countyDirect: false,
+      countyNeighbor: false,
     },
   };
 }
@@ -463,6 +518,9 @@ export function preferredAgentReasonLabel(reason) {
   const safeReason = safeString(reason, 80).toLowerCase();
   if (safeReason === "partner_inactive") return "Selected agent is inactive.";
   if (safeReason === "track_not_supported") return "Selected agent does not support this track.";
+  if (safeReason === "home_country_not_supported") {
+    return "Selected agent does not support your home country.";
+  }
   if (safeReason === "country_not_supported") return "Selected agent does not support this country.";
   if (safeReason === "county_not_supported") return "Selected agent does not support this county.";
   if (safeReason === "partner_not_found") return "Selected agent was not found.";
@@ -474,6 +532,8 @@ export async function validatePreferredAgentSelection({
   trackType = "",
   country = "",
   county = "",
+  countryOfResidence = "",
+  filterMode = PARTNER_FILTER_MODES.DESTINATION_COUNTRY,
 } = {}) {
   const safePartnerId = safeString(partnerId, 140);
   if (!safePartnerId) {
@@ -497,6 +557,8 @@ export async function validatePreferredAgentSelection({
     trackType,
     country,
     county,
+    countryOfResidence,
+    filterMode,
   });
 
   return {
@@ -511,8 +573,11 @@ export async function listEligiblePreferredAgents({
   trackType = "",
   country = "",
   county = "",
+  countryOfResidence = "",
+  filterMode = PARTNER_FILTER_MODES.DESTINATION_COUNTRY,
   max = 250,
 } = {}) {
+  const safeFilterMode = normalizePartnerFilterMode(filterMode);
   const partners = await listPartners({ activeOnly: true, max });
   return partners
     .map((partner) => ({
@@ -521,6 +586,8 @@ export async function listEligiblePreferredAgents({
         trackType,
         country,
         county,
+        countryOfResidence,
+        filterMode: safeFilterMode,
       }),
     }))
     .filter((row) => row.compatibility?.eligible)
@@ -536,6 +603,8 @@ export async function listEligiblePreferredAgents({
       id: row.partner.id,
       displayName: row.partner.displayName,
       agentLabel: row.partner.agentLabel || row.partner.displayName,
+      displayLabel: row.partner.displayName,
+      homeCountries: row.partner.homeCountries || [],
       countyMatchType: row.compatibility?.countyMatchType || "",
       partner: row.partner,
       compatibility: row.compatibility,
@@ -569,6 +638,7 @@ export async function createPartner(input = {}) {
     setDoc(ref, {
       ...corePayload,
       supportedTracks: coveragePayload.supportedTracks,
+      homeCountries: coveragePayload.homeCountries,
       supportedCountries: coveragePayload.supportedCountries,
       supportedCounties: coveragePayload.supportedCounties,
       neighboringCounties: coveragePayload.neighboringCounties,
@@ -626,6 +696,7 @@ export async function updatePartner(partnerId, input = {}) {
       {
         ...corePayload,
         supportedTracks: coveragePayload.supportedTracks,
+        homeCountries: coveragePayload.homeCountries,
         supportedCountries: coveragePayload.supportedCountries,
         supportedCounties: coveragePayload.supportedCounties,
         neighboringCounties: coveragePayload.neighboringCounties,

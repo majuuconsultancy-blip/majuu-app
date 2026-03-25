@@ -23,10 +23,17 @@ import {
   createCountry,
   createEmptyCountryDraft,
   draftFromCountry,
+  getCountryAccentSuggestions,
   setCountryActiveState,
+  suggestCountryAccentColor,
   subscribeAllCountries,
   updateCountry,
 } from "../services/countryService";
+import {
+  buildCountryAccentBadgeStyle,
+  buildCountryAccentSurfaceStyle,
+  normalizeHexColor,
+} from "../utils/countryAccent";
 import { smartBack } from "../utils/navBack";
 
 function safeString(value, max = 240) {
@@ -41,7 +48,7 @@ function matchesCountrySearch(country, search) {
     (track) => APP_TRACK_META[track]?.label || track
   );
 
-  return [country?.name, country?.code, country?.currency, ...trackLabels]
+  return [country?.name, country?.code, country?.currency, country?.accentColor, ...trackLabels]
     .filter(Boolean)
     .join(" ")
     .toLowerCase()
@@ -145,6 +152,11 @@ export default function AdminCountryManagementScreen() {
   const updateDraft = (patch) => {
     setDraft((current) => ({ ...current, ...(patch || {}) }));
   };
+
+  const accentSuggestions = useMemo(
+    () => getCountryAccentSuggestions(draft),
+    [draft]
+  );
 
   const toggleDraftTrack = (track) => {
     setDraft((current) => {
@@ -353,6 +365,45 @@ export default function AdminCountryManagementScreen() {
                       className={input}
                     />
                   </label>
+
+                  <div className="block">
+                    <div className={label}>Accent Color</div>
+                    <div className="mt-2 flex items-center gap-3">
+                      <input
+                        type="color"
+                        value={normalizeHexColor(draft.accentColor, suggestCountryAccentColor(draft))}
+                        onChange={(event) => updateDraft({ accentColor: event.target.value })}
+                        className="h-12 w-14 rounded-2xl border border-zinc-200 bg-white/90 p-1 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/70"
+                      />
+                      <input
+                        type="text"
+                        value={draft.accentColor}
+                        onChange={(event) => updateDraft({ accentColor: event.target.value })}
+                        placeholder="#157347"
+                        className={input}
+                      />
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {accentSuggestions.map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          onClick={() => updateDraft({ accentColor: color })}
+                          className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:opacity-90 dark:text-zinc-100"
+                          style={buildCountryAccentBadgeStyle(color, { strong: true })}
+                        >
+                          <span
+                            className="inline-flex h-3.5 w-3.5 rounded-full border border-white/70"
+                            style={{ backgroundColor: color }}
+                          />
+                          {color}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-3 rounded-2xl border px-4 py-3 text-sm text-zinc-700 dark:text-zinc-200" style={buildCountryAccentSurfaceStyle(draft.accentColor, { strong: true })}>
+                      This accent is reused subtly across track, request, and support screens for this country.
+                    </div>
+                  </div>
                 </div>
 
                 <div className="mt-5">
@@ -493,7 +544,11 @@ export default function AdminCountryManagementScreen() {
                   ).map((track) => APP_TRACK_META[track]?.label || track);
 
                   return (
-                    <div key={country.id} className={`${card} ${country.isActive ? "" : "opacity-90"}`}>
+                    <div
+                      key={country.id}
+                      className={`${card} ${country.isActive ? "" : "opacity-90"}`}
+                      style={buildCountryAccentSurfaceStyle(country.accentColor)}
+                    >
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
@@ -505,6 +560,12 @@ export default function AdminCountryManagementScreen() {
                             <MetaPill tone={country.isActive ? "active" : "inactive"}>
                               {country.isActive ? "Active" : "Inactive"}
                             </MetaPill>
+                            <span
+                              className="rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+                              style={buildCountryAccentBadgeStyle(country.accentColor)}
+                            >
+                              Accent {country.accentColor}
+                            </span>
                           </div>
 
                           <div className="mt-3 flex flex-wrap gap-2 text-[11px]">

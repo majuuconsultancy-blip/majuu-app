@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useCountryDirectory } from "../hooks/useCountryDirectory";
 import {
   adminSoftDeleteRequest,
   getRequests,
@@ -61,6 +62,11 @@ import {
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD, ICON_LG } from "../constants/iconSizes";
+import {
+  buildCountryAccentRailStyle,
+  buildCountryAccentSurfaceStyle,
+  resolveCountryAccentColor,
+} from "../utils/countryAccent";
 
 // ✅ 4 tabs: New / Accepted / Rejected / Assigned
 const TABS = [
@@ -259,7 +265,7 @@ function AssignedAdminAccessPanel() {
         <button type="button" onClick={() => setOpen((v) => !v)} className={headerBtn}>
           <div className="min-w-0">
             <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Admin System
+              Admin Assign System
             </div>
           </div>
           <span
@@ -620,6 +626,7 @@ export default function AdminRequestsScreen() {
   void motion;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { countryMap } = useCountryDirectory();
   const mountAtRef = useRef(typeof performance !== "undefined" ?performance.now() : 0);
   const firstPaintLoggedRef = useRef(false);
 
@@ -1703,6 +1710,7 @@ export default function AdminRequestsScreen() {
               const p = pill(r.status);
               const left = `${String(r.track || "").toUpperCase()} • ${r.country || "-"}`;
               const right = r.requestType === "full" ?"Full Package" : `Single: ${r.serviceName || "-"}`;
+              const accentColor = resolveCountryAccentColor(countryMap, r?.country, "");
 
               const rid = String(r.id || "");
               const assignedTo = String(r?.assignedTo || "").trim();
@@ -1726,13 +1734,10 @@ export default function AdminRequestsScreen() {
               const urgentAccent = urgentReassign
                 ?"border-rose-300/80 bg-rose-50/45 dark:border-rose-800/60 dark:bg-rose-950/20"
                 : "";
-              const sideAccentClass = urgentReassign
-                ?"bg-rose-600/80"
-                : isFull
-                  ?"bg-emerald-500/80 dark:bg-emerald-400/70"
-                  : hasNew
-                    ?"bg-rose-600/80"
-                    : "";
+              const sideAccentStyle =
+                urgentReassign || hasNew
+                  ? { backgroundColor: "rgba(225, 29, 72, 0.82)" }
+                  : buildCountryAccentRailStyle(accentColor);
 
               return (
                 <motion.div
@@ -1754,10 +1759,12 @@ export default function AdminRequestsScreen() {
                     }
                   }}
                   className={`${tile} ${fullAccent} ${urgentAccent} relative overflow-hidden`}
+                  style={buildCountryAccentSurfaceStyle(accentColor, { strong: isFull })}
                 >
-                  {sideAccentClass ?(
-                    <span className={`pointer-events-none absolute inset-y-0 left-0 w-1.5 ${sideAccentClass}`} />
-                  ) : null}
+                  <span
+                    className="pointer-events-none absolute inset-y-0 left-0 w-1.5"
+                    style={sideAccentStyle}
+                  />
 
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">

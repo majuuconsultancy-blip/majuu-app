@@ -19,6 +19,7 @@ import {
 } from "firebase/firestore";
 import { motion, AnimatePresence } from "../utils/motionProxy";
 import RequestChatLauncher from "../components/RequestChatLauncher";
+import RequestDocumentFieldsSection from "../components/RequestDocumentFieldsSection";
 import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
 import RequestProgressUpdatesList from "../components/RequestProgressUpdatesList";
 import RequestExtraDetailsSection from "../components/RequestExtraDetailsSection";
@@ -660,6 +661,7 @@ export default function RequestStatusScreen() {
   const canBackToFullPackage = isFull && Boolean(fullPackageHubPath);
   const canStartNew = !isFull && st === "closed";
   const canTryAgain = st === "rejected";
+  const showLegacySubmittedDocuments = Boolean(req?.legacySubmittedDocumentsVisible);
 
   const goToFullPackageHub = ({ autoOpen = false, retryItemKey = "", item = "" } = {}) => {
     if (!fullPackageHubPath) return;
@@ -996,7 +998,11 @@ export default function RequestStatusScreen() {
                   </div>
                 ) : null}
 
-                <RequestExtraDetailsSection request={req} title="Extra details" />
+                <RequestExtraDetailsSection
+                  request={req}
+                  title="Extra details"
+                  includeDocumentFields={false}
+                />
               </div>
 
               {(st === "rejected" || st === "closed" || st === "contacted") && adminNote ?(
@@ -1403,6 +1409,18 @@ export default function RequestStatusScreen() {
           {/* Submitted documents by user */}
           <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
             <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
+              <RequestDocumentFieldsSection
+                request={req}
+                requestId={validRequestId}
+                title="Submitted document fields"
+                viewerRole="user"
+                attachments={attachments}
+                attachmentsLoading={false}
+                attachmentsError={fileErr}
+                className="p-0 border-0 bg-transparent shadow-none"
+              />
+              {showLegacySubmittedDocuments ? (
+              <>
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50/60">
@@ -1458,6 +1476,8 @@ export default function RequestStatusScreen() {
                   ))
                 )}
               </div>
+              </>
+              ) : null}
             </motion.div>
           </motion.div>
 

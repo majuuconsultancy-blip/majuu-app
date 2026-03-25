@@ -68,7 +68,9 @@ function buildNotificationCopy(type, requestId, scope, extras = {}) {
       return {
         title: "New assignment",
         body: "You have been assigned a request.",
-        route: routeForScope("staff", requestId),
+        route: requestId
+          ? `/staff/request/${encodeURIComponent(safeStr(requestId))}/start`
+          : "/staff/tasks",
       };
     case "STAFF_UNASSIGNED_REQUEST":
       return {

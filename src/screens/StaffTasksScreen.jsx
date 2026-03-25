@@ -15,8 +15,14 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../firebase";
+import { useCountryDirectory } from "../hooks/useCountryDirectory";
 import { useNotifsV2Store } from "../services/notifsV2Store";
 import { smartBack } from "../utils/navBack";
+import {
+  buildCountryAccentRailStyle,
+  buildCountryAccentSurfaceStyle,
+  resolveCountryAccentColor,
+} from "../utils/countryAccent";
 
 const PERF_TAG = "[perf][StaffTasks]";
 const SEARCH_DEBOUNCE_MS = 180;
@@ -299,6 +305,7 @@ function resolveStaffStatus(requestStatus, requestStaffStatus, taskStatus) {
 export default function StaffTasksScreen() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { countryMap } = useCountryDirectory();
   const mountAtRef = useRef(typeof performance !== "undefined" ? performance.now() : 0);
   const firstPaintLoggedRef = useRef(false);
   const firstTasksSnapSeenRef = useRef(false);
@@ -934,6 +941,7 @@ export default function StaffTasksScreen() {
 
               const displayTrack = String(req?.track || task?.track || "").toUpperCase();
               const displayCountry = req?.country || task?.country || "-";
+              const accentColor = resolveCountryAccentColor(countryMap, displayCountry, "");
               const displayRequestType = String(req?.requestType || task?.requestType || "").toLowerCase();
               const isFull = Boolean(req?.isFullPackage || task?.isFullPackage) || displayRequestType === "full";
               const displayServiceName = req?.serviceName || task?.serviceName || "-";
@@ -978,7 +986,12 @@ export default function StaffTasksScreen() {
                     })
                   }
                   className={`${floatCard} ${fullTaskAccent} relative overflow-hidden`}
+                  style={buildCountryAccentSurfaceStyle(accentColor, { strong: isFull })}
                 >
+                  <span
+                    className="pointer-events-none absolute inset-y-0 left-0 w-1.5 rounded-l-3xl"
+                    style={buildCountryAccentRailStyle(accentColor)}
+                  />
                   {isFull ? (
                     <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5 bg-emerald-500/80 dark:bg-emerald-400/70" />
                   ) : null}

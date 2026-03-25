@@ -63,9 +63,9 @@ function formatMoney(amount, currency = "KES") {
 
 function createOpenSections() {
   return {
-    environment: true,
-    partnerProfiles: true,
-    payoutQueue: true,
+    environment: false,
+    partnerProfiles: false,
+    payoutQueue: false,
     settlementHistory: false,
     auditLog: false,
   };
@@ -457,7 +457,7 @@ export default function AdminFinancesScreen() {
   if (checkingRole) {
     return (
       <div className={pageBg}>
-        <div className="mx-auto max-w-xl px-5 py-6">
+        <div className="app-page-shell app-page-shell--wide">
           <div className={card}>Checking access...</div>
         </div>
       </div>
@@ -467,7 +467,7 @@ export default function AdminFinancesScreen() {
   if (!hasFinanceAccess) {
     return (
       <div className={pageBg}>
-        <div className="mx-auto max-w-xl px-5 py-6">
+        <div className="app-page-shell app-page-shell--wide">
           <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/35 dark:text-rose-200">
             Only admin accounts can open Finances.
           </div>
@@ -478,7 +478,7 @@ export default function AdminFinancesScreen() {
 
   return (
     <div className={pageBg}>
-      <div className="mx-auto max-w-xl px-5 py-6">
+      <div className="app-page-shell app-page-shell--wide">
         <div className="flex items-end justify-between gap-3">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50/80 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
@@ -489,9 +489,7 @@ export default function AdminFinancesScreen() {
               Finance Control Center
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              Request-level assigned partner and assigned admin records remain the financial source
-              of truth. This module configures payout rules, provider readiness, and finance
-              evidence around that routing.
+              Manage payment rules, payouts, and finance records.
             </p>
           </div>
 
@@ -538,7 +536,7 @@ export default function AdminFinancesScreen() {
           <SectionCard
             icon={ShieldCheck}
             title="Environment, pricing, and platform rules"
-            subtitle="Backend-first payment settings for Paystack readiness, in-progress pricing, tax, refund timing, and payout controls."
+            subtitle="Payment and payout rules."
             open={openSections.environment}
             onToggle={() => toggleSection("environment")}
             meta={
@@ -795,7 +793,7 @@ export default function AdminFinancesScreen() {
           <SectionCard
             icon={Link2}
             title="Partner financial profiles"
-            subtitle="Each request’s assigned partner drives platform cut rules, tax overrides, payout release behavior, and payout destination readiness."
+            subtitle="Partner payout settings."
             open={openSections.partnerProfiles}
             onToggle={() => toggleSection("partnerProfiles")}
             meta={
@@ -1110,7 +1108,7 @@ export default function AdminFinancesScreen() {
           <SectionCard
             icon={Package}
             title="Payout queue"
-            subtitle="Successful in-progress payments stay held here until payout release. Ready items can be released once destination metadata exists."
+            subtitle="Pending partner payouts."
             open={openSections.payoutQueue}
             onToggle={() => toggleSection("payoutQueue")}
             meta={
@@ -1213,7 +1211,7 @@ export default function AdminFinancesScreen() {
           <SectionCard
             icon={FileText}
             title="Settlement history"
-            subtitle="Released payout evidence and settlement references."
+            subtitle="Released payouts."
             open={openSections.settlementHistory}
             onToggle={() => toggleSection("settlementHistory")}
             meta={
@@ -1254,7 +1252,7 @@ export default function AdminFinancesScreen() {
           <SectionCard
             icon={FileText}
             title="Financial audit log"
-            subtitle="Immutable finance evidence for prompts, approvals, verification, refunds, and payout actions."
+            subtitle="Finance activity history."
             open={openSections.auditLog}
             onToggle={() => toggleSection("auditLog")}
             meta={

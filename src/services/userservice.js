@@ -4,6 +4,14 @@ import { normalizeCountyLower, normalizeCountyName } from "../constants/kenyaCou
 import { createDefaultUserOnboarding, createEmptyJourney } from "../journey/journeyModel";
 import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
 import { buildTrackEventKey, logAnalyticsEvent } from "./analyticsService";
+import {
+  createDefaultUserProfile,
+  getDefaultLanguageForCountry,
+  normalizeProfileHomeCountry,
+  normalizeProfileLanguage,
+  normalizeProfileName,
+  normalizeUserProfile,
+} from "../utils/userProfile";
 
 /* ----------------- helpers ----------------- */
 function onlyDigits(s) {
@@ -11,7 +19,7 @@ function onlyDigits(s) {
 }
 
 function normalizeName(name) {
-  return String(name || "").trim().replace(/\s+/g, " ");
+  return normalizeProfileName(name, 80);
 }
 
 function normalizeTown(input) {
@@ -20,6 +28,10 @@ function normalizeTown(input) {
 
 function defaultAdminScope() {
   return {
+    stationedCountry: "",
+    stationedCountryLower: "",
+    country: "",
+    countryLower: "",
     counties: [],
     countiesLower: [],
     town: "",
@@ -65,22 +77,28 @@ function normalizePhoneByResidence(countryOfResidence, phoneRaw) {
   return phone;
 }
 
-function validateProfilePayload({ name, phone, countryOfResidence }) {
-  const residence = String(countryOfResidence || "").trim();
+function validateProfilePayload({ name, phone, countryOfResidence, language }) {
+  const residence = normalizeProfileHomeCountry(countryOfResidence);
 
   if (typeof name !== "undefined") {
     const n = normalizeName(name);
-    if (!n) throw new Error("Full name is required.");
-    if (n.length < 3) throw new Error("Full name must be at least 3 characters.");
+    if (!n) throw new Error("Name is required.");
   }
 
   if (typeof countryOfResidence !== "undefined") {
     if (!residence) throw new Error("Country of residence is required.");
   }
 
+  if (typeof language !== "undefined") {
+    const rawLanguage = String(language || "").trim();
+    if (!rawLanguage) throw new Error("Language is required.");
+    const normalizedLanguage = normalizeProfileLanguage(rawLanguage, "");
+    if (!normalizedLanguage) throw new Error("Language is required.");
+  }
+
   if (typeof phone !== "undefined") {
     const raw = String(phone || "").trim();
-    if (!raw) throw new Error("Phone is required.");
+    if (!raw) return;
 
     if (residence) {
       normalizePhoneByResidence(residence, raw);
@@ -88,6 +106,18 @@ function validateProfilePayload({ name, phone, countryOfResidence }) {
       if (onlyDigits(raw).length < 8) throw new Error("Phone number looks too short.");
     }
   }
+}
+
+function normalizeUserStateRecord(state) {
+  const safeState = state && typeof state === "object" ? state : {};
+  const profile = normalizeUserProfile(safeState);
+
+  return {
+    ...safeState,
+    countryOfResidence:
+      String(safeState?.countryOfResidence || "").trim() || profile.homeCountry || "",
+    profile,
+  };
 }
 
 /**
@@ -113,6 +143,7 @@ export async function ensureUserDoc({
     county: "",
     countyLower: "",
     town: "",
+    profile: createDefaultUserProfile({}),
     role: "user",
     adminScope: defaultAdminScope(),
     selectedTrack: null,
@@ -157,6 +188,16 @@ export async function ensureUserDoc({
     setIfMissing("county", "");
     setIfMissing("countyLower", "");
     setIfMissing("town", "");
+    setIfMissing(
+      "profile",
+      createDefaultUserProfile({
+        homeCountry: d?.countryOfResidence || d?.profile?.homeCountry || "",
+        language:
+          d?.profile?.language ||
+          getDefaultLanguageForCountry(d?.countryOfResidence || d?.profile?.homeCountry || "") ||
+          "en",
+      })
+    );
     setIfMissing("role", "user");
     setIfMissing("adminScope", defaultAdminScope());
     setIfMissing("selectedTrack", null);
@@ -181,9 +222,10 @@ export async function ensureUserDoc({
   const latest = await getDoc(ref);
   const state = latest.exists() ? latest.data() : null;
   if (!state) return null;
+  const normalizedState = normalizeUserStateRecord(state);
   return didCreate
-    ? { ...state, __ensureMeta: { created: true } }
-    : { ...state, __ensureMeta: { created: false } };
+    ? { ...normalizedState, __ensureMeta: { created: true } }
+    : { ...normalizedState, __ensureMeta: { created: false } };
 }
 
 // Read user state (✅ auto-heal if missing)
@@ -195,10 +237,10 @@ export async function getUserState(uid, emailIfKnown = "") {
     // ✅ prevents Profile from loading null and looking “wiped”
     await ensureUserDoc({ uid, email: emailIfKnown || "" });
     const again = await getDoc(ref);
-    return again.exists() ? again.data() : null;
+    return again.exists() ? normalizeUserStateRecord(again.data()) : null;
   }
 
-  return snap.data();
+  return normalizeUserStateRecord(snap.data());
 }
 
 // Backward compatibility for ProfileScreen
@@ -268,8 +310,7 @@ export async function clearActiveProcess(uid) {
 export async function updateUserName(uid, name) {
   const ref = doc(db, "users", uid);
   const clean = normalizeName(name);
-  if (!clean) throw new Error("Full name is required.");
-  if (clean.length < 3) throw new Error("Full name must be at least 3 characters.");
+  if (!clean) throw new Error("Name is required.");
 
   await updateDoc(ref, {
     name: clean,
@@ -296,8 +337,7 @@ export async function upsertUserContact(uid, { name, phone }) {
   const residence = String(existing?.countryOfResidence || "").trim();
 
   const cleanName = normalizeName(name);
-  if (!cleanName) throw new Error("Full name is required.");
-  if (cleanName.length < 3) throw new Error("Full name must be at least 3 characters.");
+  if (!cleanName) throw new Error("Name is required.");
 
   const cleanPhone = residence
     ? normalizePhoneByResidence(residence, phone)
@@ -312,7 +352,10 @@ export async function upsertUserContact(uid, { name, phone }) {
   });
 }
 
-export async function updateUserProfile(uid, { name, phone, countryOfResidence, county, town }) {
+export async function updateUserProfile(
+  uid,
+  { name, phone, countryOfResidence, homeCountry, county, town, language }
+) {
   const ref = doc(db, "users", uid);
 
   // ensure doc exists so updateDoc never fails
@@ -322,12 +365,24 @@ export async function updateUserProfile(uid, { name, phone, countryOfResidence, 
   }
 
   // ✅ validate input (prevents blank writes)
-  validateProfilePayload({ name, phone, countryOfResidence });
+  const resolvedHomeCountry =
+    typeof homeCountry !== "undefined"
+      ? normalizeProfileHomeCountry(homeCountry)
+      : typeof countryOfResidence !== "undefined"
+      ? normalizeProfileHomeCountry(countryOfResidence)
+      : undefined;
+
+  validateProfilePayload({
+    name,
+    phone,
+    countryOfResidence: resolvedHomeCountry,
+    language,
+  });
 
   // determine residence for phone normalization
   let residence =
-    typeof countryOfResidence !== "undefined"
-      ? String(countryOfResidence || "").trim()
+    typeof resolvedHomeCountry !== "undefined"
+      ? resolvedHomeCountry
       : null;
 
   if (!residence && typeof phone !== "undefined") {
@@ -339,12 +394,24 @@ export async function updateUserProfile(uid, { name, phone, countryOfResidence, 
   const payload = { updatedAt: serverTimestamp() };
 
   if (typeof name !== "undefined") payload.name = normalizeName(name);
-  if (typeof countryOfResidence !== "undefined")
-    payload.countryOfResidence = String(countryOfResidence || "").trim();
+  if (typeof resolvedHomeCountry !== "undefined") {
+    payload.countryOfResidence = resolvedHomeCountry;
+    payload["profile.homeCountry"] = resolvedHomeCountry;
+  }
+
+  if (typeof language !== "undefined") {
+    const rawLanguage = String(language || "").trim();
+    if (!rawLanguage) throw new Error("Language is required.");
+    const normalizedLanguage = normalizeProfileLanguage(rawLanguage, "");
+    if (!normalizedLanguage) throw new Error("Language is required.");
+    payload["profile.language"] = normalizedLanguage;
+  }
 
   if (typeof phone !== "undefined") {
     payload.phone = residence
-      ? normalizePhoneByResidence(residence, phone)
+      ? phone
+        ? normalizePhoneByResidence(residence, phone)
+        : ""
       : String(phone || "").trim();
   }
 

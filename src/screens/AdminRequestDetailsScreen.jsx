@@ -27,6 +27,7 @@ import { ArrowLeft, FileText, Check, X, ChevronRight, ChevronDown, Link2, Trash2
 import AssignStaffPanel from "../components/AssignStaffPanel";
 import AdminRequestChatLauncher from "../components/AdminRequestChatLauncher";
 import AppIcon from "../components/AppIcon";
+import RequestDocumentFieldsSection from "../components/RequestDocumentFieldsSection";
 import RequestExtraDetailsSection from "../components/RequestExtraDetailsSection";
 import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
 import RequestProgressUpdatesList from "../components/RequestProgressUpdatesList";
@@ -816,7 +817,7 @@ export default function AdminRequestDetailsScreen() {
   if (loading) {
     return (
       <div className={pageBg}>
-        <div className="max-w-xl mx-auto px-5 py-6">
+        <div className="app-page-shell app-page-shell--wide">
           <div className={`${card} p-4 text-sm text-zinc-600 dark:text-zinc-300`}>Loading…</div>
         </div>
       </div>
@@ -826,7 +827,7 @@ export default function AdminRequestDetailsScreen() {
   if (err) {
     return (
       <div className={pageBg}>
-        <div className="max-w-xl mx-auto px-5 py-6">
+        <div className="app-page-shell app-page-shell--wide">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Request</h1>
@@ -914,7 +915,7 @@ export default function AdminRequestDetailsScreen() {
 
   return (
     <div className={pageBg}>
-      <div className="max-w-xl mx-auto px-5 py-6">
+      <div className="app-page-shell app-page-shell--wide">
         {/* Header */}
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
@@ -1467,29 +1468,31 @@ export default function AdminRequestDetailsScreen() {
           </div>
         </CollapsibleSectionCard>
 
-        <CollapsibleSectionCard
-          className={`mt-4 ${card} p-5`}
-          title="Staff assignment"
-          subtitle="Assign or reassign staff for this request."
-          open={openSections.assignment}
-          onToggle={() => toggleSection("assignment")}
-        >
-          <div className="mt-4">
-            {req && !decisionLocked ?(
-              <AssignStaffPanel request={req} />
-            ) : (
-              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
-                Staff assignment is disabled because this request is already
-                finalized.
-              </div>
-            )}
-          </div>
-        </CollapsibleSectionCard>
+        {!roleCtx?.isSuperAdmin ? (
+          <CollapsibleSectionCard
+            className={`mt-4 ${card} p-5`}
+            title="Staff assignment"
+            subtitle="Assign or reassign staff for this request."
+            open={openSections.assignment}
+            onToggle={() => toggleSection("assignment")}
+          >
+            <div className="mt-4">
+              {req && !decisionLocked ?(
+                <AssignStaffPanel request={req} />
+              ) : (
+                <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
+                  Staff assignment is disabled because this request is already
+                  finalized.
+                </div>
+              )}
+            </div>
+          </CollapsibleSectionCard>
+        ) : null}
 
         <CollapsibleSectionCard
           className={`mt-6 ${card} p-5`}
           title="Applicant"
-          subtitle="Basic details and uploaded files."
+          subtitle="Basic details and document fields."
           open={openSections.applicant}
           onToggle={() => toggleSection("applicant")}
         >
@@ -1551,7 +1554,17 @@ export default function AdminRequestDetailsScreen() {
               </div>
             )}
 
-            <RequestExtraDetailsSection request={req} title="Extra details" />
+            <RequestDocumentFieldsSection
+              request={req}
+              requestId={requestId}
+              title="Document fields"
+              viewerRole="admin"
+            />
+            <RequestExtraDetailsSection
+              request={req}
+              title="Extra details"
+              includeDocumentFields={false}
+            />
           </div>
         </CollapsibleSectionCard>
 
@@ -1814,8 +1827,6 @@ export default function AdminRequestDetailsScreen() {
             Tip: Add files first, then accept to send them automatically.
           </div>
         </div>
-
-        <div className="h-10" />
       </div>
     </div>
   );

@@ -17,15 +17,25 @@ import { useNavigate } from "react-router-dom";
 
 import AppIcon from "../components/AppIcon";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
-import { APP_TRACK_META, normalizeDestinationCountry } from "../constants/migrationOptions";
-import { useManagedDestinationCountries } from "../hooks/useManagedDestinationCountries";
+import {
+  APP_TRACK_META,
+  APP_TRACK_OPTIONS,
+  normalizeDestinationCountry,
+} from "../constants/migrationOptions";
+import { useCountryDirectory } from "../hooks/useCountryDirectory";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
+import { countrySupportsTrack } from "../services/countryService";
 import {
   createEmptyRequestDefinitionDraft,
   createEmptyRequestExtraFieldDraft,
   createRequestDefinition,
   draftFromRequestDefinition,
   getRequestDefinitionTrackLabel,
+  getRequestDefinitionTrackLabels,
+  getRequestDefinitionTrackTypes,
+  isRequestDefinitionProfileCountry,
+  REQUEST_DEFINITION_ENTRY_PLACEMENTS,
+  REQUEST_DEFINITION_PROFILE_COUNTRY_SCOPE,
   REQUEST_EXTRA_FIELD_TYPE_OPTIONS,
   setRequestDefinitionActiveState,
   subscribeAllRequestDefinitions,
@@ -47,8 +57,12 @@ function matchesDefinitionSearch(definition, search) {
 
   return [
     definition?.title,
+    definition?.summary,
+    definition?.tag,
     definition?.country,
-    getRequestDefinitionTrackLabel(definition?.trackType),
+    definition?.entryPlacement,
+    definition?.countrySource,
+    ...getRequestDefinitionTrackLabels(definition),
     ...(Array.isArray(definition?.extraFields)
       ? definition.extraFields.map((field) => field?.label)
       : []),
@@ -65,6 +79,29 @@ function formatFieldType(type) {
   if (safeType === "number") return "Number";
   if (safeType === "document") return "Document";
   return "Text";
+}
+
+function formatEntryPlacement(value) {
+  const safeValue = safeString(value, 40).toLowerCase();
+  if (safeValue === "track_simple") return "Track simple";
+  return "WeHelp country";
+}
+
+function formatCountrySource(value) {
+  const safeValue = safeString(value, 60).toLowerCase();
+  if (safeValue === "profile_country_of_residence") return "Profile country";
+  return "Selected country";
+}
+
+function formatDefinitionCountry(definition) {
+  if (
+    definition?.entryPlacement === "track_simple" ||
+    definition?.countrySource === "profile_country_of_residence" ||
+    isRequestDefinitionProfileCountry(definition?.country)
+  ) {
+    return REQUEST_DEFINITION_PROFILE_COUNTRY_SCOPE;
+  }
+  return safeString(definition?.country, 120);
 }
 
 function applyFieldOrder(fields = []) {
@@ -109,8 +146,7 @@ export default function AdminRequestManagementScreen() {
   const [fieldDraft, setFieldDraft] = useState(createEmptyRequestExtraFieldDraft());
   const [fieldErr, setFieldErr] = useState("");
 
-  const { countries: managedCountriesForTrack, hasManagedDocs: hasManagedCountries } =
-    useManagedDestinationCountries({ trackType: draft.trackType });
+  const { countries: allCountries } = useCountryDirectory();
 
   useEffect(() => {
     let cancelled = false;
@@ -163,8 +199,19 @@ export default function AdminRequestManagementScreen() {
     [definitions]
   );
 
+  const draftTrackTypes = useMemo(
+    () => getRequestDefinitionTrackTypes(draft),
+    [draft]
+  );
+
   const countryOptions = useMemo(() => {
-    const activeList = Array.isArray(managedCountriesForTrack) ? managedCountriesForTrack : [];
+    const activeList = (Array.isArray(allCountries) ? allCountries : [])
+      .filter((country) => country?.isActive)
+      .filter((country) =>
+        draftTrackTypes.some((track) => countrySupportsTrack(country, track))
+      )
+      .map((country) => safeString(country?.name, 120))
+      .filter(Boolean);
     const activeSet = new Set(activeList.map((country) => safeString(country, 120).toLowerCase()));
 
     const currentCountry =
@@ -180,9 +227,10 @@ export default function AdminRequestManagementScreen() {
       label: country,
     }));
 
-    if (!hasManagedCountries) return activeOptions;
     return [...legacyOption, ...activeOptions];
-  }, [draft.country, hasManagedCountries, managedCountriesForTrack]);
+  }, [allCountries, draft.country, draftTrackTypes]);
+  const isTrackSimplePlacement = draft.entryPlacement === "track_simple";
+  const allTracksSelected = draftTrackTypes.length === APP_TRACK_OPTIONS.length;
 
   const pageBg =
     "min-h-screen bg-gradient-to-b from-emerald-50/35 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
@@ -194,6 +242,49 @@ export default function AdminRequestManagementScreen() {
 
   const updateDraft = (patch) => {
     setDraft((current) => ({ ...current, ...(patch || {}) }));
+  };
+
+  const setDraftTrackTypes = (trackTypes) => {
+    const nextTrackTypes = APP_TRACK_OPTIONS.filter((track) =>
+      (Array.isArray(trackTypes) ? trackTypes : []).includes(track)
+    );
+    const safeTrackTypes = nextTrackTypes.length ? nextTrackTypes : ["study"];
+    updateDraft({
+      trackType: safeTrackTypes[0],
+      trackTypes: safeTrackTypes,
+    });
+  };
+
+  const toggleDraftTrack = (track) => {
+    const set = new Set(draftTrackTypes);
+    if (set.has(track)) {
+      if (set.size === 1) return;
+      set.delete(track);
+    } else {
+      set.add(track);
+    }
+    setDraftTrackTypes(APP_TRACK_OPTIONS.filter((item) => set.has(item)));
+  };
+
+  const handlePlacementChange = (nextPlacement) => {
+    if (nextPlacement === "track_simple") {
+      updateDraft({
+        entryPlacement: "track_simple",
+        countrySource: "profile_country_of_residence",
+        country: "",
+      });
+      return;
+    }
+
+    const fallbackCountry = countryOptions[0]?.value || normalizeDestinationCountry(draft.country);
+    updateDraft({
+      entryPlacement: "wehelp_country",
+      countrySource: "selected_country",
+      country:
+        !draft.country || isRequestDefinitionProfileCountry(draft.country)
+          ? fallbackCountry || ""
+          : draft.country,
+    });
   };
 
   const updateFieldDraft = (patch) => {
@@ -532,7 +623,36 @@ export default function AdminRequestManagementScreen() {
                 </div>
 
                 <div className="mt-4 grid gap-3">
-                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,0.8fr)]">
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+                    <label className="grid gap-1.5">
+                      <span className={label}>Placement</span>
+                      <select
+                        className={input}
+                        value={draft.entryPlacement}
+                        onChange={(event) => handlePlacementChange(event.target.value)}
+                      >
+                        {REQUEST_DEFINITION_ENTRY_PLACEMENTS.map((placement) => (
+                          <option key={placement} value={placement}>
+                            {formatEntryPlacement(placement)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="rounded-2xl border border-zinc-200 bg-white/80 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300">
+                      {isTrackSimplePlacement
+                        ? "Track simple entries launch directly from Track and always resolve country from the user's profile."
+                        : "WeHelp country entries stay inside the country-based single-package flow."}
+                    </div>
+                  </div>
+
+                  <div
+                    className={`grid gap-3 ${
+                      isTrackSimplePlacement
+                        ? "lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"
+                        : "lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,0.8fr)]"
+                    }`}
+                  >
                     <label className="grid gap-1.5">
                       <span className={label}>Request Title</span>
                       <input
@@ -543,34 +663,105 @@ export default function AdminRequestManagementScreen() {
                       />
                     </label>
 
-                    <label className="grid gap-1.5">
+                    <div className="grid gap-1.5">
                       <span className={label}>Track Type</span>
-                      <select
+                      <div className="grid gap-2 rounded-2xl border border-zinc-200 bg-white/80 p-3 dark:border-zinc-700 dark:bg-zinc-900/70">
+                        <div className="flex flex-wrap gap-2">
+                          {APP_TRACK_OPTIONS.map((track) => {
+                            const selected = draftTrackTypes.includes(track);
+                            return (
+                              <button
+                                key={track}
+                                type="button"
+                                onClick={() => toggleDraftTrack(track)}
+                                className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                                  selected
+                                    ? "border-emerald-200 bg-emerald-50/80 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100"
+                                    : "border-zinc-200 bg-white/80 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200"
+                                }`}
+                              >
+                                {APP_TRACK_META[track]?.label || getRequestDefinitionTrackLabel(track)}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="flex items-center justify-between gap-3 text-sm text-zinc-600 dark:text-zinc-300">
+                          <span>
+                            {draftTrackTypes.length > 1
+                              ? `${draftTrackTypes.length} tracks selected`
+                              : `${APP_TRACK_META[draftTrackTypes[0]]?.label || "Study"} selected`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDraftTrackTypes(
+                                allTracksSelected ? [draftTrackTypes[0] || "study"] : APP_TRACK_OPTIONS
+                              )
+                            }
+                            className="font-semibold text-emerald-700 dark:text-emerald-200"
+                          >
+                            {allTracksSelected ? "Keep one track" : "Select all"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {!isTrackSimplePlacement ? (
+                      <label className="grid gap-1.5">
+                        <span className={label}>Country</span>
+                        <select
+                          className={input}
+                          value={draft.country}
+                          onChange={(event) => updateDraft({ country: event.target.value })}
+                        >
+                          {countryOptions.map((country) => (
+                            <option key={country.value} value={country.value}>
+                              {country.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <div className="grid gap-1.5">
+                        <span className={label}>Country Source</span>
+                        <div className="rounded-2xl border border-zinc-200 bg-white/80 px-4 py-3 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200">
+                          {formatCountrySource(draft.countrySource)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,0.6fr)]">
+                    <label className="grid gap-1.5">
+                      <span className={label}>Summary</span>
+                      <input
                         className={input}
-                        value={draft.trackType}
-                        onChange={(event) => updateDraft({ trackType: event.target.value })}
-                      >
-                        {Object.entries(APP_TRACK_META).map(([key, meta]) => (
-                          <option key={key} value={key}>
-                            {meta.label}
-                          </option>
-                        ))}
-                      </select>
+                        value={draft.summary}
+                        onChange={(event) => updateDraft({ summary: event.target.value })}
+                        placeholder="Short helper text shown in request entry cards"
+                      />
                     </label>
 
                     <label className="grid gap-1.5">
-                      <span className={label}>Country</span>
-                      <select
+                      <span className={label}>Tag</span>
+                      <input
                         className={input}
-                        value={draft.country}
-                        onChange={(event) => updateDraft({ country: event.target.value })}
-                      >
-                        {countryOptions.map((country) => (
-                          <option key={country.value} value={country.value}>
-                            {country.label}
-                          </option>
-                        ))}
-                      </select>
+                        value={draft.tag}
+                        onChange={(event) => updateDraft({ tag: event.target.value })}
+                        placeholder="Visa"
+                      />
+                    </label>
+
+                    <label className="grid gap-1.5">
+                      <span className={label}>Sort Order</span>
+                      <input
+                        type="number"
+                        min={0}
+                        className={input}
+                        value={draft.sortOrder}
+                        onChange={(event) => updateDraft({ sortOrder: event.target.value })}
+                        placeholder="0"
+                      />
                     </label>
                   </div>
 
@@ -976,11 +1167,27 @@ export default function AdminRequestManagementScreen() {
 
                           <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
                             <FieldMetaPill>
-                              Track: {APP_TRACK_META[definition.trackType]?.label || definition.trackType}
+                              Tracks: {getRequestDefinitionTrackLabels(definition).join(", ")}
                             </FieldMetaPill>
-                            <FieldMetaPill>Country: {definition.country}</FieldMetaPill>
+                            <FieldMetaPill>Country: {formatDefinitionCountry(definition)}</FieldMetaPill>
+                            {definition.tag ? <FieldMetaPill>Tag: {definition.tag}</FieldMetaPill> : null}
+                            <FieldMetaPill>
+                              Placement: {formatEntryPlacement(definition.entryPlacement)}
+                            </FieldMetaPill>
+                            <FieldMetaPill>
+                              Source: {formatCountrySource(definition.countrySource)}
+                            </FieldMetaPill>
+                            {Number(definition.sortOrder || 0) > 0 ? (
+                              <FieldMetaPill>Order: {definition.sortOrder}</FieldMetaPill>
+                            ) : null}
                             <FieldMetaPill>Extra Fields: {activeFieldLabel}</FieldMetaPill>
                           </div>
+
+                          {definition.summary ? (
+                            <div className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
+                              {definition.summary}
+                            </div>
+                          ) : null}
 
                           {definition.extraFields?.length ? (
                             <div className="mt-3 flex flex-wrap gap-1.5">

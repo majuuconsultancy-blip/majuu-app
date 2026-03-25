@@ -6,6 +6,7 @@ import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
 import { logAnalyticsEvent } from "./analyticsService";
 import { REQUEST_BACKEND_STATUSES } from "../utils/requestLifecycle";
 import {
+  PARTNER_FILTER_MODES,
   preferredAgentReasonLabel,
   validatePreferredAgentSelection,
 } from "./partnershipService";
@@ -230,6 +231,8 @@ async function resolvePreferredAgentPayload({
   track = "",
   country = "",
   county = "",
+  countryOfResidence = "",
+  partnerFilterMode = PARTNER_FILTER_MODES.DESTINATION_COUNTRY,
 } = {}) {
   const safePreferredAgentId = cleanStr(preferredAgentId, 140);
   const checkedAtMs = Date.now();
@@ -250,6 +253,8 @@ async function resolvePreferredAgentPayload({
       trackType: track,
       country,
       county,
+      countryOfResidence,
+      filterMode: partnerFilterMode,
     });
 
     return {
@@ -349,6 +354,9 @@ export async function createServiceRequest(payload) {
   const extraFieldAnswers = cleanExtraFieldAnswers(payload?.extraFieldAnswers);
   const county = cleanRequiredCounty(payload?.county);
   const town = cleanStr(payload?.town || payload?.city, 80);
+  const countryOfResidence = cleanStr(payload?.countryOfResidence, 80);
+  const partnerFilterMode = cleanStr(payload?.partnerFilterMode, 40).toLowerCase() ||
+    PARTNER_FILTER_MODES.DESTINATION_COUNTRY;
   const unlockPaymentId = cleanStr(payload?.unlockPaymentId, 180);
   const unlockPaymentRequestId = cleanStr(payload?.unlockPaymentRequestId, 180);
   const pricingSnapshot = cleanPricingSnapshot(payload?.pricingSnapshot);
@@ -357,6 +365,8 @@ export async function createServiceRequest(payload) {
     track: cleanTrack(payload?.track),
     country: cleanStr(payload?.country, 80),
     county,
+    countryOfResidence,
+    partnerFilterMode,
   });
   const initialStatus = cleanInitialRequestStatus(payload?.status);
   const initialRoutingStatus =
@@ -370,6 +380,8 @@ export async function createServiceRequest(payload) {
 
     track: cleanTrack(payload?.track),
     country: cleanStr(payload?.country, 80),
+    countryOfResidence,
+    partnerFilterMode,
 
     requestType,
     serviceName: cleanServiceName,
@@ -427,6 +439,8 @@ export async function createServiceRequest(payload) {
     routingMeta: {
       track: cleanTrack(payload?.track),
       country: cleanStr(payload?.country, 80),
+      countryOfResidence,
+      partnerFilterMode,
       county,
       town,
       currentAdminUid: "",

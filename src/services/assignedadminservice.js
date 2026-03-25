@@ -92,6 +92,10 @@ function defaultAdminScopePayload() {
     partnerId: "",
     partnerName: "",
     partnerStatus: "inactive",
+    stationedCountry: "",
+    stationedCountryLower: "",
+    country: "",
+    countryLower: "",
     primaryCounty: "",
     primaryCountyLower: "",
     neighboringCounties: [],
@@ -108,6 +112,28 @@ function defaultAdminScopePayload() {
 
 function buildCoverageCountySet(primaryCounty = "", neighboringCounties = []) {
   return normalizeCountyList([primaryCounty, ...(neighboringCounties || [])]);
+}
+
+function assertPartnerSupportsAdminCountry(partner, country = "") {
+  const safePartner = partner && typeof partner === "object" ? partner : null;
+  const cleanCountry = safeStr(country);
+  if (!safePartner?.id) {
+    throw new Error("Select a valid partner.");
+  }
+  if (!cleanCountry) {
+    throw new Error("Select a stationed country.");
+  }
+
+  const supportedHomeCountries = new Set(
+    (Array.isArray(safePartner?.homeCountries) ? safePartner.homeCountries : [])
+      .map((value) => safeStr(value).toLowerCase())
+      .filter(Boolean)
+  );
+  if (!supportedHomeCountries.has(cleanCountry.toLowerCase())) {
+    throw new Error(
+      `${cleanCountry} is outside the selected partner's home-country coverage.`
+    );
+  }
 }
 
 function assertPartnerCoversAdminCounties(partner, counties = []) {
@@ -219,6 +245,8 @@ export async function setAssignedAdminByEmail({
   email,
   action = "upsert",
   partnerId = "",
+  stationedCountry = "",
+  country = "",
   primaryCounty = "",
   neighboringCounties = [],
   counties = [],
@@ -274,24 +302,38 @@ export async function setAssignedAdminByEmail({
   }
 
   const resolvedPartner = await resolvePartnerAssignment(partnerId);
-  const cleanPrimaryCounty = normalizeCountyList([
-    primaryCounty || normalizeCountyList(counties)[0] || "",
-  ])[0];
-  if (!cleanPrimaryCounty) {
+  const cleanStationedCountry = safeStr(stationedCountry || country).slice(0, 120);
+  assertPartnerSupportsAdminCountry(resolvedPartner, cleanStationedCountry);
+
+  const requiresCountyCoverage = cleanStationedCountry.toLowerCase() === "kenya";
+  const cleanPrimaryCounty = requiresCountyCoverage
+    ? normalizeCountyList([primaryCounty || normalizeCountyList(counties)[0] || ""])[0]
+    : "";
+  if (requiresCountyCoverage && !cleanPrimaryCounty) {
     throw new Error("Select a primary county.");
   }
-  const cleanNeighboringCounties = normalizeCountyList(
-    neighboringCounties?.length
-      ? neighboringCounties
-      : normalizeCountyList(counties).filter((county) => county !== cleanPrimaryCounty)
-  ).filter((county) => county !== cleanPrimaryCounty);
-  const cleanCounties = buildCoverageCountySet(cleanPrimaryCounty, cleanNeighboringCounties);
-  assertPartnerCoversAdminCounties(resolvedPartner, cleanCounties);
+  const cleanNeighboringCounties = requiresCountyCoverage
+    ? normalizeCountyList(
+        neighboringCounties?.length
+          ? neighboringCounties
+          : normalizeCountyList(counties).filter((county) => county !== cleanPrimaryCounty)
+      ).filter((county) => county !== cleanPrimaryCounty)
+    : [];
+  const cleanCounties = requiresCountyCoverage
+    ? buildCoverageCountySet(cleanPrimaryCounty, cleanNeighboringCounties)
+    : [];
+  if (requiresCountyCoverage) {
+    assertPartnerCoversAdminCounties(resolvedPartner, cleanCounties);
+  }
 
   const scopePayload = {
     partnerId: safeStr(resolvedPartner.id),
     partnerName: safeStr(resolvedPartner.displayName),
     partnerStatus: resolvedPartner.isActive === false ? "inactive" : "active",
+    stationedCountry: cleanStationedCountry,
+    stationedCountryLower: cleanStationedCountry.toLowerCase(),
+    country: cleanStationedCountry,
+    countryLower: cleanStationedCountry.toLowerCase(),
     primaryCounty: cleanPrimaryCounty,
     primaryCountyLower: safeStr(cleanPrimaryCounty).toLowerCase(),
     neighboringCounties: cleanNeighboringCounties,
@@ -328,6 +370,8 @@ export async function setAssignedAdminByEmail({
     action: "upserted",
     partnerId: scopePayload.partnerId,
     partnerName: scopePayload.partnerName,
+    stationedCountry: scopePayload.stationedCountry,
+    country: scopePayload.country,
     primaryCounty: scopePayload.primaryCounty,
     neighboringCounties: scopePayload.neighboringCounties,
     counties: scopePayload.counties,

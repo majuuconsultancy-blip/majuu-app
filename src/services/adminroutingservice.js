@@ -55,6 +55,26 @@ function normalizeCountyLower(value) {
   return lower(value);
 }
 
+function normalizeCountryLower(value) {
+  return lower(value);
+}
+
+function getStationedCountryLower(scope) {
+  const safeScope = scope && typeof scope === "object" ? scope : {};
+  return normalizeCountryLower(
+    safeScope?.stationedCountryLower ||
+      safeScope?.stationedCountry ||
+      safeScope?.countryLower ||
+      safeScope?.country
+  );
+}
+
+function adminScopeRequiresCountyCoverage(scope) {
+  const safeScope = scope && typeof scope === "object" ? scope : {};
+  const countryLower = getStationedCountryLower(safeScope);
+  return countryLower === "kenya" || (!countryLower && (safeScope?.countiesLower || []).length > 0);
+}
+
 function normalizeAvailability(value) {
   const v = lower(value);
   return Object.prototype.hasOwnProperty.call(ADMIN_AVAILABILITY_WEIGHTS, v) ? v : "active";
@@ -113,6 +133,10 @@ function buildEligibleAdminOptions(candidates, loadMap = {}) {
     .map((candidate) => enrichAdminCandidate(candidate, loadMap))
     .filter((candidate) => candidate.eligible)
     .sort((a, b) => {
+      const countryGap =
+        Number(Boolean(b?.countryOriginMatch)) - Number(Boolean(a?.countryOriginMatch));
+      if (countryGap !== 0) return countryGap;
+
       const directGap =
         Number(safeStr(b?.countyMatchType) === "direct") -
         Number(safeStr(a?.countyMatchType) === "direct");
@@ -172,8 +196,9 @@ async function listAssignedAdminCandidatesForRequest(
   { partnerId = "", excludeUids = [] } = {}
 ) {
   const countyLower = normalizeCountyLower(requestData?.countyLower || requestData?.county);
+  const requestCountryLower = normalizeCountryLower(requestData?.countryOfResidence);
   const safePartnerId = safeStr(partnerId);
-  if (!countyLower || !safePartnerId) return [];
+  if (!safePartnerId || !requestCountryLower) return [];
 
   const excluded = new Set((excludeUids || []).map((x) => safeStr(x)).filter(Boolean));
   const snap = await getDocs(
@@ -191,9 +216,14 @@ async function listAssignedAdminCandidatesForRequest(
     if (!uid || excluded.has(uid)) return;
 
     const scope = normalizeAdminScope(data?.adminScope);
+    const stationedCountryLower = getStationedCountryLower(scope);
+    const requiresCountyCoverage = adminScopeRequiresCountyCoverage(scope);
     if (!scope.active) return;
     if (safeStr(scope?.partnerId) !== safePartnerId) return;
-    if (!scope.countiesLower.includes(countyLower)) return;
+    if (!stationedCountryLower || stationedCountryLower !== requestCountryLower) return;
+    if (requiresCountyCoverage) {
+      if (!countyLower || !scope.countiesLower.includes(countyLower)) return;
+    }
 
     rows.push({
       uid,
@@ -205,8 +235,13 @@ async function listAssignedAdminCandidatesForRequest(
       town: scope.town,
       partnerId: safePartnerId,
       partnerName: safeStr(scope?.partnerName),
-      countyMatchType:
-        safeStr(scope?.primaryCountyLower) === countyLower ? "direct" : "neighboring",
+      stationedCountry: safeStr(scope?.stationedCountry || scope?.country),
+      countryOriginMatch: true,
+      countyMatchType: requiresCountyCoverage
+        ? safeStr(scope?.primaryCountyLower) === countyLower
+          ? "direct"
+          : "neighboring"
+        : "country",
     });
   });
 
@@ -220,6 +255,8 @@ async function buildRoutingSnapshot(
   const trackType = safeStr(requestData?.track).toLowerCase();
   const country = safeStr(requestData?.country);
   const county = safeStr(requestData?.county);
+  const countryOfResidence = safeStr(requestData?.countryOfResidence);
+  const partnerFilterMode = safeStr(requestData?.partnerFilterMode);
   const preferredAgentId = safeStr(requestData?.preferredAgentId);
   const partnerRows = await listPartners({ activeOnly: false, max: 250 });
   const evaluations = partnerRows.map((partner) => ({
@@ -228,6 +265,8 @@ async function buildRoutingSnapshot(
       trackType,
       country,
       county,
+      countryOfResidence,
+      filterMode: partnerFilterMode,
     }),
   }));
 
@@ -266,6 +305,7 @@ async function buildRoutingSnapshot(
     });
     const eligibleAdminOptions = buildEligibleAdminOptions(adminCandidates, activeLoadMap);
     const bestAdmin = pickAdminCandidate(adminCandidates, activeLoadMap);
+    const countryWeight = bestAdmin?.countryOriginMatch ? 1.16 : 1;
     const countyWeight = row.compatibility?.countyMatchType === "direct" ? 1.08 : 1;
     const preferredWeight = preferredAgentValid ? 1.12 : 1;
     partnerOptions.push({
@@ -275,7 +315,9 @@ async function buildRoutingSnapshot(
         ? eligibleAdminOptions
         : [],
       bestAdmin,
-      pairScore: bestAdmin ? Number(bestAdmin.score || 0) * countyWeight * preferredWeight : 0,
+      pairScore: bestAdmin
+        ? Number(bestAdmin.score || 0) * countryWeight * countyWeight * preferredWeight
+        : 0,
     });
   }
 
@@ -315,6 +357,8 @@ async function buildRoutingSnapshot(
     eligiblePartners: partnerOptions.map((row) => ({
       id: safeStr(row?.partner?.id),
       displayName: safeStr(row?.partner?.displayName),
+      displayLabel: safeStr(row?.partner?.displayLabel || row?.partner?.displayName),
+      homeCountries: Array.isArray(row?.partner?.homeCountries) ? row.partner.homeCountries : [],
       countyMatchType: safeStr(row?.compatibility?.countyMatchType),
       adminCount: Array.isArray(row?.adminOptions) ? row.adminOptions.length : 0,
       admins: Array.isArray(row?.adminOptions) ? row.adminOptions : [],
@@ -351,7 +395,16 @@ async function resolveExplicitAdminCandidate(targetAdminUid, requestData = {}) {
   }
 
   const countyLower = normalizeCountyLower(requestData?.countyLower || requestData?.county);
-  if (isAssigned && countyLower && !scope.countiesLower.includes(countyLower)) {
+  const requestCountryLower = normalizeCountryLower(requestData?.countryOfResidence);
+  const stationedCountryLower = getStationedCountryLower(scope);
+  const requiresCountyCoverage = adminScopeRequiresCountyCoverage(scope);
+  if (isAssigned && !stationedCountryLower) {
+    throw new Error("Target admin is missing a stationed country.");
+  }
+  if (isAssigned && stationedCountryLower !== requestCountryLower) {
+    throw new Error("Target admin is not stationed in the request origin country.");
+  }
+  if (isAssigned && requiresCountyCoverage && countyLower && !scope.countiesLower.includes(countyLower)) {
     throw new Error("Target admin does not cover this county.");
   }
 
@@ -366,6 +419,8 @@ async function resolveExplicitAdminCandidate(targetAdminUid, requestData = {}) {
       trackType: requestData?.track,
       country: requestData?.country,
       county: requestData?.county,
+      countryOfResidence: requestData?.countryOfResidence,
+      filterMode: requestData?.partnerFilterMode,
     });
     if (!compatibility?.eligible) {
       throw new Error(
@@ -385,12 +440,15 @@ async function resolveExplicitAdminCandidate(targetAdminUid, requestData = {}) {
         town: scope.town,
         partnerId: safeStr(partner?.id || scope?.partnerId),
         partnerName: safeStr(partner?.displayName || scope?.partnerName),
-        countyMatchType:
-          safeStr(scope?.primaryCountyLower) === countyLower
+        stationedCountry: safeStr(scope?.stationedCountry || scope?.country),
+        countryOriginMatch: true,
+        countyMatchType: requiresCountyCoverage
+          ? safeStr(scope?.primaryCountyLower) === countyLower
             ? "direct"
             : countyLower
             ? "neighboring"
-            : "",
+            : ""
+          : "country",
       },
       activeLoadMap
     );
@@ -495,9 +553,9 @@ async function applyRouteToRequest({
       currentAdminUid: targetUid,
       currentAdminRole: safeStr(candidate?.role || "assignedAdmin"),
       currentAdminEmail: safeStr(candidate?.email),
-      currentAdminAvailability: normalizeAvailability(candidate?.availability),
-      assignedAdminId,
-      assignedPartnerId,
+    currentAdminAvailability: normalizeAvailability(candidate?.availability),
+    assignedAdminId,
+    assignedPartnerId,
       assignedPartnerName,
       routingStatus,
       routedAt: serverTimestamp(),
@@ -535,6 +593,9 @@ async function applyRouteToRequest({
         escalationReason: safeStr(escalationReason),
         unresolvedReason,
         partnerDecisionSource: safeStr(snapshot?.partnerDecisionSource),
+        stationedCountryAtRouting: safeStr(
+          candidate?.stationedCountry || candidate?.country || ""
+        ),
         countyMatchType: safeStr(candidate?.countyMatchType || ""),
         eligiblePartnerCount: toNum(snapshot?.eligiblePartnerCount, 0),
         eligibleAdminCount: toNum(snapshot?.eligibleAdminCount, 0),

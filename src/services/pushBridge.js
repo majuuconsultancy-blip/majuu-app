@@ -91,12 +91,16 @@ function parsePayload(input) {
 
 export function resolveRouteFromPayload(rawPayload = {}) {
   const payload = parsePayload(rawPayload);
-  const route = safeStr(payload?.route);
-  if (route) return route;
-
   const type = safeStr(payload?.type).toUpperCase();
   const requestId = safeStr(payload?.requestId);
   const rid = requestId ? encodeURIComponent(requestId) : "";
+
+  if (type === "STAFF_ASSIGNED_REQUEST") {
+    return rid ? `/staff/request/${rid}/start` : "/staff/tasks";
+  }
+
+  const route = safeStr(payload?.route);
+  if (route) return route;
 
   if (type === "NEW_MESSAGE" || type === "MESSAGE_REJECTED_USER") {
     return rid ? `/app/request/${rid}?openChat=1` : "/app/progress";
@@ -104,7 +108,6 @@ export function resolveRouteFromPayload(rawPayload = {}) {
   if (type === "REQUEST_ACCEPTED" || type === "REQUEST_REJECTED" || type === "REQUEST_ASSIGNED") {
     return rid ? `/app/request/${rid}` : "/app/progress";
   }
-  if (type === "STAFF_ASSIGNED_REQUEST") return "/staff/tasks";
   if (type === "STAFF_NEW_MESSAGE" || type === "STAFF_MESSAGE_REJECTED") {
     return rid ? `/staff/request/${rid}?openChat=1` : "/staff/tasks";
   }
@@ -270,7 +273,9 @@ async function upsertPushToken({ uid, role, token }) {
 export function cleanupPushBridge() {
   try {
     activeCleanup?.();
-  } catch {}
+  } catch {
+    // ignore cleanup failures during bridge teardown
+  }
   activeCleanup = null;
   activeNavigate = null;
   activeSession = { role: "", uid: "" };
@@ -308,7 +313,7 @@ export function initPushBridge({ navigate, role, uid }) {
   PushNotifications.addListener("pushNotificationActionPerformed", (event) => {
     console.log("pushNotificationActionPerformed payload", safeJsonStringify(event));
     const payload = parsePayload(event);
-    const directRoute = safeStr(payload?.route);
+    const directRoute = resolveRouteFromPayload(payload);
     if (directRoute && typeof activeNavigate === "function") {
       try {
         const finalRoute = setOpenChatSessionFlag(directRoute);
@@ -342,7 +347,7 @@ export function initPushBridge({ navigate, role, uid }) {
       safeStr(event?.body) ||
       safeStr(event?.notification?.body) ||
       "You have an update.";
-    const route = safeStr(payload?.route) || resolveRouteFromPayload(event);
+    const route = resolveRouteFromPayload(payload) || resolveRouteFromPayload(event);
     const dedupeKey =
       safeStr(payload?.notificationId) ||
       safeStr(payload?.requestId) ||
@@ -435,19 +440,29 @@ export function initPushBridge({ navigate, role, uid }) {
     disposed = true;
     try {
       pushActionHandle?.remove?.();
-    } catch {}
+    } catch {
+      // ignore listener cleanup failures
+    }
     try {
       localActionHandle?.remove?.();
-    } catch {}
+    } catch {
+      // ignore listener cleanup failures
+    }
     try {
       pushReceivedHandle?.remove?.();
-    } catch {}
+    } catch {
+      // ignore listener cleanup failures
+    }
     try {
       registrationHandle?.remove?.();
-    } catch {}
+    } catch {
+      // ignore listener cleanup failures
+    }
     try {
       registrationErrorHandle?.remove?.();
-    } catch {}
+    } catch {
+      // ignore listener cleanup failures
+    }
   };
 
   activeCleanup = cleanup;

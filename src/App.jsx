@@ -51,6 +51,7 @@ import { resolveLandingPathFromUserState } from "./journey/journeyLanding";
 import { normalizeJourney } from "./journey/journeyModel";
 import { ANALYTICS_EVENT_TYPES } from "./constants/analyticsEvents";
 import { logAnalyticsEvent } from "./services/analyticsService";
+import { useI18n } from "./lib/i18n";
 
 /* ---------------- Lazy screens ---------------- */
 // Main user flows
@@ -95,6 +96,7 @@ const AdminPartnershipsScreen = lazy(() => import("./screens/AdminPartnershipsSc
 const AdminCountryManagementScreen = lazy(() =>
   import("./screens/AdminCountryManagementScreen")
 );
+const AdminHomeDesignScreen = lazy(() => import("./screens/AdminHomeDesignScreen"));
 const AdminRequestManagementScreen = lazy(() =>
   import("./screens/AdminRequestManagementScreen")
 );
@@ -160,6 +162,7 @@ function preloadCriticalScreens() {
   import("./screens/AdminSelfHelpLinksManagementScreen");
   import("./screens/AdminRequestManagementScreen");
   import("./screens/AdminCountryManagementScreen");
+  import("./screens/AdminHomeDesignScreen");
   import("./screens/AdminPartnershipsScreen");
   import("./screens/AdminFinancesScreen");
 }
@@ -681,6 +684,14 @@ function AppRoutes() {
               }
             />
             <Route
+              path="admin/sacc/home-design"
+              element={
+                <AdminGate>
+                  <AdminHomeDesignScreen />
+                </AdminGate>
+              }
+            />
+            <Route
               path="admin/sacc/news"
               element={
                 <AdminGate>
@@ -738,12 +749,24 @@ function AppRoutes() {
   );
 }
 
+function DocumentLanguageSync() {
+  const { language } = useI18n();
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.documentElement.lang = language || "en";
+  }, [language]);
+
+  return null;
+}
+
 export default function App() {
   useEffect(() => runWhenIdle(preloadCriticalScreens), []);
 
   const Router = IS_NATIVE_PLATFORM ? HashRouter : BrowserRouter;
   return (
     <Router>
+      <DocumentLanguageSync />
       <div className="app-safe-area">
         <AppRoutes />
       </div>

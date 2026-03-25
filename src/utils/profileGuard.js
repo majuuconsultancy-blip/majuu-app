@@ -1,9 +1,15 @@
+import {
+  normalizeProfileLanguage,
+  normalizeProfileName,
+  normalizeUserProfile,
+} from "./userProfile";
+
 function onlyDigits(s) {
   return String(s || "").replace(/\D+/g, "");
 }
 
 function normalizeName(name) {
-  return String(name || "").trim().replace(/\s+/g, " ");
+  return normalizeProfileName(name, 80);
 }
 
 // Returns normalized +254XXXXXXXXX if Kenya, otherwise returns trimmed input
@@ -35,32 +41,17 @@ export function normalizePhoneByResidence(countryOfResidence, phoneRaw) {
 
 export function getMissingProfileFields(userState) {
   const missing = [];
+  const profile = normalizeUserProfile(userState);
 
   const name = normalizeName(userState?.name);
-  const residence = String(userState?.countryOfResidence || "").trim();
-  const phoneRaw = String(userState?.phone || "").trim();
+  const residence = String(profile?.homeCountry || userState?.countryOfResidence || "").trim();
+  const language = normalizeProfileLanguage(profile?.language, "");
 
-  // Name: required + >= 3
-  if (!name) missing.push("Full Name");
-  else if (name.length < 3) missing.push("Full Name (min 3 letters)");
+  if (!name) missing.push("Name");
 
-  // Residence required
   if (!residence) missing.push("Country of Residence");
 
-  // Phone required + strict if Kenya
-  if (!phoneRaw) {
-    missing.push("Phone / WhatsApp");
-  } else {
-    const normalized = normalizePhoneByResidence(residence, phoneRaw);
-
-    if (!normalized) {
-      if (residence === "Kenya") {
-        missing.push("Phone / WhatsApp (Kenya: +254 + 9 digits)");
-      } else {
-        missing.push("Phone / WhatsApp (invalid)");
-      }
-    }
-  }
+  if (!language) missing.push("Language");
 
   return missing;
 }
