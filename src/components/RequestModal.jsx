@@ -304,34 +304,95 @@ function serializeExtraFieldSnapshot(values) {
   return out;
 }
 
+const REQUEST_MODAL_BODY_LOCK_CLASS = "request-modal-body-locked";
+let requestModalBodyLockDepth = 0;
+let requestModalBodyLockSnapshot = null;
+
+function releaseRequestModalBodyLock({ force = false } = {}) {
+  if (!force && requestModalBodyLockDepth <= 0) return;
+  if (requestModalBodyLockDepth > 0) requestModalBodyLockDepth -= 1;
+  if (!force && requestModalBodyLockDepth > 0) return;
+
+  requestModalBodyLockDepth = 0;
+
+  if (typeof document === "undefined" || typeof window === "undefined") {
+    requestModalBodyLockSnapshot = null;
+    return;
+  }
+
+  const body = document.body;
+  const html = document.documentElement;
+  if (!body || !html) {
+    requestModalBodyLockSnapshot = null;
+    return;
+  }
+
+  const snapshot = requestModalBodyLockSnapshot;
+  const hasLockClass = body.classList.contains(REQUEST_MODAL_BODY_LOCK_CLASS);
+  requestModalBodyLockSnapshot = null;
+  if (!snapshot && !hasLockClass) return;
+
+  if (snapshot) {
+    html.style.overflow = snapshot.htmlOverflow;
+    body.style.position = snapshot.bodyPosition;
+    body.style.top = snapshot.bodyTop;
+    body.style.width = snapshot.bodyWidth;
+    body.style.overflow = snapshot.bodyOverflow;
+
+    const top = parseInt(snapshot.bodyTop || "0", 10);
+    const restoreY =
+      Number.isFinite(top) && top !== 0
+        ? -top
+        : Number.isFinite(snapshot.scrollY)
+        ? snapshot.scrollY
+        : window.scrollY || 0;
+    window.scrollTo(0, restoreY);
+  } else {
+    html.style.overflow = "";
+    body.style.position = "";
+    body.style.top = "";
+    body.style.width = "";
+    body.style.overflow = "";
+  }
+
+  body.classList.remove(REQUEST_MODAL_BODY_LOCK_CLASS);
+}
+
 // Best-practice body lock for Android PWA keyboard stability
 function lockBodyScrollFixed() {
-  const y = window.scrollY || 0;
+  if (typeof document === "undefined" || typeof window === "undefined") {
+    return () => {};
+  }
 
-  const prev = {
-    bodyPosition: document.body.style.position,
-    bodyTop: document.body.style.top,
-    bodyWidth: document.body.style.width,
-    bodyOverflow: document.body.style.overflow,
-    htmlOverflow: document.documentElement.style.overflow,
-  };
+  const body = document.body;
+  const html = document.documentElement;
+  if (!body || !html) return () => {};
 
-  document.documentElement.style.overflow = "hidden";
-  document.body.style.position = "fixed";
-  document.body.style.top = `-${y}px`;
-  document.body.style.width = "100%";
-  document.body.style.overflow = "hidden";
+  if (requestModalBodyLockDepth === 0) {
+    const y = window.scrollY || 0;
+    requestModalBodyLockSnapshot = {
+      bodyPosition: body.style.position,
+      bodyTop: body.style.top,
+      bodyWidth: body.style.width,
+      bodyOverflow: body.style.overflow,
+      htmlOverflow: html.style.overflow,
+      scrollY: y,
+    };
+  }
 
+  requestModalBodyLockDepth += 1;
+  html.style.overflow = "hidden";
+  body.style.position = "fixed";
+  body.style.top = `-${requestModalBodyLockSnapshot?.scrollY || 0}px`;
+  body.style.width = "100%";
+  body.style.overflow = "hidden";
+  body.classList.add(REQUEST_MODAL_BODY_LOCK_CLASS);
+
+  let released = false;
   return () => {
-    document.documentElement.style.overflow = prev.htmlOverflow;
-    document.body.style.position = prev.bodyPosition;
-    document.body.style.top = prev.bodyTop;
-    document.body.style.width = prev.bodyWidth;
-    document.body.style.overflow = prev.bodyOverflow;
-
-    const top = parseInt(prev.bodyTop || "0", 10);
-    const restoreY = Number.isFinite(top) && top !== 0 ? -top : y;
-    window.scrollTo(0, restoreY);
+    if (released) return;
+    released = true;
+    releaseRequestModalBodyLock();
   };
 }
 
@@ -456,6 +517,7 @@ export default function RequestModal({
   const wasOpenRef = useRef(false);
   const lastStateEmitRef = useRef("");
   const persistDraftBeforeCloseRef = useRef(() => {});
+  const releaseBodyLockRef = useRef(() => {});
 
   // prevents "tap causes close + blur" on Android
   const startedInsidePanelRef = useRef(false);
@@ -1130,16 +1192,33 @@ export default function RequestModal({
   const handleClose = useMemo(() => {
     return () => {
       persistDraftBeforeCloseRef.current?.();
+      releaseBodyLockRef.current?.();
+      releaseBodyLockRef.current = () => {};
       finishClose();
     };
   }, [finishClose]);
 
   // lock body scroll (ANDROID SAFE)
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      releaseRequestModalBodyLock({ force: true });
+      return undefined;
+    }
     const unlock = lockBodyScrollFixed();
-    return () => unlock();
+    releaseBodyLockRef.current = unlock;
+    return () => {
+      unlock();
+      if (releaseBodyLockRef.current === unlock) {
+        releaseBodyLockRef.current = () => {};
+      }
+    };
   }, [open]);
+
+  useEffect(() => {
+    return () => {
+      releaseRequestModalBodyLock({ force: true });
+    };
+  }, []);
 
   // Hide the app bottom nav while the request modal is open.
   useEffect(() => {

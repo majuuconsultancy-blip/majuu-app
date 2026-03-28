@@ -382,7 +382,7 @@ export default function CompareCountriesScreen({ track = "study" }) {
             </label>
           </div>
 
-          <div className="mt-3">
+          <div className="mt-3 flex justify-center">
             <button
               type="button"
               onClick={runComparison}
@@ -390,7 +390,7 @@ export default function CompareCountriesScreen({ track = "study" }) {
               className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-emerald-300 hover:text-emerald-800 disabled:cursor-not-allowed disabled:opacity-45 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             >
               <AppIcon size={ICON_SM} icon={ArrowRightLeft} />
-              Sync Comparison
+              Compare
             </button>
           </div>
 
@@ -412,17 +412,17 @@ export default function CompareCountriesScreen({ track = "study" }) {
         ) : null}
 
         {compareRows.length ? (
-          <section className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[34rem] border-collapse text-sm">
+          <section className="mt-3 overflow-x-auto pb-1">
+            <table className="w-full min-w-[56rem] border-collapse text-xs">
               <thead>
                 <tr className="border-b border-zinc-200/85 dark:border-zinc-800/85">
-                  <th className="py-2 pr-3 text-left text-xs font-semibold uppercase tracking-[0.11em] text-zinc-500 dark:text-zinc-400">
+                  <th className="py-2 pr-3 text-left text-[10px] font-semibold uppercase tracking-[0.11em] text-zinc-500 dark:text-zinc-400">
                     Metric
                   </th>
-                  <th className="py-2 px-2 text-left text-xs font-semibold uppercase tracking-[0.11em] text-zinc-500 dark:text-zinc-400">
+                  <th className="py-2 px-2 text-left text-[10px] font-semibold uppercase tracking-[0.11em] text-zinc-500 dark:text-zinc-400">
                     {optionLabel(comparedLeftCountry)}
                   </th>
-                  <th className="py-2 pl-2 text-left text-xs font-semibold uppercase tracking-[0.11em] text-zinc-500 dark:text-zinc-400">
+                  <th className="py-2 pl-2 text-left text-[10px] font-semibold uppercase tracking-[0.11em] text-zinc-500 dark:text-zinc-400">
                     {optionLabel(comparedRightCountry)}
                   </th>
                 </tr>
@@ -436,11 +436,11 @@ export default function CompareCountriesScreen({ track = "study" }) {
                       key={`compare-row-${row.label}`}
                       className="border-b border-zinc-200/75 dark:border-zinc-800/75"
                     >
-                      <td className="py-3 pr-3 text-xs font-semibold uppercase tracking-[0.08em] text-zinc-600 dark:text-zinc-300">
+                      <td className="py-2.5 pr-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
                         {row.label}
                       </td>
                       <td
-                        className={`py-3 px-2 text-sm ${
+                        className={`py-2.5 px-2 text-[11px] whitespace-nowrap ${
                           leftWinner
                             ? "font-semibold text-emerald-700 dark:text-emerald-200"
                             : "text-zinc-800 dark:text-zinc-100"
@@ -449,7 +449,7 @@ export default function CompareCountriesScreen({ track = "study" }) {
                         {row.left}
                       </td>
                       <td
-                        className={`py-3 pl-2 text-sm ${
+                        className={`py-2.5 pl-2 text-[11px] whitespace-nowrap ${
                           rightWinner
                             ? "font-semibold text-emerald-700 dark:text-emerald-200"
                             : "text-zinc-800 dark:text-zinc-100"

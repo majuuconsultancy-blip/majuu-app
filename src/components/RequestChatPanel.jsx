@@ -22,11 +22,26 @@ function safeStr(x) {
   return String(x || "").trim();
 }
 
+const OPTIMISTIC_MAX_AGE_MS = 5 * 60 * 1000;
+const OPTIMISTIC_MATCH_WINDOW_MS = 12_000;
+const OPTIMISTIC_HANDOFF_DELAY_MS = 360;
+
 function tsToMillis(ts) {
   if (!ts) return 0;
+  if (typeof ts === "number" && Number.isFinite(ts)) return ts;
+  if (ts instanceof Date) return ts.getTime();
   if (typeof ts?.toMillis === "function") return ts.toMillis();
   if (typeof ts?.seconds === "number") return ts.seconds * 1000;
   return 0;
+}
+
+function messageCreatedAtMs(msg) {
+  return (
+    Number(msg?._createdAtMs || 0) ||
+    Number(msg?.createdAtMs || 0) ||
+    Number(msg?._localCreatedAtMs || 0) ||
+    tsToMillis(msg?.createdAt)
+  );
 }
 
 function formatTime(ts) {
@@ -135,10 +150,20 @@ function StatusDots({ status }) {
     );
   }
 
-  const delivered = s === "approved" || s === "delivered";
-  const tone = delivered ?"text-emerald-300" : "text-zinc-300";
+  const delivered = s === "delivered";
+  if (!delivered) {
+    return (
+      <span
+        className="inline-flex min-w-[18px] items-center justify-end text-white/75"
+        title="Sending"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-current opacity-90" />
+      </span>
+    );
+  }
+
   return (
-    <span className={`inline-flex items-center ${tone}`} title={delivered ?"Read" : "Pending"}>
+    <span className="inline-flex min-w-[18px] items-center justify-end text-emerald-300" title="Read">
       <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="-mr-1 h-3.5 w-3.5">
         <path
           d="M2.5 8.5 5.7 11.3 13.2 4.8"
@@ -241,76 +266,78 @@ function saveOptimisticToStorage(key, arr) {
   }
 }
 
-/* ---------------- optimistic matching (dedupe) ---------------- */
-function samePdfName(a, b) {
-  return safeStr(a?.pdfMeta?.name) && safeStr(a?.pdfMeta?.name) === safeStr(b?.pdfMeta?.name);
+/* ---------------- optimistic matching (stable handoff) ---------------- */
+function normalizedPdfName(msg) {
+  return safeStr(msg?.pdfMeta?.name).toLowerCase();
 }
 
-function matchPendingForOptimistic(oMsg, pendingMine, WINDOW_MS) {
-  const oType = String(oMsg?.type || "").toLowerCase();
-  const oMs = Number(oMsg?._createdAtMs || 0) || 0;
+function messageMatchesOptimistic(oMsg, candidate) {
+  const fromRole = safeStr(candidate?.fromRole).toLowerCase();
+  const wantFromRole = safeStr(oMsg?.fromRole).toLowerCase();
+  if (wantFromRole && fromRole && fromRole !== wantFromRole) return false;
 
-  if (!oMs) return false;
+  const fromUid = safeStr(candidate?.fromUid);
+  const wantFromUid = safeStr(oMsg?.fromUid);
+  if (wantFromUid && fromUid && fromUid !== wantFromUid) return false;
+
+  const toRole = safeStr(candidate?.toRole).toLowerCase();
+  const wantToRole = safeStr(oMsg?.toRole).toLowerCase();
+  if (wantToRole && toRole && toRole !== wantToRole) return false;
 
   const wantText = safeStr(oMsg?.text);
-  const wantPdf = safeStr(oMsg?.pdfMeta?.name);
+  const gotText = safeStr(candidate?.text);
+  const wantPdf = normalizedPdfName(oMsg);
+  const gotPdf = normalizedPdfName(candidate);
 
-  for (const p of pendingMine) {
-    const pMs = tsToMillis(p?.createdAt);
-    if (!pMs) continue;
-    if (Math.abs(pMs - oMs) > WINDOW_MS) continue;
+  const hasText = Boolean(wantText);
+  const hasPdf = Boolean(wantPdf);
+  const type = String(candidate?.type || "text").toLowerCase();
 
-    const pt = String(p?.type || "text").toLowerCase();
-    if (oType === "combo" || oType === "bundle") {
-      if (pt === "text" && wantText && safeStr(p?.text) === wantText) return true;
-      if (pt === "pdf" && wantPdf && safeStr(p?.pdfMeta?.name) === wantPdf) return true;
-      if (pt === "bundle") {
-        const okText = !wantText || safeStr(p?.text) === wantText;
-        const okPdf = !wantPdf || safeStr(p?.pdfMeta?.name) === wantPdf;
-        if (okText && okPdf) return true;
-      }
-    }
+  const textMatch = hasText && gotText === wantText;
+  const pdfMatch = hasPdf && gotPdf === wantPdf;
 
-    if (oType === "text" && pt === "text" && wantText && safeStr(p?.text) === wantText) return true;
+  if (hasText && hasPdf) {
+    if (type === "bundle") return textMatch || pdfMatch;
+    if (type === "text") return textMatch;
+    if (type === "pdf") return pdfMatch;
+    return false;
+  }
 
-    if (oType === "pdf" && pt === "pdf" && wantPdf && safeStr(p?.pdfMeta?.name) === wantPdf) return true;
+  if (hasText) {
+    if (type === "text" || type === "bundle") return textMatch;
+    return false;
+  }
+
+  if (hasPdf) {
+    if (type === "pdf" || type === "bundle") return pdfMatch;
+    return false;
   }
 
   return false;
 }
 
-function matchPublishedForOptimistic(oMsg, published, WINDOW_MS) {
-  const oType = String(oMsg?.type || "").toLowerCase();
-  const oMs = Number(oMsg?._createdAtMs || 0) || 0;
-  if (!oMs) return false;
+function findBestMatchForOptimistic(oMsg, candidates, usedIds, windowMs) {
+  const oMs = messageCreatedAtMs(oMsg);
+  if (!oMs) return null;
 
-  const wantText = safeStr(oMsg?.text);
-  const wantPdf = safeStr(oMsg?.pdfMeta?.name);
+  let best = null;
+  for (const candidate of candidates) {
+    const cid = safeStr(candidate?.id);
+    if (!cid || usedIds.has(cid)) continue;
 
-  for (const m of published) {
-    const mMs = tsToMillis(m?.createdAt);
-    if (!mMs) continue;
-    if (Math.abs(mMs - oMs) > WINDOW_MS) continue;
+    const cMs = messageCreatedAtMs(candidate);
+    if (!cMs) continue;
 
-    const mt = String(m?.type || "text").toLowerCase();
+    const distance = Math.abs(cMs - oMs);
+    if (distance > windowMs) continue;
+    if (!messageMatchesOptimistic(oMsg, candidate)) continue;
 
-    if (oType === "combo" || oType === "bundle") {
-      if (mt === "text" && wantText && safeStr(m?.text) === wantText) return true;
-      if (mt === "pdf" && wantPdf && safeStr(m?.pdfMeta?.name) === wantPdf) return true;
-      if (mt === "bundle" && (safeStr(m?.text) === wantText || samePdfName(m, oMsg))) return true;
-    }
-
-    if (oType === "text" && mt === "text" && wantText && safeStr(m?.text) === wantText) return true;
-    if (oType === "pdf" && mt === "pdf" && wantPdf && safeStr(m?.pdfMeta?.name) === wantPdf) return true;
-
-    if (oType === "bundle" && mt === "bundle") {
-      const okText = !wantText || safeStr(m?.text) === wantText;
-      const okPdf = !wantPdf || samePdfName(m, oMsg);
-      if (okText && okPdf) return true;
+    if (!best || distance < best.distance) {
+      best = { candidate, distance };
     }
   }
 
-  return false;
+  return best?.candidate || null;
 }
 
 /* ---------------- component ---------------- */
@@ -363,6 +390,8 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     [rid, myUid, myRole]
   );
   const [optimistic, setOptimistic] = useState(() => loadOptimisticFromStorage(storageKey));
+  const [reconcileNow, setReconcileNow] = useState(() => Date.now());
+  const pendingObservedAtRef = useRef(new Map());
 
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -420,8 +449,26 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        const rows = snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
-        rows.sort((a, b) => tsToMillis(a.createdAt) - tsToMillis(b.createdAt));
+        const liveIds = new Set();
+        const rows = snap.docs.map((d) => {
+          const row = normalizeTextDeep({ id: d.id, ...d.data() });
+          const id = safeStr(row?.id || d.id);
+          const fromServerMs = tsToMillis(row?.createdAt);
+          const knownMs = pendingObservedAtRef.current.get(id);
+          const localObservedMs = knownMs || fromServerMs || Date.now();
+          pendingObservedAtRef.current.set(id, localObservedMs);
+          liveIds.add(id);
+          return {
+            ...row,
+            _localCreatedAtMs: localObservedMs,
+          };
+        });
+
+        for (const id of pendingObservedAtRef.current.keys()) {
+          if (!liveIds.has(id)) pendingObservedAtRef.current.delete(id);
+        }
+
+        rows.sort((a, b) => messageCreatedAtMs(a) - messageCreatedAtMs(b));
         setPendingMine(rows);
       },
       (e) => {
@@ -433,6 +480,44 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     return () => unsub();
   }, [rid, myUid]);
 
+  useEffect(() => {
+    if (!optimistic.length) return undefined;
+
+    const now = Date.now();
+    const nextDueMs = optimistic
+      .map((o) => Number(o?.createdAtMs || 0))
+      .filter((ms) => ms > 0)
+      .flatMap((ms) => [
+        ms + OPTIMISTIC_HANDOFF_DELAY_MS - now,
+        ms + OPTIMISTIC_MAX_AGE_MS - now,
+      ])
+      .filter((delta) => delta > 0);
+
+    if (!nextDueMs.length) return undefined;
+
+    const waitMs = Math.max(40, Math.min(...nextDueMs));
+    const timer = window.setTimeout(() => {
+      setReconcileNow(Date.now());
+    }, waitMs);
+    return () => window.clearTimeout(timer);
+  }, [optimistic, pendingMine.length, published.length]);
+
+  const optimisticActive = useMemo(() => {
+    const now = reconcileNow;
+    return optimistic.filter((o) => {
+      const oMs = Number(o?.createdAtMs || 0) || 0;
+      if (!oMs) return false;
+      return now - oMs <= OPTIMISTIC_MAX_AGE_MS;
+    });
+  }, [optimistic, reconcileNow]);
+
+  useEffect(() => {
+    if (optimisticActive.length !== optimistic.length) {
+      setOptimistic(optimisticActive);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [optimisticActive.length, optimistic.length]);
+
   const publishedByPendingId = useMemo(() => {
     const map = new Map();
     published.forEach((m) => {
@@ -442,34 +527,8 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     return map;
   }, [published]);
 
-  const optimisticDeduped = useMemo(() => {
-    const WINDOW_MS = 12_000;
-    const now = Date.now();
-
-    return optimistic.filter((o) => {
-      const oMs = Number(o?.createdAtMs || 0) || 0;
-      if (!oMs) return false;
-      if (now - oMs > 5 * 60_000) return false;
-
-      const data = o.data || {};
-      const oMsg = { ...data, _createdAtMs: oMs };
-
-      if (matchPendingForOptimistic(oMsg, pendingMine, WINDOW_MS)) return false;
-      if (matchPublishedForOptimistic(oMsg, published, WINDOW_MS)) return false;
-
-      return true;
-    });
-  }, [optimistic, pendingMine, published]);
-
-  useEffect(() => {
-    if (optimisticDeduped.length !== optimistic.length) {
-      setOptimistic(optimisticDeduped);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [optimisticDeduped.length]);
-
   const timeline = useMemo(() => {
-    const pendingVisible = pendingMine
+    const pendingBase = pendingMine
       .filter((p) => {
         const st = String(p.status || "pending").toLowerCase();
         if (st === "rejected") return true;
@@ -479,26 +538,103 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
       .map((p) => ({
         _kind: "pending",
         _uiId: `p_${p.id}`,
-        _createdAtMs: tsToMillis(p.createdAt),
+        _createdAtMs: messageCreatedAtMs(p),
         ...p,
       }));
 
-    const publishedItems = published.map((m) => ({
+    const publishedBase = published.map((m) => ({
       _kind: "published",
       _uiId: `m_${m.id}`,
-      _createdAtMs: tsToMillis(m.createdAt),
+      _createdAtMs: messageCreatedAtMs(m),
       status: "delivered",
       ...m,
     }));
 
-    const optimisticItems = optimisticDeduped.map((o) => ({
-      _kind: "optimistic",
-      _uiId: o.id,
-      _createdAtMs: o.createdAtMs,
-      ...o.data,
-    }));
+    const usedPendingIds = new Set();
+    const usedPublishedIds = new Set();
 
-    const allRaw = [...publishedItems, ...pendingVisible, ...optimisticItems].sort(
+    const optimisticAnchored = [...optimisticActive]
+      .sort((a, b) => (Number(a?.createdAtMs || 0) || 0) - (Number(b?.createdAtMs || 0) || 0))
+      .map((o) => {
+        const oCreatedAtMs = Number(o?.createdAtMs || 0) || 0;
+        const oData = o?.data || {};
+        const optimisticMsg = {
+          ...oData,
+          fromRole: oData.fromRole || myRole,
+          fromUid: oData.fromUid || myUid,
+          _createdAtMs: oCreatedAtMs,
+          status: "pending",
+        };
+
+        const matchedPublished = findBestMatchForOptimistic(
+          optimisticMsg,
+          publishedBase,
+          usedPublishedIds,
+          OPTIMISTIC_MATCH_WINDOW_MS
+        );
+        const matchedPending = matchedPublished
+          ? null
+          : findBestMatchForOptimistic(
+              optimisticMsg,
+              pendingBase,
+              usedPendingIds,
+              OPTIMISTIC_MATCH_WINDOW_MS
+            );
+
+        const matched = matchedPublished || matchedPending;
+
+        if (matchedPublished) {
+          usedPublishedIds.add(matchedPublished.id);
+          const sourcePendingId = safeStr(matchedPublished.sourcePendingId);
+          if (sourcePendingId) usedPendingIds.add(sourcePendingId);
+        } else if (matchedPending) {
+          usedPendingIds.add(matchedPending.id);
+        }
+
+        const holdOptimistic =
+          Boolean(matched) && reconcileNow - oCreatedAtMs < OPTIMISTIC_HANDOFF_DELAY_MS;
+
+        if (matched && !holdOptimistic) {
+          const mergedData = {
+            ...optimisticMsg,
+            ...matched,
+            text: safeStr(matched?.text) || safeStr(optimisticMsg?.text),
+            pdfMeta: matched?.pdfMeta || optimisticMsg?.pdfMeta || null,
+            status:
+              matched?._kind === "published"
+                ? "delivered"
+                : String(matched?.status || "pending").toLowerCase(),
+          };
+          return {
+            _kind: matched._kind,
+            _uiId: o.id,
+            _createdAtMs: oCreatedAtMs || matched._createdAtMs || 0,
+            ...mergedData,
+          };
+        }
+
+        if (matched && String(matched?.status || "").toLowerCase() === "rejected") {
+          return {
+            _kind: "optimistic",
+            _uiId: o.id,
+            _createdAtMs: oCreatedAtMs,
+            ...optimisticMsg,
+            status: "rejected",
+          };
+        }
+
+        return {
+          _kind: "optimistic",
+          _uiId: o.id,
+          _createdAtMs: oCreatedAtMs,
+          ...optimisticMsg,
+        };
+      });
+
+    const pendingVisible = pendingBase.filter((p) => !usedPendingIds.has(p.id));
+    const publishedItems = publishedBase.filter((m) => !usedPublishedIds.has(m.id));
+
+    const allRaw = [...publishedItems, ...pendingVisible, ...optimisticAnchored].sort(
       (a, b) => (a._createdAtMs || 0) - (b._createdAtMs || 0)
     );
 
@@ -536,7 +672,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     }
 
     return out;
-  }, [published, pendingMine, optimisticDeduped, publishedByPendingId]);
+  }, [published, pendingMine, optimisticActive, publishedByPendingId, reconcileNow, myRole, myUid]);
 
   const timelineRows = useMemo(() => {
     const rows = [];
@@ -726,7 +862,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
 
     const fromRole = String(m.fromRole || "").toLowerCase();
     const mine = fromRole === myRole;
-    const time = formatTime(m.createdAt || null);
+    const time = formatTime(m.createdAt || m._createdAtMs || null);
 
     const type = String(m.type || "text").toLowerCase();
     const isPdf = type === "pdf";

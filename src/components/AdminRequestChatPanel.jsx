@@ -30,11 +30,23 @@ function safeStr(x) {
   return String(x || "").trim();
 }
 
+const CHAT_HANDOFF_DELAY_MS = 360;
+
 function tsToMillis(ts) {
   if (!ts) return 0;
+  if (typeof ts === "number" && Number.isFinite(ts)) return ts;
+  if (ts instanceof Date) return ts.getTime();
   if (typeof ts?.toMillis === "function") return ts.toMillis();
   if (typeof ts?.seconds === "number") return ts.seconds * 1000;
   return 0;
+}
+
+function messageCreatedAtMs(docu) {
+  return (
+    Number(docu?._localCreatedAtMs || 0) ||
+    tsToMillis(pickCreatedAt(docu)) ||
+    tsToMillis(docu?.createdAt)
+  );
 }
 
 function formatTime(ts) {
@@ -175,9 +187,20 @@ function IconSend(props) {
 
 function StatusTicks({ status }) {
   const s = String(status || "").toLowerCase();
-  const tone = s === "delivered" || s === "approved" ?"text-emerald-300" : "text-zinc-300";
+  const delivered = s === "delivered";
+  if (!delivered) {
+    return (
+      <span
+        className="inline-flex min-w-[18px] items-center justify-end text-white/75"
+        title="Sending"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-current opacity-90" />
+      </span>
+    );
+  }
+
   return (
-    <span className={`inline-flex items-center ${tone}`} title={s}>
+    <span className="inline-flex min-w-[18px] items-center justify-end text-emerald-300" title="Read">
       <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="-mr-1 h-3.5 w-3.5">
         <path d="M2.5 8.5 5.7 11.3 13.2 4.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
@@ -207,6 +230,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
   const [pending, setPending] = useState([]);
   const [published, setPublished] = useState([]);
+  const [handoffNow, setHandoffNow] = useState(() => Date.now());
 
   const [busyKey, setBusyKey] = useState(""); // message id or bundle id
   const [err, setErr] = useState("");
@@ -230,6 +254,9 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   const fileInputRef = useRef(null);
   const threadRef = useRef(null);
   const composerRef = useRef(null);
+  const pendingObservedAtRef = useRef(new Map());
+  const publishedObservedAtRef = useRef(new Map());
+  const publishedByPendingSeenAtRef = useRef(new Map());
   const keyboardInset = useKeyboardInset(true);
 
   const taRef = useRef(null);
@@ -309,7 +336,24 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        setPending(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
+        const liveIds = new Set();
+        const rows = snap.docs.map((d) => {
+          const row = normalizeTextDeep({ id: d.id, ...d.data() });
+          const id = safeStr(row?.id || d.id);
+          const fromServerMs = tsToMillis(pickCreatedAt(row));
+          const knownMs = pendingObservedAtRef.current.get(id);
+          const localObservedMs = knownMs || fromServerMs || Date.now();
+          pendingObservedAtRef.current.set(id, localObservedMs);
+          liveIds.add(id);
+          return { ...row, _localCreatedAtMs: localObservedMs };
+        });
+
+        for (const id of pendingObservedAtRef.current.keys()) {
+          if (!liveIds.has(id)) pendingObservedAtRef.current.delete(id);
+        }
+
+        rows.sort((a, b) => messageCreatedAtMs(a) - messageCreatedAtMs(b));
+        setPending(rows);
         setErr("");
       },
       (e) => {
@@ -330,7 +374,24 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        setPublished(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
+        const liveIds = new Set();
+        const rows = snap.docs.map((d) => {
+          const row = normalizeTextDeep({ id: d.id, ...d.data() });
+          const id = safeStr(row?.id || d.id);
+          const fromServerMs = tsToMillis(pickCreatedAt(row));
+          const knownMs = publishedObservedAtRef.current.get(id);
+          const localObservedMs = knownMs || fromServerMs || Date.now();
+          publishedObservedAtRef.current.set(id, localObservedMs);
+          liveIds.add(id);
+          return { ...row, _localCreatedAtMs: localObservedMs };
+        });
+
+        for (const id of publishedObservedAtRef.current.keys()) {
+          if (!liveIds.has(id)) publishedObservedAtRef.current.delete(id);
+        }
+
+        rows.sort((a, b) => messageCreatedAtMs(a) - messageCreatedAtMs(b));
+        setPublished(rows);
         setErr("");
       },
       (e) => {
@@ -342,27 +403,99 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     return () => unsub();
   }, [rid]);
 
+  useEffect(() => {
+    const now = Date.now();
+    const livePublishedPendingIds = new Set();
+    const visiblePendingIds = new Set(
+      pending
+        .filter((p) => !optimisticHidden.has(p?.id))
+        .map((p) => safeStr(p?.id))
+        .filter(Boolean)
+    );
+
+    published.forEach((m) => {
+      const pendingId = safeStr(m?.sourcePendingId);
+      if (!pendingId) return;
+      livePublishedPendingIds.add(pendingId);
+      if (!publishedByPendingSeenAtRef.current.has(pendingId)) {
+        publishedByPendingSeenAtRef.current.set(pendingId, now);
+      }
+    });
+
+    for (const pendingId of publishedByPendingSeenAtRef.current.keys()) {
+      if (!livePublishedPendingIds.has(pendingId)) {
+        publishedByPendingSeenAtRef.current.delete(pendingId);
+      }
+    }
+
+    const dueIn = [];
+    livePublishedPendingIds.forEach((pendingId) => {
+      if (!visiblePendingIds.has(pendingId)) return;
+      const seenAt = publishedByPendingSeenAtRef.current.get(pendingId) || now;
+      const leftMs = seenAt + CHAT_HANDOFF_DELAY_MS - now;
+      if (leftMs > 0) dueIn.push(leftMs);
+    });
+
+    if (!dueIn.length) return undefined;
+
+    const timer = window.setTimeout(() => {
+      setHandoffNow(Date.now());
+    }, Math.max(30, Math.min(...dueIn)));
+
+    return () => window.clearTimeout(timer);
+  }, [pending, published, optimisticHidden]);
+
   /* ---------- build timeline (UI merge) ---------- */
   const timeline = useMemo(() => {
     const hidden = optimisticHidden;
+    const visiblePending = pending.filter((p) => !hidden.has(p.id));
+    const pendingById = new Map(
+      visiblePending.map((p) => [safeStr(p?.id), p]).filter((entry) => entry[0])
+    );
+    const publishedByPendingId = new Map();
+    published.forEach((m) => {
+      const pendingId = safeStr(m?.sourcePendingId);
+      if (!pendingId) return;
+      publishedByPendingId.set(pendingId, m);
+    });
 
-    const pendingItemsRaw = pending
-      .filter((p) => !hidden.has(p.id))
+    const pendingItemsRaw = visiblePending
+      .filter((p) => {
+        const pendingId = safeStr(p?.id);
+        if (!publishedByPendingId.has(pendingId)) return true;
+
+        const seenAt = publishedByPendingSeenAtRef.current.get(pendingId) || 0;
+        if (!seenAt) return true;
+        return handoffNow - seenAt < CHAT_HANDOFF_DELAY_MS;
+      })
       .map((p) => ({
         _kind: "pending",
-        _uiId: `p_${p.id}`,
-        _createdAtMs: tsToMillis(pickCreatedAt(p)) || 0,
+        _uiId: publishedByPendingId.has(safeStr(p?.id)) ? `handoff_${p.id}` : `p_${p.id}`,
+        _createdAtMs: messageCreatedAtMs(p),
         status: "pending",
         ...p,
       }));
 
-    const publishedItemsRaw = published.map((m) => ({
-      _kind: "published",
-      _uiId: `m_${m.id}`,
-      _createdAtMs: tsToMillis(pickCreatedAt(m)) || 0,
-      status: "delivered",
-      ...m,
-    }));
+    const publishedItemsRaw = published
+      .filter((m) => {
+        const pendingId = safeStr(m?.sourcePendingId);
+        if (!pendingId) return true;
+        if (!pendingById.has(pendingId)) return true;
+
+        const seenAt = publishedByPendingSeenAtRef.current.get(pendingId) || 0;
+        if (!seenAt) return false;
+        return handoffNow - seenAt >= CHAT_HANDOFF_DELAY_MS;
+      })
+      .map((m) => {
+        const pendingId = safeStr(m?.sourcePendingId);
+        return {
+          _kind: "published",
+          _uiId: pendingId ? `handoff_${pendingId}` : `m_${m.id}`,
+          _createdAtMs: messageCreatedAtMs(m),
+          status: "delivered",
+          ...m,
+        };
+      });
 
     const allRaw = [...publishedItemsRaw, ...pendingItemsRaw].sort(
       (a, b) => (a._createdAtMs || 0) - (b._createdAtMs || 0)
@@ -400,7 +533,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     }
 
     return out;
-  }, [pending, published, optimisticHidden]);
+  }, [pending, published, optimisticHidden, handoffNow]);
 
   const timelineRows = useMemo(() => {
     const rows = [];
@@ -714,7 +847,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
               const fromRole = String(m.fromRole || "").toLowerCase();
               const isLeft = fromRole === "user";
               const bubbleCls = isLeft ?bubbleLeft : bubbleRight;
-              const time = formatTime(pickCreatedAt(m));
+              const time = formatTime(pickCreatedAt(m) || m?._localCreatedAtMs || item.createdAtMs || 0);
 
               const isBundleView =
                 item._kind === "bundle_view" ||

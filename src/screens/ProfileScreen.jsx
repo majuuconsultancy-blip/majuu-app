@@ -399,35 +399,20 @@ export default function ProfileScreen() {
           <p className="mt-1 truncate text-sm text-zinc-600 dark:text-zinc-300">{email || "-"}</p>
 
           {isAdmin ? (
-            <span className="mt-2 inline-flex rounded-full border border-rose-200/70 bg-rose-50/80 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:border-rose-900/45 dark:bg-rose-950/30 dark:text-rose-200">
-              {adminBadgeLabel}
-            </span>
+            <div className="mt-2 flex items-center justify-center">
+              <span className="inline-flex rounded-full border border-rose-200/70 bg-rose-50/80 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:border-rose-900/45 dark:bg-rose-950/30 dark:text-rose-200">
+                {adminBadgeLabel}
+              </span>
+            </div>
           ) : null}
-
-          <div className="mt-4 grid grid-cols-2 gap-2.5 text-left">
-            <div className="rounded-2xl border border-zinc-200/80 bg-white/85 px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950/40">
-              <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500 dark:text-zinc-400">
-                Country
-              </div>
-              <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                {countryValue}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-zinc-200/80 bg-white/85 px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950/40">
-              <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500 dark:text-zinc-400">
-                Phone
-              </div>
-              <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                {phoneValue}
-              </div>
-            </div>
-          </div>
 
           <Motion.button
             type="button"
             onClick={openEdit}
             whileTap={{ scale: 0.99 }}
-            className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-zinc-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:text-zinc-100"
+            className={`inline-flex items-center gap-1.5 rounded-full border border-zinc-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:text-zinc-100 ${
+              isAdmin ? "mt-5" : "mt-3"
+            }`}
           >
             <AppIcon size={ICON_SM} icon={Pencil} />
             Edit profile
@@ -439,6 +424,25 @@ export default function ProfileScreen() {
             {err}
           </div>
         ) : null}
+
+        <div className="mt-3 grid grid-cols-2 gap-2.5 text-left">
+          <div className="rounded-2xl border border-zinc-200/80 bg-white/85 px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950/40">
+            <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500 dark:text-zinc-400">
+              Country
+            </div>
+            <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              {countryValue}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-zinc-200/80 bg-white/85 px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950/40">
+            <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500 dark:text-zinc-400">
+              Phone
+            </div>
+            <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              {phoneValue}
+            </div>
+          </div>
+        </div>
 
         <Motion.div
           variants={floatCard}
@@ -514,7 +518,7 @@ export default function ProfileScreen() {
                     Legal Policies Help Center
                   </div>
                   <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                    Policies, FAQs, WhatsApp help, and support contacts.
+                    Policies, FAQs and support.
                   </div>
                 </div>
               </div>

@@ -271,6 +271,27 @@ function parseMissingItemsFromNote(note) {
   return Array.from(new Set(parts));
 }
 
+function clearStaleRequestModalBodyLock() {
+  if (typeof document === "undefined") return;
+  const body = document.body;
+  const html = document.documentElement;
+  if (!body || !html) return;
+
+  const hasRequestModalLockClass = body.classList.contains("request-modal-body-locked");
+  const bodyTop = String(body.style.top || "").trim();
+  const looksLikeStaleFixedLock =
+    body.style.position === "fixed" && /^-\d+px$/i.test(bodyTop);
+  if (!hasRequestModalLockClass && !looksLikeStaleFixedLock) return;
+
+  body.classList.remove("request-modal-body-locked");
+  body.classList.remove("request-modal-open");
+  html.style.overflow = "";
+  body.style.position = "";
+  body.style.top = "";
+  body.style.width = "";
+  body.style.overflow = "";
+}
+
 function buildProgressSummary(request, progressUpdates, workProgress) {
   const updates = Array.isArray(progressUpdates)
     ? progressUpdates.filter((row) => row && row.visibleToUser !== false)
@@ -416,6 +437,10 @@ export default function RequestStatusScreen() {
 
   // ✅ IMPORTANT: ensure any modal/portal chat always sits on top
   const TOP_LAYER_CLS = "relative isolate z-0";
+
+  useEffect(() => {
+    clearStaleRequestModalBodyLock();
+  }, []);
 
   useEffect(() => {
     let unsubDoc = null;

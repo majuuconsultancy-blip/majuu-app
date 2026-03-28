@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 function safeStr(value, max = 400) {
   return String(value || "").trim().slice(0, max);
@@ -169,13 +169,26 @@ function DemoPaystackCheckoutModal({
   const maskedReference = useMemo(() => safeStr(reference, 120) || "DEMO-CHECKOUT", [reference]);
   const payerEmail = useMemo(() => safeStr(email, 160).toLowerCase(), [email]);
   const flowLabel = useMemo(() => safeStr(metadata?.flowType || metadata?.paymentType || "checkout", 60), [metadata]);
+  const cancelCheckout = useCallback(() => {
+    if (processing) return;
+    onReject(new Error("Demo checkout cancelled."));
+  }, [onReject, processing]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setEntered(true), 12);
     const onKeyDown = (event) => {
-      if (event.key === "Escape" && !processing) {
-        onReject(new Error("Demo checkout cancelled."));
-      }
+      if (event.key === "Escape") cancelCheckout();
+    };
+    const onNativeBack = (event) => {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      event?.stopImmediatePropagation?.();
+      cancelCheckout();
+    };
+    const onPopState = (event) => {
+      event?.stopPropagation?.();
+      event?.stopImmediatePropagation?.();
+      cancelCheckout();
     };
 
     const previousHtmlOverflow = document.documentElement.style.overflow;
@@ -183,14 +196,18 @@ function DemoPaystackCheckoutModal({
     document.documentElement.style.overflow = "hidden";
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onKeyDown);
+    document.addEventListener("backbutton", onNativeBack);
+    window.addEventListener("popstate", onPopState, true);
 
     return () => {
       window.clearTimeout(timer);
       window.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("backbutton", onNativeBack);
+      window.removeEventListener("popstate", onPopState, true);
       document.documentElement.style.overflow = previousHtmlOverflow;
       document.body.style.overflow = previousBodyOverflow;
     };
-  }, [onReject, processing]);
+  }, [cancelCheckout]);
 
   const canSubmit = useMemo(() => {
     if (processing) return false;
@@ -243,8 +260,8 @@ function DemoPaystackCheckoutModal({
         entered ? "bg-zinc-950/45 opacity-100 backdrop-blur-[2px]" : "bg-zinc-950/0 opacity-0",
       ].join(" ")}
       onClick={(event) => {
-        if (event.target === event.currentTarget && !processing) {
-          onReject(new Error("Demo checkout cancelled."));
+        if (event.target === event.currentTarget) {
+          cancelCheckout();
         }
       }}
       role="presentation"
@@ -267,7 +284,7 @@ function DemoPaystackCheckoutModal({
             </div>
             <button
               type="button"
-              onClick={() => onReject(new Error("Demo checkout cancelled."))}
+              onClick={cancelCheckout}
               disabled={processing}
               className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-500 transition hover:bg-zinc-50 disabled:opacity-50"
               aria-label="Close demo checkout"
