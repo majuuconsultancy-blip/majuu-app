@@ -859,7 +859,7 @@ export default function SelfHelpHubScreen({ track }) {
                   aria-label="Open money tools"
                 >
                   <AppIcon size={ICON_SM} icon={DollarSign} />
-                  Money Tools
+                  Journey Tools
                 </button>
 
                 <button
@@ -868,8 +868,7 @@ export default function SelfHelpHubScreen({ track }) {
                   className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 text-xs font-semibold text-zinc-800 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100 dark:hover:bg-zinc-900"
                   aria-label="Open journey checklist"
                 >
-                  <AppIcon size={ICON_SM} icon={ListChecks} />
-                  Jenny Checklist
+                  <AppIcon size={ICON_SM} icon={ListChecks} />                  
                 </button>
               </div>
             </div>

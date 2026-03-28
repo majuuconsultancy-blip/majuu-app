@@ -47,43 +47,19 @@ export default function ThemeToggle() {
   };
 
   const isDark = mode === "dark";
+  const Icon = isDark ? IconSun : IconMoon;
+  const nextMode = isDark ? "light" : "dark";
+  const nextLabel = isDark ? "Use light theme" : "Use dark theme";
 
   return (
-    <div className="rounded-[1.1rem] border border-zinc-200/80 bg-white/80 p-1 shadow-[0_10px_30px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-zinc-700/70 dark:bg-zinc-900/70">
-      <div className="relative grid min-w-[11rem] grid-cols-2 items-center">
-        <span
-          aria-hidden="true"
-          className={`pointer-events-none absolute inset-y-0 left-0 w-[calc(50%-0.125rem)] rounded-[0.85rem] bg-zinc-950 shadow-sm transition-transform duration-200 ease-out dark:bg-white ${
-            isDark ? "translate-x-full" : "translate-x-0"
-          }`}
-        />
-
-        <button
-          type="button"
-          onClick={() => setNextMode("light")}
-          className={`relative z-10 inline-flex items-center justify-center gap-2 rounded-[0.85rem] px-3 py-2 text-sm font-semibold transition ${
-            isDark ? "text-zinc-500 dark:text-zinc-400" : "text-white dark:text-zinc-950"
-          }`}
-          aria-pressed={!isDark}
-          title="Use light theme"
-        >
-          <IconSun className="h-4 w-4" />
-          <span>Light</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setNextMode("dark")}
-          className={`relative z-10 inline-flex items-center justify-center gap-2 rounded-[0.85rem] px-3 py-2 text-sm font-semibold transition ${
-            isDark ? "text-zinc-950 dark:text-zinc-950" : "text-zinc-500 dark:text-zinc-400"
-          }`}
-          aria-pressed={isDark}
-          title="Use dark theme"
-        >
-          <IconMoon className="h-4 w-4" />
-          <span>Dark</span>
-        </button>
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={() => setNextMode(nextMode)}
+      className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200/80 bg-white/80 text-zinc-700 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl transition hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700/70 dark:bg-zinc-900/70 dark:text-zinc-200 dark:hover:border-zinc-600 dark:hover:text-zinc-100"
+      aria-label={nextLabel}
+      title={nextLabel}
+    >
+      <Icon className="h-4 w-4" />
+    </button>
   );
 }

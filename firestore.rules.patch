@@ -415,6 +415,11 @@ service cloud.firestore {
       allow create, update, delete: if isSuperAdmin();
     }
 
+    match /discoveryPublications/{publicationId} {
+      allow read: if isSuperAdmin() || (signedIn() && resource.data.isPublished == true);
+      allow create, update, delete: if isSuperAdmin();
+    }
+
     match /pricingRules/{pricingKey} {
       allow read: if signedIn();
       allow create, update, delete: if isSuperAdmin();

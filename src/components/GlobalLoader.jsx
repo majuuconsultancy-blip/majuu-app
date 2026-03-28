@@ -16,6 +16,8 @@ export default function GlobalLoader({
   appName = "MAJUU",
   showAppName = false,
   phase = "active",
+  logoSrc = "",
+  logoAlt = "",
 } = {}) {
   const active = typeof visible === "boolean" ? visible : Boolean(isLoading);
   const resolvedText = useMemo(
@@ -23,6 +25,11 @@ export default function GlobalLoader({
     [label, loadingText]
   );
   const resolvedCaption = useMemo(() => String(caption || "").trim(), [caption]);
+  const resolvedLogoSrc = useMemo(() => String(logoSrc || "").trim(), [logoSrc]);
+  const resolvedLogoAlt = useMemo(
+    () => normalizeText(logoAlt, `${normalizeText(appName, "MAJUU")} logo`),
+    [appName, logoAlt]
+  );
   const staticMark = !active || phase === "settle" || phase === "exit";
 
   return (
@@ -37,9 +44,13 @@ export default function GlobalLoader({
       aria-hidden={!active}
     >
       <div className="global-loader-panel" role="status" aria-live="polite" aria-label={resolvedText}>
-        <div className={`global-loader-mark ${staticMark ? "global-loader-mark--static" : ""}`}>
-          M
-        </div>
+        {resolvedLogoSrc ? (
+          <img className="global-loader-logo" src={resolvedLogoSrc} alt={resolvedLogoAlt} />
+        ) : (
+          <div className={`global-loader-mark ${staticMark ? "global-loader-mark--static" : ""}`}>
+            M
+          </div>
+        )}
         {showAppName ? <div className="global-loader-brand">{normalizeText(appName, "MAJUU")}</div> : null}
         <div className="global-loader-text-wrap">
           <span key={resolvedText} className="global-loader-text">

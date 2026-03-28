@@ -21,8 +21,6 @@ import { motion } from "../utils/motionProxy";
 import RequestChatLauncher from "../components/RequestChatLauncher";
 import CollapsibleSection from "../components/CollapsibleSection";
 import RequestDocumentFieldsSection from "../components/RequestDocumentFieldsSection";
-import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
-import RequestProgressUpdatesList from "../components/RequestProgressUpdatesList";
 import RequestExtraDetailsSection from "../components/RequestExtraDetailsSection";
 
 import { auth, db } from "../firebase";
@@ -389,7 +387,6 @@ export default function RequestStatusScreen() {
   const [adminDocumentsOpen, setAdminDocumentsOpen] = useState(false);
   const [requestIdCopied, setRequestIdCopied] = useState(false);
   const [progressUpdates, setProgressUpdates] = useState([]);
-  const [progressUpdatesErr, setProgressUpdatesErr] = useState("");
   const unreadRequestState = useNotifsV2Store(
     (s) => s.unreadByRequest?.[String(requestId || "").trim()] || EMPTY_REQUEST_UNREAD_STATE
   );
@@ -600,11 +597,9 @@ export default function RequestStatusScreen() {
       viewerRole: "user",
       onData: (rows) => {
         setProgressUpdates(rows);
-        setProgressUpdatesErr("");
       },
       onError: (error) => {
         console.error("request progress updates snapshot error:", error);
-        setProgressUpdatesErr(error?.message || "Failed to load progress updates.");
       },
     });
 
@@ -839,7 +834,6 @@ export default function RequestStatusScreen() {
     (isFull ? "Bundled request journey" : "-");
   const workProgress = getRequestWorkProgress(req);
   const progressSummary = buildProgressSummary(req, progressUpdates, workProgress);
-  const showWorkProgressCard = Boolean(req);
   const requestIdentifier = safeStr(req?.id || validRequestId, 240);
   const requestIdLabel = truncateMiddle(requestIdentifier);
   const unlockPayment =
@@ -1087,6 +1081,30 @@ export default function RequestStatusScreen() {
           </span>
         </div>
 
+        <div className="mt-3 mx-auto w-full max-w-md">
+          <div className="flex items-center gap-3">
+            <div className="relative h-4 flex-1 overflow-hidden rounded-full bg-zinc-200/80 dark:bg-zinc-800/75">
+              <div
+                className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 transition-[width] duration-500"
+                style={{ width: `${progressSummary.percent}%` }}
+              >
+                {progressSummary.percent > 0 && progressSummary.percent < 100 ? (
+                  <motion.span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-y-0 w-14 bg-gradient-to-r from-transparent via-white/30 to-transparent dark:via-white/12"
+                    initial={{ x: "-100%" }}
+                    animate={{ x: "120%" }}
+                    transition={{ duration: 2.8, repeat: Infinity, ease: "easeInOut" }}
+                  />
+                ) : null}
+              </div>
+            </div>
+            <span className="min-w-[3rem] text-right text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+              {progressSummary.badgeLabel}
+            </span>
+          </div>
+        </div>
+
         {isFull && fullPackageStatusRows.length > 0 ?(
           <div className="mt-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4">
             <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
@@ -1118,18 +1136,6 @@ export default function RequestStatusScreen() {
 
                 <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${ui.badge}`}>
                   {requestTypeLabel}
-                </span>
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                <span className="rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/35 dark:text-zinc-200">
-                  Track: {startCase(req?.track) || "-"}
-                </span>
-                <span className="rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/35 dark:text-zinc-200">
-                  Country: {req?.country || "-"}
-                </span>
-                <span className="rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/35 dark:text-zinc-200">
-                  Service: {serviceNameLabel}
                 </span>
               </div>
 
@@ -1215,36 +1221,6 @@ export default function RequestStatusScreen() {
 
             </motion.div>
           </motion.div>
-
-          {showWorkProgressCard ?(
-            <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
-              <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
-                <RequestWorkProgressCard
-                  request={req}
-                  title="Request progress"
-                  subtitle="A quick view of your application journey."
-                  showWhenIdle
-                  helperText={progressSummary.helperText}
-                  progressPercentOverride={progressSummary.percent}
-                  badgeLabelOverride={progressSummary.badgeLabel}
-                  idleText="Request received and waiting for staff review."
-                  pendingText="Work has started. A percentage update has not been posted yet."
-                />
-
-                {progressUpdatesErr ? (
-                  <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-                    {progressUpdatesErr}
-                  </div>
-                ) : null}
-
-                <RequestProgressUpdatesList
-                  updates={progressUpdates}
-                  viewerRole="user"
-                  emptyText="No visible progress notes yet."
-                />
-              </motion.div>
-            </motion.div>
-          ) : null}
 
           <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
             <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
@@ -1445,7 +1421,7 @@ export default function RequestStatusScreen() {
                   <div className="mt-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4">
                     <div className="text-xs text-zinc-600 dark:text-zinc-300">
                       Unlock payment is not manually refundable. It auto-refunds after 48 hours if work has not started.
-                      In-progress payment refunds are reviewed manually.
+                      In-progress payments are manually refundable.
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
                       <span>Review</span>
@@ -1490,7 +1466,7 @@ export default function RequestStatusScreen() {
               >
                 <div className="min-w-0">
                   <div className="font-semibold text-zinc-900 dark:text-zinc-100">Request refund</div>
-                  <div className="text-xs text-zinc-500">Select the exact payment item and review refund history.</div>
+                  <div className="text-xs text-zinc-500">View the exact payment and review refund history.</div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {unreadRequestState?.refundUnread ? (
@@ -1615,7 +1591,7 @@ export default function RequestStatusScreen() {
             <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
               <CollapsibleSection
                 title="Submitted documents"
-                subtitle="Your uploads and document fields for this request."
+                subtitle="Your document uploads for this request."
                 meta={`${attachments.length} files`}
                 open={documentsOpen}
                 onToggle={setDocumentsOpen}
@@ -1640,9 +1616,9 @@ export default function RequestStatusScreen() {
                       </div>
                     ) : null}
 
-                    <div className="grid gap-2">
+                    <div className="divide-y divide-zinc-200/75 dark:divide-zinc-800/75">
                       {attachments.length === 0 ?(
-                        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
+                        <div className="py-4 text-sm text-zinc-600 dark:text-zinc-300">
                           No documents submitted yet.
                         </div>
                       ) : (
@@ -1652,7 +1628,7 @@ export default function RequestStatusScreen() {
                             initial={{ opacity: 0, y: 6 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: Math.min(0.2, idx * 0.03), duration: 0.18 }}
-                            className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
+                            className="py-3 transition active:scale-[0.995]"
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
@@ -1686,8 +1662,8 @@ export default function RequestStatusScreen() {
           <motion.div variants={tileIn} whileHover="hover" whileTap="tap" initial="rest" animate="rest">
             <motion.div variants={floaty} className={`${cardBase} ${cardPolish} p-5`}>
               <CollapsibleSection
-                title="Documents from My Google"
-                subtitle="Shared templates and downloadable files."
+                title="Documents from Agency"
+                subtitle="Viewall your agency-provided documents."
                 meta={`${adminFiles.length} files`}
                 open={adminDocumentsOpen}
                 onToggle={setAdminDocumentsOpen}

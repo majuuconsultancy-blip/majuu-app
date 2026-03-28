@@ -189,18 +189,17 @@ export default function LegalPortalScreen({ mode = "public" }) {
             </div>
 
             <h1 className="mt-3 text-[2rem] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-              Legal Policies Help Center
+              Help Center
             </h1>
             <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Get policy documents, support contacts, and quick answers in one place.
+              Policy documents, Support contacts, FAQs.
             </p>
 
             <div className="mt-4 flex flex-wrap gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
               <span className="rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-950/40">
-                Support: {SUPPORT_PHONE}
               </span>
               <span className="rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-950/40">
-                Location: {SUPPORT_LOCATION}
+                HQ: {SUPPORT_LOCATION}
               </span>
             </div>
           </section>
@@ -212,7 +211,7 @@ export default function LegalPortalScreen({ mode = "public" }) {
                   Help center
                 </h2>
                 <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                  Reach support or find quick guidance fast.
+                  Reach support or find quick answers fast.
                 </p>
               </div>
             </div>
@@ -267,7 +266,7 @@ export default function LegalPortalScreen({ mode = "public" }) {
                 </p>
               </div>
               <span className="rounded-full border border-zinc-200 bg-white/80 px-3 py-1 text-[11px] font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
-                {docs.length} documents
+                {docs.length}
               </span>
             </div>
 

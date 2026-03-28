@@ -1242,19 +1242,6 @@ export default function ProgressScreen() {
               <button
                 type="button"
                 onClick={() => {
-                  setProgressTab("selfhelp");
-                }}
-                className={`rounded-full px-4 py-2 font-semibold transition ${
-                  activeTab === "selfhelp"
-                    ? "bg-emerald-600 text-white"
-                    : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                }`}
-              >
-                SelfHelp
-              </button>
-              <button
-                type="button"
-                onClick={() => {
                   setProgressTab("wehelp");
                 }}
                 className={`rounded-full px-4 py-2 font-semibold transition ${
@@ -1264,6 +1251,19 @@ export default function ProgressScreen() {
                 }`}
               >
                 WeHelp
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setProgressTab("selfhelp");
+                }}
+                className={`rounded-full px-4 py-2 font-semibold transition ${
+                  activeTab === "selfhelp"
+                    ? "bg-emerald-600 text-white"
+                    : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                }`}
+              >
+                SelfHelp
               </button>
             </div>
           </div>

@@ -78,8 +78,8 @@ const SACC_MODULES = [
   },
   {
     key: "news",
-    title: "News Publication",
-    description: "Publish and manage migration updates and announcements.",
+    title: "News & Discovery Publication",
+    description: "Publish migration news and track-country discovery content.",
     path: "/app/admin/sacc/news",
     icon: Newspaper,
     group: "content-design",

@@ -44,7 +44,6 @@ import { sweepStaleAssignments } from "./services/adminrequestservice";
 import { getCurrentUserRoleContext } from "./services/adminroleservice";
 import { hasSeenIntro } from "./utils/introFlag";
 import { isResumableRoute, setSnapshot } from "./resume/resumeEngine";
-import { waitForAuthRestore } from "./utils/authRestore";
 import BiometricAppLock from "./components/BiometricAppLock";
 import { getUserState } from "./services/userservice";
 import { resolveLandingPathFromUserState } from "./journey/journeyLanding";
@@ -52,6 +51,7 @@ import { normalizeJourney } from "./journey/journeyModel";
 import { ANALYTICS_EVENT_TYPES } from "./constants/analyticsEvents";
 import { logAnalyticsEvent } from "./services/analyticsService";
 import { useI18n } from "./lib/i18n";
+import { AuthSessionProvider, useAuthSession } from "./auth/AuthSessionContext";
 
 /* ---------------- Lazy screens ---------------- */
 // Main user flows
@@ -72,6 +72,13 @@ const TravelSelfHelp = lazy(() => import("./screens/TravelSelfHelp"));
 const TravelWeHelp = lazy(() => import("./screens/TravelWeHelp"));
 const TravelMoneyTools = lazy(() => import("./screens/TravelMoneyTools"));
 const TravelSelfHelpDocuments = lazy(() => import("./screens/TravelSelfHelpDocuments"));
+const DiscoveryScreen = lazy(() => import("./screens/DiscoveryScreen"));
+const DiscoveryDetailScreen = lazy(() => import("./screens/DiscoveryDetailScreen"));
+const CompareCountriesScreen = lazy(() => import("./screens/CompareCountriesScreen"));
+const DiscoveryMatchQuestionnaireScreen = lazy(() =>
+  import("./screens/DiscoveryMatchQuestionnaireScreen")
+);
+const DiscoveryMatchResultsScreen = lazy(() => import("./screens/DiscoveryMatchResultsScreen"));
 
 const FullPackageMissingScreen = lazy(() => import("./screens/FullPackageMissingScreen"));
 const SettingsScreen = lazy(() => import("./screens/SettingsScreen"));
@@ -147,6 +154,11 @@ function preloadCriticalScreens() {
   import("./screens/TravelWeHelp");
   import("./screens/TravelMoneyTools");
   import("./screens/TravelSelfHelpDocuments");
+  import("./screens/DiscoveryScreen");
+  import("./screens/DiscoveryDetailScreen");
+  import("./screens/CompareCountriesScreen");
+  import("./screens/DiscoveryMatchQuestionnaireScreen");
+  import("./screens/DiscoveryMatchResultsScreen");
 
   import("./screens/FullPackageMissingScreen");
   import("./screens/RequestStatusScreen");
@@ -180,6 +192,7 @@ function runWhenIdle(fn) {
 }
 
 function StartupRoute() {
+  const { user, isAuthenticated } = useAuthSession();
   const [target, setTarget] = useState(null);
 
   useEffect(() => {
@@ -204,26 +217,24 @@ function StartupRoute() {
       };
     }
 
-    // Last fallback to avoid hanging loader forever.
-    timeoutId = window.setTimeout(() => {
-      finalize(auth.currentUser ? "/dashboard" : "/login");
-    }, 8000);
+    if (!isAuthenticated || !user) {
+      finalize("/login");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    timeoutId = window.setTimeout(() => finalize("/dashboard"), 8000);
 
     void (async () => {
-      const restoredUser = await waitForAuthRestore(8000);
-      if (!restoredUser) {
-        finalize("/login");
-        return;
-      }
-
       try {
-        const state = await getUserState(restoredUser.uid, restoredUser.email || "");
+        const state = await getUserState(user.uid, user.email || "");
         const landing = resolveLandingPathFromUserState(state || {});
 
         const journey = normalizeJourney(state?.journey);
         const didHaveSavedJourney = Boolean(journey?.track);
         void logAnalyticsEvent({
-          uid: restoredUser.uid,
+          uid: user.uid,
           eventType: didHaveSavedJourney
             ? ANALYTICS_EVENT_TYPES.APP_LAUNCH_WITH_SAVED_JOURNEY
             : ANALYTICS_EVENT_TYPES.APP_LAUNCH_WITHOUT_SAVED_JOURNEY,
@@ -246,10 +257,42 @@ function StartupRoute() {
       cancelled = true;
       if (timeoutId) window.clearTimeout(timeoutId);
     };
-  }, []);
+  }, [isAuthenticated, user]);
 
-  if (!target) return <AppLoading />;
+  if (!target) {
+    return (
+      <AppLoading
+        title="Preparing your dashboard..."
+        subtitle="Checking your account and restoring progress"
+        showAppName
+        logoSrc="/icons/icon-192.png"
+        logoAlt="Majuu logo"
+      />
+    );
+  }
   return <Navigate to={target} replace />;
+}
+
+function RequireAuthRoute({ children }) {
+  const { isAuthenticated } = useAuthSession();
+  const location = useLocation();
+
+  if (!isAuthenticated) {
+    const from = `${location.pathname}${location.search || ""}${location.hash || ""}`;
+    return <Navigate to="/login" replace state={{ from }} />;
+  }
+
+  return children;
+}
+
+function GuestOnlyRoute({ children }) {
+  const { isAuthenticated } = useAuthSession();
+
+  if (isAuthenticated) {
+    return <Navigate to="/" replace />;
+  }
+
+  return children;
 }
 
 function AndroidBackHandler() {
@@ -475,6 +518,19 @@ function ResumeRouteWatcher() {
 }
 
 function AppRoutes() {
+  const { authInitializing } = useAuthSession();
+
+  if (authInitializing) {
+    return (
+      <AppLoading
+        title="Restoring your session..."
+        subtitle="Please wait while we load your account"
+        showAppName
+        logoSrc="/icons/icon-192.png"
+        logoAlt="Majuu logo"
+      />
+    );
+  }
 
   return (
     <>
@@ -491,86 +547,144 @@ function AppRoutes() {
           <Route path="/intro" element={<IntroScreen />} />
           <Route path="/" element={<StartupRoute />} />
 
-          <Route path="/login" element={<LoginScreen />} />
-          <Route path="/signup" element={<SignupScreen />} />
-          <Route path="/verify-email" element={<VerifyEmailScreen />} />
-          <Route path="/setup" element={<SetupProfileJourneyScreen />} />
+          <Route
+            path="/login"
+            element={
+              <GuestOnlyRoute>
+                <LoginScreen />
+              </GuestOnlyRoute>
+            }
+          />
+          <Route
+            path="/signup"
+            element={
+              <GuestOnlyRoute>
+                <SignupScreen />
+              </GuestOnlyRoute>
+            }
+          />
+          <Route
+            path="/verify-email"
+            element={
+              <RequireAuthRoute>
+                <VerifyEmailScreen />
+              </RequireAuthRoute>
+            }
+          />
+          <Route
+            path="/setup"
+            element={
+              <RequireAuthRoute>
+                <SetupProfileJourneyScreen />
+              </RequireAuthRoute>
+            }
+          />
           <Route path="/legal" element={<LegalPortalScreen />} />
           <Route path="/legal/:docKey" element={<LegalDocumentScreen />} />
           <Route path="/payment/callback" element={<PaymentCallbackScreen />} />
           <Route path="/pay/shared/:shareToken" element={<SharedPaymentScreen />} />
 
           {/* Track selection hub */}
-          <Route path="/dashboard" element={<TrackSelectScreen />} />
+          <Route
+            path="/dashboard"
+            element={
+              <RequireAuthRoute>
+                <TrackSelectScreen />
+              </RequireAuthRoute>
+            }
+          />
 
           {/* Staff */}
           <Route
             path="/staff"
             element={
-              <StaffGate>
-                <StaffHomeScreen />
-              </StaffGate>
+              <RequireAuthRoute>
+                <StaffGate>
+                  <StaffHomeScreen />
+                </StaffGate>
+              </RequireAuthRoute>
             }
           />
           <Route
             path="/staff/onboarding"
             element={
-              <StaffGate>
-                <StaffOnboardingScreen />
-              </StaffGate>
+              <RequireAuthRoute>
+                <StaffGate>
+                  <StaffOnboardingScreen />
+                </StaffGate>
+              </RequireAuthRoute>
             }
           />
           <Route
             path="/staff/onboarding/legal/:docKey"
             element={
-              <StaffGate>
-                <LegalDocumentScreen />
-              </StaffGate>
+              <RequireAuthRoute>
+                <StaffGate>
+                  <LegalDocumentScreen />
+                </StaffGate>
+              </RequireAuthRoute>
             }
           />
           <Route
             path="/staff/tasks"
             element={
-              <StaffGate>
-                <StaffTasksScreen />
-              </StaffGate>
+              <RequireAuthRoute>
+                <StaffGate>
+                  <StaffTasksScreen />
+                </StaffGate>
+              </RequireAuthRoute>
             }
           />
           <Route
             path="/staff/notifications"
             element={
-              <StaffGate>
-                <NotificationsScreen />
-              </StaffGate>
+              <RequireAuthRoute>
+                <StaffGate>
+                  <NotificationsScreen />
+                </StaffGate>
+              </RequireAuthRoute>
             }
           />
           <Route
             path="/staff/request/:requestId/start"
             element={
-              <StaffGate>
-                <StaffStartWorkModalScreen />
-              </StaffGate>
+              <RequireAuthRoute>
+                <StaffGate>
+                  <StaffStartWorkModalScreen />
+                </StaffGate>
+              </RequireAuthRoute>
             }
           />
           <Route
             path="/staff/request/:requestId"
             element={
-              <StaffGate>
-                <StaffRequestDetailsScreen />
-              </StaffGate>
+              <RequireAuthRoute>
+                <StaffGate>
+                  <StaffRequestDetailsScreen />
+                </StaffGate>
+              </RequireAuthRoute>
             }
           />
           <Route
             path="/staff/request/:requestId/documents"
             element={
-              <StaffGate>
-                <StaffRequestDocumentsScreen />
-              </StaffGate>
+              <RequireAuthRoute>
+                <StaffGate>
+                  <StaffRequestDocumentsScreen />
+                </StaffGate>
+              </RequireAuthRoute>
             }
           />
 
           {/* App shell */}
-          <Route path="/app" element={<AppLayout />}>
+          <Route
+            path="/app"
+            element={
+              <RequireAuthRoute>
+                <AppLayout />
+              </RequireAuthRoute>
+            }
+          >
             <Route index element={<Navigate to="home" replace />} />
 
             <Route path="home" element={<SmartHome />} />
@@ -598,14 +712,59 @@ function AppRoutes() {
             <Route path="study/self-help/money-tools" element={<StudyMoneyTools />} />
             <Route path="study/self-help/documents" element={<StudySelfHelpDocuments />} />
             <Route path="study/we-help" element={<StudyWeHelp />} />
+            <Route path="study/discovery" element={<DiscoveryScreen track="study" />} />
+            <Route
+              path="study/discovery/match"
+              element={<DiscoveryMatchQuestionnaireScreen track="study" />}
+            />
+            <Route
+              path="study/discovery/match/results"
+              element={<DiscoveryMatchResultsScreen track="study" />}
+            />
+            <Route path="study/discovery/compare" element={<CompareCountriesScreen track="study" />} />
+            <Route
+              path="study/discovery/:countryParam"
+              element={<DiscoveryDetailScreen track="study" />}
+            />
             <Route path="work/self-help" element={<WorkSelfHelp />} />
             <Route path="work/self-help/money-tools" element={<WorkMoneyTools />} />
             <Route path="work/self-help/documents" element={<WorkSelfHelpDocuments />} />
             <Route path="work/we-help" element={<WorkWeHelp />} />
+            <Route path="work/discovery" element={<DiscoveryScreen track="work" />} />
+            <Route
+              path="work/discovery/match"
+              element={<DiscoveryMatchQuestionnaireScreen track="work" />}
+            />
+            <Route
+              path="work/discovery/match/results"
+              element={<DiscoveryMatchResultsScreen track="work" />}
+            />
+            <Route path="work/discovery/compare" element={<CompareCountriesScreen track="work" />} />
+            <Route
+              path="work/discovery/:countryParam"
+              element={<DiscoveryDetailScreen track="work" />}
+            />
             <Route path="travel/self-help" element={<TravelSelfHelp />} />
             <Route path="travel/self-help/money-tools" element={<TravelMoneyTools />} />
             <Route path="travel/self-help/documents" element={<TravelSelfHelpDocuments />} />
             <Route path="travel/we-help" element={<TravelWeHelp />} />
+            <Route path="travel/discovery" element={<DiscoveryScreen track="travel" />} />
+            <Route
+              path="travel/discovery/match"
+              element={<DiscoveryMatchQuestionnaireScreen track="travel" />}
+            />
+            <Route
+              path="travel/discovery/match/results"
+              element={<DiscoveryMatchResultsScreen track="travel" />}
+            />
+            <Route
+              path="travel/discovery/compare"
+              element={<CompareCountriesScreen track="travel" />}
+            />
+            <Route
+              path="travel/discovery/:countryParam"
+              element={<DiscoveryDetailScreen track="travel" />}
+            />
 
             <Route path="settings" element={<SettingsScreen />} />
             <Route path="notifications" element={<NotificationsScreen />} />
@@ -766,10 +925,12 @@ export default function App() {
   const Router = IS_NATIVE_PLATFORM ? HashRouter : BrowserRouter;
   return (
     <Router>
-      <DocumentLanguageSync />
-      <div className="app-safe-area">
-        <AppRoutes />
-      </div>
+      <AuthSessionProvider>
+        <DocumentLanguageSync />
+        <div className="app-safe-area">
+          <AppRoutes />
+        </div>
+      </AuthSessionProvider>
     </Router>
   );
 }

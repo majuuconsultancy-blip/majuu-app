@@ -3,13 +3,10 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { motion as Motion } from "../utils/motionProxy";
 import {
-  Mail,
   Pencil,
   LogOut,
   Settings,
   ShieldCheck,
-  Phone,
-  Flag,
   FileText,
   MapPinned,
   ChevronRight,
@@ -119,6 +116,7 @@ export default function ProfileScreen() {
   const [err, setErr] = useState("");
 
   const [email, setEmail] = useState("");
+  const [photoURL, setPhotoURL] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [countryOfResidence, setCountryOfResidence] = useState("");
@@ -137,17 +135,10 @@ export default function ProfileScreen() {
     if (normalized === "assignedAdmin") return "Assigned Admin";
     return "Admin";
   }, [role]);
-  const showElevatedAdminTag = useMemo(
-    () => adminBadgeLabel === "Superadmin" || adminBadgeLabel === "Assigned Admin",
-    [adminBadgeLabel]
-  );
 
-  const initials = useMemo(() => {
+  const avatarInitial = useMemo(() => {
     const base = (name || email || "U").trim();
-    const parts = base.split(" ").filter(Boolean);
-    const first = parts[0]?.[0] || base[0] || "U";
-    const second = parts[1]?.[0] || "";
-    return (first + second).toUpperCase();
+    return (base[0] || "U").toUpperCase();
   }, [name, email]);
 
   const journeyTrackLabel = useMemo(() => {
@@ -187,6 +178,7 @@ export default function ProfileScreen() {
 
       lastHydratedUidRef.current = uidNow;
       setEmail(user.email || "");
+      setPhotoURL(user.photoURL || "");
       setErr("");
 
       const cached = readProfileCache(uidNow);
@@ -346,24 +338,28 @@ export default function ProfileScreen() {
   }
 
   const topBg =
-    "bg-gradient-to-b from-emerald-50/60 via-white to-zinc-50 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
+    "bg-gradient-to-b from-emerald-50/45 via-zinc-50 to-zinc-100/35 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
   const glass =
-    "border border-white/40 bg-white/55 backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.10)] dark:border-zinc-800/70 dark:bg-zinc-900/55";
-  const tile = `rounded-2xl ${glass} transition will-change-transform`;
+    "border border-white/65 bg-white/72 backdrop-blur-xl shadow-[0_12px_36px_rgba(15,23,42,0.08)] dark:border-zinc-800/70 dark:bg-zinc-900/58";
+  const tile = `rounded-3xl ${glass} transition will-change-transform`;
   const tileHover =
-    "hover:shadow-[0_20px_60px_rgba(0,0,0,0.14)] hover:border-emerald-200/60 dark:hover:border-emerald-900/40";
+    "hover:shadow-[0_16px_44px_rgba(15,23,42,0.11)] hover:border-emerald-200/70 dark:hover:border-emerald-900/40";
   const actionCard = `${tile} ${tileHover} p-4 text-left`;
-  const infoChip =
-    "inline-flex items-center gap-2 rounded-full border border-zinc-200/80 bg-white/82 px-3 py-1.5 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200";
   const adminCard =
-    "rounded-2xl border border-emerald-200/70 bg-emerald-50/55 p-4 shadow-[0_14px_40px_rgba(16,185,129,0.18)] transition hover:bg-emerald-50/70 hover:shadow-[0_22px_70px_rgba(16,185,129,0.22)] active:scale-[0.99] dark:border-emerald-900/45 dark:bg-emerald-950/28";
+    "rounded-3xl border border-emerald-200/70 bg-emerald-50/55 p-4 shadow-[0_12px_36px_rgba(16,185,129,0.16)] transition hover:bg-emerald-50/70 hover:shadow-[0_16px_44px_rgba(16,185,129,0.2)] active:scale-[0.99] dark:border-emerald-900/45 dark:bg-emerald-950/28";
   const logoutCard =
-    "rounded-2xl border border-rose-200/70 bg-rose-50/45 p-4 shadow-[0_14px_40px_rgba(244,63,94,0.12)] transition hover:bg-rose-50/60 hover:shadow-[0_22px_70px_rgba(244,63,94,0.16)] active:scale-[0.99] disabled:opacity-60 dark:border-rose-900/40 dark:bg-rose-950/22";
+    "rounded-3xl border border-rose-200/70 bg-rose-50/45 p-4 shadow-[0_12px_36px_rgba(244,63,94,0.12)] transition hover:bg-rose-50/60 hover:shadow-[0_16px_44px_rgba(244,63,94,0.16)] active:scale-[0.99] disabled:opacity-60 dark:border-rose-900/40 dark:bg-rose-950/22";
 
-  const secondaryDetails = [
-    { label: "Preferred county", value: county?.trim() ? county : "Not set" },
-    { label: "Preferred town/city", value: town?.trim() ? town : "Not set" },
-    { label: "Language", value: language?.trim() ? language : "Not set" },
+  const countryValue = countryOfResidence?.trim() ? countryOfResidence : "Not set";
+  const phoneValue = phone?.trim() ? phone : "Not set";
+  const profileDetails = [
+    { label: "Full name", value: name?.trim() ? name : "Not set" },
+    { label: "Email", value: email || "Not set" },
+    { label: "Phone number", value: phoneValue },
+    { label: "Country of residence", value: countryValue },
+    ...(language?.trim() ? [{ label: "Language", value: language }] : []),
+    ...(county?.trim() ? [{ label: "County", value: county }] : []),
+    ...(town?.trim() ? [{ label: "Town/City", value: town }] : []),
   ];
 
   return (
@@ -374,34 +370,8 @@ export default function ProfileScreen() {
         animate="show"
         className="mx-auto max-w-xl px-5 pb-10 pt-6"
       >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-[2.25rem] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-              Profile
-            </h1>
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-              Your details, preferences, and settings
-            </p>
-            {showElevatedAdminTag ? (
-              <span className="mt-2 inline-flex rounded-full border border-rose-200/70 bg-rose-50/80 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:border-rose-900/45 dark:bg-rose-950/30 dark:text-rose-200">
-                {adminBadgeLabel}
-              </span>
-            ) : null}
-          </div>
-
-          <div className="shrink-0">
-            <ThemeToggle />
-          </div>
-        </div>
-
-        {err ? (
-          <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
-            {err}
-          </div>
-        ) : null}
-
         <Motion.div
-          className={`mt-6 rounded-[2rem] ${glass} p-6`}
+          className={`relative mt-1 rounded-[2rem] ${glass} px-5 pb-5 pt-6 text-center`}
           initial={{ opacity: 0, y: 4 }}
           animate={{
             opacity: 1,
@@ -409,45 +379,66 @@ export default function ProfileScreen() {
             transition: { duration: 0.14, ease: "easeOut" },
           }}
         >
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex min-w-0 items-start gap-4">
-              <div className="flex h-16 w-16 items-center justify-center rounded-[1.4rem] border border-emerald-100/70 bg-emerald-50/70 text-xl font-bold text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
-                {initials}
+          <div className="absolute right-4 top-4">
+            <ThemeToggle />
+          </div>
+
+          <div className="mx-auto h-20 w-20 overflow-hidden rounded-full border border-zinc-200/80 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800/70">
+            {photoURL ? (
+              <img src={photoURL} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-2xl font-semibold text-zinc-700 dark:text-zinc-200">
+                {avatarInitial}
               </div>
+            )}
+          </div>
 
-              <div className="min-w-0">
-                <div className="truncate text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-                  {name?.trim() ? name : "Your name"}
-                </div>
-                <div className="mt-1 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
-                  <AppIcon size={ICON_SM} className="text-zinc-500 dark:text-zinc-400" icon={Mail} />
-                  <span className="truncate">{email || "-"}</span>
-                </div>
+          <h1 className="mt-3 truncate text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+            {name?.trim() ? name : "Your name"}
+          </h1>
+          <p className="mt-1 truncate text-sm text-zinc-600 dark:text-zinc-300">{email || "-"}</p>
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <span className={infoChip}>
-                    <AppIcon size={ICON_SM} icon={Flag} />
-                    <span>{countryOfResidence?.trim() ? countryOfResidence : "Residence not set"}</span>
-                  </span>
-                  <span className={infoChip}>
-                    <AppIcon size={ICON_SM} icon={Phone} />
-                    <span>{phone?.trim() ? phone : "Phone not set"}</span>
-                  </span>
-                </div>
+          {isAdmin ? (
+            <span className="mt-2 inline-flex rounded-full border border-rose-200/70 bg-rose-50/80 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:border-rose-900/45 dark:bg-rose-950/30 dark:text-rose-200">
+              {adminBadgeLabel}
+            </span>
+          ) : null}
+
+          <div className="mt-4 grid grid-cols-2 gap-2.5 text-left">
+            <div className="rounded-2xl border border-zinc-200/80 bg-white/85 px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950/40">
+              <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500 dark:text-zinc-400">
+                Country
+              </div>
+              <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                {countryValue}
               </div>
             </div>
-
-            <Motion.button
-              type="button"
-              onClick={openEdit}
-              whileTap={{ scale: 0.995 }}
-              className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
-            >
-              <AppIcon size={ICON_MD} icon={Pencil} />
-              Edit
-            </Motion.button>
+            <div className="rounded-2xl border border-zinc-200/80 bg-white/85 px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950/40">
+              <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500 dark:text-zinc-400">
+                Phone
+              </div>
+              <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                {phoneValue}
+              </div>
+            </div>
           </div>
+
+          <Motion.button
+            type="button"
+            onClick={openEdit}
+            whileTap={{ scale: 0.99 }}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-zinc-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:text-zinc-100"
+          >
+            <AppIcon size={ICON_SM} icon={Pencil} />
+            Edit profile
+          </Motion.button>
         </Motion.div>
+
+        {err ? (
+          <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200">
+            {err}
+          </div>
+        ) : null}
 
         <Motion.div
           variants={floatCard}
@@ -458,14 +449,14 @@ export default function ProfileScreen() {
         >
           <CollapsibleSection
             title="Profile details"
-            subtitle="Location and language preferences"
-            meta={`${secondaryDetails.filter((item) => item.value !== "Not set").length}/${secondaryDetails.length}`}
-            bodyClassName="mt-4 grid gap-2"
+            subtitle="Contact, identity, and preferences"
+            meta={`${profileDetails.filter((item) => item.value !== "Not set").length}/${profileDetails.length}`}
+            bodyClassName="mt-3 grid gap-2.5"
           >
-            {secondaryDetails.map((item) => (
+            {profileDetails.map((item) => (
               <div
                 key={item.label}
-                className="flex items-center justify-between gap-4 rounded-2xl border border-zinc-200/80 bg-white/80 px-3.5 py-3 dark:border-zinc-800 dark:bg-zinc-950/40"
+                className="flex items-center justify-between gap-4 rounded-2xl border border-zinc-200/80 bg-white/85 px-3.5 py-3 dark:border-zinc-700 dark:bg-zinc-950/40"
               >
                 <div className="text-sm text-zinc-500 dark:text-zinc-400">{item.label}</div>
                 <div className="text-sm font-semibold text-right text-zinc-900 dark:text-zinc-100">
@@ -476,7 +467,7 @@ export default function ProfileScreen() {
           </CollapsibleSection>
         </Motion.div>
 
-        <div className="mt-4 grid gap-2">
+        <div className="mt-4 grid gap-2.5">
           <Motion.button
             type="button"
             onClick={() => navigate("/app/profile/journey")}
@@ -488,7 +479,7 @@ export default function ProfileScreen() {
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100/70 bg-emerald-50/70 text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200/80 bg-white/85 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-200">
                   <AppIcon size={ICON_MD} icon={MapPinned} />
                 </span>
                 <div className="min-w-0">
@@ -515,7 +506,7 @@ export default function ProfileScreen() {
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100/70 bg-emerald-50/70 text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200/80 bg-white/85 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-200">
                   <AppIcon size={ICON_MD} icon={FileText} />
                 </span>
                 <div className="min-w-0">
@@ -542,7 +533,7 @@ export default function ProfileScreen() {
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-100/70 bg-emerald-50/70 text-emerald-800 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200/80 bg-white/85 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-200">
                   <AppIcon size={ICON_MD} icon={Settings} />
                 </span>
                 <div className="min-w-0">

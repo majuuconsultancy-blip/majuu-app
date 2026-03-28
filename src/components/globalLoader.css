@@ -64,6 +64,14 @@
   transform: scale(1);
 }
 
+.global-loader-logo {
+  height: clamp(4.4rem, 17vw, 5.4rem);
+  width: clamp(4.4rem, 17vw, 5.4rem);
+  border-radius: 1.35rem;
+  object-fit: cover;
+  box-shadow: 0 12px 34px rgba(16, 185, 129, 0.22);
+}
+
 .global-loader-brand {
   margin-top: 0.35rem;
   font-size: 0.72rem;

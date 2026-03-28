@@ -884,10 +884,8 @@ export default function TravelWeHelp() {
 
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1.5 text-xs font-semibold text-emerald-900">
-                  Full Package
                 </span>
                 <span className="inline-flex items-center rounded-full border border-emerald-100 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-zinc-950/45 dark:text-emerald-200">
-                  Best Value
                 </span>
               </div>
 
@@ -998,7 +996,7 @@ export default function TravelWeHelp() {
             </div>
           ) : singlePackages.length === 0 ? (
             <div className="mt-4 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 text-sm text-zinc-600 dark:text-zinc-300 shadow-sm backdrop-blur">
-              No single packages configured yet for this route.
+              No single packages configured yet.
             </div>
           ) : filteredSinglePackages.length === 0 ? (
             <div className="mt-4 rounded-3xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-5 text-sm text-zinc-600 dark:text-zinc-300 shadow-sm backdrop-blur">
