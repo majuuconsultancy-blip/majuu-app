@@ -37,6 +37,7 @@ import AdminGate from "./components/AdminGate";
 import GAPageView from "./components/GAPageView";
 import StaffGate from "./components/StaffGate";
 import AppLoading from "./components/AppLoading";
+import RouteErrorBoundary from "./components/RouteErrorBoundary";
 import { auth } from "./firebase";
 import { startNotifsV2Engine, stopNotifsV2Engine } from "./services/notifsV2Engine";
 import { cleanupPushBridge, initPushBridge } from "./services/pushBridge";
@@ -52,6 +53,53 @@ import { ANALYTICS_EVENT_TYPES } from "./constants/analyticsEvents";
 import { logAnalyticsEvent } from "./services/analyticsService";
 import { useI18n } from "./lib/i18n";
 import { AuthSessionProvider, useAuthSession } from "./auth/AuthSessionContext";
+
+const LAZY_RELOAD_GUARD_KEY = "__majuu_lazy_route_reload_once__";
+
+function shouldRetryLazyLoad(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return (
+    message.includes("failed to fetch dynamically imported module") ||
+    message.includes("importing a module script failed") ||
+    message.includes("loading chunk") ||
+    message.includes("chunkloaderror")
+  );
+}
+
+function lazyWithRetry(loader) {
+  return lazy(async () => {
+    try {
+      const module = await loader();
+      if (typeof window !== "undefined") {
+        try {
+          window.sessionStorage.removeItem(LAZY_RELOAD_GUARD_KEY);
+        } catch {
+          // Ignore storage errors.
+        }
+      }
+      return module;
+    } catch (error) {
+      if (typeof window !== "undefined" && shouldRetryLazyLoad(error)) {
+        let alreadyRetried = false;
+        try {
+          alreadyRetried = window.sessionStorage.getItem(LAZY_RELOAD_GUARD_KEY) === "1";
+        } catch {
+          alreadyRetried = false;
+        }
+        if (!alreadyRetried) {
+          try {
+            window.sessionStorage.setItem(LAZY_RELOAD_GUARD_KEY, "1");
+          } catch {
+            // Ignore storage errors.
+          }
+          window.location.reload();
+          return new Promise(() => {});
+        }
+      }
+      throw error;
+    }
+  });
+}
 
 /* ---------------- Lazy screens ---------------- */
 // Main user flows
@@ -88,26 +136,26 @@ const LegalPortalScreen = lazy(() => import("./screens/LegalPortalScreen"));
 const LegalDocumentScreen = lazy(() => import("./screens/LegalDocumentScreen"));
 
 // Admin
-const AdminRequestsScreen = lazy(() => import("./screens/AdminRequestsScreen"));
-const AdminRequestDetailsScreen = lazy(() => import("./screens/AdminRequestDetailsScreen"));
-const AdminRequestDocumentsScreen = lazy(() => import("./screens/AdminRequestDocumentsScreen"));
-const AdminManageStaffScreen = lazy(() => import("./screens/AdminManageStaffScreen"));
-const AdminAssignAdminScreen = lazy(() => import("./screens/AdminAssignAdminScreen"));
-const AdminManageAdminsScreen = lazy(() => import("./screens/AdminManageAdminsScreen"));
-const AdminSaccScreen = lazy(() => import("./screens/AdminSaccScreen"));
-const AdminAnalyticsScreen = lazy(() => import("./screens/AdminAnalyticsScreen"));
-const AdminNewsManagementScreen = lazy(() => import("./screens/AdminNewsManagementScreen"));
-const AdminPricingControlsScreen = lazy(() => import("./screens/AdminPricingControlsScreen"));
-const AdminFinancesScreen = lazy(() => import("./screens/AdminFinancesScreen"));
-const AdminPartnershipsScreen = lazy(() => import("./screens/AdminPartnershipsScreen"));
-const AdminCountryManagementScreen = lazy(() =>
+const AdminRequestsScreen = lazyWithRetry(() => import("./screens/AdminRequestsScreen"));
+const AdminRequestDetailsScreen = lazyWithRetry(() => import("./screens/AdminRequestDetailsScreen"));
+const AdminRequestDocumentsScreen = lazyWithRetry(() => import("./screens/AdminRequestDocumentsScreen"));
+const AdminManageStaffScreen = lazyWithRetry(() => import("./screens/AdminManageStaffScreen"));
+const AdminAssignAdminScreen = lazyWithRetry(() => import("./screens/AdminAssignAdminScreen"));
+const AdminManageAdminsScreen = lazyWithRetry(() => import("./screens/AdminManageAdminsScreen"));
+const AdminSaccScreen = lazyWithRetry(() => import("./screens/AdminSaccScreen"));
+const AdminAnalyticsScreen = lazyWithRetry(() => import("./screens/AdminAnalyticsScreen"));
+const AdminNewsManagementScreen = lazyWithRetry(() => import("./screens/AdminNewsManagementScreen"));
+const AdminPricingControlsScreen = lazyWithRetry(() => import("./screens/AdminPricingControlsScreen"));
+const AdminFinancesScreen = lazyWithRetry(() => import("./screens/AdminFinancesScreen"));
+const AdminPartnershipsScreen = lazyWithRetry(() => import("./screens/AdminPartnershipsScreen"));
+const AdminCountryManagementScreen = lazyWithRetry(() =>
   import("./screens/AdminCountryManagementScreen")
 );
-const AdminHomeDesignScreen = lazy(() => import("./screens/AdminHomeDesignScreen"));
-const AdminRequestManagementScreen = lazy(() =>
+const AdminHomeDesignScreen = lazyWithRetry(() => import("./screens/AdminHomeDesignScreen"));
+const AdminRequestManagementScreen = lazyWithRetry(() =>
   import("./screens/AdminRequestManagementScreen")
 );
-const AdminSelfHelpLinksManagementScreen = lazy(() =>
+const AdminSelfHelpLinksManagementScreen = lazyWithRetry(() =>
   import("./screens/AdminSelfHelpLinksManagementScreen")
 );
 
@@ -293,6 +341,16 @@ function GuestOnlyRoute({ children }) {
   }
 
   return children;
+}
+
+function renderAdminRoute(content, fallbackPath = "/app/admin") {
+  return (
+    <AdminGate>
+      <RouteErrorBoundary fallbackPath={fallbackPath}>
+        {content}
+      </RouteErrorBoundary>
+    </AdminGate>
+  );
 }
 
 function AndroidBackHandler() {
@@ -772,131 +830,67 @@ function AppRoutes() {
             {/* Admin */}
             <Route
               path="admin"
-              element={
-                <AdminGate>
-                  <AdminRequestsScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminRequestsScreen />, "/dashboard")}
             />
             <Route
               path="admin/request/:requestId"
-              element={
-                <AdminGate>
-                  <AdminRequestDetailsScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminRequestDetailsScreen />)}
             />
             <Route
               path="admin/request/:requestId/documents"
-              element={
-                <AdminGate>
-                  <AdminRequestDocumentsScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminRequestDocumentsScreen />)}
             />
             <Route
               path="admin/manage-staff"
-              element={
-                <AdminGate>
-                  <AdminManageStaffScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminManageStaffScreen />)}
             />
             <Route
               path="admin/assign-admin"
-              element={
-                <AdminGate>
-                  <AdminAssignAdminScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminAssignAdminScreen />)}
             />
             <Route
               path="admin/manage-admins"
-              element={
-                <AdminGate>
-                  <AdminManageAdminsScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminManageAdminsScreen />)}
             />
             <Route
               path="admin/sacc"
-              element={
-                <AdminGate>
-                  <AdminSaccScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminSaccScreen />)}
             />
             <Route
               path="admin/sacc/analytics"
-              element={
-                <AdminGate>
-                  <AdminAnalyticsScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminAnalyticsScreen />, "/app/admin/sacc")}
             />
             <Route
               path="admin/sacc/request-management"
-              element={
-                <AdminGate>
-                  <AdminRequestManagementScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminRequestManagementScreen />, "/app/admin/sacc")}
             />
             <Route
               path="admin/sacc/home-design"
-              element={
-                <AdminGate>
-                  <AdminHomeDesignScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminHomeDesignScreen />, "/app/admin/sacc")}
             />
             <Route
               path="admin/sacc/news"
-              element={
-                <AdminGate>
-                  <AdminNewsManagementScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminNewsManagementScreen />, "/app/admin/sacc")}
             />
             <Route
               path="admin/sacc/partnerships"
-              element={
-                <AdminGate>
-                  <AdminPartnershipsScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminPartnershipsScreen />, "/app/admin/sacc")}
             />
             <Route
               path="admin/sacc/pricing"
-              element={
-                <AdminGate>
-                  <AdminPricingControlsScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminPricingControlsScreen />, "/app/admin/sacc")}
             />
             <Route
               path="admin/sacc/finances"
-              element={
-                <AdminGate>
-                  <AdminFinancesScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminFinancesScreen />, "/app/admin/sacc")}
             />
             <Route
               path="admin/sacc/selfhelp-links"
-              element={
-                <AdminGate>
-                  <AdminSelfHelpLinksManagementScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminSelfHelpLinksManagementScreen />, "/app/admin/sacc")}
             />
             <Route
               path="admin/sacc/countries"
-              element={
-                <AdminGate>
-                  <AdminCountryManagementScreen />
-                </AdminGate>
-              }
+              element={renderAdminRoute(<AdminCountryManagementScreen />, "/app/admin/sacc")}
             />
           </Route>
 

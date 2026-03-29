@@ -136,7 +136,7 @@ export default function DiscoveryScreen({ track = "study" }) {
                 </div>
                 <h2 className="mt-2 text-[1.15rem] font-semibold tracking-tight">Find My Best Match</h2>
                 <p className="mt-1 text-sm text-white/90">
-                  Get smart country recommendations from a quick track-aware questionnaire.
+                  Get personalized country recommendations.
                 </p>
               </div>
               <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/45 bg-black/25">

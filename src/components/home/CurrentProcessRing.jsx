@@ -12,6 +12,8 @@ export default function CurrentProcessRing({
   size = 108,
   stroke = 10,
   label = "Progress",
+  textClassName = "",
+  textStyle = undefined,
 }) {
   const safePercent = clampPercent(percent);
   const safeSize = Math.max(72, Math.round(Number(size) || 108));
@@ -84,7 +86,10 @@ export default function CurrentProcessRing({
       </svg>
 
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-        <div className="text-xl font-semibold leading-none text-zinc-900 dark:text-zinc-100">
+        <div
+          className={`text-xl font-semibold leading-none text-zinc-900 dark:text-zinc-100 ${textClassName}`.trim()}
+          style={textStyle}
+        >
           {safePercent}%
         </div>
       </div>
