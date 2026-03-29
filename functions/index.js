@@ -22,11 +22,19 @@ const DEFAULT_ADMIN_RESPONSE_TIMEOUT_MINUTES = 20;
 const DEFAULT_ROUTING_SWEEP_LIMIT = 500;
 const PARTNERS_COLLECTION = "partners";
 const PARTNER_COVERAGE_COLLECTION = "partnerCoverage";
-const HARDCODED_SUPER_ADMIN_EMAIL = "brioneroo@gmail.com";
+const SUPER_ADMIN_ROLE_VARIANTS = [
+  "superAdmin",
+  "superadmin",
+  "super_admin",
+  "super-admin",
+  "super admin",
+];
 const ASSIGNED_ADMIN_ROLE_VARIANTS = [
   "assignedAdmin",
   "assignedadmin",
   "assigned_admin",
+  "assigned-admin",
+  "assigned admin",
   "admin",
 ];
 const INVALID_TOKEN_CODES = new Set([
@@ -53,16 +61,20 @@ function clamp(n, min, max) {
 
 function normalizeRole(rawRole) {
   const role = lower(rawRole);
-  if (role === "superadmin" || role === "super_admin") return "assignedAdmin";
-  if (role === "assignedadmin" || role === "assigned_admin") return "assignedAdmin";
+  if (role === "superadmin" || role === "super_admin" || role === "super-admin" || role === "super admin") {
+    return "superAdmin";
+  }
+  if (
+    role === "assignedadmin" ||
+    role === "assigned_admin" ||
+    role === "assigned-admin" ||
+    role === "assigned admin"
+  ) {
+    return "assignedAdmin";
+  }
   if (role === "admin") return "assignedAdmin"; // legacy role fallback
   if (role === "staff") return "staff";
   return "user";
-}
-
-function isHardcodedSuperAdminEmail(email) {
-  const safeEmail = lower(email);
-  return !!safeEmail && safeEmail === lower(HARDCODED_SUPER_ADMIN_EMAIL);
 }
 
 function normalizeCountyLower(value) {
@@ -466,13 +478,7 @@ async function getCallerRoleFromContext(context) {
   const callerUid = safeStr(context?.auth?.uid);
   if (!callerUid) return "";
   const userDoc = await getUserDocByUid(callerUid);
-  const callerEmail = lower(userDoc?.email || context?.auth?.token?.email);
-  if (isHardcodedSuperAdminEmail(callerEmail)) {
-    return "superAdmin";
-  }
-  const role = normalizeRole(userDoc?.role);
-  if (role !== "user") return role;
-  return role;
+  return normalizeRole(userDoc?.role);
 }
 
 async function requireAdminCallerContext(context, { superOnly = false } = {}) {
@@ -483,8 +489,7 @@ async function requireAdminCallerContext(context, { superOnly = false } = {}) {
 
   const callerDoc = await getUserDocByUid(callerUid);
   const normalizedRole = normalizeRole(callerDoc?.role);
-  const callerEmail = lower(callerDoc?.email || context?.auth?.token?.email);
-  const isSuperAdmin = isHardcodedSuperAdminEmail(callerEmail);
+  const isSuperAdmin = normalizedRole === "superAdmin";
   const isAssignedAdmin = normalizedRole === "assignedAdmin";
 
   if (superOnly && !isSuperAdmin) {
@@ -647,29 +652,26 @@ async function listAssignedAdminCandidatesForRequest(
 async function listSuperAdminCandidates({ excludeUids = [] } = {}) {
   const excluded = new Set((excludeUids || []).map((x) => safeStr(x)).filter(Boolean));
   const rows = [];
+  const snap = await db
+    .collection("users")
+    .where("role", "in", SUPER_ADMIN_ROLE_VARIANTS)
+    .limit(50)
+    .get();
 
-  let hardcodedUid = "";
-  try {
-    const hardcodedAuthUser = await admin.auth().getUserByEmail(HARDCODED_SUPER_ADMIN_EMAIL);
-    hardcodedUid = safeStr(hardcodedAuthUser?.uid);
-  } catch {
-    hardcodedUid = "";
-  }
-
-  if (!hardcodedUid || excluded.has(hardcodedUid)) {
-    return rows;
-  }
-
-  const hardcodedUserDoc = await getUserDocByUid(hardcodedUid);
-  const scope = normalizeAdminScope(hardcodedUserDoc?.adminScope);
-  rows.push({
-    uid: hardcodedUid,
-    email: safeStr(hardcodedUserDoc?.email || HARDCODED_SUPER_ADMIN_EMAIL),
-    role: "superAdmin",
-    availability: scope.availability,
-    maxActiveRequests: scope.maxActiveRequests,
-    responseTimeoutMinutes: scope.responseTimeoutMinutes,
-    town: scope.town,
+  snap.docs.forEach((docSnap) => {
+    const uid = safeStr(docSnap.id);
+    if (!uid || excluded.has(uid)) return;
+    const data = docSnap.data() || {};
+    const scope = normalizeAdminScope(data?.adminScope);
+    rows.push({
+      uid,
+      email: safeStr(data?.email),
+      role: "superAdmin",
+      availability: scope.availability,
+      maxActiveRequests: scope.maxActiveRequests,
+      responseTimeoutMinutes: scope.responseTimeoutMinutes,
+      town: scope.town,
+    });
   });
 
   return rows;
@@ -838,10 +840,10 @@ async function resolveExplicitAdminCandidate(targetAdminUid, requestData = {}) {
 
   const email = safeStr(data?.email);
   const normalizedRole = normalizeRole(data?.role);
-  const targetIsHardcodedSuper = isHardcodedSuperAdminEmail(email);
+  const isSuperAdmin = normalizedRole === "superAdmin";
   const isAssigned = normalizedRole === "assignedAdmin";
 
-  if (!(targetIsHardcodedSuper || isAssigned)) {
+  if (!(isSuperAdmin || isAssigned)) {
     throw new Error("Target user is not an assigned admin.");
   }
 
@@ -858,7 +860,7 @@ async function resolveExplicitAdminCandidate(targetAdminUid, requestData = {}) {
   const candidateBase = {
     uid,
     email,
-    role: targetIsHardcodedSuper ? "superAdmin" : "assignedAdmin",
+    role: isSuperAdmin ? "superAdmin" : "assignedAdmin",
     availability: scope.availability,
     maxActiveRequests: scope.maxActiveRequests,
     responseTimeoutMinutes: scope.responseTimeoutMinutes,
@@ -1222,8 +1224,8 @@ exports.grantStaffAccess = functions.https.onCall(async (data, context) => {
 
   const ownerAdminDoc = await getUserDocByUid(ownerAdminUid);
   const ownerAdminRole = normalizeRole(ownerAdminDoc?.role);
-  const ownerIsHardcodedSuper = isHardcodedSuperAdminEmail(ownerAdminDoc?.email);
-  if (!(ownerAdminRole === "assignedAdmin" || ownerIsHardcodedSuper)) {
+  const ownerIsSuperAdmin = ownerAdminRole === "superAdmin";
+  if (!(ownerAdminRole === "assignedAdmin" || ownerIsSuperAdmin)) {
     throw new functions.https.HttpsError("invalid-argument", "ownerAdminUid must be an admin user");
   }
 
@@ -1258,7 +1260,7 @@ exports.grantStaffAccess = functions.https.onCall(async (data, context) => {
       tracks,
       maxActive,
       ownerAdminUid,
-      ownerAdminRole: ownerIsHardcodedSuper ? "superAdmin" : ownerAdminRole,
+      ownerAdminRole: ownerIsSuperAdmin ? "superAdmin" : ownerAdminRole,
       ownerAdminEmail: safeStr(ownerAdminDoc?.email).toLowerCase(),
       updatedAt: FieldValue.serverTimestamp(),
       ...(existingSnap.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
@@ -1362,8 +1364,8 @@ exports.superAdminOverrideRouteRequest = functions.https.onCall(async (data, con
     throw new functions.https.HttpsError("not-found", "Target admin user does not exist");
   }
   const selectedTargetRole = normalizeRole(selectedTargetAdminDoc?.role);
-  const selectedIsHardcodedSuper = isHardcodedSuperAdminEmail(selectedTargetAdminDoc?.email);
-  if (!(selectedIsHardcodedSuper || selectedTargetRole === "assignedAdmin")) {
+  const selectedIsSuperAdmin = selectedTargetRole === "superAdmin";
+  if (!(selectedIsSuperAdmin || selectedTargetRole === "assignedAdmin")) {
     throw new functions.https.HttpsError("invalid-argument", "Target user is not an admin");
   }
 

@@ -39,12 +39,10 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return signedIn() && (
-        (
-          request.auth.token.email != null
-          && lower(request.auth.token.email) == "brioneroo@gmail.com"
-        ) ||
         userRole(authUid()) == "superadmin" ||
-        userRole(authUid()) == "super_admin"
+        userRole(authUid()) == "super_admin" ||
+        userRole(authUid()) == "super-admin" ||
+        userRole(authUid()) == "super admin"
       );
     }
 
@@ -52,6 +50,8 @@ service cloud.firestore {
       return signedIn() && (
         userRole(authUid()) == "assignedadmin" ||
         userRole(authUid()) == "assigned_admin" ||
+        userRole(authUid()) == "assigned-admin" ||
+        userRole(authUid()) == "assigned admin" ||
         userRole(authUid()) == "admin"
       );
     }

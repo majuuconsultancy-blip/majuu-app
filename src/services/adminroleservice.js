@@ -2,7 +2,6 @@ import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { isEligibleStaffProfile } from "./staffaccessservice";
 
-export const HARDCODED_SUPER_ADMIN_EMAIL = "brioneroo@gmail.com";
 export const ADMIN_SCOPE_AVAILABILITIES = new Set(["active", "busy", "offline"]);
 
 function safeStr(value) {
@@ -15,8 +14,17 @@ function lower(value) {
 
 export function normalizeUserRole(role) {
   const r = lower(role);
-  if (r === "superadmin" || r === "super_admin") return "superAdmin";
-  if (r === "assignedadmin" || r === "assigned_admin") return "assignedAdmin";
+  if (r === "superadmin" || r === "super_admin" || r === "super-admin" || r === "super admin") {
+    return "superAdmin";
+  }
+  if (
+    r === "assignedadmin" ||
+    r === "assigned_admin" ||
+    r === "assigned-admin" ||
+    r === "assigned admin"
+  ) {
+    return "assignedAdmin";
+  }
   if (r === "admin") return "assignedAdmin"; // legacy admin compatibility
   if (r === "staff") return "staff";
   return "user";
@@ -117,21 +125,14 @@ export function normalizeAdminScope(rawScope) {
 
 export function resolveRoleFromUserDoc({
   role,
-  email,
   adminScope = null,
   adminUpdatedBy = "",
   adminUpdatedAt = null,
   hasActiveStaffAccess = false,
 }) {
   const normalizedRole = normalizeUserRole(role);
-  const safeEmail = lower(email);
 
-  // Hardcoded super admin source of truth.
-  if (safeEmail && safeEmail === lower(HARDCODED_SUPER_ADMIN_EMAIL)) {
-    return "superAdmin";
-  }
-
-  // Role-based super admin (stored in users/{uid}.role) for additional super admins.
+  // Role-based super admin source of truth (stored in users/{uid}.role).
   if (normalizedRole === "superAdmin") return "superAdmin";
   if (normalizedRole === "assignedAdmin") return "assignedAdmin";
 

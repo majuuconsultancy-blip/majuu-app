@@ -12,7 +12,6 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import {
-  HARDCODED_SUPER_ADMIN_EMAIL,
   getCurrentUserRoleContext,
   normalizeAdminScope,
   normalizeUserRole,
@@ -78,10 +77,6 @@ function adminScopeRequiresCountyCoverage(scope) {
 function normalizeAvailability(value) {
   const v = lower(value);
   return Object.prototype.hasOwnProperty.call(ADMIN_AVAILABILITY_WEIGHTS, v) ? v : "active";
-}
-
-function isHardcodedSuperAdminEmail(email) {
-  return lower(email) === lower(HARDCODED_SUPER_ADMIN_EMAIL);
 }
 
 function buildReassignmentHistory(currentRequest, nextEntry) {
@@ -382,10 +377,10 @@ async function resolveExplicitAdminCandidate(targetAdminUid, requestData = {}) {
   const data = snap.data() || {};
   const email = safeStr(data?.email);
   const normalizedRole = normalizeUserRole(data?.role);
-  const targetIsHardcodedSuper = isHardcodedSuperAdminEmail(email);
+  const isSuperAdmin = normalizedRole === "superAdmin";
   const isAssigned = normalizedRole === "assignedAdmin";
 
-  if (!(targetIsHardcodedSuper || isAssigned)) {
+  if (!(isSuperAdmin || isAssigned)) {
     throw new Error("Target user is not an assigned admin.");
   }
 
@@ -467,7 +462,7 @@ async function resolveExplicitAdminCandidate(targetAdminUid, requestData = {}) {
   return {
     uid,
     email,
-    role: targetIsHardcodedSuper ? "superAdmin" : "assignedAdmin",
+    role: isSuperAdmin ? "superAdmin" : "assignedAdmin",
     availability: normalizeAvailability(scope.availability),
     maxActiveRequests: scope.maxActiveRequests,
     responseTimeoutMinutes: scope.responseTimeoutMinutes,
