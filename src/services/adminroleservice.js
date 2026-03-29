@@ -1,8 +1,14 @@
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { isEligibleStaffProfile } from "./staffaccessservice";
+import {
+  MANAGER_STATUS_PENDING,
+  managerHasModuleAccess,
+  normalizeManagerModules,
+} from "./managerModules";
 
 export const ADMIN_SCOPE_AVAILABILITIES = new Set(["active", "busy", "offline"]);
+export const MANAGER_SCOPE_STATUSES = new Set(["active", MANAGER_STATUS_PENDING, "inactive"]);
 
 function safeStr(value) {
   return String(value || "").trim();
@@ -26,6 +32,15 @@ export function normalizeUserRole(role) {
     return "assignedAdmin";
   }
   if (r === "admin") return "assignedAdmin"; // legacy admin compatibility
+  if (
+    r === "manager" ||
+    r === "assignedmanager" ||
+    r === "assigned_manager" ||
+    r === "assigned-manager" ||
+    r === "assigned manager"
+  ) {
+    return "manager";
+  }
   if (r === "staff") return "staff";
   return "user";
 }
@@ -41,6 +56,10 @@ export function isAssignedAdminRole(role) {
 export function isAnyAdminRole(role) {
   const normalized = normalizeUserRole(role);
   return normalized === "superAdmin" || normalized === "assignedAdmin";
+}
+
+export function isManagerRole(role) {
+  return normalizeUserRole(role) === "manager";
 }
 
 export function normalizeAdminAvailability(value) {
@@ -123,6 +142,31 @@ export function normalizeAdminScope(rawScope) {
   };
 }
 
+export function normalizeManagerStatus(value) {
+  const safe = lower(value);
+  return MANAGER_SCOPE_STATUSES.has(safe) ? safe : "active";
+}
+
+export function normalizeManagerScope(rawScope) {
+  const scope = rawScope && typeof rawScope === "object" ? rawScope : {};
+  return {
+    name: safeStr(scope?.name || scope?.fullName || scope?.managerName),
+    stationedCountry: safeStr(scope?.stationedCountry || scope?.country),
+    stationedCountryLower: lower(scope?.stationedCountryLower || scope?.stationedCountry || scope?.country),
+    cityTown: safeStr(scope?.cityTown || scope?.town || scope?.city),
+    managerRole: safeStr(scope?.managerRole || scope?.roleLabel),
+    assignedModules: normalizeManagerModules(scope?.assignedModules),
+    notes: safeStr(scope?.notes, 1000),
+    status: normalizeManagerStatus(scope?.status),
+    inviteToken: safeStr(scope?.inviteToken, 160),
+    inviteId: safeStr(scope?.inviteId, 160),
+    inviteCreatedAtMs: Number(scope?.inviteCreatedAtMs || 0) || 0,
+    inviteExpiresAtMs: Number(scope?.inviteExpiresAtMs || 0) || 0,
+    lastLoginAtMs: Number(scope?.lastLoginAtMs || scope?.lastSeenAtMs || 0) || 0,
+    updatedAtMs: Number(scope?.updatedAtMs || 0) || 0,
+  };
+}
+
 export function resolveRoleFromUserDoc({
   role,
   adminScope = null,
@@ -135,6 +179,7 @@ export function resolveRoleFromUserDoc({
   // Role-based super admin source of truth (stored in users/{uid}.role).
   if (normalizedRole === "superAdmin") return "superAdmin";
   if (normalizedRole === "assignedAdmin") return "assignedAdmin";
+  if (normalizedRole === "manager") return "manager";
 
   // Recovery path: if role is stale but admin scope clearly looks assigned-admin managed,
   // treat as assigned admin so access does not break.
@@ -163,9 +208,12 @@ export async function getCurrentUserRoleContext(uid = "") {
       role: "user",
       roleSource: "none",
       adminScope: normalizeAdminScope({}),
+      managerScope: normalizeManagerScope({}),
       isAdmin: false,
       isSuperAdmin: false,
       isAssignedAdmin: false,
+      isManager: false,
+      hasAdminPortalAccess: false,
     };
   }
 
@@ -191,8 +239,11 @@ export async function getCurrentUserRoleContext(uid = "") {
   });
 
   const adminScope = normalizeAdminScope(userData?.adminScope);
+  const managerScope = normalizeManagerScope(userData?.managerScope);
   const isSuperAdmin = isSuperAdminRole(role);
   const isAssignedAdmin = isAssignedAdminRole(role);
+  const isManager = isManagerRole(role);
+  const hasAdminPortalAccess = isSuperAdmin || isAssignedAdmin || isManager;
 
   return {
     uid: currentUid,
@@ -200,8 +251,13 @@ export async function getCurrentUserRoleContext(uid = "") {
     role,
     roleSource: safeStr(userData?.role) ? "userDoc" : hasActiveStaffAccess ? "staffDoc" : "fallback",
     adminScope,
+    managerScope,
     isAdmin: isSuperAdmin || isAssignedAdmin,
     isSuperAdmin,
     isAssignedAdmin,
+    isManager,
+    hasAdminPortalAccess,
+    canAccessManagerModule: (moduleKey = "") =>
+      isSuperAdmin || (isManager && managerHasModuleAccess(managerScope, moduleKey)),
   };
 }

@@ -20,6 +20,8 @@ import {
 import { auth, db } from "../firebase";
 import { BUNDLED_SELF_HELP_RESOURCES } from "../selfHelp/selfHelpCatalog";
 import { getCurrentUserRoleContext } from "./adminroleservice";
+import { logManagerModuleActivity } from "./managerservice";
+import { managerHasModuleAccess } from "./managerModules";
 
 export const SELF_HELP_RESOURCE_COLLECTION = "selfHelpLinks";
 export const SELF_HELP_RESOURCE_GLOBAL_COUNTRY = "Global";
@@ -542,14 +544,31 @@ export function getSelfHelpRuntimeResourceById(resourceId) {
   return bundled || null;
 }
 
-async function requireSuperAdminActor() {
+async function requireAffiliateModuleActor() {
   const uid = safeString(auth.currentUser?.uid, 120);
   if (!uid) throw new Error("You must be signed in.");
   const roleCtx = await getCurrentUserRoleContext(uid);
-  if (!roleCtx?.isSuperAdmin) {
-    throw new Error("Only Super Admin can manage SelfHelp links.");
+  const canAccess =
+    Boolean(roleCtx?.isSuperAdmin) ||
+    (Boolean(roleCtx?.isManager) &&
+      managerHasModuleAccess(roleCtx?.managerScope, "selfhelp-links"));
+  if (!canAccess) {
+    throw new Error("You do not have access to Affiliate Management.");
   }
   return roleCtx;
+}
+
+async function logAffiliateManagerActivity(action, details = "", metadata = {}) {
+  try {
+    await logManagerModuleActivity({
+      moduleKey: "selfhelp-links",
+      action,
+      details,
+      metadata,
+    });
+  } catch {
+    // non-blocking
+  }
 }
 
 export function subscribeAllSelfHelpResources({ onData, onError } = {}) {
@@ -574,7 +593,7 @@ export function subscribeAllSelfHelpResources({ onData, onError } = {}) {
 export const subscribeRuntimeSelfHelpResources = subscribeAllSelfHelpResources;
 
 export async function createSelfHelpResource(input = {}) {
-  await requireSuperAdminActor();
+  const actor = await requireAffiliateModuleActor();
 
   const payload = toSelfHelpResourcePayload(input);
   const ref = doc(collection(db, SELF_HELP_RESOURCE_COLLECTION));
@@ -591,11 +610,20 @@ export async function createSelfHelpResource(input = {}) {
     updatedByEmail: safeString(auth.currentUser?.email, 160),
   });
 
+  if (actor?.isManager) {
+    await logAffiliateManagerActivity("affiliate_resource_created", payload.title, {
+      resourceId: ref.id,
+      category: payload.category,
+      trackType: payload.trackType,
+      country: payload.country,
+    });
+  }
+
   return ref.id;
 }
 
 export async function updateSelfHelpResource(resourceId, input = {}) {
-  await requireSuperAdminActor();
+  const actor = await requireAffiliateModuleActor();
 
   const safeId = safeString(resourceId, 140);
   if (!safeId) throw new Error("Missing SelfHelp resource id.");
@@ -617,10 +645,19 @@ export async function updateSelfHelpResource(resourceId, input = {}) {
     },
     { merge: true }
   );
+
+  if (actor?.isManager) {
+    await logAffiliateManagerActivity("affiliate_resource_updated", payload.title, {
+      resourceId: safeId,
+      category: payload.category,
+      trackType: payload.trackType,
+      country: payload.country,
+    });
+  }
 }
 
 export async function setSelfHelpResourceActiveState(resourceId, isActive) {
-  await requireSuperAdminActor();
+  const actor = await requireAffiliateModuleActor();
 
   const safeId = safeString(resourceId, 140);
   if (!safeId) throw new Error("Missing SelfHelp resource id.");
@@ -632,6 +669,14 @@ export async function setSelfHelpResourceActiveState(resourceId, isActive) {
     updatedByUid: safeString(auth.currentUser?.uid, 120),
     updatedByEmail: safeString(auth.currentUser?.email, 160),
   });
+
+  if (actor?.isManager) {
+    await logAffiliateManagerActivity(
+      normalizeBoolean(isActive) ? "affiliate_resource_activated" : "affiliate_resource_deactivated",
+      "",
+      { resourceId: safeId }
+    );
+  }
 }
 
 export async function incrementSelfHelpResourceClick(resourceId) {
@@ -651,7 +696,7 @@ export async function incrementSelfHelpResourceClick(resourceId) {
 }
 
 export async function importBundledSelfHelpResources({ onlyMissing = true } = {}) {
-  await requireSuperAdminActor();
+  const actor = await requireAffiliateModuleActor();
 
   const snapshot = await getDocs(collection(db, SELF_HELP_RESOURCE_COLLECTION));
   const existingIds = new Set(snapshot.docs.map((docSnap) => safeString(docSnap.id, 140)));
@@ -695,6 +740,13 @@ export async function importBundledSelfHelpResources({ onlyMissing = true } = {}
   }
 
   await batch.commit();
+
+  if (actor?.isManager) {
+    await logAffiliateManagerActivity("affiliate_bundled_import", "", {
+      importedCount,
+      onlyMissing: onlyMissing !== false,
+    });
+  }
 
   return {
     importedCount,

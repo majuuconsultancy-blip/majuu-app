@@ -12,6 +12,8 @@ import {
 import { auth, db } from "../firebase";
 import { normalizeDestinationCountry, normalizeTrackType } from "../constants/migrationOptions";
 import { getCurrentUserRoleContext } from "./adminroleservice";
+import { logManagerModuleActivity } from "./managerservice";
+import { managerHasModuleAccess } from "./managerModules";
 
 export const DISCOVERY_PUBLICATION_COLLECTION = "discoveryPublications";
 
@@ -297,14 +299,31 @@ function compareDiscoveryPublications(left, right) {
   return Number(right?.updatedAtMs || 0) - Number(left?.updatedAtMs || 0);
 }
 
-async function requireSuperAdminActor() {
+async function requireNewsModuleActor() {
   const uid = safeString(auth.currentUser?.uid, 120);
   if (!uid) throw new Error("You must be signed in.");
   const roleCtx = await getCurrentUserRoleContext(uid);
-  if (!roleCtx?.isSuperAdmin) {
-    throw new Error("Only Super Admin can manage discovery publication.");
+  const canAccess =
+    Boolean(roleCtx?.isSuperAdmin) ||
+    (Boolean(roleCtx?.isManager) &&
+      managerHasModuleAccess(roleCtx?.managerScope, "news"));
+  if (!canAccess) {
+    throw new Error("You do not have access to Discovery publication.");
   }
   return roleCtx;
+}
+
+async function logDiscoveryManagerActivity(action, details = "", metadata = {}) {
+  try {
+    await logManagerModuleActivity({
+      moduleKey: "news",
+      action,
+      details,
+      metadata,
+    });
+  } catch {
+    // non-blocking
+  }
 }
 
 export function createEmptyDiscoveryPublicationDraft({ trackType = "study", country = "" } = {}) {
@@ -418,7 +437,7 @@ export function subscribeDiscoveryPublicationsByTrack({
 }
 
 export async function upsertDiscoveryPublication(input = {}) {
-  await requireSuperAdminActor();
+  const actor = await requireNewsModuleActor();
 
   const payload = normalizeDiscoveryPublicationPayload(input);
   const nowMs = Date.now();
@@ -439,13 +458,26 @@ export async function upsertDiscoveryPublication(input = {}) {
     { merge: true }
   );
 
+  if (actor?.isManager) {
+    await logDiscoveryManagerActivity("discovery_publication_upserted", payload.country, {
+      publicationId: safeId,
+      trackType: payload.trackType,
+      country: payload.country,
+    });
+  }
+
   return safeId;
 }
 
 export async function deleteDiscoveryPublication({ trackType = "", country = "" } = {}) {
-  await requireSuperAdminActor();
+  const actor = await requireNewsModuleActor();
 
   const safeId = buildDiscoveryPublicationId({ trackType, country });
   if (!safeId) throw new Error("Missing discovery publication id.");
   await deleteDoc(doc(db, DISCOVERY_PUBLICATION_COLLECTION, safeId));
+  if (actor?.isManager) {
+    await logDiscoveryManagerActivity("discovery_publication_deleted", "", {
+      publicationId: safeId,
+    });
+  }
 }

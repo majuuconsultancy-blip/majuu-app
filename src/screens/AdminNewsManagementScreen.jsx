@@ -29,6 +29,7 @@ import { useCountryDirectory } from "../hooks/useCountryDirectory";
 import { useDiscoveryPublications } from "../hooks/useDiscoveryPublications";
 import { useManagedDestinationCountries } from "../hooks/useManagedDestinationCountries";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
+import { managerHasModuleAccess } from "../services/managerModules";
 import { countrySupportsTrack } from "../services/countryService";
 import {
   createEmptyDiscoveryPublicationDraft,
@@ -1525,7 +1526,7 @@ function DiscoveryPublicationTab() {
 export default function AdminNewsManagementScreen() {
   const navigate = useNavigate();
   const [checkingRole, setCheckingRole] = useState(true);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [hasNewsAccess, setHasNewsAccess] = useState(false);
   const [activeTab, setActiveTab] = useState("news");
 
   useEffect(() => {
@@ -1535,11 +1536,15 @@ export default function AdminNewsManagementScreen() {
       try {
         const roleCtx = await getCurrentUserRoleContext();
         if (cancelled) return;
-        setIsSuperAdmin(Boolean(roleCtx?.isSuperAdmin));
+        const canAccess =
+          Boolean(roleCtx?.isSuperAdmin) ||
+          (Boolean(roleCtx?.isManager) &&
+            managerHasModuleAccess(roleCtx?.managerScope, "news"));
+        setHasNewsAccess(canAccess);
       } catch (error) {
         if (cancelled) return;
         console.error(error);
-        setIsSuperAdmin(false);
+        setHasNewsAccess(false);
       } finally {
         if (!cancelled) setCheckingRole(false);
       }
@@ -1589,9 +1594,9 @@ export default function AdminNewsManagementScreen() {
           <div className="mt-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 p-4 shadow-sm backdrop-blur text-sm text-zinc-600 dark:text-zinc-300">
             Checking access...
           </div>
-        ) : !isSuperAdmin ? (
+        ) : !hasNewsAccess ? (
           <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/35 dark:text-rose-200">
-            Only Super Admin can manage News & Discovery publication.
+            You do not have access to the News module.
           </div>
         ) : (
           <>

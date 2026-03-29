@@ -2,6 +2,7 @@ const functions = require("firebase-functions");
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
+const crypto = require("node:crypto");
 const admin = require("firebase-admin");
 const buildFinanceFoundation = require("./finance-foundation");
 
@@ -37,6 +38,45 @@ const ASSIGNED_ADMIN_ROLE_VARIANTS = [
   "assigned admin",
   "admin",
 ];
+const MANAGER_ROLE_VARIANTS = [
+  "manager",
+  "assignedManager",
+  "assignedmanager",
+  "assigned_manager",
+  "assigned-manager",
+  "assigned manager",
+];
+const MANAGER_MODULE_KEYS = new Set([
+  "finances",
+  "news",
+  "request-management",
+  "selfhelp-links",
+]);
+const MANAGER_MODULE_ALIAS_MAP = new Map(
+  Object.entries({
+    finance: "finances",
+    finances: "finances",
+    payments: "finances",
+    payout: "finances",
+    payouts: "finances",
+    news: "news",
+    discovery: "news",
+    request: "request-management",
+    requests: "request-management",
+    request_management: "request-management",
+    "request-management": "request-management",
+    affiliate: "selfhelp-links",
+    affiliates: "selfhelp-links",
+    selfhelp: "selfhelp-links",
+    self_help: "selfhelp-links",
+    selfhelplinks: "selfhelp-links",
+    "selfhelp-links": "selfhelp-links",
+  })
+);
+const MANAGER_STATUS_VALUES = new Set(["active", "pending", "inactive"]);
+const MANAGER_INVITES_COLLECTION = "managerInvites";
+const MANAGER_AUDIT_COLLECTION = "managerAuditLogs";
+const DEFAULT_MANAGER_INVITE_EXPIRY_HOURS = 24;
 const INVALID_TOKEN_CODES = new Set([
   "messaging/registration-token-not-registered",
   "messaging/invalid-registration-token",
@@ -73,6 +113,15 @@ function normalizeRole(rawRole) {
     return "assignedAdmin";
   }
   if (role === "admin") return "assignedAdmin"; // legacy role fallback
+  if (
+    role === "manager" ||
+    role === "assignedmanager" ||
+    role === "assigned_manager" ||
+    role === "assigned-manager" ||
+    role === "assigned manager"
+  ) {
+    return "manager";
+  }
   if (role === "staff") return "staff";
   return "user";
 }
@@ -98,6 +147,79 @@ function normalizeStringList(values, { max = 120, lowercase = false } = {}) {
     out.push(normalized);
   });
   return out;
+}
+
+function normalizeManagerModuleKey(value) {
+  const raw = lower(value);
+  if (!raw) return "";
+  const resolved = MANAGER_MODULE_ALIAS_MAP.get(raw) || raw;
+  return MANAGER_MODULE_KEYS.has(resolved) ? resolved : "";
+}
+
+function normalizeManagerModules(values = [], { max = 12 } = {}) {
+  const rows = Array.isArray(values) ? values : [values];
+  const seen = new Set();
+  const out = [];
+
+  rows.forEach((value) => {
+    const key = normalizeManagerModuleKey(value);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(key);
+  });
+
+  return out.slice(0, clamp(toNum(max, 12), 1, 20));
+}
+
+function normalizeManagerStatus(value) {
+  const safe = lower(value);
+  return MANAGER_STATUS_VALUES.has(safe) ? safe : "active";
+}
+
+function normalizeManagerScope(rawScope) {
+  const scope = rawScope && typeof rawScope === "object" ? rawScope : {};
+  return {
+    name: safeStr(scope?.name || scope?.fullName || scope?.managerName, 140),
+    stationedCountry: safeStr(scope?.stationedCountry || scope?.country, 120),
+    stationedCountryLower: lower(scope?.stationedCountryLower || scope?.stationedCountry || scope?.country, 120),
+    cityTown: safeStr(scope?.cityTown || scope?.city || scope?.town, 120),
+    managerRole: safeStr(scope?.managerRole || scope?.roleLabel, 120),
+    assignedModules: normalizeManagerModules(scope?.assignedModules),
+    notes: safeStr(scope?.notes, 2000),
+    status: normalizeManagerStatus(scope?.status),
+    inviteToken: safeStr(scope?.inviteToken, 220),
+    inviteId: safeStr(scope?.inviteId, 220),
+    inviteCreatedAtMs: toNum(scope?.inviteCreatedAtMs, 0),
+    inviteExpiresAtMs: toNum(scope?.inviteExpiresAtMs, 0),
+    lastLoginAtMs: toNum(scope?.lastLoginAtMs || scope?.lastSeenAtMs, 0),
+    updatedAtMs: toNum(scope?.updatedAtMs, 0),
+  };
+}
+
+function defaultManagerScopePayload() {
+  return {
+    name: "",
+    stationedCountry: "",
+    stationedCountryLower: "",
+    cityTown: "",
+    managerRole: "",
+    assignedModules: [],
+    notes: "",
+    status: "inactive",
+    inviteToken: "",
+    inviteId: "",
+    inviteCreatedAtMs: 0,
+    inviteExpiresAtMs: 0,
+    lastLoginAtMs: 0,
+    updatedAtMs: 0,
+  };
+}
+
+function hasManagerModuleAccess(managerScope, moduleKey) {
+  const normalizedModule = normalizeManagerModuleKey(moduleKey);
+  if (!normalizedModule) return false;
+  const scope = normalizeManagerScope(managerScope);
+  return scope.assignedModules.includes(normalizedModule);
 }
 
 function mergeUniqueLowerLists(...lists) {
@@ -455,6 +577,92 @@ async function writeUserNotificationDoc(uid, notificationId, payload) {
   );
 }
 
+function toTimestampMs(value) {
+  if (!value) return 0;
+  if (typeof value?.toMillis === "function") {
+    const ms = Number(value.toMillis());
+    return Number.isFinite(ms) ? ms : 0;
+  }
+  const seconds = Number(value?.seconds || 0);
+  const nanos = Number(value?.nanoseconds || 0);
+  if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+  return seconds * 1000 + (Number.isFinite(nanos) ? Math.floor(nanos / 1e6) : 0);
+}
+
+function pickPrimaryUserDoc(rows = []) {
+  return [...(Array.isArray(rows) ? rows : [])]
+    .sort((left, right) => {
+      const leftUpdated = toTimestampMs(left?.updatedAt);
+      const rightUpdated = toTimestampMs(right?.updatedAt);
+      if (rightUpdated !== leftUpdated) return rightUpdated - leftUpdated;
+      const leftCreated = toTimestampMs(left?.createdAt);
+      const rightCreated = toTimestampMs(right?.createdAt);
+      if (rightCreated !== leftCreated) return rightCreated - leftCreated;
+      return safeStr(left?.id).localeCompare(safeStr(right?.id));
+    })[0] || null;
+}
+
+async function findUserDocsByEmail(email) {
+  const safeEmail = safeStr(email).toLowerCase();
+  if (!safeEmail || !safeEmail.includes("@")) {
+    throw new functions.https.HttpsError("invalid-argument", "Valid email is required");
+  }
+
+  const snap = await db
+    .collection("users")
+    .where("email", "==", safeEmail)
+    .limit(20)
+    .get();
+
+  const rows = snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
+  const primary = pickPrimaryUserDoc(rows);
+  return {
+    email: safeEmail,
+    rows,
+    primaryUid: safeStr(primary?.id),
+  };
+}
+
+function generateManagerInviteToken() {
+  return crypto.randomBytes(24).toString("base64url");
+}
+
+async function writeManagerAuditLog({
+  managerUid = "",
+  managerEmail = "",
+  action = "",
+  moduleKey = "",
+  details = "",
+  metadata = {},
+  actorUid = "",
+  actorEmail = "",
+  actorRole = "",
+} = {}) {
+  const safeAction = lower(action);
+  if (!safeAction) return "";
+
+  const now = Date.now();
+  const id = `mgr_audit_${now}_${Math.random().toString(36).slice(2, 8)}`;
+  await db.collection(MANAGER_AUDIT_COLLECTION).doc(id).set(
+    {
+      id,
+      managerUid: safeStr(managerUid),
+      managerEmail: safeStr(managerEmail).toLowerCase(),
+      action: safeAction,
+      moduleKey: normalizeManagerModuleKey(moduleKey),
+      details: safeStr(details, 3000),
+      metadata: metadata && typeof metadata === "object" ? metadata : {},
+      actorUid: safeStr(actorUid),
+      actorEmail: safeStr(actorEmail).toLowerCase(),
+      actorRole: safeStr(actorRole, 80),
+      createdAt: FieldValue.serverTimestamp(),
+      createdAtMs: now,
+    },
+    { merge: true }
+  );
+  return id;
+}
+
 async function getUserDocByUid(uid) {
   const safeUid = safeStr(uid);
   if (!safeUid) return null;
@@ -481,7 +689,15 @@ async function getCallerRoleFromContext(context) {
   return normalizeRole(userDoc?.role);
 }
 
-async function requireAdminCallerContext(context, { superOnly = false } = {}) {
+async function requireAdminCallerContext(
+  context,
+  {
+    superOnly = false,
+    allowManager = false,
+    requiredManagerModule = "",
+    allowAssignedAdmin = true,
+  } = {}
+) {
   const callerUid = safeStr(context?.auth?.uid);
   if (!callerUid) {
     throw new functions.https.HttpsError("unauthenticated", "Login required");
@@ -491,21 +707,33 @@ async function requireAdminCallerContext(context, { superOnly = false } = {}) {
   const normalizedRole = normalizeRole(callerDoc?.role);
   const isSuperAdmin = normalizedRole === "superAdmin";
   const isAssignedAdmin = normalizedRole === "assignedAdmin";
+  const isManager = normalizedRole === "manager";
+  const managerScope = normalizeManagerScope(callerDoc?.managerScope);
+  const hasRequiredManagerModule =
+    !safeStr(requiredManagerModule) ||
+    hasManagerModuleAccess(managerScope, requiredManagerModule);
+  const hasAdminAccess =
+    isSuperAdmin ||
+    (allowAssignedAdmin && isAssignedAdmin) ||
+    (allowManager && isManager && hasRequiredManagerModule);
 
   if (superOnly && !isSuperAdmin) {
     throw new functions.https.HttpsError("permission-denied", "Super admin only");
   }
 
-  if (!superOnly && !(isSuperAdmin || isAssignedAdmin)) {
-    throw new functions.https.HttpsError("permission-denied", "Admin only");
+  if (!superOnly && !hasAdminAccess) {
+    throw new functions.https.HttpsError("permission-denied", "Admin access required");
   }
 
   return {
     callerUid,
     callerDoc: callerDoc || {},
-    callerRole: isSuperAdmin ? "superAdmin" : "assignedAdmin",
+    callerRole: isSuperAdmin ? "superAdmin" : isAssignedAdmin ? "assignedAdmin" : "manager",
     isSuperAdmin,
     isAssignedAdmin,
+    isManager,
+    managerScope,
+    hasRequiredManagerModule,
   };
 }
 
@@ -1188,6 +1416,432 @@ async function notifyRequestOwnerStatus({
     ),
   ]);
 }
+
+function buildManagerScopePayload(input = {}, existingScope = {}) {
+  const now = Date.now();
+  const existing = normalizeManagerScope(existingScope);
+  const assignedModules = normalizeManagerModules(
+    input?.assignedModules?.length ? input.assignedModules : existing.assignedModules
+  );
+
+  return {
+    ...existing,
+    name: safeStr(input?.name || existing.name),
+    stationedCountry: safeStr(input?.stationedCountry || existing.stationedCountry),
+    stationedCountryLower: lower(
+      input?.stationedCountryLower ||
+        input?.stationedCountry ||
+        existing.stationedCountryLower ||
+        existing.stationedCountry
+    ),
+    cityTown: safeStr(input?.cityTown || existing.cityTown),
+    managerRole: safeStr(input?.managerRole || existing.managerRole),
+    assignedModules,
+    notes: safeStr(input?.notes ?? existing.notes),
+    status: normalizeManagerStatus(input?.status || existing.status || "active"),
+    inviteToken: safeStr(input?.inviteToken || existing.inviteToken),
+    inviteId: safeStr(input?.inviteId || existing.inviteId),
+    inviteCreatedAtMs: toNum(input?.inviteCreatedAtMs || existing.inviteCreatedAtMs, 0),
+    inviteExpiresAtMs: toNum(input?.inviteExpiresAtMs || existing.inviteExpiresAtMs, 0),
+    lastLoginAtMs: toNum(input?.lastLoginAtMs || existing.lastLoginAtMs, 0),
+    updatedAtMs: now,
+  };
+}
+
+function buildInviteLink(appBaseUrl, inviteToken, email) {
+  const base = safeStr(appBaseUrl);
+  const token = safeStr(inviteToken);
+  if (!token) return "";
+  if (!base || (!base.startsWith("http://") && !base.startsWith("https://"))) return "";
+  try {
+    const url = new URL("/signup", base);
+    url.searchParams.set("managerInvite", token);
+    const safeEmail = safeStr(email).toLowerCase();
+    if (safeEmail) url.searchParams.set("email", safeEmail);
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+async function updatePendingInvitesForEmail(email, patch = {}) {
+  const safeEmail = safeStr(email).toLowerCase();
+  if (!safeEmail) return 0;
+  const inviteSnap = await db
+    .collection(MANAGER_INVITES_COLLECTION)
+    .where("emailLower", "==", safeEmail)
+    .where("status", "==", "pending")
+    .limit(20)
+    .get();
+  if (inviteSnap.empty) return 0;
+  const batch = db.batch();
+  inviteSnap.docs.forEach((docSnap) => {
+    batch.set(
+      docSnap.ref,
+      {
+        ...(patch && typeof patch === "object" ? patch : {}),
+        updatedAt: FieldValue.serverTimestamp(),
+        updatedAtMs: Date.now(),
+      },
+      { merge: true }
+    );
+  });
+  await batch.commit();
+  return inviteSnap.docs.length;
+}
+
+exports.createManagerInvite = functions.https.onCall(async (data, context) => {
+  const caller = await requireAdminCallerContext(context, { superOnly: true });
+  const email = safeStr(data?.email).toLowerCase();
+  if (!email || !email.includes("@")) {
+    throw new functions.https.HttpsError("invalid-argument", "Valid manager email is required");
+  }
+
+  const assignedModules = normalizeManagerModules(data?.assignedModules);
+  if (!assignedModules.length) {
+    throw new functions.https.HttpsError("invalid-argument", "At least one module is required");
+  }
+
+  const now = Date.now();
+  const expiryHours = clamp(
+    toNum(data?.expiresInHours, DEFAULT_MANAGER_INVITE_EXPIRY_HOURS),
+    1,
+    168
+  );
+  const expiresAtMs = now + expiryHours * 60 * 60 * 1000;
+  const inviteToken = generateManagerInviteToken();
+  const inviteLink = buildInviteLink(data?.appBaseUrl, inviteToken, email);
+
+  await db
+    .collection(MANAGER_INVITES_COLLECTION)
+    .doc(inviteToken)
+    .set(
+      {
+        id: inviteToken,
+        inviteToken,
+        email,
+        emailLower: email,
+        name: safeStr(data?.name),
+        stationedCountry: safeStr(data?.stationedCountry),
+        stationedCountryLower: lower(data?.stationedCountry),
+        cityTown: safeStr(data?.cityTown),
+        managerRole: safeStr(data?.managerRole),
+        assignedModules,
+        notes: safeStr(data?.notes),
+        status: "pending",
+        singleUse: true,
+        expiresAtMs,
+        createdByUid: caller.callerUid,
+        createdByEmail: safeStr(caller?.callerDoc?.email).toLowerCase(),
+        createdAt: FieldValue.serverTimestamp(),
+        createdAtMs: now,
+        updatedAt: FieldValue.serverTimestamp(),
+        updatedAtMs: now,
+      },
+      { merge: true }
+    );
+
+  await writeManagerAuditLog({
+    managerUid: "",
+    managerEmail: email,
+    action: "manager_invite_created",
+    moduleKey: assignedModules[0] || "",
+    details: `Invite created for ${email}`,
+    metadata: {
+      inviteId: inviteToken,
+      assignedModules,
+      expiresAtMs,
+    },
+    actorUid: caller.callerUid,
+    actorEmail: safeStr(caller?.callerDoc?.email).toLowerCase(),
+    actorRole: caller.callerRole,
+  });
+
+  return {
+    ok: true,
+    inviteId: inviteToken,
+    inviteToken,
+    inviteLink,
+    email,
+    assignedModules,
+    expiresAtMs,
+  };
+});
+
+exports.redeemManagerInvite = functions.https.onCall(async (data, context) => {
+  const callerUid = safeStr(context?.auth?.uid);
+  if (!callerUid) {
+    throw new functions.https.HttpsError("unauthenticated", "Login required");
+  }
+
+  const inviteToken = safeStr(data?.inviteToken);
+  if (!inviteToken) {
+    throw new functions.https.HttpsError("invalid-argument", "inviteToken is required");
+  }
+
+  const inviteRef = db.collection(MANAGER_INVITES_COLLECTION).doc(inviteToken);
+  const inviteSnap = await inviteRef.get();
+  if (!inviteSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "Manager invite was not found");
+  }
+  const invite = inviteSnap.data() || {};
+  const inviteStatus = lower(invite?.status || "pending");
+  if (inviteStatus !== "pending") {
+    throw new functions.https.HttpsError("failed-precondition", "Invite has already been used");
+  }
+
+  const now = Date.now();
+  const expiresAtMs = toNum(invite?.expiresAtMs, 0);
+  if (expiresAtMs > 0 && now > expiresAtMs) {
+    await inviteRef.set(
+      {
+        status: "expired",
+        updatedAt: FieldValue.serverTimestamp(),
+        updatedAtMs: now,
+      },
+      { merge: true }
+    );
+    throw new functions.https.HttpsError("failed-precondition", "Invite has expired");
+  }
+
+  const inviteEmail = safeStr(invite?.email || invite?.emailLower).toLowerCase();
+  const callerEmail = safeStr(context?.auth?.token?.email).toLowerCase();
+  if (!callerEmail || !inviteEmail || callerEmail !== inviteEmail) {
+    throw new functions.https.HttpsError(
+      "permission-denied",
+      "Invite email does not match signed-in account"
+    );
+  }
+
+  const userDoc = (await getUserDocByUid(callerUid)) || {};
+  const managerScope = buildManagerScopePayload(
+    {
+      name: safeStr(invite?.name || userDoc?.name),
+      stationedCountry: safeStr(invite?.stationedCountry),
+      cityTown: safeStr(invite?.cityTown),
+      managerRole: safeStr(invite?.managerRole),
+      assignedModules: normalizeManagerModules(invite?.assignedModules),
+      notes: safeStr(invite?.notes),
+      status: "active",
+      inviteToken,
+      inviteId: inviteToken,
+      inviteCreatedAtMs: toNum(invite?.createdAtMs, now),
+      inviteExpiresAtMs: expiresAtMs,
+      lastLoginAtMs: now,
+    },
+    userDoc?.managerScope
+  );
+  if (!managerScope.assignedModules.length) {
+    throw new functions.https.HttpsError("failed-precondition", "Invite has no modules assigned");
+  }
+
+  const batch = db.batch();
+  batch.set(
+    db.collection("users").doc(callerUid),
+    {
+      email: inviteEmail,
+      role: "manager",
+      managerScope,
+      managerUpdatedBy: `invite:${inviteToken}`,
+      managerUpdatedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedAtMs: now,
+    },
+    { merge: true }
+  );
+  batch.set(
+    inviteRef,
+    {
+      status: "redeemed",
+      redeemedByUid: callerUid,
+      redeemedByEmail: callerEmail,
+      redeemedAt: FieldValue.serverTimestamp(),
+      redeemedAtMs: now,
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedAtMs: now,
+    },
+    { merge: true }
+  );
+  await batch.commit();
+
+  await writeManagerAuditLog({
+    managerUid: callerUid,
+    managerEmail: inviteEmail,
+    action: "manager_invite_redeemed",
+    details: "Manager invite redeemed and modules assigned",
+    metadata: {
+      inviteId: inviteToken,
+      assignedModules: managerScope.assignedModules,
+    },
+    actorUid: callerUid,
+    actorEmail: callerEmail,
+    actorRole: "manager",
+  });
+
+  return {
+    ok: true,
+    uid: callerUid,
+    email: inviteEmail,
+    assignedModules: managerScope.assignedModules,
+    status: managerScope.status,
+  };
+});
+
+exports.upsertManagerAssignmentByEmail = functions.https.onCall(async (data, context) => {
+  const caller = await requireAdminCallerContext(context, { superOnly: true });
+  const email = safeStr(data?.email).toLowerCase();
+  if (!email || !email.includes("@")) {
+    throw new functions.https.HttpsError("invalid-argument", "Valid manager email is required");
+  }
+
+  const assignedModules = normalizeManagerModules(data?.assignedModules);
+  if (!assignedModules.length) {
+    throw new functions.https.HttpsError("invalid-argument", "At least one module is required");
+  }
+
+  const matches = await findUserDocsByEmail(email);
+  const targetRows = Array.isArray(matches?.rows) ? matches.rows : [];
+  if (!targetRows.length) {
+    throw new functions.https.HttpsError(
+      "not-found",
+      "No user account found for this email. Invite them first."
+    );
+  }
+
+  const now = Date.now();
+  const status = normalizeManagerStatus(data?.status || "active");
+  const batch = db.batch();
+
+  targetRows.forEach((row) => {
+    const uid = safeStr(row?.id);
+    if (!uid) return;
+    const scope = buildManagerScopePayload(
+      {
+        name: safeStr(data?.name || row?.name),
+        stationedCountry: safeStr(data?.stationedCountry),
+        cityTown: safeStr(data?.cityTown),
+        managerRole: safeStr(data?.managerRole),
+        assignedModules,
+        notes: safeStr(data?.notes),
+        status,
+      },
+      row?.managerScope
+    );
+
+    batch.set(
+      db.collection("users").doc(uid),
+      {
+        email,
+        role: "manager",
+        managerScope: scope,
+        managerUpdatedBy: caller.callerUid,
+        managerUpdatedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+        updatedAtMs: now,
+      },
+      { merge: true }
+    );
+  });
+
+  await batch.commit();
+  await updatePendingInvitesForEmail(email, {
+    assignedModules,
+    status: "pending",
+    name: safeStr(data?.name),
+    stationedCountry: safeStr(data?.stationedCountry),
+    stationedCountryLower: lower(data?.stationedCountry),
+    cityTown: safeStr(data?.cityTown),
+    managerRole: safeStr(data?.managerRole),
+    notes: safeStr(data?.notes),
+  });
+
+  await Promise.all(
+    targetRows.map((row) =>
+      writeManagerAuditLog({
+        managerUid: safeStr(row?.id),
+        managerEmail: email,
+        action: "manager_assignment_updated",
+        moduleKey: assignedModules[0] || "",
+        details: `Manager modules updated: ${assignedModules.join(", ")}`,
+        metadata: { assignedModules, status },
+        actorUid: caller.callerUid,
+        actorEmail: safeStr(caller?.callerDoc?.email).toLowerCase(),
+        actorRole: caller.callerRole,
+      })
+    )
+  );
+
+  return {
+    ok: true,
+    email,
+    uid: safeStr(matches?.primaryUid),
+    uids: targetRows.map((row) => safeStr(row?.id)).filter(Boolean),
+    assignedModules,
+    status,
+  };
+});
+
+exports.revokeManagerByEmail = functions.https.onCall(async (data, context) => {
+  const caller = await requireAdminCallerContext(context, { superOnly: true });
+  const email = safeStr(data?.email).toLowerCase();
+  if (!email || !email.includes("@")) {
+    throw new functions.https.HttpsError("invalid-argument", "Valid manager email is required");
+  }
+
+  const matches = await findUserDocsByEmail(email);
+  const targetRows = Array.isArray(matches?.rows) ? matches.rows : [];
+  const targetUids = targetRows.map((row) => safeStr(row?.id)).filter(Boolean);
+  const now = Date.now();
+
+  if (targetUids.length) {
+    const batch = db.batch();
+    targetUids.forEach((uid) => {
+      batch.set(
+        db.collection("users").doc(uid),
+        {
+          role: "user",
+          managerScope: defaultManagerScopePayload(),
+          managerUpdatedBy: caller.callerUid,
+          managerUpdatedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedAtMs: now,
+        },
+        { merge: true }
+      );
+    });
+    await batch.commit();
+  }
+
+  await updatePendingInvitesForEmail(email, {
+    status: "revoked",
+    revokedByUid: caller.callerUid,
+    revokedByEmail: safeStr(caller?.callerDoc?.email).toLowerCase(),
+    revokedAt: FieldValue.serverTimestamp(),
+    revokedAtMs: now,
+  });
+
+  await Promise.all(
+    targetUids.map((uid) =>
+      writeManagerAuditLog({
+        managerUid: uid,
+        managerEmail: email,
+        action: "manager_revoked",
+        details: "Manager role revoked",
+        actorUid: caller.callerUid,
+        actorEmail: safeStr(caller?.callerDoc?.email).toLowerCase(),
+        actorRole: caller.callerRole,
+      })
+    )
+  );
+
+  return {
+    ok: true,
+    email,
+    uid: safeStr(matches?.primaryUid),
+    uids: targetUids,
+    revoked: targetUids.length,
+  };
+});
 
 /* ======================================================
    Existing callable functions (kept)
@@ -2047,5 +2701,6 @@ Object.assign(
     fetchPartnerById,
     claimEventLock,
     autoRouteRequest,
+    writeManagerAuditLog,
   })
 );

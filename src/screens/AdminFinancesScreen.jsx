@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import AppIcon from "../components/AppIcon";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
+import { managerHasModuleAccess } from "../services/managerModules";
 import {
   defaultFinanceSettings,
   defaultPartnerFinancialProfile,
@@ -154,6 +155,7 @@ export default function AdminFinancesScreen() {
   const [checkingRole, setCheckingRole] = useState(true);
   const [hasFinanceAccess, setHasFinanceAccess] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [isFinanceManager, setIsFinanceManager] = useState(false);
   const [partners, setPartners] = useState([]);
   const [partnerProfiles, setPartnerProfiles] = useState([]);
   const [payoutQueue, setPayoutQueue] = useState([]);
@@ -188,15 +190,20 @@ export default function AdminFinancesScreen() {
     (async () => {
       try {
         const roleCtx = await getCurrentUserRoleContext();
+        const managerAllowed =
+          Boolean(roleCtx?.isManager) &&
+          managerHasModuleAccess(roleCtx?.managerScope, "finances");
         if (!cancelled) {
-          setHasFinanceAccess(Boolean(roleCtx?.isAdmin));
+          setHasFinanceAccess(Boolean(roleCtx?.isSuperAdmin || managerAllowed));
           setIsSuperAdmin(Boolean(roleCtx?.isSuperAdmin));
+          setIsFinanceManager(managerAllowed);
         }
       } catch (error) {
         if (!cancelled) {
           console.error(error);
           setHasFinanceAccess(false);
           setIsSuperAdmin(false);
+          setIsFinanceManager(false);
         }
       } finally {
         if (!cancelled) setCheckingRole(false);
@@ -206,6 +213,8 @@ export default function AdminFinancesScreen() {
       cancelled = true;
     };
   }, []);
+
+  const canEditFinance = isSuperAdmin || isFinanceManager;
 
   useEffect(() => {
     if (!hasFinanceAccess) return undefined;
@@ -376,8 +385,8 @@ export default function AdminFinancesScreen() {
   };
 
   const saveGlobalSettings = async () => {
-    if (!isSuperAdmin) {
-      setErr("Only Superadmin can update finance settings.");
+    if (!canEditFinance) {
+      setErr("Only authorized finance managers can update finance settings.");
       return;
     }
     setSettingsBusy(true);
@@ -428,8 +437,8 @@ export default function AdminFinancesScreen() {
   };
 
   const releasePayout = async (row) => {
-    if (!isSuperAdmin) {
-      setErr("Only Superadmin can release payouts.");
+    if (!canEditFinance) {
+      setErr("Only authorized finance managers can release payouts.");
       return;
     }
     const queueId = safeString(row?.queueId || row?.id);
@@ -469,7 +478,7 @@ export default function AdminFinancesScreen() {
       <div className={pageBg}>
         <div className="app-page-shell app-page-shell--wide">
           <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/35 dark:text-rose-200">
-            Only admin accounts can open Finances.
+            You do not have access to the Finances module.
           </div>
         </div>
       </div>
@@ -781,7 +790,7 @@ export default function AdminFinancesScreen() {
                 <button
                   type="button"
                   onClick={() => void saveGlobalSettings()}
-                  disabled={settingsBusy || !settingsDirty || !isSuperAdmin}
+                  disabled={settingsBusy || !settingsDirty || !canEditFinance}
                   className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                 >
                   {settingsBusy ? "Saving..." : "Save finance settings"}
@@ -1194,7 +1203,7 @@ export default function AdminFinancesScreen() {
                           <button
                             type="button"
                             onClick={() => void releasePayout(row)}
-                            disabled={releaseBusy || !isSuperAdmin}
+                            disabled={releaseBusy || !canEditFinance}
                             className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                           >
                             {releaseBusy ? "Releasing..." : "Release payout"}

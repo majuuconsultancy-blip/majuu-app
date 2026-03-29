@@ -24,6 +24,7 @@ import {
 } from "../constants/migrationOptions";
 import { useCountryDirectory } from "../hooks/useCountryDirectory";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
+import { managerHasModuleAccess } from "../services/managerModules";
 import { countrySupportsTrack } from "../services/countryService";
 import {
   createEmptyRequestDefinitionDraft,
@@ -130,7 +131,7 @@ export default function AdminRequestManagementScreen() {
   const navigate = useNavigate();
 
   const [checkingRole, setCheckingRole] = useState(true);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [hasRequestManagementAccess, setHasRequestManagementAccess] = useState(false);
   const [loading, setLoading] = useState(true);
   const [definitions, setDefinitions] = useState([]);
   const [search, setSearch] = useState("");
@@ -155,11 +156,15 @@ export default function AdminRequestManagementScreen() {
       try {
         const roleCtx = await getCurrentUserRoleContext();
         if (cancelled) return;
-        setIsSuperAdmin(Boolean(roleCtx?.isSuperAdmin));
+        const canAccess =
+          Boolean(roleCtx?.isSuperAdmin) ||
+          (Boolean(roleCtx?.isManager) &&
+            managerHasModuleAccess(roleCtx?.managerScope, "request-management"));
+        setHasRequestManagementAccess(canAccess);
       } catch (error) {
         if (cancelled) return;
         console.error(error);
-        setIsSuperAdmin(false);
+        setHasRequestManagementAccess(false);
       } finally {
         if (!cancelled) setCheckingRole(false);
       }
@@ -171,7 +176,7 @@ export default function AdminRequestManagementScreen() {
   }, []);
 
   useEffect(() => {
-    if (!isSuperAdmin) return undefined;
+    if (!hasRequestManagementAccess) return undefined;
 
     setLoading(true);
     setErr("");
@@ -188,7 +193,7 @@ export default function AdminRequestManagementScreen() {
         setLoading(false);
       },
     });
-  }, [isSuperAdmin]);
+  }, [hasRequestManagementAccess]);
 
   const filteredDefinitions = useMemo(
     () => definitions.filter((definition) => matchesDefinitionSearch(definition, search)),
@@ -539,9 +544,9 @@ export default function AdminRequestManagementScreen() {
           <div className={`mt-5 ${card} text-sm text-zinc-600 dark:text-zinc-300`}>
             Checking access...
           </div>
-        ) : !isSuperAdmin ? (
+        ) : !hasRequestManagementAccess ? (
           <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50/80 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/35 dark:text-rose-200">
-            Only Super Admin can manage request definitions.
+            You do not have access to Request Management.
           </div>
         ) : (
           <>

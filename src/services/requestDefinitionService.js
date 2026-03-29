@@ -20,6 +20,8 @@ import {
 } from "../constants/migrationOptions";
 import { auth, db } from "../firebase";
 import { getCurrentUserRoleContext } from "./adminroleservice";
+import { logManagerModuleActivity } from "./managerservice";
+import { managerHasModuleAccess } from "./managerModules";
 
 export const REQUEST_DEFINITION_COLLECTION = "requestDefinitions";
 export const REQUEST_EXTRA_FIELD_TYPE_OPTIONS = ["text", "textarea", "number", "document"];
@@ -421,14 +423,31 @@ export function toRequestDefinitionPayload(input = {}) {
   return payload;
 }
 
-async function requireSuperAdminActor() {
+async function requireRequestManagementActor() {
   const uid = safeString(auth.currentUser?.uid, 120);
   if (!uid) throw new Error("You must be signed in.");
   const roleCtx = await getCurrentUserRoleContext(uid);
-  if (!roleCtx?.isSuperAdmin) {
-    throw new Error("Only Super Admin can manage request definitions.");
+  const canAccess =
+    Boolean(roleCtx?.isSuperAdmin) ||
+    (Boolean(roleCtx?.isManager) &&
+      managerHasModuleAccess(roleCtx?.managerScope, "request-management"));
+  if (!canAccess) {
+    throw new Error("You do not have access to Request Management.");
   }
   return roleCtx;
+}
+
+async function logRequestDefinitionManagerActivity(action, details = "", metadata = {}) {
+  try {
+    await logManagerModuleActivity({
+      moduleKey: "request-management",
+      action,
+      details,
+      metadata,
+    });
+  } catch {
+    // non-blocking
+  }
 }
 
 async function ensureUniqueDefinitionKey({ definitionId = "", definitionKey = "" } = {}) {
@@ -563,7 +582,7 @@ export async function fetchRequestDefinitionByKey(definitionKey = "") {
 }
 
 export async function createRequestDefinition(input = {}) {
-  await requireSuperAdminActor();
+  const actor = await requireRequestManagementActor();
 
   const payload = toRequestDefinitionPayload(input);
   await ensureUniqueDefinitionKey({ definitionKey: payload.definitionKey });
@@ -582,11 +601,19 @@ export async function createRequestDefinition(input = {}) {
     updatedByEmail: safeString(auth.currentUser?.email, 160),
   });
 
+  if (actor?.isManager) {
+    await logRequestDefinitionManagerActivity("request_definition_created", payload.title, {
+      definitionId: ref.id,
+      trackTypes: payload.trackTypes,
+      country: payload.country,
+    });
+  }
+
   return ref.id;
 }
 
 export async function updateRequestDefinition(definitionId, input = {}) {
-  await requireSuperAdminActor();
+  const actor = await requireRequestManagementActor();
 
   const safeId = safeString(definitionId, 140);
   if (!safeId) throw new Error("Missing request definition id.");
@@ -604,10 +631,18 @@ export async function updateRequestDefinition(definitionId, input = {}) {
     updatedByUid: safeString(auth.currentUser?.uid, 120),
     updatedByEmail: safeString(auth.currentUser?.email, 160),
   });
+
+  if (actor?.isManager) {
+    await logRequestDefinitionManagerActivity("request_definition_updated", payload.title, {
+      definitionId: safeId,
+      trackTypes: payload.trackTypes,
+      country: payload.country,
+    });
+  }
 }
 
 export async function setRequestDefinitionActiveState(definitionId, isActive) {
-  await requireSuperAdminActor();
+  const actor = await requireRequestManagementActor();
 
   const safeId = safeString(definitionId, 140);
   if (!safeId) throw new Error("Missing request definition id.");
@@ -619,4 +654,14 @@ export async function setRequestDefinitionActiveState(definitionId, isActive) {
     updatedByUid: safeString(auth.currentUser?.uid, 120),
     updatedByEmail: safeString(auth.currentUser?.email, 160),
   });
+
+  if (actor?.isManager) {
+    await logRequestDefinitionManagerActivity(
+      normalizeBoolean(isActive, true)
+        ? "request_definition_activated"
+        : "request_definition_deactivated",
+      "",
+      { definitionId: safeId }
+    );
+  }
 }

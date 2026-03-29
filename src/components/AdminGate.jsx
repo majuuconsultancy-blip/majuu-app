@@ -3,18 +3,25 @@ import { useNavigate } from "react-router-dom";
 
 import { useAuthSession } from "../auth/AuthSessionContext";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
+import { managerHasModuleAccess } from "../services/managerModules";
 import ScreenLoader from "./ScreenLoader";
 
-export default function AdminGate({ children }) {
+export default function AdminGate({
+  children,
+  allowManager = false,
+  requiredManagerModule = "",
+  fallbackPath = "/dashboard",
+}) {
   const { user, isAuthenticated, authInitializing } = useAuthSession();
   const navigate = useNavigate();
-  const [checking, setChecking] = useState(true);
+  const [grantedAccessKey, setGrantedAccessKey] = useState("");
+  const accessKey = `${user?.uid || "anonymous"}:${allowManager ? "manager" : "admin"}:${requiredManagerModule || "all"}`;
+  const checking = authInitializing || grantedAccessKey !== accessKey;
 
   useEffect(() => {
     let cancelled = false;
 
     if (authInitializing) {
-      setChecking(true);
       return () => {
         cancelled = true;
       };
@@ -27,27 +34,41 @@ export default function AdminGate({ children }) {
       };
     }
 
-    setChecking(true);
-
     void (async () => {
       try {
         const roleCtx = await getCurrentUserRoleContext(user.uid);
         if (cancelled) return;
-        if (!roleCtx.isAdmin) {
-          navigate("/dashboard", { replace: true });
+        const adminAllowed = Boolean(roleCtx?.isAdmin);
+        const managerAllowed =
+          Boolean(allowManager) &&
+          Boolean(roleCtx?.isManager) &&
+          (!requiredManagerModule ||
+            managerHasModuleAccess(roleCtx?.managerScope, requiredManagerModule));
+
+        if (!adminAllowed && !managerAllowed) {
+          navigate(fallbackPath, { replace: true });
           return;
         }
-        setChecking(false);
+        setGrantedAccessKey(accessKey);
       } catch {
         if (cancelled) return;
-        navigate("/dashboard", { replace: true });
+        navigate(fallbackPath, { replace: true });
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [authInitializing, isAuthenticated, navigate, user?.uid]);
+  }, [
+    allowManager,
+    authInitializing,
+    fallbackPath,
+    isAuthenticated,
+    navigate,
+    requiredManagerModule,
+    accessKey,
+    user?.uid,
+  ]);
 
   if (authInitializing || checking) {
     return (

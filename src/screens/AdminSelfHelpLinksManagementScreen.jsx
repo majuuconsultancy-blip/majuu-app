@@ -17,6 +17,7 @@ import AppIcon from "../components/AppIcon";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
 import { useManagedDestinationCountries } from "../hooks/useManagedDestinationCountries";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
+import { managerHasModuleAccess } from "../services/managerModules";
 import {
   createEmptySelfHelpResourceDraft,
   createSelfHelpResource,
@@ -79,7 +80,7 @@ function getTypeLabel(resource) {
 export default function AdminSelfHelpLinksManagementScreen() {
   const navigate = useNavigate();
   const [checkingRole, setCheckingRole] = useState(true);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [hasAffiliateAccess, setHasAffiliateAccess] = useState(false);
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
   const [err, setErr] = useState("");
@@ -125,11 +126,15 @@ export default function AdminSelfHelpLinksManagementScreen() {
       try {
         const roleCtx = await getCurrentUserRoleContext();
         if (cancelled) return;
-        setIsSuperAdmin(Boolean(roleCtx?.isSuperAdmin));
+        const canAccess =
+          Boolean(roleCtx?.isSuperAdmin) ||
+          (Boolean(roleCtx?.isManager) &&
+            managerHasModuleAccess(roleCtx?.managerScope, "selfhelp-links"));
+        setHasAffiliateAccess(canAccess);
       } catch (error) {
         if (cancelled) return;
         console.error(error);
-        setIsSuperAdmin(false);
+        setHasAffiliateAccess(false);
       } finally {
         if (!cancelled) setCheckingRole(false);
       }
@@ -141,7 +146,7 @@ export default function AdminSelfHelpLinksManagementScreen() {
   }, []);
 
   useEffect(() => {
-    if (!isSuperAdmin) return undefined;
+    if (!hasAffiliateAccess) return undefined;
 
     setLoading(true);
     setErr("");
@@ -157,7 +162,7 @@ export default function AdminSelfHelpLinksManagementScreen() {
         setLoading(false);
       },
     });
-  }, [isSuperAdmin]);
+  }, [hasAffiliateAccess]);
 
   const filteredItems = useMemo(
     () => items.filter((item) => matchesSearch(item, search)),
@@ -310,9 +315,9 @@ export default function AdminSelfHelpLinksManagementScreen() {
           <div className={`mt-5 ${card} text-sm text-zinc-600 dark:text-zinc-300`}>
             Checking access...
           </div>
-        ) : !isSuperAdmin ? (
+        ) : !hasAffiliateAccess ? (
           <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50/80 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/35 dark:text-rose-200">
-            Only Super Admin can manage SelfHelp links.
+            You do not have access to Affiliate Management.
           </div>
         ) : (
           <>

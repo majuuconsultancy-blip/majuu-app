@@ -129,10 +129,13 @@ export default function ProfileScreen() {
   const [busy, setBusy] = useState("");
 
   const isAdmin = useMemo(() => isAnyAdminRole(role), [role]);
+  const isManager = useMemo(() => normalizeUserRole(role) === "manager", [role]);
+  const hasAdminTools = isAdmin || isManager;
   const adminBadgeLabel = useMemo(() => {
     const normalized = normalizeUserRole(role);
     if (normalized === "superAdmin") return "Superadmin";
     if (normalized === "assignedAdmin") return "Assigned Admin";
+    if (normalized === "manager") return "Manager";
     return "Admin";
   }, [role]);
 
@@ -398,7 +401,7 @@ export default function ProfileScreen() {
           </h1>
           <p className="mt-1 truncate text-sm text-zinc-600 dark:text-zinc-300">{email || "-"}</p>
 
-          {isAdmin ? (
+          {hasAdminTools ? (
             <div className="mt-2 flex items-center justify-center">
               <span className="inline-flex rounded-full border border-rose-200/70 bg-rose-50/80 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:border-rose-900/45 dark:bg-rose-950/30 dark:text-rose-200">
                 {adminBadgeLabel}
@@ -411,7 +414,7 @@ export default function ProfileScreen() {
             onClick={openEdit}
             whileTap={{ scale: 0.99 }}
             className={`inline-flex items-center gap-1.5 rounded-full border border-zinc-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:text-zinc-100 ${
-              isAdmin ? "mt-5" : "mt-3"
+              hasAdminTools ? "mt-5" : "mt-3"
             }`}
           >
             <AppIcon size={ICON_SM} icon={Pencil} />
@@ -551,10 +554,10 @@ export default function ProfileScreen() {
             </div>
           </Motion.button>
 
-          {isAdmin ? (
+          {hasAdminTools ? (
             <Motion.button
               type="button"
-              onClick={() => navigate("/app/admin")}
+              onClick={() => navigate(isManager ? "/app/admin/sacc" : "/app/admin")}
               variants={floatCard}
               initial="rest"
               whileHover="hover"
@@ -568,10 +571,12 @@ export default function ProfileScreen() {
                   </span>
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-emerald-950 dark:text-emerald-100">
-                      Admin tools
+                      {isManager ? "Manager tools" : "Admin tools"}
                     </div>
                     <div className="mt-0.5 text-xs text-emerald-900/70 dark:text-emerald-200/80">
-                      Manage requests, users, and staff.
+                      {isManager
+                        ? "Open your assigned management modules."
+                        : "Manage requests, users, and staff."}
                     </div>
                   </div>
                 </div>

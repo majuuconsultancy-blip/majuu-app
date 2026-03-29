@@ -6,7 +6,7 @@
 // - ✅ No backend logic changes (your Firebase flow kept)
 
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
@@ -14,6 +14,7 @@ import {
   signInWithRedirect,
 } from "firebase/auth";
 import { auth, authPersistenceReady, googleProvider } from "../firebase";
+import { redeemManagerInvite } from "../services/managerservice";
 import { ensureUserDoc } from "../services/userservice";
 
 import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
@@ -186,8 +187,11 @@ function friendlyAuthError(err) {
 
 export default function SignupScreen() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const managerInviteToken = String(searchParams.get("managerInvite") || "").trim();
+  const inviteEmailPrefill = String(searchParams.get("email") || "").trim();
 
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(inviteEmailPrefill);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPass, setShowPass] = useState(false);
@@ -223,6 +227,12 @@ export default function SignupScreen() {
     return state;
   }
 
+  async function applyManagerInviteIfPresent() {
+    const token = String(managerInviteToken || "").trim();
+    if (!token) return null;
+    return redeemManagerInvite(token);
+  }
+
   const handleGoogle = async () => {
     if (!acceptedLegal) {
       setError("Please review and accept the Terms & Conditions and Privacy Policy to continue.");
@@ -235,6 +245,7 @@ export default function SignupScreen() {
       await authPersistenceReady.catch(() => {});
       const res = await signInWithPopup(auth, googleProvider);
       const state = await finishLogin(res.user);
+      await applyManagerInviteIfPresent();
       navigate(resolveLandingPathFromUserState(state || {}), { replace: true });
     } catch (err) {
       const code = String(err?.code || "").toLowerCase();
@@ -273,6 +284,7 @@ export default function SignupScreen() {
       await authPersistenceReady.catch(() => {});
       const userCred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
       await finishLogin(userCred.user);
+      await applyManagerInviteIfPresent();
 
       await sendEmailVerification(userCred.user);
 

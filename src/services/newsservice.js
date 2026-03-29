@@ -22,6 +22,8 @@ import {
   normalizeNewsTag,
 } from "../constants/news";
 import { getCurrentUserRoleContext } from "./adminroleservice";
+import { logManagerModuleActivity } from "./managerservice";
+import { managerHasModuleAccess } from "./managerModules";
 
 const NEWS_COLLECTION = "news";
 
@@ -152,14 +154,31 @@ function compareByImportanceThenRecency(a, b) {
   return String(a?.title || "").localeCompare(String(b?.title || ""));
 }
 
-async function requireSuperAdminActor() {
+async function requireNewsActor() {
   const uid = String(auth.currentUser?.uid || "").trim();
   if (!uid) throw new Error("You must be signed in.");
   const roleCtx = await getCurrentUserRoleContext(uid);
-  if (!roleCtx?.isSuperAdmin) {
-    throw new Error("Only Super Admin can manage news.");
+  const canAccess =
+    Boolean(roleCtx?.isSuperAdmin) ||
+    (Boolean(roleCtx?.isManager) &&
+      managerHasModuleAccess(roleCtx?.managerScope, "news"));
+  if (!canAccess) {
+    throw new Error("You do not have access to the News module.");
   }
   return roleCtx;
+}
+
+async function logNewsManagerActivity(action, details = "", metadata = {}) {
+  try {
+    await logManagerModuleActivity({
+      moduleKey: "news",
+      action,
+      details,
+      metadata,
+    });
+  } catch {
+    // non-blocking
+  }
 }
 
 export function createEmptyNewsDraft({ trackType = "", country = "" } = {}) {
@@ -280,7 +299,7 @@ export function subscribeAllNews({ onData, onError }) {
 }
 
 export async function createNewsItem(input = {}) {
-  await requireSuperAdminActor();
+  const actor = await requireNewsActor();
 
   const payload = toNewsPayload(input);
   const nowMs = Date.now();
@@ -294,11 +313,19 @@ export async function createNewsItem(input = {}) {
     updatedAtMs: nowMs,
   });
 
+  if (actor?.isManager) {
+    await logNewsManagerActivity("news_item_created", payload.title, {
+      newsId: ref.id,
+      trackType: payload.trackType,
+      country: payload.country,
+    });
+  }
+
   return ref.id;
 }
 
 export async function updateNewsItem(newsId, input = {}) {
-  await requireSuperAdminActor();
+  const actor = await requireNewsActor();
 
   const safeId = String(newsId || "").trim();
   if (!safeId) throw new Error("Missing news item id.");
@@ -309,10 +336,18 @@ export async function updateNewsItem(newsId, input = {}) {
     updatedAt: serverTimestamp(),
     updatedAtMs: Date.now(),
   });
+
+  if (actor?.isManager) {
+    await logNewsManagerActivity("news_item_updated", payload.title, {
+      newsId: safeId,
+      trackType: payload.trackType,
+      country: payload.country,
+    });
+  }
 }
 
 export async function setNewsPublishedState(newsId, isPublished) {
-  await requireSuperAdminActor();
+  const actor = await requireNewsActor();
 
   const safeId = String(newsId || "").trim();
   if (!safeId) throw new Error("Missing news item id.");
@@ -322,13 +357,24 @@ export async function setNewsPublishedState(newsId, isPublished) {
     updatedAt: serverTimestamp(),
     updatedAtMs: Date.now(),
   });
+
+  if (actor?.isManager) {
+    await logNewsManagerActivity(
+      normalizeBoolean(isPublished) ? "news_item_published" : "news_item_unpublished",
+      "",
+      { newsId: safeId }
+    );
+  }
 }
 
 export async function deleteNewsItem(newsId) {
-  await requireSuperAdminActor();
+  const actor = await requireNewsActor();
 
   const safeId = String(newsId || "").trim();
   if (!safeId) throw new Error("Missing news item id.");
 
   await deleteDoc(doc(db, NEWS_COLLECTION, safeId));
+  if (actor?.isManager) {
+    await logNewsManagerActivity("news_item_deleted", "", { newsId: safeId });
+  }
 }

@@ -43,6 +43,7 @@ import { startNotifsV2Engine, stopNotifsV2Engine } from "./services/notifsV2Engi
 import { cleanupPushBridge, initPushBridge } from "./services/pushBridge";
 import { sweepStaleAssignments } from "./services/adminrequestservice";
 import { getCurrentUserRoleContext } from "./services/adminroleservice";
+import { touchManagerLastLogin } from "./services/managerservice";
 import { hasSeenIntro } from "./utils/introFlag";
 import { isResumableRoute, setSnapshot } from "./resume/resumeEngine";
 import BiometricAppLock from "./components/BiometricAppLock";
@@ -142,6 +143,8 @@ const AdminRequestDocumentsScreen = lazyWithRetry(() => import("./screens/AdminR
 const AdminManageStaffScreen = lazyWithRetry(() => import("./screens/AdminManageStaffScreen"));
 const AdminAssignAdminScreen = lazyWithRetry(() => import("./screens/AdminAssignAdminScreen"));
 const AdminManageAdminsScreen = lazyWithRetry(() => import("./screens/AdminManageAdminsScreen"));
+const AdminAssignManagerScreen = lazyWithRetry(() => import("./screens/AdminAssignManagerScreen"));
+const AdminManageManagersScreen = lazyWithRetry(() => import("./screens/AdminManageManagersScreen"));
 const AdminSaccScreen = lazyWithRetry(() => import("./screens/AdminSaccScreen"));
 const AdminAnalyticsScreen = lazyWithRetry(() => import("./screens/AdminAnalyticsScreen"));
 const AdminNewsManagementScreen = lazyWithRetry(() => import("./screens/AdminNewsManagementScreen"));
@@ -343,9 +346,9 @@ function GuestOnlyRoute({ children }) {
   return children;
 }
 
-function renderAdminRoute(content, fallbackPath = "/app/admin") {
+function renderAdminRoute(content, fallbackPath = "/app/admin", gateOptions = {}) {
   return (
-    <AdminGate>
+    <AdminGate fallbackPath={fallbackPath} {...(gateOptions || {})}>
       <RouteErrorBoundary fallbackPath={fallbackPath}>
         {content}
       </RouteErrorBoundary>
@@ -492,6 +495,9 @@ function RuntimeBridges() {
             : "user";
 
         if (disposed || seq !== bootSeq) return;
+        if (ctx?.isManager) {
+          void touchManagerLastLogin({ managerUid: user.uid }).catch(() => {});
+        }
         localEngineCleanup = startNotifsV2Engine({ role, uid: user.uid });
         localPushCleanup = initPushBridge({ navigate, role, uid: user.uid }) || (() => {});
         if (role === "admin" || role === "assignedAdmin") {
@@ -854,7 +860,17 @@ function AppRoutes() {
             />
             <Route
               path="admin/sacc"
-              element={renderAdminRoute(<AdminSaccScreen />)}
+              element={renderAdminRoute(<AdminSaccScreen />, "/dashboard", {
+                allowManager: true,
+              })}
+            />
+            <Route
+              path="admin/sacc/assign-manager"
+              element={renderAdminRoute(<AdminAssignManagerScreen />, "/app/admin/sacc")}
+            />
+            <Route
+              path="admin/sacc/manage-managers"
+              element={renderAdminRoute(<AdminManageManagersScreen />, "/app/admin/sacc")}
             />
             <Route
               path="admin/sacc/analytics"
@@ -862,7 +878,10 @@ function AppRoutes() {
             />
             <Route
               path="admin/sacc/request-management"
-              element={renderAdminRoute(<AdminRequestManagementScreen />, "/app/admin/sacc")}
+              element={renderAdminRoute(<AdminRequestManagementScreen />, "/app/admin/sacc", {
+                allowManager: true,
+                requiredManagerModule: "request-management",
+              })}
             />
             <Route
               path="admin/sacc/home-design"
@@ -870,7 +889,10 @@ function AppRoutes() {
             />
             <Route
               path="admin/sacc/news"
-              element={renderAdminRoute(<AdminNewsManagementScreen />, "/app/admin/sacc")}
+              element={renderAdminRoute(<AdminNewsManagementScreen />, "/app/admin/sacc", {
+                allowManager: true,
+                requiredManagerModule: "news",
+              })}
             />
             <Route
               path="admin/sacc/partnerships"
@@ -882,11 +904,21 @@ function AppRoutes() {
             />
             <Route
               path="admin/sacc/finances"
-              element={renderAdminRoute(<AdminFinancesScreen />, "/app/admin/sacc")}
+              element={renderAdminRoute(<AdminFinancesScreen />, "/app/admin/sacc", {
+                allowManager: true,
+                requiredManagerModule: "finances",
+              })}
             />
             <Route
               path="admin/sacc/selfhelp-links"
-              element={renderAdminRoute(<AdminSelfHelpLinksManagementScreen />, "/app/admin/sacc")}
+              element={renderAdminRoute(
+                <AdminSelfHelpLinksManagementScreen />,
+                "/app/admin/sacc",
+                {
+                  allowManager: true,
+                  requiredManagerModule: "selfhelp-links",
+                }
+              )}
             />
             <Route
               path="admin/sacc/countries"

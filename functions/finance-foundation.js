@@ -18,6 +18,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     fetchPartnerById,
     claimEventLock,
     autoRouteRequest,
+    writeManagerAuditLog,
   } = deps;
 
   const PAYMENT_TYPES = {
@@ -303,6 +304,21 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     }
 
     return caller;
+  }
+
+  async function logFinanceManagerActivity(caller, action, details = "", metadata = {}) {
+    if (!caller?.isManager || typeof writeManagerAuditLog !== "function") return;
+    await writeManagerAuditLog({
+      managerUid: caller.callerUid,
+      managerEmail: safeEmail(caller?.callerDoc?.email),
+      action,
+      moduleKey: "finances",
+      details: cleanParagraph(details, 3000),
+      metadata: metadata && typeof metadata === "object" ? metadata : {},
+      actorUid: caller.callerUid,
+      actorEmail: safeEmail(caller?.callerDoc?.email),
+      actorRole: "manager",
+    });
   }
 
   async function requireAssignedStaffForRequest(context, requestData = {}) {
@@ -2564,7 +2580,11 @@ module.exports = function buildFinanceFoundation(deps = {}) {
   }
   // exports
   const saveFinanceSettings = functions.https.onCall(async (data, context) => {
-    const caller = await requireAdminCallerContext(context, { superOnly: true });
+    const caller = await requireAdminCallerContext(context, {
+      allowManager: true,
+      requiredManagerModule: "finances",
+      allowAssignedAdmin: false,
+    });
     const settings = normalizeFinanceSettings(data?.settings || {});
     await topLevelRef(FINANCE_SETTINGS_COLLECTION, FINANCE_SETTINGS_DOC).set(
       {
@@ -2583,6 +2603,14 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       actorRole: caller.callerRole,
       next: settings,
     });
+    await logFinanceManagerActivity(
+      caller,
+      "finance_settings_updated",
+      "Finance settings updated",
+      {
+        providerEnvironment: settings?.provider?.environment,
+      }
+    );
 
     return {
       ok: true,
@@ -2592,7 +2620,11 @@ module.exports = function buildFinanceFoundation(deps = {}) {
   });
 
   const savePartnerFinancialProfile = functions.https.onCall(async (data, context) => {
-    const caller = await requireAdminCallerContext(context);
+    const caller = await requireAdminCallerContext(context, {
+      allowManager: true,
+      requiredManagerModule: "finances",
+      allowAssignedAdmin: false,
+    });
     const partnerId = safeStr(data?.partnerId);
     if (!partnerId) {
       throw new functions.https.HttpsError("invalid-argument", "partnerId is required");
@@ -2622,12 +2654,22 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       next: profile,
       metadata: { partnerId },
     });
+    await logFinanceManagerActivity(
+      caller,
+      "partner_financial_profile_updated",
+      `Partner profile updated: ${safeStr(partner?.displayName)}`,
+      { partnerId }
+    );
 
     return { ok: true, profile };
   });
 
   const getFinanceEnvironmentStatus = functions.https.onCall(async (_, context) => {
-    const caller = await requireAdminCallerContext(context);
+    const caller = await requireAdminCallerContext(context, {
+      allowManager: true,
+      requiredManagerModule: "finances",
+      allowAssignedAdmin: false,
+    });
     const settings = await getFinanceSettings();
     return {
       ok: true,
@@ -3475,7 +3517,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       valid: !invalid,
       requestId: requestRow.requestId,
       paymentId: paymentRow.paymentId,
-      expiresAtMs,
+      expiresAtMs: expiredAtMs,
       payment: {
         id: paymentRow.paymentId,
         paymentLabel: payment.paymentLabel,
@@ -3895,7 +3937,11 @@ module.exports = function buildFinanceFoundation(deps = {}) {
   });
 
   const releasePartnerPayout = functions.https.onCall(async (data, context) => {
-    const caller = await requireAdminCallerContext(context, { superOnly: true });
+    const caller = await requireAdminCallerContext(context, {
+      allowManager: true,
+      requiredManagerModule: "finances",
+      allowAssignedAdmin: false,
+    });
     const queueId = safeStr(data?.queueId);
     const releaseNotes = cleanParagraph(data?.releaseNotes, 2000);
     const settlementReference = safeStr(data?.settlementReference, 160);
@@ -3991,6 +4037,12 @@ module.exports = function buildFinanceFoundation(deps = {}) {
         payoutStatus: PAYOUT_STATUSES.PAID_OUT,
       },
     });
+    await logFinanceManagerActivity(
+      caller,
+      "payout_released",
+      `Payout released for queue ${queueId}`,
+      { queueId, requestId, paymentId }
+    );
 
     await notifyPaymentParties({
       requestData: requestRow.data,
@@ -4020,7 +4072,11 @@ module.exports = function buildFinanceFoundation(deps = {}) {
   });
 
   const listUnlockAutoRefundCandidates = functions.https.onCall(async (data, context) => {
-    await requireAdminCallerContext(context);
+    await requireAdminCallerContext(context, {
+      allowManager: true,
+      requiredManagerModule: "finances",
+      allowAssignedAdmin: false,
+    });
     const ids = Array.from(
       new Set((Array.isArray(data?.requestIds) ? data.requestIds : []).map((id) => safeStr(id)).filter(Boolean))
     );
@@ -4062,7 +4118,11 @@ module.exports = function buildFinanceFoundation(deps = {}) {
   });
 
   const runUnlockAutoRefundSweep = functions.https.onCall(async (data, context) => {
-    await requireAdminCallerContext(context);
+    const caller = await requireAdminCallerContext(context, {
+      allowManager: true,
+      requiredManagerModule: "finances",
+      allowAssignedAdmin: false,
+    });
     const ids = Array.from(
       new Set((Array.isArray(data?.requestIds) ? data.requestIds : []).map((id) => safeStr(id)).filter(Boolean))
     );
@@ -4071,7 +4131,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       const result = await maybeAutoRefundUnlockPayment({
         requestId,
         actorUid: safeStr(context?.auth?.uid) || "system",
-        actorRole: "admin_manual_sweep",
+        actorRole: caller?.isManager ? "manager_manual_sweep" : "admin_manual_sweep",
       });
       if (result?.applied) applied += 1;
     }

@@ -56,6 +56,28 @@ service cloud.firestore {
       );
     }
 
+    function isManager() {
+      return signedIn() && (
+        userRole(authUid()) == "manager" ||
+        userRole(authUid()) == "assignedmanager" ||
+        userRole(authUid()) == "assigned_manager" ||
+        userRole(authUid()) == "assigned-manager" ||
+        userRole(authUid()) == "assigned manager"
+      );
+    }
+
+    function managerAssignedModules() {
+      return isManager() &&
+          userDoc(authUid()).managerScope is map &&
+          userDoc(authUid()).managerScope.assignedModules is list
+        ? userDoc(authUid()).managerScope.assignedModules
+        : [];
+    }
+
+    function managerHasModule(moduleKey) {
+      return isManager() && managerAssignedModules().hasAny([moduleKey]);
+    }
+
     function isAnyAdmin() {
       return isSuperAdmin() || isAssignedAdmin();
     }
@@ -70,7 +92,11 @@ service cloud.firestore {
     function isSafeSelfUserUpdate(uid) {
       return isSelf(uid) &&
         request.resource.data.role == resource.data.role &&
-        request.resource.data.adminScope == resource.data.adminScope;
+        request.resource.data.adminScope == resource.data.adminScope &&
+        (
+          lower(resource.data.role) != "manager" ||
+          request.resource.data.managerScope.assignedModules == resource.data.managerScope.assignedModules
+        );
     }
 
     function fullPackagePath(fullPackageId) {
@@ -412,12 +438,12 @@ service cloud.firestore {
 
     match /news/{newsId} {
       allow read: if isSuperAdmin() || (signedIn() && resource.data.isPublished == true);
-      allow create, update, delete: if isSuperAdmin();
+      allow create, update, delete: if isSuperAdmin() || managerHasModule("news");
     }
 
     match /discoveryPublications/{publicationId} {
       allow read: if isSuperAdmin() || (signedIn() && resource.data.isPublished == true);
-      allow create, update, delete: if isSuperAdmin();
+      allow create, update, delete: if isSuperAdmin() || managerHasModule("news");
     }
 
     match /pricingRules/{pricingKey} {
@@ -427,7 +453,7 @@ service cloud.firestore {
 
     match /requestDefinitions/{definitionId} {
       allow read: if signedIn();
-      allow create, update, delete: if isSuperAdmin();
+      allow create, update, delete: if isSuperAdmin() || managerHasModule("request-management");
     }
 
     match /homeDesignModules/{moduleId} {
@@ -451,28 +477,28 @@ service cloud.firestore {
     }
 
     match /financeSettings/{configId} {
-      allow read: if isAnyAdmin();
-      allow create, update, delete: if isSuperAdmin();
+      allow read: if isAnyAdmin() || managerHasModule("finances");
+      allow create, update, delete: if isSuperAdmin() || managerHasModule("finances");
     }
 
     match /partnerFinancialProfiles/{partnerId} {
-      allow read: if isAnyAdmin();
-      allow create, update: if isAnyAdmin();
+      allow read: if isAnyAdmin() || managerHasModule("finances");
+      allow create, update: if isAnyAdmin() || managerHasModule("finances");
       allow delete: if isSuperAdmin();
     }
 
     match /payoutQueue/{queueId} {
-      allow read: if isAnyAdmin();
+      allow read: if isAnyAdmin() || managerHasModule("finances");
       allow create, update, delete: if false;
     }
 
     match /settlementHistory/{settlementId} {
-      allow read: if isAnyAdmin();
+      allow read: if isAnyAdmin() || managerHasModule("finances");
       allow create, update, delete: if false;
     }
 
     match /financialAuditLogs/{auditId} {
-      allow read: if isAnyAdmin();
+      allow read: if isAnyAdmin() || managerHasModule("finances");
       allow create, update, delete: if false;
     }
 
@@ -490,9 +516,10 @@ service cloud.firestore {
 
     match /selfHelpLinks/{resourceId} {
       allow read: if signedIn();
-      allow create, delete: if isSuperAdmin();
+      allow create, delete: if isSuperAdmin() || managerHasModule("selfhelp-links");
 
       allow update: if isSuperAdmin()
+        || managerHasModule("selfhelp-links")
         || (
           signedIn()
           && request.resource.data.id == resource.data.id
@@ -508,6 +535,22 @@ service cloud.firestore {
         );
     }
 
+    match /managerInvites/{inviteId} {
+      allow read, create, update, delete: if isSuperAdmin();
+    }
+
+    match /managerAuditLogs/{auditId} {
+      allow read: if isSuperAdmin() || (isManager() && resource.data.managerUid == authUid());
+      allow create: if isSuperAdmin()
+        || (
+          isManager()
+          && request.resource.data.managerUid == authUid()
+          && request.resource.data.actorUid == authUid()
+          && lower(request.resource.data.actorRole) == "manager"
+        );
+      allow update, delete: if isSuperAdmin();
+    }
+
     match /users/{uid} {
       allow read: if isAnyAdmin() || isSelf(uid);
       allow create: if isSuperAdmin() || isSafeSelfUserCreate(uid);
@@ -519,7 +562,7 @@ service cloud.firestore {
 
         allow create, update: if (isSelf(uid) || isAnyAdmin())
           && request.resource.data.uid == uid
-          && request.resource.data.role in ["user", "staff", "admin"]
+          && request.resource.data.role in ["user", "staff", "admin", "manager"]
           && request.resource.data.platform in ["android", "ios", "web"]
           && str(request.resource.data.token).size() >= 20;
 
@@ -618,7 +661,7 @@ service cloud.firestore {
 
         allow create, update: if isSelf(staffUid)
           && request.resource.data.uid == staffUid
-          && request.resource.data.role in ["user", "staff", "admin"]
+          && request.resource.data.role in ["user", "staff", "admin", "manager"]
           && request.resource.data.platform in ["android", "ios", "web"]
           && str(request.resource.data.token).size() >= 20;
 
