@@ -5,8 +5,8 @@
 // - Adds a small online/offline listener to clear the message when network returns
 // - NO backend changes
 
-import { useMemo, useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useMemo, useState, useEffect, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -181,6 +181,18 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function normalizeReturnPath(value) {
+  const path = String(value || "").trim();
+  if (!path.startsWith("/")) return "";
+
+  const blockedPublicPaths = ["/login", "/signup", "/verify-email", "/intro"];
+  if (blockedPublicPaths.some((base) => path === base || path.startsWith(`${base}?`) || path.startsWith(`${base}#`))) {
+    return "";
+  }
+
+  return path;
+}
+
 async function withRetries(fn, { tries = 3, baseDelayMs = 650, onRetry } = {}) {
   let lastErr = null;
 
@@ -250,6 +262,7 @@ function ModalShell({ open, title, subtitle, children, onClose, busy }) {
 
 export default function LoginScreen() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -266,6 +279,7 @@ export default function LoginScreen() {
   const [resetEmail, setResetEmail] = useState("");
   const [resetMsg, setResetMsg] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
+  const requestedPath = useMemo(() => normalizeReturnPath(location.state?.from), [location.state?.from]);
 
   const openLegalDoc = (docKey) => {
     navigate(buildLegalDocRoute(docKey), {
@@ -274,6 +288,35 @@ export default function LoginScreen() {
   };
 
   const lastAttemptRef = useRef(null); // { type: "email"|"google", payload: {...} }
+  const finishLogin = useCallback(
+    async (user) => {
+      const targetFallback = requestedPath || "/dashboard";
+      if (!user.emailVerified) {
+        navigate("/verify-email", {
+          replace: true,
+          state: {
+            email: user.email || "",
+            from: targetFallback,
+          },
+        });
+        return null;
+      }
+
+      const state = await ensureUserDoc({
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName || "",
+        photoURL: user.photoURL || "",
+        provider: (user.providerData?.[0]?.providerId || "").toString(),
+        lastLoginAt: Date.now(),
+      });
+
+      const target = requestedPath || resolveLandingPathFromUserState(state || {});
+      navigate(target, { replace: true });
+      return state;
+    },
+    [navigate, requestedPath]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -283,19 +326,23 @@ export default function LoginScreen() {
       if (!user || redirected || cancelled) return;
       redirected = true;
       try {
-        const state = await ensureUserDoc({
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName || "",
-          photoURL: user.photoURL || "",
-          provider: (user.providerData?.[0]?.providerId || "").toString(),
-          lastLoginAt: Date.now(),
-        });
+        await finishLogin(user);
         if (cancelled) return;
-        navigate(resolveLandingPathFromUserState(state || {}), { replace: true });
       } catch (error) {
         void error;
-        if (!cancelled) navigate("/dashboard", { replace: true });
+        if (!cancelled) {
+          if (user?.emailVerified) {
+            navigate("/dashboard", { replace: true });
+          } else {
+            navigate("/verify-email", {
+              replace: true,
+              state: {
+                email: user?.email || "",
+                from: requestedPath || "/dashboard",
+              },
+            });
+          }
+        }
       }
     };
 
@@ -313,7 +360,7 @@ export default function LoginScreen() {
       cancelled = true;
       unsub();
     };
-  }, [navigate]);
+  }, [finishLogin, navigate, requestedPath]);
 
   // ✅ watch online/offline
   useEffect(() => {
@@ -343,19 +390,6 @@ export default function LoginScreen() {
   const canSubmit = useMemo(() => {
     return email.trim().length > 0 && password.trim().length > 0 && !loading;
   }, [email, password, loading]);
-
-  async function finishLogin(user) {
-    const state = await ensureUserDoc({
-      uid: user.uid,
-      email: user.email,
-      displayName: user.displayName || "",
-      photoURL: user.photoURL || "",
-      provider: (user.providerData?.[0]?.providerId || "").toString(),
-      lastLoginAt: Date.now(),
-    });
-
-    navigate(resolveLandingPathFromUserState(state || {}), { replace: true });
-  }
 
   const handleLogin = async (e) => {
     e.preventDefault();

@@ -190,13 +190,13 @@ export default function DiscoveryScreen({ track = "study" }) {
                 : "Discovery will appear once countries are available."}
             </div>
           ) : (
-            <div className="mt-3 flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            <div className="mt-3 flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain pb-2 [scrollbar-width:none] [touch-action:pan-x] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               {spotlightCountries.map((country) => (
                 <button
                   key={`spotlight-${country.name}`}
                   type="button"
                   onClick={() => openCountry(country.name)}
-                  className="group relative h-[11.5rem] min-w-[15rem] snap-start overflow-hidden rounded-[26px] border border-zinc-200/80 text-left shadow-sm transition active:scale-[0.99] dark:border-zinc-700/80"
+                  className="group relative h-[11.5rem] min-w-[15rem] flex-none snap-start overflow-hidden rounded-[26px] border border-zinc-200/80 text-left shadow-sm transition active:scale-[0.99] [scroll-snap-stop:always] dark:border-zinc-700/80"
                   style={buildCountryAccentSurfaceStyle(country.accentColor, { strong: true })}
                 >
                   {country.heroImage ? (

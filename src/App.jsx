@@ -275,17 +275,37 @@ function StartupRoute() {
       };
     }
 
+    const activeUser = auth.currentUser || user;
+    if (!activeUser) {
+      finalize("/login");
+      return () => {
+        cancelled = true;
+      };
+    }
+
     timeoutId = window.setTimeout(() => finalize("/dashboard"), 8000);
 
     void (async () => {
       try {
-        const state = await getUserState(user.uid, user.email || "");
+        try {
+          await activeUser.reload();
+        } catch (error) {
+          void error;
+        }
+
+        const refreshedUser = auth.currentUser || activeUser;
+        if (!refreshedUser?.emailVerified) {
+          finalize("/verify-email");
+          return;
+        }
+
+        const state = await getUserState(refreshedUser.uid, refreshedUser.email || "");
         const landing = resolveLandingPathFromUserState(state || {});
 
         const journey = normalizeJourney(state?.journey);
         const didHaveSavedJourney = Boolean(journey?.track);
         void logAnalyticsEvent({
-          uid: user.uid,
+          uid: refreshedUser.uid,
           eventType: didHaveSavedJourney
             ? ANALYTICS_EVENT_TYPES.APP_LAUNCH_WITH_SAVED_JOURNEY
             : ANALYTICS_EVENT_TYPES.APP_LAUNCH_WITHOUT_SAVED_JOURNEY,
@@ -324,22 +344,44 @@ function StartupRoute() {
   return <Navigate to={target} replace />;
 }
 
-function RequireAuthRoute({ children }) {
-  const { isAuthenticated } = useAuthSession();
+function RequireAuthRoute({ children, allowUnverified = false }) {
+  const { isAuthenticated, user } = useAuthSession();
   const location = useLocation();
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !user) {
     const from = `${location.pathname}${location.search || ""}${location.hash || ""}`;
     return <Navigate to="/login" replace state={{ from }} />;
+  }
+
+  const currentUser = auth.currentUser || user;
+  if (!allowUnverified && !currentUser?.emailVerified) {
+    const from = `${location.pathname}${location.search || ""}${location.hash || ""}`;
+    return (
+      <Navigate
+        to="/verify-email"
+        replace
+        state={{ from, email: currentUser?.email || user?.email || "" }}
+      />
+    );
   }
 
   return children;
 }
 
 function GuestOnlyRoute({ children }) {
-  const { isAuthenticated } = useAuthSession();
+  const { isAuthenticated, user } = useAuthSession();
 
   if (isAuthenticated) {
+    const currentUser = auth.currentUser || user;
+    if (!currentUser?.emailVerified) {
+      return (
+        <Navigate
+          to="/verify-email"
+          replace
+          state={{ email: currentUser?.email || user?.email || "" }}
+        />
+      );
+    }
     return <Navigate to="/" replace />;
   }
 
@@ -630,7 +672,7 @@ function AppRoutes() {
           <Route
             path="/verify-email"
             element={
-              <RequireAuthRoute>
+              <RequireAuthRoute allowUnverified>
                 <VerifyEmailScreen />
               </RequireAuthRoute>
             }

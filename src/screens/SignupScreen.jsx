@@ -244,9 +244,19 @@ export default function SignupScreen() {
     try {
       await authPersistenceReady.catch(() => {});
       const res = await signInWithPopup(auth, googleProvider);
+      if (!res.user?.emailVerified) {
+        await applyManagerInviteIfPresent();
+        navigate("/verify-email", {
+          replace: true,
+          state: { email: res.user?.email || email.trim(), from: "/dashboard" },
+        });
+        return;
+      }
+
       const state = await finishLogin(res.user);
       await applyManagerInviteIfPresent();
-      navigate(resolveLandingPathFromUserState(state || {}), { replace: true });
+      const landing = resolveLandingPathFromUserState(state || {});
+      navigate(landing, { replace: true });
     } catch (err) {
       const code = String(err?.code || "").toLowerCase();
       if (
@@ -283,12 +293,18 @@ export default function SignupScreen() {
     try {
       await authPersistenceReady.catch(() => {});
       const userCred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
-      await finishLogin(userCred.user);
+      const state = await finishLogin(userCred.user);
       await applyManagerInviteIfPresent();
 
       await sendEmailVerification(userCred.user);
 
-      navigate("/verify-email", { replace: true, state: { email: cleanEmail } });
+      navigate("/verify-email", {
+        replace: true,
+        state: {
+          email: cleanEmail,
+          from: resolveLandingPathFromUserState(state || {}),
+        },
+      });
     } catch (err) {
       setError(friendlyAuthError(err));
     } finally {

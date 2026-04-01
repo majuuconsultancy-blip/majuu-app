@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -1930,7 +1930,7 @@ export default function TrackScreen({ track }) {
                         </span>
                       </div>
                       <div className="mt-0.5 text-xs font-medium text-zinc-600">
-                        Guide yourself with country resources
+                        Guide yourself independly with curated resources
                       </div>
                     </div>
                   </div>
@@ -1949,7 +1949,7 @@ export default function TrackScreen({ track }) {
                     <div className="min-w-0">
                       <div>{saving && startingType === "we" ? "Starting..." : "We-Help"}</div>
                       <div className="mt-0.5 text-xs font-medium text-white/80">
-                        Follow the standard admin-routed request flow
+                        Choose a guided support from our  verified Agent networks
                       </div>
                     </div>
                   </div>
