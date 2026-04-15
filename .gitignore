@@ -1,32 +1,68 @@
-# Logs
-logs
+# --- General ---
+node_modules/
+dist/
+dist-ssr/
+build/
+.DS_Store
+Thumbs.db
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-node_modules
-dist
-dist-ssr
 *.local
 
-# Editor directories and files
-.vscode/*
+# --- Environment Secrets ---
+.env
+.env.*
+!.env.example
+# Firebase service accounts
+*-firebase-adminsdk-*.json
+service-account-file.json
+
+# --- AI & Assistant Artifacts ---
+.gemini/
+.antigravity/
+.cortex/
+.cursor/
+brain/
+scratch/
+*.patch
+*.diff
+
+# --- IDE (VS Code, IntelliJ) ---
+.vscode/
 !.vscode/extensions.json
-.idea
-.DS_Store
+!.vscode/launch.json
+!.vscode/settings.json
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
 
-node_modules
-dist
-build
-.env
-.env.*
-.DS_Store
-*.log
+# --- Firebase ---
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# --- Capacitor ---
+www/
+capacitor.config.json.bak
+
+# --- Android ---
+.gradle/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/app/google-services.json
+android/app/*.jks
+android/app/*.keystore
+android/app/*.p12
+android/.cxx/
+android/captures/
+android/*.iml
+
+# --- Test Artifacts ---
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/

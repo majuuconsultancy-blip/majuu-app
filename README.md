@@ -27,9 +27,11 @@ This repository contains the full source code for the MAJUU frontend (Vite + Rea
   - [Firebase Setup](#firebase-setup)
   - [Environment Variables (.env)](#environment-variables-env)
   - [Security Notes](#security-notes)
-- [Running Locally](#running-locally)
+- [Run Locally](#running-locally)
+- [Multi-Machine Development Setup](#multi-machine-development-setup)
 - [Build & Deploy](#build--deploy)
 - [Common Tasks](#common-tasks)
+- [GitHub Hygiene & Security](#github-hygiene--security)
   - [Make a Backup (GitHub)](#make-a-backup-github)
   - [Update Your Backup (Commit + Push)](#update-your-backup-commit--push)
 - [Development Notes](#development-notes)
@@ -262,13 +264,52 @@ Then restart the dev server after editing `.env`.
 
 ---
 
-### Security Notes
-- ✅ `.env` is excluded from GitHub
-- ✅ `node_modules` is excluded
-- ✅ Keep admin logic enforced in Firestore rules, not just UI checks
-- ✅ Never commit service account credentials or private API keys
+## Multi-Machine Development Setup
+
+To ensure a smooth transition between different development machines, follow these steps:
+
+### Prerequisites
+
+1.  **Node.js**: v18 or v20 (LTS recommended).
+2.  **Android Studio**: Latest Flamingo or newer.
+3.  **JDK**: Java 17 (required for modern Android builds).
+4.  **Firebase CLI**: `npm install -g firebase-tools`.
+5.  **Capacitor CLI**: Usually handled via `npx cap`.
+
+### Fresh Machine Onboarding
+
+1.  **Clone the Repo**:
+    ```bash
+    git clone https://github.com/your-repo/majuu-app.git
+    cd majuu-app
+    ```
+2.  **Install Dependencies**:
+    ```bash
+    npm install
+    cd functions && npm install && cd ..
+    ```
+3.  **Environment Setup**:
+    - Copy `.env.example` to `.env`.
+    - Fill in the Firebase credentials.
+    - Copy `backend/.env.example` to `backend/.env` and add Paystack Secret.
+    - Copy `functions/.env.example` to `functions/.env`.
+4.  **Firebase Android Config**:
+    - Download `google-services.json` from the Firebase Console.
+    - Place it at `android/app/google-services.json`.
+5.  **Run Dev Server**:
+    ```bash
+    npm run dev
+    ```
 
 ---
+
+## GitHub Hygiene & Security
+
+- ✅ **Ignore Secrets**: `.env` and `google-services.json` are excluded from Git tracking.
+- ✅ **Environment Templates**: Always update `.env.example` if you add new environment variables.
+- ✅ **Keystores**: Never commit `.jks` or `.keystore` files. Store them securely in a password manager.
+- ✅ **Native Junk**: Local IDE and Gradle caches are ignored to keep the repo clean.
+
 
 ## Running Locally
 
