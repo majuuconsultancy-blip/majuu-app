@@ -25,6 +25,7 @@ import { useRequestPricingEntry } from "../hooks/useRequestPricing";
 import {
   buildRequestDefinitionKey,
   fetchRequestDefinitionByKey,
+  recordRequestDefinitionEngagement,
 } from "../services/requestDefinitionService";
 import {
   saveWorkflowDraft,
@@ -518,6 +519,7 @@ export default function RequestModal({
   const lastStateEmitRef = useRef("");
   const persistDraftBeforeCloseRef = useRef(() => {});
   const releaseBodyLockRef = useRef(() => {});
+  const definitionEngagementRef = useRef("");
 
   // prevents "tap causes close + blur" on Android
   const startedInsidePanelRef = useRef(false);
@@ -663,7 +665,10 @@ export default function RequestModal({
     () => String(paymentContext?.country || "").trim(),
     [paymentContext?.country]
   );
-  const preferredAgentLookupReady = Boolean(routeTrackType && routeCountry && routeResidenceCountry);
+  const requestCounty = useMemo(() => normalizeCountyName(county), [county]);
+  const preferredAgentLookupReady = Boolean(
+    routeTrackType && routeCountry && routeResidenceCountry && requestCounty
+  );
 
   const liveRequestPricing = useRequestPricingEntry({
     pricingKey: paymentContext?.pricingKey,
@@ -759,6 +764,19 @@ export default function RequestModal({
     if (!requestDefinition || requestDefinition?.isActive === false) return null;
     return requestDefinition;
   }, [requestDefinition]);
+  const definitionEligiblePartnerIds = useMemo(() => {
+    if (!Array.isArray(resolvedDefinition?.eligiblePartnerIds)) return [];
+    const seen = new Set();
+    const rows = [];
+    resolvedDefinition.eligiblePartnerIds.forEach((value) => {
+      const id = String(value || "").trim();
+      const key = id.toLowerCase();
+      if (!id || seen.has(key)) return;
+      seen.add(key);
+      rows.push(id);
+    });
+    return rows;
+  }, [resolvedDefinition?.eligiblePartnerIds]);
 
   const activeExtraFields = useMemo(() => {
     const fields = Array.isArray(resolvedDefinition?.extraFields)
@@ -768,6 +786,26 @@ export default function RequestModal({
       .filter((field) => field?.isActive !== false)
       .sort((a, b) => Number(a?.sortOrder || 0) - Number(b?.sortOrder || 0));
   }, [resolvedDefinition]);
+
+  useEffect(() => {
+    if (!open) {
+      definitionEngagementRef.current = "";
+      return;
+    }
+    const definitionId = String(resolvedDefinition?.id || "").trim();
+    const definitionKeyValue = String(resolvedDefinition?.definitionKey || definitionKey || "").trim();
+    if (!definitionId && !definitionKeyValue) return;
+    const lockKey = `${definitionId || "na"}::${definitionKeyValue || "na"}`;
+    if (definitionEngagementRef.current === lockKey) return;
+    definitionEngagementRef.current = lockKey;
+    void recordRequestDefinitionEngagement({
+      definitionId,
+      definitionKey: definitionKeyValue,
+      eventType: "open",
+    }).catch((error) => {
+      console.warn("request definition engagement log failed:", error?.message || error);
+    });
+  }, [definitionKey, open, resolvedDefinition?.definitionKey, resolvedDefinition?.id]);
 
   const extraRequiredReady = useMemo(() => {
     if (!activeExtraFields.length) return true;
@@ -1485,9 +1523,10 @@ export default function RequestModal({
         const rows = await listEligiblePreferredAgents({
           trackType: routeTrackType,
           country: routeCountry,
-          county: "",
+          county: requestCounty,
           countryOfResidence: routeResidenceCountry,
           filterMode: partnerFilterMode,
+          eligiblePartnerIds: definitionEligiblePartnerIds,
           max: 250,
         });
         if (cancelled) return;
@@ -1509,8 +1548,10 @@ export default function RequestModal({
     partnerFilterMode,
     preferredAgentLookupReady,
     routeCountry,
+    requestCounty,
     routeResidenceCountry,
     routeTrackType,
+    definitionEligiblePartnerIds,
   ]);
 
   useEffect(() => {
@@ -1537,9 +1578,10 @@ export default function RequestModal({
           partnerId: safePreferredAgentId,
           trackType: routeTrackType,
           country: routeCountry,
-          county: "",
+          county: requestCounty,
           countryOfResidence: routeResidenceCountry,
           filterMode: partnerFilterMode,
+          eligiblePartnerIds: definitionEligiblePartnerIds,
         });
         if (cancelled) return;
         setPreferredAgentWarning(
@@ -1561,8 +1603,10 @@ export default function RequestModal({
     partnerFilterMode,
     preferredAgentLookupReady,
     routeCountry,
+    requestCounty,
     routeResidenceCountry,
     routeTrackType,
+    definitionEligiblePartnerIds,
     t,
   ]);
 
@@ -1788,6 +1832,11 @@ export default function RequestModal({
               }
             : null,
         extraFieldAnswers: extraFieldAnswers || null,
+        requestDefinitionId: String(resolvedDefinition?.id || "").trim(),
+        requestDefinitionKey: String(
+          resolvedDefinition?.definitionKey || definitionKey || ""
+        ).trim(),
+        eligiblePartnerIds: definitionEligiblePartnerIds,
 
         paid: Boolean(paymentRequired ? paid : true),
         paymentMeta: unlockPaymentReceipt
@@ -2077,6 +2126,10 @@ export default function RequestModal({
                   {!routeResidenceCountry ? (
                     <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                       {t("add_profile_country_for_agents")}
+                    </div>
+                  ) : !requestCounty ? (
+                    <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      Select your county to load compatible partners.
                     </div>
                   ) : agentLoading ? (
                     <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">

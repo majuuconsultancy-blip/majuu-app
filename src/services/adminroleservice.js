@@ -10,12 +10,26 @@ import {
 export const ADMIN_SCOPE_AVAILABILITIES = new Set(["active", "busy", "offline"]);
 export const MANAGER_SCOPE_STATUSES = new Set(["active", MANAGER_STATUS_PENDING, "inactive"]);
 
-function safeStr(value) {
-  return String(value || "").trim();
+function safeStr(value, max = 400) {
+  return String(value || "").trim().slice(0, max);
 }
 
 function lower(value) {
   return safeStr(value).toLowerCase();
+}
+
+function normalizeBranchIdList(values = []) {
+  const rows = Array.isArray(values) ? values : [];
+  const seen = new Set();
+  const out = [];
+  rows.forEach((value) => {
+    const id = safeStr(value, 140);
+    const key = lower(id);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(id);
+  });
+  return out.slice(0, 80);
 }
 
 export function normalizeUserRole(role) {
@@ -69,26 +83,80 @@ export function normalizeAdminAvailability(value) {
 
 export function normalizeAdminScope(rawScope) {
   const scope = rawScope && typeof rawScope === "object" ? rawScope : {};
+  const derivedCoverage =
+    scope?.derivedCoverage && typeof scope.derivedCoverage === "object"
+      ? scope.derivedCoverage
+      : {};
   const stationedCountry = safeStr(scope?.stationedCountry || scope?.country);
   const stationedCountryLower = lower(
     scope?.stationedCountryLower || scope?.countryLower || stationedCountry
   );
   const country = stationedCountry;
   const countryLower = stationedCountryLower;
-  const primaryCounty = safeStr(scope?.primaryCounty || scope?.county);
+  const directCountries = Array.isArray(scope?.countries)
+    ? scope.countries.map((v) => safeStr(v)).filter(Boolean)
+    : Array.isArray(derivedCoverage?.countries)
+    ? derivedCoverage.countries.map((v) => safeStr(v)).filter(Boolean)
+    : stationedCountry
+    ? [stationedCountry]
+    : [];
+  const directCountriesLower = Array.isArray(scope?.countriesLower)
+    ? scope.countriesLower.map((v) => lower(v)).filter(Boolean)
+    : Array.isArray(derivedCoverage?.countriesLower)
+    ? derivedCoverage.countriesLower.map((v) => lower(v)).filter(Boolean)
+    : [];
+  const mergedCountries = [
+    ...(stationedCountry ? [stationedCountry] : []),
+    ...directCountries,
+  ].filter(Boolean);
+  const mergedCountriesLower = [
+    ...(stationedCountryLower ? [stationedCountryLower] : []),
+    ...directCountriesLower,
+    ...mergedCountries.map((v) => lower(v)),
+  ].filter(Boolean);
+  const seenCountries = new Set();
+  const countries = mergedCountries.filter((value) => {
+    const key = lower(value);
+    if (!key || seenCountries.has(key)) return false;
+    seenCountries.add(key);
+    return true;
+  });
+  const seenCountriesLower = new Set();
+  const countriesLower = mergedCountriesLower.filter((value) => {
+    const key = lower(value);
+    if (!key || seenCountriesLower.has(key)) return false;
+    seenCountriesLower.add(key);
+    return true;
+  });
+  const primaryCounty = safeStr(
+    scope?.primaryCounty || scope?.county || derivedCoverage?.primaryCounty
+  );
   const primaryCountyLower = lower(scope?.primaryCountyLower || primaryCounty);
   const neighboringCounties = Array.isArray(scope?.neighboringCounties)
     ? scope.neighboringCounties.map((v) => safeStr(v)).filter(Boolean)
+    : Array.isArray(derivedCoverage?.neighboringCounties)
+    ? derivedCoverage.neighboringCounties.map((v) => safeStr(v)).filter(Boolean)
     : [];
   const neighboringCountiesLower = Array.isArray(scope?.neighboringCountiesLower)
     ? scope.neighboringCountiesLower.map((v) => lower(v)).filter(Boolean)
+    : Array.isArray(derivedCoverage?.neighboringCountiesLower)
+    ? derivedCoverage.neighboringCountiesLower.map((v) => lower(v)).filter(Boolean)
     : [];
   const directCounties = Array.isArray(scope?.counties)
     ? scope.counties.map((v) => safeStr(v)).filter(Boolean)
+    : Array.isArray(derivedCoverage?.counties)
+    ? derivedCoverage.counties.map((v) => safeStr(v)).filter(Boolean)
     : [];
   const directCountiesLower = Array.isArray(scope?.countiesLower)
     ? scope.countiesLower.map((v) => lower(v)).filter(Boolean)
+    : Array.isArray(derivedCoverage?.countiesLower)
+    ? derivedCoverage.countiesLower.map((v) => lower(v)).filter(Boolean)
     : [];
+  const assignedBranchIds = normalizeBranchIdList(
+    scope?.assignedBranchIds || scope?.branchIds
+  );
+  const coverageSource = safeStr(scope?.coverageSource || derivedCoverage?.source || "legacy_manual", 40)
+    .toLowerCase() || "legacy_manual";
   const mergedCounties = [
     ...(primaryCounty ? [primaryCounty] : []),
     ...neighboringCounties,
@@ -124,12 +192,28 @@ export function normalizeAdminScope(rawScope) {
     stationedCountryLower,
     country,
     countryLower,
+    countries,
+    countriesLower,
     primaryCounty,
     primaryCountyLower,
     neighboringCounties,
     neighboringCountiesLower,
     counties,
     countiesLower,
+    assignedBranchIds,
+    coverageSource,
+    derivedCoverage: {
+      source: coverageSource,
+      primaryCounty,
+      primaryCountyLower,
+      neighboringCounties,
+      neighboringCountiesLower,
+      counties,
+      countiesLower,
+      countries,
+      countriesLower,
+      assignedBranchIds,
+    },
     town: safeStr(scope?.town),
     availability: normalizeAdminAvailability(scope?.availability),
     active: scope?.active !== false,
@@ -189,6 +273,7 @@ export function resolveRoleFromUserDoc({
       scope.active !== false &&
       Boolean(safeStr(scope?.partnerId)) &&
       (Boolean(safeStr(scope?.stationedCountry || scope?.country)) ||
+        (Array.isArray(scope?.countries) && scope.countries.length > 0) ||
         (Array.isArray(scope?.counties) && scope.counties.length > 0));
     const hasAdminAuditSignal = Boolean(safeStr(adminUpdatedBy)) || Boolean(adminUpdatedAt);
     if (hasScopeSignal && hasAdminAuditSignal) return "assignedAdmin";

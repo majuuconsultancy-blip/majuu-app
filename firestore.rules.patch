@@ -313,11 +313,110 @@ service cloud.firestore {
     }
 
     function chatTypeOk(t) {
-      return t in ["text", "pdf", "bundle"];
+      return t in ["text", "pdf", "document", "image", "photo", "bundle"];
     }
 
     function chatRoleOk(r) {
       return r in ["user", "staff", "admin"];
+    }
+
+    function requestIdFromData(data) {
+      return data != null && data.requestId != null ? str(data.requestId) : "";
+    }
+
+    function userUidFromData(data) {
+      return data != null && data.userUid != null ? str(data.userUid) : "";
+    }
+
+    function requestOwnerMatchesUser(data) {
+      let rid = requestIdFromData(data);
+      let uid = userUidFromData(data);
+      return rid.size() == 0
+        || (requestExists(rid) && requestOwner(rid) == uid);
+    }
+
+    function canReadUnifiedDocumentData(data) {
+      let rid = requestIdFromData(data);
+      let uid = userUidFromData(data);
+      return signedIn() && data != null && (
+        isSuperAdmin()
+        || (uid.size() > 0 && uid == authUid())
+        || (rid.size() > 0 && requestExists(rid) && canReadRequestData(requestDoc(rid)))
+      );
+    }
+
+    function canWriteUnifiedDocumentData(data) {
+      let rid = requestIdFromData(data);
+      let uid = userUidFromData(data);
+      let createdByUid = data != null && data.createdByUid != null ? str(data.createdByUid) : "";
+      return signedIn() && data != null
+        && requestOwnerMatchesUser(data)
+        && (
+          isSuperAdmin()
+          || (rid.size() > 0 && canAdminAccessRequest(rid))
+          || (
+            rid.size() > 0
+            && isRequestAssignedStaff(rid)
+            && createdByUid == authUid()
+          )
+          || (
+            uid.size() > 0
+            && uid == authUid()
+            && (
+              rid.size() == 0
+              || isRequestOwner(rid)
+            )
+          )
+        );
+    }
+
+    match /documents/{documentId} {
+      allow read: if canReadUnifiedDocumentData(resource.data);
+      allow create: if canWriteUnifiedDocumentData(request.resource.data);
+      allow update: if canWriteUnifiedDocumentData(resource.data)
+        && canWriteUnifiedDocumentData(request.resource.data);
+      allow delete: if isSuperAdmin()
+        || (requestIdFromData(resource.data).size() > 0 && canAdminAccessRequest(requestIdFromData(resource.data)))
+        || (
+          userUidFromData(resource.data).size() > 0
+          && userUidFromData(resource.data) == authUid()
+          && requestIdFromData(resource.data).size() == 0
+        );
+    }
+
+    match /documentLinks/{linkId} {
+      allow read: if canReadUnifiedDocumentData(resource.data);
+      allow create: if canWriteUnifiedDocumentData(request.resource.data)
+        && str(request.resource.data.documentId).size() > 0;
+      allow update: if canWriteUnifiedDocumentData(resource.data)
+        && canWriteUnifiedDocumentData(request.resource.data)
+        && str(request.resource.data.documentId).size() > 0
+        && str(request.resource.data.documentId) == str(resource.data.documentId);
+      allow delete: if isSuperAdmin()
+        || (requestIdFromData(resource.data).size() > 0 && canAdminAccessRequest(requestIdFromData(resource.data)))
+        || (
+          userUidFromData(resource.data).size() > 0
+          && userUidFromData(resource.data) == authUid()
+          && requestIdFromData(resource.data).size() == 0
+        );
+    }
+
+    match /runtimeFlags/{flagId} {
+      function isDocumentEngineModeWrite() {
+        return flagId == "documentEngine"
+          && (
+            !request.resource.data.keys().hasAny(["readMode"])
+            || lower(request.resource.data.readMode) in ["legacy", "merge", "canonical"]
+          )
+          && (
+            !request.resource.data.keys().hasAny(["mode"])
+            || lower(request.resource.data.mode) in ["legacy", "merge", "canonical"]
+          );
+      }
+
+      allow read: if signedIn();
+      allow create, update: if isSuperAdmin() && isDocumentEngineModeWrite();
+      allow delete: if false;
     }
 
     match /analytics_helpChoices/{id} {
@@ -476,9 +575,22 @@ service cloud.firestore {
       allow create, update, delete: if isSuperAdmin();
     }
 
+    match /partnerPushSubscriptions/{partnerId} {
+      allow read, create, update, delete: if isSuperAdmin();
+    }
+
+    match /pushCampaigns/{campaignId} {
+      allow read, create, update, delete: if isSuperAdmin();
+    }
+
     match /financeSettings/{configId} {
       allow read: if isAnyAdmin() || managerHasModule("finances");
       allow create, update, delete: if isSuperAdmin() || managerHasModule("finances");
+    }
+
+    match /platformConfig/{configId} {
+      allow read: if isAnyAdmin() || managerHasModule("finances");
+      allow create, update, delete: if isSuperAdmin();
     }
 
     match /partnerFinancialProfiles/{partnerId} {
@@ -502,11 +614,20 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    match /financeTransactions/{transactionId} {
+      allow read: if isAnyAdmin() || managerHasModule("finances");
+      allow create, update, delete: if false;
+    }
+
     match /paymentProviderReferences/{referenceId} {
       allow read, create, update, delete: if false;
     }
 
     match /paymentShareLinks/{shareId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /payment_links/{linkId} {
       allow read, create, update, delete: if false;
     }
 
@@ -837,62 +958,7 @@ service cloud.firestore {
             || request.resource.data.ownerLockedAdminUid == authUid()
           )
         )
-        || ownerCanFinalizeUnlockRequest()
-        || (
-          isRequestAssignedStaff(requestId)
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly([
-            "status",
-            "staffNote",
-            "staffUpdatedAt",
-            "staffStatus",
-            "staffDecision",
-            "staffStartedAt",
-            "staffStartedAtMs",
-            "staffStartedBy",
-            "markedInProgressAt",
-            "markedInProgressAtMs",
-            "staffCompletedAt",
-            "staffCompletedAtMs",
-            "staffCompletedBy",
-            "staffWorkMinutes",
-            "staffProgressPercent",
-            "staffProgressUpdatedAt",
-            "staffProgressUpdatedAtMs",
-            "backendStatus",
-            "userStatus",
-            "everAssigned",
-            "updatedAt"
-          ])
-          && (
-            !changedHas("status")
-            || staffAllowedRequestStatus(request.resource.data.status)
-          )
-          && (
-            !changedHas("staffStatus")
-            || staffAllowedStaffStatus(request.resource.data.staffStatus)
-          )
-          && (
-            !changedHas("staffDecision")
-            || staffAllowedDecision(request.resource.data.staffDecision)
-          )
-          && (
-            !changedHas("staffProgressPercent")
-            || staffAllowedProgressPercent(request.resource.data.staffProgressPercent)
-          )
-          && (
-            !changedHas("backendStatus")
-            || staffAllowedBackendStatus(request.resource.data.backendStatus)
-          )
-          && (
-            !changedHas("userStatus")
-            || staffAllowedUserStatus(request.resource.data.userStatus)
-          )
-          && (
-            !changedHas("everAssigned")
-            || request.resource.data.everAssigned == true
-            || request.resource.data.everAssigned == resource.data.everAssigned
-          )
-        );
+        || ownerCanFinalizeUnlockRequest();
 
       allow delete: if isSuperAdmin()
         || (
@@ -915,26 +981,7 @@ service cloud.firestore {
           || isRequestAssignedStaff(requestId)
           || (isRequestOwner(requestId) && resource.data.visibleToUser == true);
 
-        allow create: if canAdminAccessRequest(requestId)
-          || (
-            isRequestAssignedStaff(requestId)
-            && request.resource.data.requestId == requestId
-            && request.resource.data.staffId == authUid()
-            && request.resource.data.createdBy == authUid()
-            && request.resource.data.visibleToUser is bool
-            && request.resource.data.content is string
-            && str(request.resource.data.content).size() > 0
-            && request.resource.data.keys().hasOnly([
-              "requestId",
-              "staffId",
-              "createdBy",
-              "content",
-              "visibleToUser",
-              "progressPercent",
-              "createdAt",
-              "createdAtMs"
-            ])
-          );
+        allow create: if canAdminAccessRequest(requestId);
 
         allow update, delete: if false;
       }
@@ -1104,41 +1151,7 @@ service cloud.firestore {
             && (isRequestOwner(requestId) || isRequestAssignedStaff(requestId))
           );
 
-        allow create: if (isRequestOwner(requestId) || isRequestAssignedStaff(requestId))
-          && request.resource.data.keys().hasOnly([
-            "fromRole",
-            "fromUid",
-            "toRole",
-            "type",
-            "text",
-            "pdfMeta",
-            "status",
-            "createdAt"
-          ])
-          && chatRoleOk(request.resource.data.fromRole)
-          && chatRoleOk(request.resource.data.toRole)
-          && chatTypeOk(request.resource.data.type)
-          && request.resource.data.status == "pending"
-          && request.resource.data.fromUid == authUid()
-          && (
-            (isRequestOwner(requestId)
-              && request.resource.data.fromRole == "user"
-              && request.resource.data.toRole == "staff")
-            || (isRequestAssignedStaff(requestId)
-              && request.resource.data.fromRole == "staff"
-              && request.resource.data.toRole == "user")
-          )
-          && (
-            (request.resource.data.type == "text" && str(request.resource.data.text).size() > 0)
-            || (request.resource.data.type == "pdf" && request.resource.data.pdfMeta != null)
-            || (
-              request.resource.data.type == "bundle"
-              && (
-                str(request.resource.data.text).size() > 0
-                || request.resource.data.pdfMeta != null
-              )
-            )
-          );
+        allow create: if false;
 
         allow update, delete: if canAdminAccessRequest(requestId);
       }

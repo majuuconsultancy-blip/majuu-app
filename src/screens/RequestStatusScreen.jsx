@@ -49,6 +49,14 @@ import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
 import { isUnsubmittedGhostRequest } from "../utils/requestGhosts";
 import { getUserRequestState } from "../utils/requestLifecycle";
+import {
+  splitRequestDocumentsForLegacyViews,
+  subscribeRequestDocumentContext,
+} from "../services/documentEngineService";
+import {
+  getDocumentEngineReadMode,
+  subscribeDocumentEngineModeState,
+} from "../services/documentEngineFlags";
 
 /* ---------------- Minimal icons ---------------- */
 function IconReceipt(props) {
@@ -162,6 +170,23 @@ function IconCopy(props) {
 /* ---------------- Helpers ---------------- */
 function safeStr(value, max = 240) {
   return String(value || "").trim().slice(0, max);
+}
+
+function mergeDocumentRows(primaryRows = [], fallbackRows = []) {
+  const rows = [...(Array.isArray(primaryRows) ? primaryRows : []), ...(Array.isArray(fallbackRows) ? fallbackRows : [])];
+  const seen = new Set();
+  const out = [];
+
+  rows.forEach((row) => {
+    const idKey = safeStr(row?.id, 220);
+    const signature = `${safeStr(row?.name, 180).toLowerCase()}|${Number(row?.size || row?.sizeBytes || 0) || 0}|${safeStr(row?.url, 1200)}`;
+    const key = idKey || signature;
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(row);
+  });
+
+  return out;
 }
 
 function startCase(value) {
@@ -390,6 +415,8 @@ export default function RequestStatusScreen() {
 
   const [adminFilesErr, setAdminFilesErr] = useState("");
   const [adminFiles, setAdminFiles] = useState([]);
+  const [canonicalRequestDocs, setCanonicalRequestDocs] = useState([]);
+  const [canonicalDocsErr, setCanonicalDocsErr] = useState("");
   const [fullPackageItems, setFullPackageItems] = useState([]);
   const [fullPackageLinkedRequests, setFullPackageLinkedRequests] = useState([]);
   const [payments, setPayments] = useState([]);
@@ -423,6 +450,7 @@ export default function RequestStatusScreen() {
     const id = String(requestId || "").trim();
     return id.length > 0 ?id : null;
   }, [requestId]);
+  const [docsReadMode, setDocsReadMode] = useState(getDocumentEngineReadMode());
 
   const isFullRequest =
     Boolean(req?.isFullPackage) || String(req?.requestType || "").toLowerCase() === "full";
@@ -440,6 +468,18 @@ export default function RequestStatusScreen() {
 
   useEffect(() => {
     clearStaleRequestModalBodyLock();
+  }, []);
+
+  useEffect(() => {
+    const unsub = subscribeDocumentEngineModeState({
+      onData: (state) => {
+        setDocsReadMode(state?.effectiveMode || "merge");
+      },
+      onError: (error) => {
+        console.error("document engine mode subscription error:", error);
+      },
+    });
+    return () => unsub?.();
   }, []);
 
   useEffect(() => {
@@ -548,6 +588,24 @@ export default function RequestStatusScreen() {
       unsubAuth();
     };
   }, [navigate, validRequestId]);
+
+  useEffect(() => {
+    if (!validRequestId || docsReadMode === "legacy") return undefined;
+    const unsub = subscribeRequestDocumentContext({
+      requestId: validRequestId,
+      viewerRole: "user",
+      onData: (rows) => {
+        setCanonicalRequestDocs(Array.isArray(rows) ? rows : []);
+        setCanonicalDocsErr("");
+      },
+      onError: (error) => {
+        console.error("canonical request docs snapshot error:", error);
+        setCanonicalDocsErr(error?.message || "Failed to load unified request documents.");
+      },
+    });
+
+    return () => unsub?.();
+  }, [validRequestId, docsReadMode]);
 
   useEffect(() => {
     if (!validRequestId) return;
@@ -728,6 +786,38 @@ export default function RequestStatusScreen() {
     fallbackFullPackageItems,
     latestFullPackageByItemKey,
   ]);
+  const canonicalSplit = useMemo(
+    () => splitRequestDocumentsForLegacyViews(canonicalRequestDocs),
+    [canonicalRequestDocs]
+  );
+  const effectiveAttachments = useMemo(
+    () => {
+      if (docsReadMode === "legacy") return attachments;
+      if (docsReadMode === "canonical") return canonicalSplit.attachments;
+      return mergeDocumentRows(canonicalSplit.attachments, attachments);
+    },
+    [docsReadMode, canonicalSplit.attachments, attachments]
+  );
+  const effectiveAdminFiles = useMemo(
+    () => {
+      if (docsReadMode === "legacy") return adminFiles;
+      if (docsReadMode === "canonical") return canonicalSplit.adminFiles;
+      return mergeDocumentRows(canonicalSplit.adminFiles, adminFiles);
+    },
+    [docsReadMode, canonicalSplit.adminFiles, adminFiles]
+  );
+  const effectiveFileErr = useMemo(() => {
+    if (effectiveAttachments.length > 0) return "";
+    if (docsReadMode === "legacy") return fileErr;
+    if (docsReadMode === "canonical") return canonicalDocsErr || fileErr;
+    return fileErr || canonicalDocsErr;
+  }, [docsReadMode, effectiveAttachments.length, fileErr, canonicalDocsErr]);
+  const effectiveAdminFilesErr = useMemo(() => {
+    if (effectiveAdminFiles.length > 0) return "";
+    if (docsReadMode === "legacy") return adminFilesErr;
+    if (docsReadMode === "canonical") return canonicalDocsErr || adminFilesErr;
+    return adminFilesErr || canonicalDocsErr;
+  }, [docsReadMode, effectiveAdminFiles.length, adminFilesErr, canonicalDocsErr]);
 
   // ✅ keep your original base styles, just slightly upgraded
   const cardBase =
@@ -954,6 +1044,7 @@ export default function RequestStatusScreen() {
       const session = await createPaymentCheckoutSession({
         requestId: validRequestId,
         paymentId,
+        phoneNumber: String(req?.phone || "").trim(),
         appBaseUrl: typeof window !== "undefined" ? window.location.origin : "",
         returnTo: `/app/request/${encodeURIComponent(validRequestId)}`,
       });
@@ -1312,6 +1403,12 @@ export default function RequestStatusScreen() {
                                   <div className="mt-1 text-xs text-zinc-700 dark:text-zinc-300">
                                     {payment.currency} {Number(payment.amount || 0).toLocaleString()}
                                   </div>
+                                  {Number(payment?.breakdown?.discountAmount || 0) > 0 ? (
+                                    <div className="mt-1 text-xs text-emerald-700">
+                                      Discount applied: {payment.currency}{" "}
+                                      {Number(payment.breakdown.discountAmount || 0).toLocaleString()}
+                                    </div>
+                                  ) : null}
                                   {payment.note ?(
                                     <div className="mt-1 text-xs text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">
                                       {payment.note}
@@ -1328,7 +1425,7 @@ export default function RequestStatusScreen() {
                                 disabled={paymentBusyId === payment.id || shareBusyId === payment.id}
                                 className="mt-3 w-full rounded-xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
                               >
-                                {paymentBusyId === payment.id ? "Opening checkout..." : "Pay now"}
+                                {paymentBusyId === payment.id ? "Opening checkout..." : "Pay Directly"}
                               </button>
                               <button
                                 type="button"
@@ -1338,7 +1435,7 @@ export default function RequestStatusScreen() {
                               >
                                 {shareBusyId === payment.id
                                   ? "Preparing link..."
-                                  : "Share full payment link"}
+                                  : "Share Link"}
                               </button>
                             </div>
                           );
@@ -1617,7 +1714,7 @@ export default function RequestStatusScreen() {
               <CollapsibleSection
                 title="Submitted documents"
                 subtitle="Your document uploads for this request."
-                meta={`${attachments.length} files`}
+                meta={`${effectiveAttachments.length} files`}
                 open={documentsOpen}
                 onToggle={setDocumentsOpen}
                 bodyClassName="mt-4 grid gap-4"
@@ -1627,27 +1724,27 @@ export default function RequestStatusScreen() {
                   requestId={validRequestId}
                   title="Submitted document fields"
                   viewerRole="user"
-                  attachments={attachments}
+                  attachments={effectiveAttachments}
                   attachmentsLoading={false}
-                  attachmentsError={fileErr}
+                  attachmentsError={effectiveFileErr}
                   showHeader={false}
                   className="p-0 border-0 bg-transparent shadow-none"
                 />
                 {showLegacySubmittedDocuments ? (
                   <>
-                    {fileErr ?(
+                    {effectiveFileErr ?(
                       <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-                        {fileErr}
+                        {effectiveFileErr}
                       </div>
                     ) : null}
 
                     <div className="divide-y divide-zinc-200/75 dark:divide-zinc-800/75">
-                      {attachments.length === 0 ?(
+                      {effectiveAttachments.length === 0 ?(
                         <div className="py-4 text-sm text-zinc-600 dark:text-zinc-300">
                           No documents submitted yet.
                         </div>
                       ) : (
-                        attachments.map((a, idx) => (
+                        effectiveAttachments.map((a, idx) => (
                           <motion.div
                             key={a.id}
                             initial={{ opacity: 0, y: 6 }}
@@ -1689,23 +1786,23 @@ export default function RequestStatusScreen() {
               <CollapsibleSection
                 title="Documents from Agency"
                 subtitle="Viewall your agency-provided documents."
-                meta={`${adminFiles.length} files`}
+                meta={`${effectiveAdminFiles.length} files`}
                 open={adminDocumentsOpen}
                 onToggle={setAdminDocumentsOpen}
                 bodyClassName="mt-4 grid gap-2"
               >
-                {adminFilesErr ?(
+                {effectiveAdminFilesErr ?(
                   <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-                    {adminFilesErr}
+                    {effectiveAdminFilesErr}
                   </div>
                 ) : null}
 
-                {adminFiles.length === 0 ?(
+                {effectiveAdminFiles.length === 0 ?(
                   <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 text-sm text-zinc-600 dark:text-zinc-300">
                     No documents sent yet.
                   </div>
                 ) : (
-                  adminFiles.map((f, idx) => {
+                  effectiveAdminFiles.map((f, idx) => {
                     const name = String(f.name || "Document");
                     const url = String(f.url || "").trim();
 

@@ -16,7 +16,9 @@ export async function getMyServiceRequests(uid, max = 20) {
   const q = query(ref, where("uid", "==", uid), limit(max));
   const snap = await getDocs(q);
 
-  const items = snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() }));
+  const items = snap.docs
+    .map((d) => normalizeTextDeep({ id: d.id, ...d.data() }))
+    .filter((row) => row?.deletedByOwner !== true);
   return sortByCreatedAtDesc(items);
 }
 

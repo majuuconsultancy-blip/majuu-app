@@ -1,10 +1,11 @@
 // requestservice.js (REPLACE with this)
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import { collection, doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { sendPushToAdmin } from "./pushServerClient";
 import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
 import { logAnalyticsEvent } from "./analyticsService";
 import { REQUEST_BACKEND_STATUSES } from "../utils/requestLifecycle";
+import { createRequestCommand } from "./requestcommandservice";
 import {
   PARTNER_FILTER_MODES,
   preferredAgentReasonLabel,
@@ -64,6 +65,21 @@ function cleanStringList(input, { maxItems = 60, maxLen = 120 } = {}) {
     if (out.length >= maxItems) break;
   }
 
+  return out;
+}
+
+function cleanPartnerIdList(input, { maxItems = 300 } = {}) {
+  const values = Array.isArray(input) ? input : [input];
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    const clean = cleanStr(value, 140);
+    const key = clean.toLowerCase();
+    if (!clean || seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+    if (out.length >= maxItems) break;
+  }
   return out;
 }
 
@@ -233,6 +249,7 @@ async function resolvePreferredAgentPayload({
   county = "",
   countryOfResidence = "",
   partnerFilterMode = PARTNER_FILTER_MODES.DESTINATION_COUNTRY,
+  eligiblePartnerIds = [],
 } = {}) {
   const safePreferredAgentId = cleanStr(preferredAgentId, 140);
   const checkedAtMs = Date.now();
@@ -255,6 +272,7 @@ async function resolvePreferredAgentPayload({
       county,
       countryOfResidence,
       filterMode: partnerFilterMode,
+      eligiblePartnerIds: cleanPartnerIdList(eligiblePartnerIds),
     });
 
     return {
@@ -297,6 +315,69 @@ function ensureVerified(user) {
   }
 }
 
+function shouldUseLocalCreateFallback(error) {
+  const code = cleanStr(error?.code, 180).toLowerCase();
+  const message = cleanStr(error?.message, 500).toLowerCase();
+  return (
+    Boolean(error?.isInfrastructureUnavailable) ||
+    code === "internal" ||
+    code.includes("functions/internal") ||
+    code.includes("functions/unavailable") ||
+    code.includes("functions/unimplemented") ||
+    code.includes("functions/deadline-exceeded") ||
+    code.includes("functions/not-found") ||
+    message.includes("deploy cloud functions")
+  );
+}
+
+async function createRequestLocally({
+  requestPayload = {},
+  actorUid = "",
+} = {}) {
+  const safeActorUid = cleanStr(actorUid, 180);
+  if (!safeActorUid) {
+    throw new Error("Request create fallback requires a valid user.");
+  }
+
+  const now = Date.now();
+  const requestRef = doc(collection(db, "serviceRequests"));
+  const payload = requestPayload && typeof requestPayload === "object" ? requestPayload : {};
+  const writePayload = {
+    ...payload,
+    uid: safeActorUid,
+    lifecycle: {
+      stage: "Submitted",
+      decisionFinalized: false,
+      finalDecision: "",
+      version: 1,
+      createdAt: serverTimestamp(),
+      createdAtMs: now,
+      updatedAt: serverTimestamp(),
+      updatedAtMs: now,
+    },
+    ownership: {
+      ownerUid: safeActorUid,
+      adminUid: "",
+      staffUid: "",
+    },
+    actionType: "createRequest",
+    updatedBy: { uid: safeActorUid, role: "user" },
+    createdAt: serverTimestamp(),
+    createdAtMs: now,
+    updatedAt: serverTimestamp(),
+    updatedAtMs: now,
+  };
+
+  await setDoc(requestRef, writePayload, { merge: true });
+  return {
+    ok: true,
+    command: "createRequest",
+    requestId: requestRef.id,
+    stage: "Submitted",
+    localFallback: true,
+  };
+}
+
 export async function createServiceRequest(payload) {
   // ✅ Ensure we have a signed-in user
   const user = requireSignedInUser();
@@ -310,8 +391,6 @@ export async function createServiceRequest(payload) {
 
   // ✅ Soft gate here (central enforcement)
   ensureVerified(user);
-
-  const ref = collection(db, "serviceRequests");
 
   const requestType = cleanRequestType(payload?.requestType);
   const isSingle = requestType === "single";
@@ -360,6 +439,17 @@ export async function createServiceRequest(payload) {
   const unlockPaymentId = cleanStr(payload?.unlockPaymentId, 180);
   const unlockPaymentRequestId = cleanStr(payload?.unlockPaymentRequestId, 180);
   const pricingSnapshot = cleanPricingSnapshot(payload?.pricingSnapshot);
+  const requestDefinitionId = cleanStr(
+    payload?.requestDefinitionId || payload?.extraFieldAnswers?.definitionId,
+    140
+  );
+  const requestDefinitionKey = cleanStr(
+    payload?.requestDefinitionKey || payload?.extraFieldAnswers?.definitionKey,
+    200
+  );
+  const eligiblePartnerIds = cleanPartnerIdList(
+    payload?.eligiblePartnerIds || payload?.eligiblePartners || []
+  );
   const preferredAgentPayload = await resolvePreferredAgentPayload({
     preferredAgentId: payload?.preferredAgentId,
     track: cleanTrack(payload?.track),
@@ -367,6 +457,7 @@ export async function createServiceRequest(payload) {
     county,
     countryOfResidence,
     partnerFilterMode,
+    eligiblePartnerIds,
   });
   const initialStatus = cleanInitialRequestStatus(payload?.status);
   const initialRoutingStatus =
@@ -417,6 +508,9 @@ export async function createServiceRequest(payload) {
     pricingSnapshot,
     unlockPaymentId,
     unlockPaymentRequestId,
+    requestDefinitionId,
+    requestDefinitionKey,
+    eligiblePartnerIds,
     requestUploadMeta,
     extraFieldAnswers,
 
@@ -453,6 +547,9 @@ export async function createServiceRequest(payload) {
       preferredAgentStatus: preferredAgentPayload.preferredAgentStatus,
       preferredAgentInvalidReason: preferredAgentPayload.preferredAgentInvalidReason,
       preferredAgentInvalidMessage: preferredAgentPayload.preferredAgentInvalidMessage,
+      requestDefinitionId,
+      requestDefinitionKey,
+      eligiblePartnerIds,
       routedAtMs: 0,
       routingReason:
         initialStatus === "payment_pending" ? "awaiting_unlock_payment" : "awaiting_auto_route",
@@ -469,13 +566,31 @@ export async function createServiceRequest(payload) {
       acceptedAtMs: 0,
       lockedOwnerAdminUid: "",
     },
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+    createdAtMs: Date.now(),
+    updatedAtMs: Date.now(),
   };
   clean.status = initialStatus;
   clean.routingStatus = initialRoutingStatus;
-
-  const docRef = await addDoc(ref, clean);
+  const idempotencySeed = `${user.uid}:${clean.track}:${clean.country}:${clean.requestType}:${Date.now()}`;
+  let commandResult = null;
+  try {
+    commandResult = await createRequestCommand({
+      request: clean,
+      idempotencyKey: cleanStr(payload?.idempotencyKey || idempotencySeed, 120),
+    });
+  } catch (error) {
+    if (!shouldUseLocalCreateFallback(error)) {
+      throw error;
+    }
+    commandResult = await createRequestLocally({
+      requestPayload: clean,
+      actorUid: user.uid,
+    });
+  }
+  const createdRequestId = cleanStr(commandResult?.requestId, 180);
+  if (!createdRequestId) {
+    throw new Error("Failed to create request (missing requestId).");
+  }
 
   if (initialStatus === "new") {
     void logAnalyticsEvent({
@@ -483,7 +598,7 @@ export async function createServiceRequest(payload) {
       eventType: ANALYTICS_EVENT_TYPES.REQUEST_SUBMITTED,
       trackType: clean.track,
       country: clean.country,
-      requestId: docRef.id,
+      requestId: createdRequestId,
       requestTitle: clean.serviceName,
       sourceScreen: "requestservice.createServiceRequest",
       metadata: {
@@ -502,13 +617,13 @@ export async function createServiceRequest(payload) {
         body: "A new service request was submitted.",
         data: {
           type: "NEW_REQUEST",
-          requestId: docRef.id,
-          route: `/app/admin/request/${encodeURIComponent(docRef.id)}`,
+          requestId: createdRequestId,
+          route: `/app/admin/request/${encodeURIComponent(createdRequestId)}`,
         },
       });
     } catch (error) {
       console.warn("Failed to trigger NEW_REQUEST push:", error?.message || error);
     }
   }
-  return docRef.id;
+  return createdRequestId;
 }

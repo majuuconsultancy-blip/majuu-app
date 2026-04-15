@@ -10,6 +10,7 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 import {
   APP_DESTINATION_COUNTRIES,
@@ -31,6 +32,7 @@ export const REQUEST_DEFINITION_COUNTRY_SOURCES = [
   "profile_country_of_residence",
 ];
 export const REQUEST_DEFINITION_PROFILE_COUNTRY_SCOPE = "Profile Country";
+const functions = getFunctions(undefined, "us-central1");
 
 function safeString(value, max = 400) {
   return String(value || "").trim().slice(0, max);
@@ -44,6 +46,20 @@ function toWholeNumber(value, fallback = 0, { min = 0, max = 100000 } = {}) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.max(min, Math.min(max, Math.round(num)));
+}
+
+function normalizePartnerIdList(values, { max = 300 } = {}) {
+  const arr = Array.isArray(values) ? values : [values];
+  const seen = new Set();
+  const out = [];
+  arr.forEach((entry) => {
+    const clean = safeString(entry, 140);
+    const key = clean.toLowerCase();
+    if (!clean || seen.has(key)) return;
+    seen.add(key);
+    out.push(clean);
+  });
+  return out.slice(0, max);
 }
 
 function normalizeBoolean(value, fallback = false) {
@@ -180,6 +196,9 @@ function compareRequestDefinitions(left, right) {
   const activeGap = Number(Boolean(right?.isActive)) - Number(Boolean(left?.isActive));
   if (activeGap !== 0) return activeGap;
 
+  const popularityGap = getRequestDefinitionPopularityScore(right) - getRequestDefinitionPopularityScore(left);
+  if (popularityGap !== 0) return popularityGap;
+
   const leftTracks = getRequestDefinitionTrackTypes(left);
   const rightTracks = getRequestDefinitionTrackTypes(right);
   const trackGap =
@@ -260,6 +279,9 @@ function buildRequestDefinitionPayload(input = {}) {
     entryPlacement,
     countrySource,
     sortOrder: toWholeNumber(input?.sortOrder, 0, { min: 0, max: 5000 }),
+    eligiblePartnerIds: normalizePartnerIdList(
+      input?.eligiblePartnerIds || input?.eligiblePartners || []
+    ),
     isActive: normalizeBoolean(input?.isActive, true),
     extraFields,
   };
@@ -314,6 +336,7 @@ export function normalizeRequestDefinitionRecord(id, raw = {}) {
     entryPlacement: raw?.entryPlacement,
     countrySource: raw?.countrySource,
     sortOrder: raw?.sortOrder,
+    eligiblePartnerIds: raw?.eligiblePartnerIds || raw?.eligiblePartners,
     isActive: raw?.isActive,
     extraFields: raw?.extraFields,
   });
@@ -334,6 +357,8 @@ export function normalizeRequestDefinitionRecord(id, raw = {}) {
     updatedAtMs,
     updatedByUid: safeString(raw?.updatedByUid, 120),
     updatedByEmail: safeString(raw?.updatedByEmail, 160),
+    engagement: raw?.engagement && typeof raw.engagement === "object" ? raw.engagement : {},
+    engagementScore: Number(raw?.engagementScore || 0) || 0,
   };
 }
 
@@ -371,6 +396,7 @@ export function createEmptyRequestDefinitionDraft({
     entryPlacement: "wehelp_country",
     countrySource: "selected_country",
     sortOrder: "",
+    eligiblePartnerIds: [],
     isActive: true,
     extraFields: [],
   };
@@ -388,6 +414,7 @@ export function draftFromRequestDefinition(definition) {
     entryPlacement: clean.entryPlacement,
     countrySource: clean.countrySource,
     sortOrder: clean.sortOrder > 0 ? String(clean.sortOrder) : "",
+    eligiblePartnerIds: normalizePartnerIdList(clean.eligiblePartnerIds || []),
     isActive: clean.isActive,
     extraFields: clean.extraFields.map((field) => ({
       ...field,
@@ -415,12 +442,39 @@ export function toRequestDefinitionPayload(input = {}) {
     ...input,
     trackTypes: normalizeRequestDefinitionTrackTypes(input?.trackTypes, input?.trackType),
     sortOrder: input?.sortOrder === "" ? 0 : input?.sortOrder,
+    eligiblePartnerIds: normalizePartnerIdList(
+      input?.eligiblePartnerIds || input?.eligiblePartners || []
+    ),
     extraFields: (Array.isArray(input?.extraFields) ? input.extraFields : []).map((field, index) =>
       normalizeDraftExtraFieldForSave(field, index)
     ),
   });
   validateRequestDefinitionPayload(payload);
   return payload;
+}
+
+export function getRequestDefinitionPopularityScore(definition = {}) {
+  const safe = definition && typeof definition === "object" ? definition : {};
+  const explicit = Number(safe?.engagementScore || 0) || 0;
+  if (explicit > 0) return explicit;
+  const engagement = safe?.engagement && typeof safe.engagement === "object" ? safe.engagement : {};
+  const taps = Number(engagement?.tapCount || 0) || 0;
+  const opens = Number(engagement?.openCount || 0) || 0;
+  const submissions = Number(engagement?.submissionCount || 0) || 0;
+  return taps * 3 + opens * 2 + submissions * 4;
+}
+
+export async function recordRequestDefinitionEngagement({
+  definitionId = "",
+  definitionKey = "",
+  eventType = "open",
+} = {}) {
+  const callable = httpsCallable(functions, "recordRequestDefinitionEngagement");
+  return callable({
+    definitionId: safeString(definitionId, 140),
+    definitionKey: safeString(definitionKey, 200),
+    eventType: safeString(eventType, 40),
+  }).then((result) => result?.data ?? null);
 }
 
 async function requireRequestManagementActor() {

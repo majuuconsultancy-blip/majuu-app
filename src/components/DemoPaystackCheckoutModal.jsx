@@ -96,17 +96,6 @@ function IconPhone(props) {
   );
 }
 
-function IconBank(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-      <path d="M4.2 9.2 12 4.6l7.8 4.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M5.8 9.5h12.4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M7.5 9.5V18M12 9.5V18M16.5 9.5V18" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M4.8 18.5h14.4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function MethodButton({ active, icon, label, onClick, disabled }) {
   return (
     <button
@@ -127,25 +116,6 @@ function MethodButton({ active, icon, label, onClick, disabled }) {
   );
 }
 
-function ProviderButton({ active, label, onClick, disabled }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={[
-        "rounded-2xl border px-3 py-2 text-sm font-semibold transition",
-        active
-          ? "border-emerald-300 bg-emerald-50 text-emerald-900 shadow-[0_10px_24px_rgba(16,185,129,0.10)]"
-          : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50",
-        disabled ? "cursor-not-allowed opacity-70" : "",
-      ].join(" ")}
-    >
-      {label}
-    </button>
-  );
-}
-
 function DemoPaystackCheckoutModal({
   email,
   amount,
@@ -160,7 +130,6 @@ function DemoPaystackCheckoutModal({
   const [cardNumber, setCardNumber] = useState("");
   const [expiry, setExpiry] = useState("");
   const [cvv, setCvv] = useState("");
-  const [mobileProvider, setMobileProvider] = useState("mpesa");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
@@ -169,6 +138,12 @@ function DemoPaystackCheckoutModal({
   const maskedReference = useMemo(() => safeStr(reference, 120) || "DEMO-CHECKOUT", [reference]);
   const payerEmail = useMemo(() => safeStr(email, 160).toLowerCase(), [email]);
   const flowLabel = useMemo(() => safeStr(metadata?.flowType || metadata?.paymentType || "checkout", 60), [metadata]);
+  const paymentLabel = useMemo(
+    () => safeStr(metadata?.paymentLabel || metadata?.serviceName || metadata?.label, 120),
+    [metadata]
+  );
+  const discountAmount = useMemo(() => cleanAmount(metadata?.discountAmount || 0), [metadata]);
+  const paymentNote = useMemo(() => safeStr(metadata?.note, 280), [metadata]);
   const cancelCheckout = useCallback(() => {
     if (processing) return;
     onReject(new Error("Demo checkout cancelled."));
@@ -211,24 +186,21 @@ function DemoPaystackCheckoutModal({
 
   const canSubmit = useMemo(() => {
     if (processing) return false;
-    if (method === "mobile_money") {
-      return Boolean(mobileProvider) && safeDigits(phoneNumber).length >= 10;
-    }
-    if (method === "bank") {
-      return true;
+    if (method === "mpesa") {
+      return safeDigits(phoneNumber).length >= 10;
     }
     return (
       safeDigits(cardNumber).length >= 12 &&
       safeDigits(expiry).length === 4 &&
       safeDigits(cvv).length >= 3
     );
-  }, [processing, method, mobileProvider, phoneNumber, cardNumber, expiry, cvv]);
+  }, [processing, method, phoneNumber, cardNumber, expiry, cvv]);
 
   const handlePay = async () => {
     if (!canSubmit) {
       setError(
-        method === "mobile_money"
-          ? "Select M-Pesa or Airtel Money and enter a phone number."
+        method === "mpesa"
+          ? "Enter the M-PESA phone number to continue."
           : "Enter payment details to continue."
       );
       return;
@@ -243,8 +215,8 @@ function DemoPaystackCheckoutModal({
         status: "success",
         reference: `DEMO-${Date.now()}`,
         method,
-        provider: method === "mobile_money" ? mobileProvider : "",
-        phone: method === "mobile_money" ? phoneNumber : "",
+        provider: method === "mpesa" ? "mpesa" : "",
+        phone: method === "mpesa" ? phoneNumber : "",
       });
       return;
     }
@@ -277,7 +249,7 @@ function DemoPaystackCheckoutModal({
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
                 <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                Paystack
+                MAJUU Pay
               </div>
               <div className="mt-4 text-sm font-medium text-zinc-500">Paying with</div>
               <div className="mt-1 text-sm font-semibold text-zinc-900">{payerEmail || "demo@majuu.app"}</div>
@@ -294,10 +266,21 @@ function DemoPaystackCheckoutModal({
           </div>
 
           <div className="mt-5 rounded-[24px] border border-emerald-100 bg-white px-5 py-4 shadow-[0_12px_30px_rgba(16,185,129,0.08)]">
+            {paymentLabel ? (
+              <div className="text-xs font-medium text-zinc-600">For: {paymentLabel}</div>
+            ) : null}
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Amount</div>
             <div className="mt-2 text-[2rem] font-semibold leading-none tracking-tight text-zinc-950">
               {amountLabel}
             </div>
+            {discountAmount > 0 ? (
+              <div className="mt-2 text-xs text-emerald-700">
+                Discount applied: {formatMoney(discountAmount, currency)}
+              </div>
+            ) : null}
+            {paymentNote ? (
+              <div className="mt-2 text-xs text-zinc-600 whitespace-pre-wrap">{paymentNote}</div>
+            ) : null}
             <div className="mt-2 flex items-center justify-between gap-3 text-xs text-zinc-500">
               <span>Reference: {maskedReference}</span>
               <span className="rounded-full bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">
@@ -311,17 +294,16 @@ function DemoPaystackCheckoutModal({
           <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
             Payment Method
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className="mt-3 grid grid-cols-2 gap-2">
             <MethodButton active={method === "card"} icon={<IconCard className="h-4 w-4" />} label="Card" onClick={() => setMethod("card")} disabled={processing} />
-            <MethodButton active={method === "mobile_money"} icon={<IconPhone className="h-4 w-4" />} label="Mobile Money" onClick={() => setMethod("mobile_money")} disabled={processing} />
-            <MethodButton active={method === "bank"} icon={<IconBank className="h-4 w-4" />} label="Bank" onClick={() => setMethod("bank")} disabled={processing} />
+            <MethodButton active={method === "mpesa"} icon={<IconPhone className="h-4 w-4" />} label="M-PESA" onClick={() => setMethod("mpesa")} disabled={processing} />
           </div>
 
           <div className="mt-5 rounded-[24px] border border-zinc-200 bg-zinc-50/70 p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div className="text-sm font-semibold text-zinc-900">Authorization details</div>
               <div className="text-xs text-zinc-500">
-                {method === "card" ? "Card payment" : method === "mobile_money" ? "Mobile Money" : "Bank transfer"}
+                {method === "card" ? "Card payment" : "M-PESA payment"}
               </div>
             </div>
 
@@ -369,28 +351,10 @@ function DemoPaystackCheckoutModal({
                 </>
               ) : null}
 
-              {method === "mobile_money" ? (
+              {method === "mpesa" ? (
                 <>
-                  <div className="grid gap-1.5">
-                    <div className="text-sm font-medium text-zinc-700">Mobile Money Provider</div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <ProviderButton
-                        active={mobileProvider === "mpesa"}
-                        label="M-Pesa"
-                        onClick={() => setMobileProvider("mpesa")}
-                        disabled={processing}
-                      />
-                      <ProviderButton
-                        active={mobileProvider === "airtel_money"}
-                        label="Airtel Money"
-                        onClick={() => setMobileProvider("airtel_money")}
-                        disabled={processing}
-                      />
-                    </div>
-                  </div>
-
                   <label className="grid gap-1.5 text-sm font-medium text-zinc-700">
-                    Phone Number
+                    M-PESA Phone Number
                     <input
                       value={phoneNumber}
                       onChange={(event) => setPhoneNumber(formatPhoneNumber(event.target.value))}
@@ -406,12 +370,6 @@ function DemoPaystackCheckoutModal({
                     STK push will come here later. For now, demo mode only needs the mobile number.
                   </div>
                 </>
-              ) : null}
-
-              {method === "bank" ? (
-                <div className="rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-600">
-                  Bank payment is available in demo mode as a guided confirmation step. Press Pay to continue.
-                </div>
               ) : null}
 
               <div className="rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500">
@@ -443,7 +401,7 @@ function DemoPaystackCheckoutModal({
 
           <div className="mt-4 flex items-center justify-center gap-2 text-xs text-zinc-500">
             <IconLock className="h-4 w-4" />
-            <span>Secured by Paystack - Demo Mode</span>
+            <span>Secured by MAJUU Payments - Demo Mode</span>
           </div>
         </div>
       </div>

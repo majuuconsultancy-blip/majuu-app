@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import AppIcon from "../components/AppIcon";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
 import { db } from "../firebase";
-import { setStaffAccessByEmail } from "../services/staffservice";
+import { setStaffAccessByEmail, setStaffChatAutoApproval } from "../services/staffservice";
 import { listStaff, unassignRequest } from "../services/taskassignservice";
 import { smartBack } from "../utils/navBack";
 
@@ -194,6 +194,41 @@ export default function AdminManageStaffScreen() {
     }
   };
 
+  const runToggleAutoApprove = async ({ uid, nextEnabled }) => {
+    const safeUid = safeStr(uid);
+    if (!safeUid) return;
+    const busyKey = `autoapprove:${safeUid}`;
+    setActionBusy(busyKey);
+    setErr("");
+    setMsg("");
+    try {
+      await setStaffChatAutoApproval({
+        staffUid: safeUid,
+        enabled: nextEnabled === true,
+      });
+      setRows((prev) =>
+        (Array.isArray(prev) ? prev : []).map((row) =>
+          safeStr(row?.uid) === safeUid
+            ? {
+                ...row,
+                autoApproveChatMessages: nextEnabled === true,
+                chatModeration: {
+                  ...(row?.chatModeration || {}),
+                  autoApproveMessages: nextEnabled === true,
+                },
+              }
+            : row
+        )
+      );
+      setMsg(`Chat auto-approve ${nextEnabled ? "enabled" : "disabled"} for staff.`);
+    } catch (error) {
+      console.error(error);
+      setErr(error?.message || "Failed to update chat auto-approve setting.");
+    } finally {
+      setActionBusy("");
+    }
+  };
+
   const activeRows = useMemo(() => rows || [], [rows]);
 
   return (
@@ -248,6 +283,10 @@ export default function AdminManageStaffScreen() {
               const tasksLoading = Boolean(tasksLoadingByUid?.[uid]);
               const tasks = Array.isArray(tasksByUid?.[uid]) ? tasksByUid[uid] : [];
               const fireBusy = actionBusy === `fire:${uid}`;
+              const autoApproveBusy = actionBusy === `autoapprove:${uid}`;
+              const autoApproveEnabled =
+                staffRow?.autoApproveChatMessages === true ||
+                staffRow?.chatModeration?.autoApproveMessages === true;
 
               return (
                 <div key={uid} className={card}>
@@ -272,6 +311,30 @@ export default function AdminManageStaffScreen() {
                       <span className="inline-flex items-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                         {activeLoad}/{maxActive}
                       </span>
+
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void runToggleAutoApprove({
+                            uid,
+                            nextEnabled: !autoApproveEnabled,
+                          });
+                        }}
+                        disabled={autoApproveBusy}
+                        className={`inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition active:scale-[0.99] disabled:opacity-60 ${
+                          autoApproveEnabled
+                            ? "border-emerald-200 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200"
+                            : "border-zinc-200 bg-white/80 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200"
+                        }`}
+                        title="Toggle chat auto-approve"
+                      >
+                        {autoApproveBusy
+                          ? "Saving..."
+                          : autoApproveEnabled
+                          ? "Chat: Auto"
+                          : "Chat: Review"}
+                      </button>
 
                       <button
                         type="button"

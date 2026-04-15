@@ -74,13 +74,52 @@ module.exports = function buildFinanceFoundation(deps = {}) {
   const SETTLEMENT_HISTORY_COLLECTION = "settlementHistory";
   const FINANCIAL_AUDIT_COLLECTION = "financialAuditLogs";
   const PAYMENT_PROVIDER_REFS_COLLECTION = "paymentProviderReferences";
+  const PAYMENT_PROVIDER_CONFIG_COLLECTION = "paymentProviderConfigs";
+  const PAYMENT_PROVIDER_CONFIG_DOC = "global";
   const PAYMENT_SHARE_LINKS_COLLECTION = "paymentShareLinks";
+  const PAYMENT_LINKS_COLLECTION = "payment_links";
   const PAYMENT_PROVIDER_EVENTS_COLLECTION = "paymentProviderEvents";
+  const FINANCE_RATE_LIMITS_COLLECTION = "financeRateLimits";
   const DEFAULT_UNLOCK_AUTO_REFUND_HOURS = 48;
   const DEFAULT_SHARED_LINK_EXPIRY_HOURS = 72;
   const DEFAULT_ATTEMPT_REUSE_WINDOW_MS = 20 * 60 * 1000;
   const DEFAULT_PAYMENT_PENDING_WINDOW_MS = 24 * 60 * 60 * 1000;
+  const DUPLICATE_DETECTION_WINDOW_MS = 5 * 60 * 1000;
+  const CHECKOUT_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+  const CHECKOUT_RATE_LIMIT_MAX = 8;
   const SUPPORTED_PAYMENT_CURRENCIES = new Set(["KES", "USD", "NGN", "GHS", "ZAR"]);
+  const PAYMENT_PROVIDER_KEYS = new Set(["mpesa", "paystack"]);
+  const PROVIDER_SECRET_ENCRYPTION_ALGO = "aes-256-gcm";
+  const PROVIDER_SECRET_MASTER_KEY_ENV = "PAYMENT_PROVIDER_CONFIG_ENCRYPTION_KEY";
+  const PROVIDER_SECRET_FIELDS = Object.freeze({
+    mpesa: Object.freeze([
+      "consumerKey",
+      "consumerSecret",
+      "passkey",
+      "initiatorName",
+      "initiatorPassword",
+      "securityCredential",
+    ]),
+    paystack: Object.freeze(["secretKey", "webhookSecret"]),
+  });
+  const DARAJA_DEFAULT_WEBHOOK_IPS = Object.freeze([
+    "196.201.214.200",
+    "196.201.214.206",
+    "196.201.213.114",
+    "196.201.214.207",
+    "196.201.214.208",
+    "196.201.214.203",
+    "127.0.0.1",
+    "::1",
+  ]);
+  const DARAJA_WEBHOOK_IPS = parseCsvList(
+    process.env.DARAJA_WEBHOOK_IPS,
+    DARAJA_DEFAULT_WEBHOOK_IPS
+  );
+  const DARAJA_BASE_URLS = Object.freeze({
+    test: "https://sandbox.safaricom.co.ke",
+    live: "https://api.safaricom.co.ke",
+  });
   const FULL_PACKAGE_DEFAULT_PRICING = Object.freeze({
     study: Object.freeze({
       passport: 1700,
@@ -118,6 +157,34 @@ module.exports = function buildFinanceFoundation(deps = {}) {
 
   function cleanParagraph(value, max = 2000) {
     return String(value || "").trim().replace(/\r\n/g, "\n").slice(0, max);
+  }
+
+  function parseCsvList(value, fallback = []) {
+    const raw = safeStr(value, 4000);
+    const rows = raw
+      .split(",")
+      .map((row) => safeStr(row, 220))
+      .filter(Boolean);
+    if (rows.length) return rows;
+    return Array.isArray(fallback)
+      ? fallback.map((row) => safeStr(row, 220)).filter(Boolean)
+      : [];
+  }
+
+  function hasOwn(value, key) {
+    return Object.prototype.hasOwnProperty.call(value || {}, key);
+  }
+
+  function resolveProvidedString(source = {}, keys = [], max = 400) {
+    const names = Array.isArray(keys) ? keys : [keys];
+    for (const key of names) {
+      if (!hasOwn(source, key)) continue;
+      return {
+        provided: true,
+        value: safeStr(source?.[key], max),
+      };
+    }
+    return { provided: false, value: "" };
   }
 
   function normalizeCurrency(value, fallback = "KES") {
@@ -179,6 +246,38 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     return backendStatus === "in_progress" || backendStatus === "completed";
   }
 
+  function deriveUnlockVisibilityState(requestData = {}) {
+    const backendStatus = normalizeRequestBackendStatus(requestData);
+    const active = backendStatus === "in_progress" || backendStatus === "completed";
+    return {
+      visibleAsPaid: active,
+      paid: active,
+      paymentMetaStatus: active ? "paid" : "paid_held",
+      unlockState: active ? "consumed" : "paid_held",
+      unlockAutoRefundStatus: active ? "not_applicable" : "pending",
+    };
+  }
+
+  function derivePayoutQueueState({ requestData = {}, payoutDestinationReady = false } = {}) {
+    const backendStatus = normalizeRequestBackendStatus(requestData);
+    if (backendStatus !== "in_progress") {
+      return {
+        queueStatus: PAYOUT_STATUSES.ON_HOLD,
+        holdReason: "request_not_in_progress",
+      };
+    }
+    if (payoutDestinationReady !== true) {
+      return {
+        queueStatus: PAYOUT_STATUSES.ON_HOLD,
+        holdReason: "missing_partner_payout_destination",
+      };
+    }
+    return {
+      queueStatus: PAYOUT_STATUSES.READY,
+      holdReason: "",
+    };
+  }
+
   function moneyToMinorUnits(amount, currency = "KES") {
     const safeAmount = roundMoney(amount);
     const safeCurrency = normalizeCurrency(currency);
@@ -212,6 +311,14 @@ module.exports = function buildFinanceFoundation(deps = {}) {
 
   function topLevelRef(collectionName, id) {
     return db.collection(collectionName).doc(id);
+  }
+
+  function paymentProviderConfigRef() {
+    return topLevelRef(PAYMENT_PROVIDER_CONFIG_COLLECTION, PAYMENT_PROVIDER_CONFIG_DOC);
+  }
+
+  function checkoutRateLimitRef(scopeKey = "") {
+    return topLevelRef(FINANCE_RATE_LIMITS_COLLECTION, safeStr(scopeKey, 220));
   }
 
   function fullPackageDocRef(fullPackageId) {
@@ -536,6 +643,148 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     ]).has(safeStatus);
   }
 
+  function hashIdentity(value = "") {
+    const safe = safeStr(value, 600);
+    if (!safe) return "";
+    return crypto.createHash("sha256").update(safe).digest("hex");
+  }
+
+  function normalizePhoneNumber(value = "") {
+    const digits = String(value || "").replace(/\D+/g, "").slice(-12);
+    if (!digits) return "";
+    if (digits.startsWith("0")) return `254${digits.slice(1)}`;
+    if (digits.startsWith("254")) return digits;
+    if (digits.startsWith("7") || digits.startsWith("1")) return `254${digits}`;
+    return digits;
+  }
+
+  function normalizeCheckoutPaymentMethod(value = "", provider = "mpesa") {
+    const method = lower(value, 40);
+    if (provider === "mpesa") return "mpesa";
+    if (method === "mpesa" || method === "card") return method;
+    return "card";
+  }
+
+  function buildCheckoutRateLimitScope({
+    requestId = "",
+    paymentId = "",
+    payerMode = "",
+    shareToken = "",
+    payerIdentity = "",
+  } = {}) {
+    const raw = [
+      safeStr(requestId, 180),
+      safeStr(paymentId, 180),
+      safeStr(payerMode, 60),
+      safeStr(shareToken ? hashShareToken(shareToken) : "", 90),
+      safeStr(payerIdentity, 120),
+    ]
+      .filter(Boolean)
+      .join("|");
+    return `checkout_${hashIdentity(raw).slice(0, 40)}`;
+  }
+
+  async function enforceCheckoutRateLimit({
+    scopeKey = "",
+    max = CHECKOUT_RATE_LIMIT_MAX,
+    windowMs = CHECKOUT_RATE_LIMIT_WINDOW_MS,
+  } = {}) {
+    const safeScopeKey = safeStr(scopeKey, 220);
+    if (!safeScopeKey) return;
+    const ref = checkoutRateLimitRef(safeScopeKey);
+    const now = nowMs();
+    await db.runTransaction(async (txn) => {
+      const snap = await txn.get(ref);
+      const row = snap.exists ? snap.data() || {} : {};
+      const windowStartMs = clamp(toNum(row?.windowStartMs, 0), 0, 9999999999999);
+      const priorCount = clamp(toNum(row?.count, 0), 0, 999999);
+      const reset = !windowStartMs || now - windowStartMs >= windowMs;
+      const nextCount = reset ? 1 : priorCount + 1;
+      if (nextCount > max) {
+        throw new functions.https.HttpsError(
+          "resource-exhausted",
+          "Too many payment initiation attempts. Please wait and retry.",
+          {
+            reason: "checkout_rate_limited",
+            retryAfterMs: Math.max(1000, windowMs - Math.max(0, now - windowStartMs)),
+          }
+        );
+      }
+      txn.set(
+        ref,
+        {
+          scopeKey: safeScopeKey,
+          windowStartMs: reset ? now : windowStartMs,
+          count: nextCount,
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedAtMs: now,
+        },
+        { merge: true }
+      );
+    });
+  }
+
+  async function detectDuplicateCheckoutAttempt({
+    requestId = "",
+    paymentId = "",
+    amount = 0,
+    payerFingerprint = "",
+    windowMs = DUPLICATE_DETECTION_WINDOW_MS,
+  } = {}) {
+    const safeRequestId = safeStr(requestId, 180);
+    const safePaymentId = safeStr(paymentId, 180);
+    const safeAmount = roundMoney(amount);
+    if (!safeRequestId || !safePaymentId || safeAmount <= 0 || !safeStr(payerFingerprint, 120)) {
+      return null;
+    }
+
+    const cutoffMs = nowMs() - Math.max(10 * 1000, windowMs);
+    const snap = await paymentAttemptsCol(safeRequestId, safePaymentId)
+      .where("createdAtMs", ">=", cutoffMs)
+      .limit(20)
+      .get();
+
+    for (const docSnap of snap.docs) {
+      const row = docSnap.data() || {};
+      const fingerprint = safeStr(row?.metadata?.payerFingerprint, 160);
+      if (fingerprint !== safeStr(payerFingerprint, 160)) continue;
+      if (roundMoney(row?.expectedAmount) !== safeAmount) continue;
+      const status = lower(row?.status, 80);
+      const providerRef = safeStr(
+        row?.providerReference || row?.internalReference || row?.paystackReference || "",
+        160
+      );
+      if (
+        status === PAYMENT_STATUSES.AWAITING_PAYMENT ||
+        status === PAYMENT_STATUSES.PAYMENT_SESSION_CREATED ||
+        status === "initializing"
+      ) {
+        return {
+          type: "in_flight",
+          attemptId: docSnap.id,
+          status,
+          authorizationUrl: safeStr(row?.authorizationUrl, 1200),
+          reference: providerRef,
+          expiresAtMs: toNum(row?.expiresAtMs, 0),
+        };
+      }
+      if (
+        status === PAYMENT_STATUSES.PAID ||
+        status === PAYMENT_STATUSES.HELD ||
+        status === "verified_paid" ||
+        status === "verified_duplicate"
+      ) {
+        return {
+          type: "already_paid",
+          attemptId: docSnap.id,
+          status,
+          reference: providerRef,
+        };
+      }
+    }
+    return null;
+  }
+
   function makeNotificationId(prefix, ...parts) {
     return [prefix, ...parts.map((part) => safeStr(part).replace(/[^a-zA-Z0-9_-]+/g, "_"))]
       .filter(Boolean)
@@ -682,29 +931,78 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     return fallback === "inclusive" ? "inclusive" : "exclusive";
   }
 
-  function defaultFinanceSettings() {
+  function normalizeProviderKey(value, fallback = "mpesa") {
+    const raw = lower(value, 40);
+    if (PAYMENT_PROVIDER_KEYS.has(raw)) return raw;
+    const safeFallback = lower(fallback, 40);
+    return PAYMENT_PROVIDER_KEYS.has(safeFallback) ? safeFallback : "mpesa";
+  }
+
+  function defaultProviderCatalog() {
     return {
+      mpesa: {
+        enabled: true,
+        label: "M-Pesa",
+      },
+      paystack: {
+        enabled: false,
+        label: "Paystack",
+      },
+    };
+  }
+
+  function normalizeProviderCatalog(input = {}) {
+    const source = input && typeof input === "object" ? input : {};
+    const defaults = defaultProviderCatalog();
+    const out = {};
+    PAYMENT_PROVIDER_KEYS.forEach((providerKey) => {
+      const row =
+        source?.[providerKey] && typeof source[providerKey] === "object"
+          ? source[providerKey]
+          : {};
+      out[providerKey] = {
+        enabled:
+          typeof row?.enabled === "boolean"
+            ? row.enabled
+            : defaults?.[providerKey]?.enabled === true,
+        label: safeStr(row?.label || defaults?.[providerKey]?.label, 80) || defaults?.[providerKey]?.label,
+      };
+    });
+    return out;
+  }
+
+  function defaultFinanceSettings() {
+    const providers = defaultProviderCatalog();
+    return {
+      paymentProvider: {
+        activeProvider: "mpesa",
+        providerEnvironment: "test",
+        providerCallbackUrl: "",
+        paymentLinkBaseUrl: "",
+        providers,
+      },
+      pricingControls: {
+        globalDiscountEnabled: false,
+        globalDiscountPercentage: 0,
+      },
       provider: {
-        name: "paystack",
+        name: "mpesa",
+        active: "mpesa",
         environment: "test",
         callbackBaseUrl: "",
+        paymentLinkBaseUrl: "",
+        providers,
       },
       inProgressPricing: {
         defaultCurrency: "KES",
         allowServiceFeeInput: true,
         allowAdminAdjustAmounts: true,
+        platformCutEnabledGlobal: true,
       },
       platformFee: {
         defaultCutType: "percentage",
         defaultCutValue: 10,
         cutBase: "official_plus_service_fee",
-      },
-      tax: {
-        enabled: false,
-        label: "Tax",
-        type: "percentage",
-        rate: 0,
-        mode: "exclusive",
       },
       refundControls: {
         unlockAutoRefundHours: DEFAULT_UNLOCK_AUTO_REFUND_HOURS,
@@ -722,23 +1020,72 @@ module.exports = function buildFinanceFoundation(deps = {}) {
   function normalizeFinanceSettings(input = {}) {
     const source = input && typeof input === "object" ? input : {};
     const defaults = defaultFinanceSettings();
+    const providerCatalog = normalizeProviderCatalog(
+      source?.paymentProvider?.providers ||
+        source?.provider?.providers ||
+        defaults?.paymentProvider?.providers
+    );
+    const activeProvider = normalizeProviderKey(
+      source?.paymentProvider?.activeProvider ||
+        source?.provider?.active ||
+        source?.provider?.name,
+      defaults?.paymentProvider?.activeProvider
+    );
+    const providerEnvironment =
+      lower(
+        source?.paymentProvider?.providerEnvironment ||
+          source?.provider?.environment ||
+          defaults?.paymentProvider?.providerEnvironment
+      ) === "live"
+        ? "live"
+        : "test";
+    const providerCallbackUrl = safeStr(
+      source?.paymentProvider?.providerCallbackUrl ||
+        source?.paymentProvider?.callbackBaseUrl ||
+        source?.provider?.callbackBaseUrl ||
+        defaults?.paymentProvider?.providerCallbackUrl,
+      400
+    );
+    const defaultCurrency = normalizeCurrency(
+      source?.defaultCurrency ||
+        source?.inProgressPricing?.defaultCurrency ||
+        defaults?.inProgressPricing?.defaultCurrency
+    );
+
     return {
-      provider: {
-        name: "paystack",
-        environment: lower(source?.provider?.environment || defaults.provider.environment) === "live"
-          ? "live"
-          : "test",
-        callbackBaseUrl: safeStr(
-          source?.provider?.callbackBaseUrl || defaults.provider.callbackBaseUrl,
+      paymentProvider: {
+        activeProvider,
+        providerEnvironment,
+        providerCallbackUrl,
+        paymentLinkBaseUrl: safeStr(
+          source?.paymentProvider?.paymentLinkBaseUrl ||
+            source?.provider?.paymentLinkBaseUrl,
           400
         ),
+        providers: providerCatalog,
+      },
+      pricingControls: {
+        globalDiscountEnabled: source?.pricingControls?.globalDiscountEnabled === true,
+        globalDiscountPercentage: clamp(toNum(source?.pricingControls?.globalDiscountPercentage, 0), 0, 100),
+      },
+      provider: {
+        name: activeProvider,
+        active: activeProvider,
+        environment: providerEnvironment,
+        callbackBaseUrl: providerCallbackUrl,
+        paymentLinkBaseUrl: safeStr(
+          source?.paymentProvider?.paymentLinkBaseUrl ||
+            source?.provider?.paymentLinkBaseUrl,
+          400
+        ),
+        providers: providerCatalog,
       },
       inProgressPricing: {
-        defaultCurrency: normalizeCurrency(
-          source?.inProgressPricing?.defaultCurrency || defaults.inProgressPricing.defaultCurrency
-        ),
+        defaultCurrency,
         allowServiceFeeInput: source?.inProgressPricing?.allowServiceFeeInput !== false,
         allowAdminAdjustAmounts: source?.inProgressPricing?.allowAdminAdjustAmounts !== false,
+        platformCutEnabledGlobal:
+          source?.inProgressPricing?.platformCutEnabledGlobal !== false,
       },
       platformFee: {
         defaultCutType: normalizeFeeType(
@@ -751,13 +1098,6 @@ module.exports = function buildFinanceFoundation(deps = {}) {
           lower(source?.platformFee?.cutBase) === "official_amount"
             ? "official_amount"
             : "official_plus_service_fee",
-      },
-      tax: {
-        enabled: source?.tax?.enabled === true,
-        label: safeStr(source?.tax?.label || defaults.tax.label, 80) || "Tax",
-        type: normalizeFeeType(source?.tax?.type || defaults.tax.type),
-        rate: roundRate(source?.tax?.rate ?? defaults.tax.rate),
-        mode: normalizeTaxMode(source?.tax?.mode || defaults.tax.mode),
       },
       refundControls: {
         unlockAutoRefundHours: clamp(
@@ -887,31 +1227,39 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     return normalizePartnerFinancialProfile(snap.exists ? snap.data() || {} : {}, partner);
   }
 
-  function resolveTaxConfig(settings, partnerProfile) {
-    const overrides =
-      partnerProfile?.taxOverrides && typeof partnerProfile.taxOverrides === "object"
-        ? partnerProfile.taxOverrides
-        : null;
-    const base = overrides || settings.tax;
-    return {
-      enabled: base?.enabled === true,
-      label: safeStr(base?.label || "Tax", 80) || "Tax",
-      type: normalizeFeeType(base?.type || "percentage"),
-      rate: roundRate(base?.rate),
-      mode: normalizeTaxMode(base?.mode || "exclusive"),
-    };
+  function resolveRequestDiscountPercentage(requestData = {}, explicit = null) {
+    if (Number.isFinite(Number(explicit))) {
+      return clamp(toNum(explicit, 0), 0, 100);
+    }
+    const source = requestData && typeof requestData === "object" ? requestData : {};
+    return clamp(
+      toNum(
+        source?.requestDiscountPercentage ??
+          source?.discountPercentage ??
+          source?.pricingSnapshot?.requestDiscountPercentage ??
+          source?.pricingSnapshot?.discountPercentage ??
+          0,
+        0
+      ),
+      0,
+      100
+    );
   }
 
   function calculateBreakdown({
     officialAmount = 0,
     serviceFee = 0,
     currency = "KES",
+    requestDiscountPercentage = 0,
     requestId = "",
     partnerId = "",
+    paymentType = "in_progress",
+    overridePlatformCutEnabled = null,
     assignedAdminId = "",
     partnerProfile = {},
     settings = defaultFinanceSettings(),
   } = {}) {
+    const isUnlock = lower(paymentType) === PAYMENT_TYPES.UNLOCK_REQUEST;
     const safeOfficialAmount = roundMoney(officialAmount);
     const safeServiceFee = roundMoney(serviceFee);
     const safeCurrency = normalizeCurrency(
@@ -929,51 +1277,55 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       lower(partnerProfile?.platformCutBase || settings?.platformFee?.cutBase) === "official_amount"
         ? safeOfficialAmount
         : subtotal;
+    const globalDiscountEnabled = settings?.pricingControls?.globalDiscountEnabled === true;
+    const globalDiscountPercentage = clamp(
+      toNum(settings?.pricingControls?.globalDiscountPercentage, 0),
+      0,
+      100
+    );
+    const requestDiscount = clamp(toNum(requestDiscountPercentage, 0), 0, 100);
+    const discountAppliedPercentage = globalDiscountEnabled
+      ? globalDiscountPercentage
+      : requestDiscount;
+    const discountAmount = roundMoney((subtotal * discountAppliedPercentage) / 100);
+    const discountedSubtotal = Math.max(0, subtotal - discountAmount);
     const platformCutAmount =
       cutType === "flat"
         ? roundMoney(cutValue)
         : roundMoney((cutBase * cutValue) / 100);
-
-    const tax = resolveTaxConfig(settings, partnerProfile);
-    let taxAmount = 0;
-    let finalUserPayable = subtotal;
-    if (tax.enabled) {
-      if (tax.type === "flat") {
-        taxAmount = roundMoney(tax.rate);
-        finalUserPayable = tax.mode === "inclusive" ? subtotal : subtotal + taxAmount;
-      } else if (tax.mode === "inclusive") {
-        taxAmount = roundMoney((subtotal * tax.rate) / (100 + tax.rate));
-        finalUserPayable = subtotal;
-      } else {
-        taxAmount = roundMoney((subtotal * tax.rate) / 100);
-        finalUserPayable = subtotal + taxAmount;
-      }
-    }
-
+    const platformCutEnabled =
+      typeof overridePlatformCutEnabled === "boolean"
+        ? overridePlatformCutEnabled
+        : settings?.inProgressPricing?.platformCutEnabledGlobal !== false;
     const estimatedProcessorFee = 0;
-    const estimatedNetPartnerPayable = Math.max(
-      0,
-      subtotal -
-        platformCutAmount -
-        (settings?.payoutControls?.deductProcessorFeeFromPartner ? estimatedProcessorFee : 0)
-    );
+    const finalUserPayable =
+      isUnlock || platformCutEnabled !== true
+        ? discountedSubtotal
+        : Math.max(0, discountedSubtotal + platformCutAmount);
+    const estimatedNetPartnerPayable = Math.max(0, discountedSubtotal);
 
     return {
       officialAmount: safeOfficialAmount,
       serviceFee: safeServiceFee,
+      subtotal,
+      discountAmount,
+      discountAppliedPercentage,
+      requestDiscountPercentage: requestDiscount,
+      isGlobalDiscount: globalDiscountEnabled,
       platformCutType: cutType,
       platformCutValue: cutValue,
-      platformCutAmount,
+      platformCutAmount: platformCutEnabled ? platformCutAmount : 0,
+      platformCutEnabled,
       platformCutBase:
         lower(partnerProfile?.platformCutBase || settings?.platformFee?.cutBase) === "official_amount"
           ? "official_amount"
           : "official_plus_service_fee",
-      taxEnabled: tax.enabled,
-      taxType: tax.type,
-      taxRate: tax.rate,
-      taxMode: tax.mode,
-      taxLabel: tax.label,
-      taxAmount,
+      taxEnabled: false,
+      taxType: "",
+      taxRate: 0,
+      taxMode: "exclusive",
+      taxLabel: "",
+      taxAmount: 0,
       finalUserPayable,
       estimatedProcessorFee,
       estimatedNetPartnerPayable,
@@ -1012,9 +1364,15 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       note: cleanParagraph(note, 2000),
       officialAmount: roundMoney(breakdown?.officialAmount),
       serviceFee: roundMoney(breakdown?.serviceFee),
+      subtotal: roundMoney(breakdown?.subtotal),
+      discountAmount: roundMoney(breakdown?.discountAmount),
+      discountAppliedPercentage: roundRate(breakdown?.discountAppliedPercentage),
+      requestDiscountPercentage: roundRate(breakdown?.requestDiscountPercentage),
+      isGlobalDiscount: breakdown?.isGlobalDiscount === true,
       platformCutType: safeStr(breakdown?.platformCutType),
       platformCutValue: roundRate(breakdown?.platformCutValue),
       platformCutAmount: roundMoney(breakdown?.platformCutAmount),
+      platformCutEnabled: breakdown?.platformCutEnabled === true,
       platformCutBase: safeStr(breakdown?.platformCutBase),
       taxEnabled: breakdown?.taxEnabled === true,
       taxType: safeStr(breakdown?.taxType),
@@ -1028,43 +1386,549 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       currency: normalizeCurrency(breakdown?.currency || "KES"),
       partnerFinancialStatus: safeStr(partnerProfile?.activeFinancialStatus),
       payoutReleaseBehavior: safeStr(partnerProfile?.payoutReleaseBehavior),
-      provider: safeStr(settings?.provider?.name || "paystack"),
+      provider: safeStr(
+        settings?.paymentProvider?.activeProvider || settings?.provider?.name || "mpesa"
+      ),
       environment: safeStr(settings?.provider?.environment || "test"),
       approvedAtMs: clamp(toNum(approvedAtMs, nowMs()), 0, 9999999999999),
       createdAtMs: nowMs(),
     };
   }
 
-  function buildProviderStatus(settings = {}) {
-    const environment =
-      lower(settings?.provider?.environment || "test") === "live" ? "live" : "test";
-    const secretKey =
-      environment === "live"
-        ? safeStr(process.env.PAYSTACK_SECRET_KEY_LIVE)
-        : safeStr(process.env.PAYSTACK_SECRET_KEY_TEST);
-    const callbackBaseUrl = safeStr(
-      settings?.provider?.callbackBaseUrl || process.env.PAYSTACK_CALLBACK_BASE_URL,
+  function resolveProviderAdapter(providerKey = "", configuredAdapter = "") {
+    const provider = normalizeProviderKey(providerKey || "mpesa");
+    const configured =
+      lower(configuredAdapter, 80) ||
+      lower(process.env?.[`PAYMENT_PROVIDER_ADAPTER_${provider.toUpperCase()}`], 80);
+    if (configured) return configured;
+    if (provider === "paystack") return "paystack";
+    return "mpesa_daraja";
+  }
+
+  function resolveProviderSecretFromEnv(providerKey = "", environment = "test") {
+    const provider = normalizeProviderKey(providerKey || "mpesa");
+    const env = lower(environment) === "live" ? "live" : "test";
+    const exact = safeStr(
+      process.env?.[`${provider.toUpperCase()}_SECRET_KEY_${env.toUpperCase()}`],
+      2000
+    );
+    if (exact) return exact;
+    if (provider === "paystack") {
+      return safeStr(
+        env === "live"
+          ? process.env.PAYSTACK_SECRET_KEY_LIVE
+          : process.env.PAYSTACK_SECRET_KEY_TEST,
+        2000
+      );
+    }
+    return safeStr(
+      env === "live"
+        ? process.env.MPESA_SECRET_KEY_LIVE || process.env.PAYSTACK_SECRET_KEY_LIVE
+        : process.env.MPESA_SECRET_KEY_TEST || process.env.PAYSTACK_SECRET_KEY_TEST,
+      2000
+    );
+  }
+
+  function resolveProviderConfigMasterKey() {
+    const raw = safeStr(process.env?.[PROVIDER_SECRET_MASTER_KEY_ENV], 6000);
+    if (!raw) return null;
+    if (/^[a-fA-F0-9]{64}$/.test(raw)) {
+      try {
+        return Buffer.from(raw, "hex");
+      } catch {
+        return null;
+      }
+    }
+    try {
+      const base64 = Buffer.from(raw, "base64");
+      if (base64.length === 32) return base64;
+    } catch {
+      // ignore
+    }
+    try {
+      const utf = Buffer.from(raw, "utf8");
+      if (utf.length === 32) return utf;
+    } catch {
+      // ignore
+    }
+    return null;
+  }
+
+  function normalizeEncryptedSecretRow(input = null) {
+    const source = input && typeof input === "object" ? input : null;
+    if (!source) return null;
+    return {
+      alg: safeStr(source?.alg || PROVIDER_SECRET_ENCRYPTION_ALGO, 40) || PROVIDER_SECRET_ENCRYPTION_ALGO,
+      v: clamp(toNum(source?.v, 1), 1, 99),
+      iv: safeStr(source?.iv, 600),
+      tag: safeStr(source?.tag, 600),
+      value: safeStr(source?.value, 9000),
+    };
+  }
+
+  function encryptSecretValue(value = "", keyBuffer = null) {
+    const plain = safeStr(value, 4000);
+    if (!plain || !Buffer.isBuffer(keyBuffer) || keyBuffer.length !== 32) return null;
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv(PROVIDER_SECRET_ENCRYPTION_ALGO, keyBuffer, iv);
+    const encrypted = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return {
+      alg: PROVIDER_SECRET_ENCRYPTION_ALGO,
+      v: 1,
+      iv: iv.toString("base64"),
+      tag: tag.toString("base64"),
+      value: encrypted.toString("base64"),
+    };
+  }
+
+  function decryptSecretValue(payload = null, keyBuffer = null) {
+    const row = normalizeEncryptedSecretRow(payload);
+    if (!row || !Buffer.isBuffer(keyBuffer) || keyBuffer.length !== 32) return "";
+    try {
+      const decipher = crypto.createDecipheriv(
+        safeStr(row.alg || PROVIDER_SECRET_ENCRYPTION_ALGO, 40),
+        keyBuffer,
+        Buffer.from(row.iv, "base64")
+      );
+      decipher.setAuthTag(Buffer.from(row.tag, "base64"));
+      const decrypted = Buffer.concat([
+        decipher.update(Buffer.from(row.value, "base64")),
+        decipher.final(),
+      ]);
+      return safeStr(decrypted.toString("utf8"), 4000);
+    } catch {
+      return "";
+    }
+  }
+
+  function defaultPaymentProviderConfig() {
+    return {
+      providers: {
+        mpesa: {
+          test: { active: false, adapter: "mpesa_daraja", callbackUrl: "", settings: {}, secrets: {} },
+          live: { active: false, adapter: "mpesa_daraja", callbackUrl: "", settings: {}, secrets: {} },
+        },
+        paystack: {
+          test: { active: false, adapter: "paystack", callbackUrl: "", settings: {}, secrets: {} },
+          live: { active: false, adapter: "paystack", callbackUrl: "", settings: {}, secrets: {} },
+        },
+      },
+      updatedAtMs: 0,
+      updatedByUid: "",
+      updatedByEmail: "",
+    };
+  }
+
+  function normalizeProviderConfigEnv(providerKey = "", environmentKey = "", input = {}) {
+    const provider = normalizeProviderKey(providerKey, "mpesa");
+    const environment = lower(environmentKey) === "live" ? "live" : "test";
+    const defaults = defaultPaymentProviderConfig();
+    const source = input && typeof input === "object" ? input : {};
+    const base = defaults?.providers?.[provider]?.[environment] || {};
+    const outSecrets = {};
+    (PROVIDER_SECRET_FIELDS?.[provider] || []).forEach((field) => {
+      const row = normalizeEncryptedSecretRow(source?.secrets?.[field]);
+      if (row?.value && row?.iv && row?.tag) outSecrets[field] = row;
+    });
+    return {
+      active:
+        typeof source?.active === "boolean"
+          ? source.active
+          : base?.active === true,
+      adapter: safeStr(source?.adapter || base?.adapter, 80) || resolveProviderAdapter(provider),
+      callbackUrl: safeStr(source?.callbackUrl || base?.callbackUrl, 400),
+      settings: source?.settings && typeof source.settings === "object" ? source.settings : {},
+      secrets: outSecrets,
+    };
+  }
+
+  function normalizePaymentProviderConfig(input = {}) {
+    const source = input && typeof input === "object" ? input : {};
+    return {
+      providers: {
+        mpesa: {
+          test: normalizeProviderConfigEnv("mpesa", "test", source?.providers?.mpesa?.test),
+          live: normalizeProviderConfigEnv("mpesa", "live", source?.providers?.mpesa?.live),
+        },
+        paystack: {
+          test: normalizeProviderConfigEnv("paystack", "test", source?.providers?.paystack?.test),
+          live: normalizeProviderConfigEnv("paystack", "live", source?.providers?.paystack?.live),
+        },
+      },
+      updatedAtMs: clamp(toNum(source?.updatedAtMs, 0), 0, 9999999999999),
+      updatedByUid: safeStr(source?.updatedByUid, 160),
+      updatedByEmail: safeEmail(source?.updatedByEmail),
+    };
+  }
+
+  function maskPaymentProviderConfig(config = {}) {
+    const source = normalizePaymentProviderConfig(config);
+    const out = { providers: {} };
+    ["mpesa", "paystack"].forEach((provider) => {
+      out.providers[provider] = {};
+      ["test", "live"].forEach((environment) => {
+        const row = source?.providers?.[provider]?.[environment] || {};
+        const secretConfigured = {};
+        (PROVIDER_SECRET_FIELDS?.[provider] || []).forEach((field) => {
+          secretConfigured[field] = Boolean(row?.secrets?.[field]?.value);
+        });
+        out.providers[provider][environment] = {
+          active: row?.active === true,
+          adapter: safeStr(row?.adapter, 80),
+          callbackUrl: safeStr(row?.callbackUrl, 400),
+          settings: row?.settings && typeof row.settings === "object" ? row.settings : {},
+          secretConfigured,
+        };
+      });
+    });
+    return out;
+  }
+
+  async function getPaymentProviderConfig() {
+    const snap = await paymentProviderConfigRef().get();
+    if (!snap.exists) return normalizePaymentProviderConfig(defaultPaymentProviderConfig());
+    return normalizePaymentProviderConfig(snap.data() || {});
+  }
+
+  function normalizeProviderSettingsPatch(providerKey = "", input = {}) {
+    const provider = normalizeProviderKey(providerKey, "mpesa");
+    const source = input && typeof input === "object" ? input : {};
+    const out = {};
+    if (provider === "paystack") {
+      if (hasOwn(source, "publicKey")) {
+        out.publicKey = safeStr(source?.publicKey, 260);
+      }
+      return out;
+    }
+
+    const shortcode = resolveProvidedString(source, ["shortcode", "shortCode"], 80);
+    if (shortcode.provided) out.shortcode = shortcode.value;
+
+    const paybill = resolveProvidedString(source, ["paybill", "payBill"], 80);
+    if (paybill.provided) out.paybill = paybill.value;
+
+    const initiatorName = resolveProvidedString(source, ["initiatorName"], 160);
+    if (initiatorName.provided) out.initiatorName = initiatorName.value;
+
+    const callbackValidationUrl = resolveProvidedString(
+      source,
+      ["callbackValidationUrl", "validationUrl"],
       400
     );
-    return {
-      provider: "paystack",
+    if (callbackValidationUrl.provided) {
+      out.callbackValidationUrl = callbackValidationUrl.value;
+    }
+
+    const callbackConfirmationUrl = resolveProvidedString(
+      source,
+      ["callbackConfirmationUrl", "confirmationUrl"],
+      400
+    );
+    if (callbackConfirmationUrl.provided) {
+      out.callbackConfirmationUrl = callbackConfirmationUrl.value;
+    }
+
+    const timeoutUrl = resolveProvidedString(source, ["timeoutUrl"], 400);
+    if (timeoutUrl.provided) out.timeoutUrl = timeoutUrl.value;
+
+    const resultUrl = resolveProvidedString(source, ["resultUrl"], 400);
+    if (resultUrl.provided) out.resultUrl = resultUrl.value;
+
+    return out;
+  }
+
+  function normalizeProviderEnvironmentPatch(providerKey = "", envKey = "", input = {}) {
+    const provider = normalizeProviderKey(providerKey, "mpesa");
+    const environment = lower(envKey) === "live" ? "live" : "test";
+    const source = input && typeof input === "object" ? input : {};
+    const out = {
+      provider,
       environment,
+      touched: false,
+    };
+
+    if (typeof source?.active === "boolean") {
+      out.active = source.active;
+      out.touched = true;
+    }
+    if (hasOwn(source, "adapter")) {
+      out.adapter = safeStr(source?.adapter, 80) || resolveProviderAdapter(provider);
+      out.touched = true;
+    }
+    if (hasOwn(source, "callbackUrl")) {
+      out.callbackUrl = safeStr(source?.callbackUrl, 400);
+      out.touched = true;
+    }
+    if (source?.settings && typeof source.settings === "object") {
+      out.settingsPatch = normalizeProviderSettingsPatch(provider, source.settings);
+      if (Object.keys(out.settingsPatch).length) out.touched = true;
+    } else {
+      out.settingsPatch = {};
+    }
+
+    const clearSecrets = Array.isArray(source?.clearSecrets)
+      ? source.clearSecrets.map((field) => safeStr(field, 80)).filter(Boolean)
+      : [];
+    out.clearSecrets = clearSecrets;
+    if (clearSecrets.length) out.touched = true;
+
+    out.secretsPatch = {};
+    if (source?.secrets && typeof source.secrets === "object") {
+      (PROVIDER_SECRET_FIELDS?.[provider] || []).forEach((field) => {
+        if (!hasOwn(source.secrets, field)) return;
+        out.secretsPatch[field] = safeStr(source.secrets[field], 4000);
+        out.touched = true;
+      });
+    }
+
+    return out;
+  }
+
+  function applyProviderConfigPatch(currentConfig = {}, patch = {}, options = {}) {
+    const source = patch && typeof patch === "object" ? patch : {};
+    const current = normalizePaymentProviderConfig(currentConfig);
+    const next = normalizePaymentProviderConfig(current);
+    const encryptionKey = options?.encryptionKey || null;
+    let changed = false;
+
+    ["mpesa", "paystack"].forEach((provider) => {
+      const providerPatch = source?.providers?.[provider];
+      if (!providerPatch || typeof providerPatch !== "object") return;
+
+      ["test", "live"].forEach((environment) => {
+        const envPatch = normalizeProviderEnvironmentPatch(
+          provider,
+          environment,
+          providerPatch?.[environment]
+        );
+        if (!envPatch?.touched) return;
+        const currentRow = next?.providers?.[provider]?.[environment] || {};
+        const row = {
+          ...currentRow,
+          settings:
+            currentRow?.settings && typeof currentRow.settings === "object"
+              ? { ...currentRow.settings }
+              : {},
+          secrets:
+            currentRow?.secrets && typeof currentRow.secrets === "object"
+              ? { ...currentRow.secrets }
+              : {},
+        };
+
+        if (typeof envPatch?.active === "boolean") row.active = envPatch.active;
+        if (hasOwn(envPatch, "adapter")) row.adapter = envPatch.adapter;
+        if (hasOwn(envPatch, "callbackUrl")) row.callbackUrl = envPatch.callbackUrl;
+
+        Object.entries(envPatch?.settingsPatch || {}).forEach(([key, value]) => {
+          row.settings[key] = safeStr(value, 400);
+        });
+
+        (envPatch?.clearSecrets || []).forEach((field) => {
+          if ((PROVIDER_SECRET_FIELDS?.[provider] || []).includes(field)) {
+            delete row.secrets[field];
+          }
+        });
+
+        Object.entries(envPatch?.secretsPatch || {}).forEach(([field, plain]) => {
+          if (!(PROVIDER_SECRET_FIELDS?.[provider] || []).includes(field)) return;
+          if (!plain) {
+            delete row.secrets[field];
+            return;
+          }
+          if (!Buffer.isBuffer(encryptionKey) || encryptionKey.length !== 32) {
+            throw new functions.https.HttpsError(
+              "failed-precondition",
+              "Provider secret encryption key is missing. Set PAYMENT_PROVIDER_CONFIG_ENCRYPTION_KEY."
+            );
+          }
+          const encrypted = encryptSecretValue(plain, encryptionKey);
+          if (!encrypted?.value) {
+            throw new functions.https.HttpsError(
+              "internal",
+              "Provider secret encryption failed"
+            );
+          }
+          row.secrets[field] = encrypted;
+        });
+
+        next.providers[provider][environment] = normalizeProviderConfigEnv(
+          provider,
+          environment,
+          row
+        );
+        changed = true;
+      });
+    });
+
+    return {
+      changed,
+      config: changed
+        ? {
+            ...next,
+            updatedAtMs: nowMs(),
+            updatedByUid: safeStr(options?.updatedByUid, 160),
+            updatedByEmail: safeEmail(options?.updatedByEmail),
+          }
+        : current,
+    };
+  }
+
+  function resolveProviderSecrets({
+    provider = "mpesa",
+    environment = "test",
+    providerConfig = {},
+  } = {}) {
+    const safeProvider = normalizeProviderKey(provider, "mpesa");
+    const safeEnv = lower(environment) === "live" ? "live" : "test";
+    const row = providerConfig?.providers?.[safeProvider]?.[safeEnv] || {};
+    const keyBuffer = resolveProviderConfigMasterKey();
+    const getSecret = (field) => decryptSecretValue(row?.secrets?.[field], keyBuffer);
+
+    if (safeProvider === "paystack") {
+      return {
+        secretKey: getSecret("secretKey") || resolveProviderSecretFromEnv("paystack", safeEnv),
+        webhookSecret:
+          getSecret("webhookSecret") ||
+          safeStr(
+            safeEnv === "live"
+              ? process.env.PAYSTACK_WEBHOOK_SECRET_LIVE
+              : process.env.PAYSTACK_WEBHOOK_SECRET_TEST,
+            2000
+          ),
+        credentials: {
+          publicKey: safeStr(row?.settings?.publicKey, 260),
+        },
+      };
+    }
+
+    const shortcode = safeStr(
+      row?.settings?.shortcode ||
+        row?.settings?.paybill ||
+        (safeEnv === "live" ? process.env.MPESA_SHORTCODE_LIVE : process.env.MPESA_SHORTCODE_TEST),
+      80
+    );
+    const paybill = safeStr(row?.settings?.paybill, 80) || shortcode;
+    return {
+      secretKey: resolveProviderSecretFromEnv("mpesa", safeEnv),
+      webhookSecret: "",
+      credentials: {
+        shortcode,
+        paybill,
+        consumerKey: safeStr(
+          getSecret("consumerKey") ||
+            (safeEnv === "live"
+              ? process.env.MPESA_CONSUMER_KEY_LIVE
+              : process.env.MPESA_CONSUMER_KEY_TEST),
+          300
+        ),
+        consumerSecret: safeStr(
+          getSecret("consumerSecret") ||
+            (safeEnv === "live"
+              ? process.env.MPESA_CONSUMER_SECRET_LIVE
+              : process.env.MPESA_CONSUMER_SECRET_TEST),
+          300
+        ),
+        passkey: safeStr(
+          getSecret("passkey") ||
+            (safeEnv === "live" ? process.env.MPESA_PASSKEY_LIVE : process.env.MPESA_PASSKEY_TEST),
+          400
+        ),
+        initiatorName: safeStr(
+          row?.settings?.initiatorName ||
+            getSecret("initiatorName") ||
+            (safeEnv === "live"
+              ? process.env.MPESA_INITIATOR_NAME_LIVE
+              : process.env.MPESA_INITIATOR_NAME_TEST),
+          160
+        ),
+        initiatorPassword: safeStr(
+          getSecret("initiatorPassword") ||
+            (safeEnv === "live"
+              ? process.env.MPESA_INITIATOR_PASSWORD_LIVE
+              : process.env.MPESA_INITIATOR_PASSWORD_TEST),
+          400
+        ),
+        securityCredential: safeStr(
+          getSecret("securityCredential") ||
+            (safeEnv === "live"
+              ? process.env.MPESA_SECURITY_CREDENTIAL_LIVE
+              : process.env.MPESA_SECURITY_CREDENTIAL_TEST),
+          2000
+        ),
+      },
+    };
+  }
+
+  async function buildProviderStatus(settings = {}, options = {}) {
+    const provider = normalizeProviderKey(
+      options?.providerOverride ||
+        settings?.paymentProvider?.activeProvider ||
+        settings?.provider?.active ||
+        settings?.provider?.name,
+      "mpesa"
+    );
+    const environment =
+      lower(
+        options?.environmentOverride ||
+          settings?.paymentProvider?.providerEnvironment ||
+          settings?.provider?.environment ||
+          "test"
+      ) === "live"
+        ? "live"
+        : "test";
+    const providerConfig = await getPaymentProviderConfig();
+    const row = providerConfig?.providers?.[provider]?.[environment] || {};
+    const secrets = resolveProviderSecrets({ provider, environment, providerConfig });
+    const callbackBaseUrl = safeStr(
+      row?.callbackUrl ||
+        settings?.paymentProvider?.providerCallbackUrl ||
+        settings?.provider?.callbackBaseUrl ||
+        process.env.MPESA_CALLBACK_BASE_URL ||
+        process.env.PAYSTACK_CALLBACK_BASE_URL,
+      400
+    );
+    const adapter = resolveProviderAdapter(provider, row?.adapter);
+    const active =
+      typeof row?.active === "boolean"
+        ? row.active
+        : provider === normalizeProviderKey(settings?.paymentProvider?.activeProvider || provider);
+    const secretConfigured =
+      provider === "paystack"
+        ? Boolean(safeStr(secrets?.secretKey, 2000))
+        : Boolean(
+            safeStr(secrets?.credentials?.consumerKey, 300) &&
+              safeStr(secrets?.credentials?.consumerSecret, 300) &&
+              safeStr(secrets?.credentials?.passkey, 400) &&
+              safeStr(secrets?.credentials?.shortcode, 80)
+          );
+    return {
+      provider,
+      environment,
+      adapter,
+      active,
       callbackBaseUrl,
       callbackConfigured: Boolean(callbackBaseUrl),
-      secretConfigured: Boolean(secretKey),
-      ready: Boolean(secretKey && callbackBaseUrl),
-      secretKey,
+      secretConfigured,
+      ready: Boolean(active && secretConfigured && callbackBaseUrl),
+      secretKey: safeStr(secrets?.secretKey, 2000),
+      webhookSecret: safeStr(secrets?.webhookSecret, 2000),
+      credentials: secrets?.credentials && typeof secrets.credentials === "object" ? secrets.credentials : {},
+      configMasked: maskPaymentProviderConfig(providerConfig),
     };
   }
 
   function buildPublicProviderStatus(status = {}) {
     return {
-      provider: safeStr(status?.provider || "paystack"),
+      provider: safeStr(status?.provider || "mpesa"),
       environment: safeStr(status?.environment || "test"),
+      adapter: safeStr(status?.adapter, 80),
+      active: status?.active !== false,
       callbackBaseUrl: safeStr(status?.callbackBaseUrl),
       callbackConfigured: Boolean(status?.callbackConfigured),
       secretConfigured: Boolean(status?.secretConfigured),
       ready: Boolean(status?.ready),
+      providers: status?.configMasked && typeof status.configMasked === "object" ? status.configMasked : undefined,
     };
   }
 
@@ -1073,7 +1937,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     if (!status?.secretConfigured && !status?.callbackConfigured) {
       return new functions.https.HttpsError(
         "failed-precondition",
-        "Paystack secret key and callback URL are not configured yet",
+        "Provider secret key and callback URL are not configured yet",
         {
           reason: "provider_config_missing",
           providerStatus: publicStatus,
@@ -1083,7 +1947,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     if (!status?.secretConfigured) {
       return new functions.https.HttpsError(
         "failed-precondition",
-        "Paystack secret key is not configured yet",
+        "Provider secret key is not configured yet",
         {
           reason: "provider_secret_missing",
           providerStatus: publicStatus,
@@ -1281,6 +2145,412 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     };
   }
 
+  function darajaBaseUrlForEnvironment(environment = "test") {
+    return lower(environment) === "live" ? DARAJA_BASE_URLS.live : DARAJA_BASE_URLS.test;
+  }
+
+  function buildDarajaTimestamp(date = new Date()) {
+    const yyyy = date.getUTCFullYear();
+    const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(date.getUTCDate()).padStart(2, "0");
+    const hh = String(date.getUTCHours()).padStart(2, "0");
+    const min = String(date.getUTCMinutes()).padStart(2, "0");
+    const sec = String(date.getUTCSeconds()).padStart(2, "0");
+    return `${yyyy}${mm}${dd}${hh}${min}${sec}`;
+  }
+
+  function parseDarajaTransactionDate(value = "") {
+    const digits = safeStr(value, 40).replace(/\D+/g, "");
+    if (digits.length !== 14) return 0;
+    const yyyy = Number(digits.slice(0, 4));
+    const mm = Number(digits.slice(4, 6));
+    const dd = Number(digits.slice(6, 8));
+    const hh = Number(digits.slice(8, 10));
+    const min = Number(digits.slice(10, 12));
+    const sec = Number(digits.slice(12, 14));
+    const ms = Date.UTC(yyyy, Math.max(0, mm - 1), dd, hh, min, sec);
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  async function getDarajaAccessToken(providerStatus = {}) {
+    const consumerKey = safeStr(providerStatus?.credentials?.consumerKey, 300);
+    const consumerSecret = safeStr(providerStatus?.credentials?.consumerSecret, 300);
+    if (!consumerKey || !consumerSecret) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Daraja consumer credentials are not configured"
+      );
+    }
+    const basic = Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64");
+    const response = await fetch(
+      `${darajaBaseUrlForEnvironment(providerStatus?.environment)}/oauth/v1/generate?grant_type=client_credentials`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Basic ${basic}`,
+        },
+      }
+    );
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new Error("Daraja token endpoint returned invalid JSON");
+    }
+    const token = safeStr(payload?.access_token, 2000);
+    if (!response.ok || !token) {
+      throw new Error(
+        safeStr(
+          payload?.error_description ||
+            payload?.errorMessage ||
+            payload?.error ||
+            `Daraja token request failed (${response.status})`,
+          300
+        ) || "Daraja token request failed"
+      );
+    }
+    return token;
+  }
+
+  async function callDaraja({
+    providerStatus = {},
+    path = "/",
+    method = "POST",
+    body = null,
+    accessToken = "",
+  } = {}) {
+    const token = safeStr(accessToken, 2000) || (await getDarajaAccessToken(providerStatus));
+    const baseUrl = darajaBaseUrlForEnvironment(providerStatus?.environment);
+    const response = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new Error(`Daraja returned unreadable JSON (${response.status})`);
+    }
+    if (!response.ok) {
+      throw new Error(
+        safeStr(
+          payload?.errorMessage ||
+            payload?.ResponseDescription ||
+            payload?.error_description ||
+            `Daraja request failed (${response.status})`,
+          300
+        ) || "Daraja request failed"
+      );
+    }
+    return payload;
+  }
+
+  function buildDarajaWebhookUrl({
+    callbackBaseUrl = "",
+    reference = "",
+    requestId = "",
+    paymentId = "",
+  } = {}) {
+    const safeBaseUrl = safeStr(callbackBaseUrl, 600).replace(/\/+$/, "");
+    if (!safeBaseUrl) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Daraja callback URL is not configured"
+      );
+    }
+    const url = new URL(`${safeBaseUrl}/darajaWebhook`);
+    if (safeStr(reference, 160)) url.searchParams.set("reference", safeStr(reference, 160));
+    if (safeStr(requestId, 180)) url.searchParams.set("requestId", safeStr(requestId, 180));
+    if (safeStr(paymentId, 180)) url.searchParams.set("paymentId", safeStr(paymentId, 180));
+    return url.toString();
+  }
+
+  async function initializeDarajaStkPush({
+    providerStatus = {},
+    amount = 0,
+    reference = "",
+    callbackUrl = "",
+    phoneNumber = "",
+    metadata = null,
+  } = {}) {
+    const shortcode = safeStr(
+      providerStatus?.credentials?.shortcode || providerStatus?.credentials?.paybill,
+      80
+    );
+    const passkey = safeStr(providerStatus?.credentials?.passkey, 400);
+    const phone = normalizePhoneNumber(phoneNumber);
+    if (!shortcode || !passkey || !phone) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Daraja shortcode, passkey, and phone number are required"
+      );
+    }
+    const timestamp = buildDarajaTimestamp();
+    const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString("base64");
+    const meta = metadata && typeof metadata === "object" ? metadata : {};
+    const accountReference =
+      safeStr(meta?.requestId || meta?.paymentId || reference, 60) || safeStr(reference, 60);
+    const transactionDesc =
+      safeStr(meta?.paymentLabel || meta?.paymentType || "MAJUU payment", 120) || "MAJUU payment";
+    return callDaraja({
+      providerStatus,
+      path: "/mpesa/stkpush/v1/processrequest",
+      method: "POST",
+      body: {
+        BusinessShortCode: shortcode,
+        Password: password,
+        Timestamp: timestamp,
+        TransactionType: "CustomerPayBillOnline",
+        Amount: Math.max(1, roundMoney(amount)),
+        PartyA: phone,
+        PartyB: shortcode,
+        PhoneNumber: phone,
+        CallBackURL: safeStr(callbackUrl, 600),
+        AccountReference: accountReference,
+        TransactionDesc: transactionDesc,
+      },
+    });
+  }
+
+  async function queryDarajaStkPush({
+    providerStatus = {},
+    checkoutRequestId = "",
+  } = {}) {
+    const shortcode = safeStr(
+      providerStatus?.credentials?.shortcode || providerStatus?.credentials?.paybill,
+      80
+    );
+    const passkey = safeStr(providerStatus?.credentials?.passkey, 400);
+    const safeCheckoutRequestId = safeStr(checkoutRequestId, 200);
+    if (!shortcode || !passkey || !safeCheckoutRequestId) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Daraja checkout context is incomplete"
+      );
+    }
+    const timestamp = buildDarajaTimestamp();
+    const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString("base64");
+    return callDaraja({
+      providerStatus,
+      path: "/mpesa/stkpushquery/v1/query",
+      method: "POST",
+      body: {
+        BusinessShortCode: shortcode,
+        Password: password,
+        Timestamp: timestamp,
+        CheckoutRequestID: safeCheckoutRequestId,
+      },
+    });
+  }
+
+  function summarizeDarajaVerification({
+    payload = {},
+    reference = "",
+    fallbackAmountMinor = 0,
+    source = "query",
+  } = {}) {
+    const body = payload?.Body?.stkCallback && typeof payload.Body.stkCallback === "object"
+      ? payload.Body.stkCallback
+      : {};
+    const metadataRows = Array.isArray(body?.CallbackMetadata?.Item)
+      ? body.CallbackMetadata.Item
+      : [];
+    const metadata = metadataRows.reduce((acc, item) => {
+      const key = safeStr(item?.Name, 120);
+      if (!key) return acc;
+      acc[key] = item?.Value;
+      return acc;
+    }, {});
+    const resultCode = Number(
+      source === "webhook" ? body?.ResultCode : payload?.ResultCode
+    );
+    const status =
+      resultCode === 0
+        ? "success"
+        : resultCode >= 0
+          ? "failed"
+          : "pending";
+    const amountMinor = moneyToMinorUnits(
+      source === "webhook" ? metadata?.Amount : 0,
+      "KES"
+    );
+    const paidAtMs = parseDarajaTransactionDate(metadata?.TransactionDate);
+    return {
+      id: safeStr(
+        source === "webhook" ? body?.CheckoutRequestID : payload?.CheckoutRequestID,
+        200
+      ),
+      domain: "daraja",
+      status,
+      reference: safeStr(reference, 120),
+      amount: amountMinor > 0 ? amountMinor : roundMoney(fallbackAmountMinor),
+      currency: "KES",
+      paidAt: paidAtMs ? new Date(paidAtMs).toISOString() : "",
+      gatewayResponse: safeStr(
+        source === "webhook" ? body?.ResultDesc : payload?.ResultDesc || payload?.ResponseDescription,
+        180
+      ),
+      channel: "mpesa",
+      fees: 0,
+      customerEmail: "",
+      authorization: {
+        mpesaReceiptNumber: safeStr(metadata?.MpesaReceiptNumber, 120),
+        phoneNumber: safeStr(metadata?.PhoneNumber, 40),
+        merchantRequestId: safeStr(body?.MerchantRequestID || payload?.MerchantRequestID, 200),
+        checkoutRequestId: safeStr(body?.CheckoutRequestID || payload?.CheckoutRequestID, 200),
+      },
+    };
+  }
+
+  function summarizeDarajaRefund({
+    requestId = "",
+    amountMinor = 0,
+    providerReference = "",
+  } = {}) {
+    return {
+      refundId: safeStr(requestId || providerReference, 120),
+      transactionId: safeStr(providerReference, 120),
+      status: "provider_retry_needed",
+      currency: "KES",
+      amount: roundMoney(amountMinor),
+    };
+  }
+
+  async function initializeProviderTransaction({
+    providerStatus = {},
+    email = "",
+    amountMinor = 0,
+    currency = "KES",
+    reference = "",
+    callbackUrl = "",
+    metadata = null,
+    phoneNumber = "",
+  } = {}) {
+    if (providerStatus?.provider === "paystack") {
+      return initializePaystackTransaction({
+        email,
+        amountMinor,
+        currency,
+        reference,
+        callbackUrl,
+        metadata,
+        secretKey: providerStatus?.secretKey,
+      });
+    }
+    return initializeDarajaStkPush({
+      providerStatus,
+      amount: roundMoney(amountMinor / 100),
+      reference,
+      callbackUrl,
+      phoneNumber,
+      metadata,
+    });
+  }
+
+  async function verifyProviderTransaction({
+    providerStatus = {},
+    reference = "",
+    attemptData = {},
+    webhookPayload = null,
+    expectedAmountMinor = 0,
+  } = {}) {
+    if (providerStatus?.provider === "paystack") {
+      return verifyPaystackTransaction(reference, providerStatus.secretKey);
+    }
+
+    if (webhookPayload && typeof webhookPayload === "object") {
+      const summary = summarizeDarajaVerification({
+        payload: webhookPayload,
+        source: "webhook",
+        reference,
+        fallbackAmountMinor: expectedAmountMinor,
+      });
+      return { data: summary, _summaryType: "daraja" };
+    }
+
+    const checkoutRequestId = safeStr(
+      attemptData?.providerInitializeResult?.CheckoutRequestID ||
+        attemptData?.providerCheckoutRequestId ||
+        attemptData?.darajaCheckoutRequestId,
+      200
+    );
+    if (!checkoutRequestId) {
+      throw new Error("Daraja checkout request ID is missing for verification");
+    }
+    return queryDarajaStkPush({
+      providerStatus,
+      checkoutRequestId,
+    });
+  }
+
+  async function createProviderRefund({
+    providerStatus = {},
+    transaction = "",
+    amountMinor = 0,
+    merchantNote = "",
+    customerNote = "",
+    requestId = "",
+  } = {}) {
+    if (providerStatus?.provider === "paystack") {
+      return createPaystackRefund({
+        transaction,
+        amountMinor,
+        merchantNote,
+        customerNote,
+        secretKey: providerStatus?.secretKey,
+      });
+    }
+    return summarizeDarajaRefund({
+      requestId,
+      amountMinor,
+      providerReference: transaction,
+    });
+  }
+
+  function summarizeProviderVerification({
+    provider = "",
+    payload = {},
+    reference = "",
+    fallbackAmountMinor = 0,
+  } = {}) {
+    const safeProvider = normalizeProviderKey(provider, "mpesa");
+    let summary = null;
+    if (safeProvider === "paystack") {
+      summary = summarizePaystackVerification(payload);
+    } else if (payload?._summaryType === "daraja" && payload?.data) {
+      summary = payload.data;
+    } else {
+      summary = summarizeDarajaVerification({
+        payload,
+        reference,
+        fallbackAmountMinor,
+        source: "query",
+      });
+    }
+    return {
+      ...(summary && typeof summary === "object" ? summary : {}),
+      provider: safeProvider,
+    };
+  }
+
+  function summarizeProviderRefund(provider = "", payload = {}) {
+    const safeProvider = normalizeProviderKey(provider, "mpesa");
+    if (safeProvider === "paystack") return summarizePaystackRefund(payload);
+    return payload && typeof payload === "object"
+      ? {
+          refundId: safeStr(payload?.refundId, 120),
+          transactionId: safeStr(payload?.transactionId, 120),
+          status: lower(payload?.status || "provider_retry_needed"),
+          currency: normalizeCurrency(payload?.currency || "KES"),
+          amount: roundMoney(payload?.amount),
+        }
+      : summarizeDarajaRefund({});
+  }
+
   function buildPaymentShareToken() {
     return crypto.randomBytes(20).toString("hex");
   }
@@ -1334,7 +2604,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
         paymentLabel: "Unlock request payment",
         finalUserPayable: roundMoney(amount),
         currency: normalizeCurrency(currency),
-        provider: "paystack",
+        provider: "pending",
         environment: "pending",
         createdAtMs: createdMs,
       },
@@ -1551,6 +2821,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     payment = {},
     transactionReference = "",
     paidAtMs = 0,
+    paymentMethod = "",
   } = {}) {
     if (lower(requestData?.paymentFlowType) !== "full_package_unlock") return null;
 
@@ -1585,7 +2856,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       (newlyPaidItems.some((item) => !coveredSet.has(fullPackageItemKey(item))) ? 1 : 0);
     const unlockPaymentMeta = {
       status: "paid",
-      method: "paystack",
+      method: safeStr(paymentMethod, 80) || "unknown",
       paidAt: paidAtMs || nowMs(),
       amount: roundMoney(payment?.amount),
       currency: normalizeCurrency(payment?.currency || "KES"),
@@ -1647,14 +2918,23 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     paymentRef = null,
     payerMode = "direct_user",
     payerEmail = "",
+    payerPhone = "",
     callerUid = "",
     appBaseUrl = "",
     returnTo = "",
     draftId = "",
     shareToken = "",
+    idempotencyKey = "",
   } = {}) {
     const settings = await getFinanceSettings();
-    const providerStatus = buildProviderStatus(settings);
+    const providerStatus = await buildProviderStatus(settings, {
+      providerOverride:
+        payment?.paymentMethod ||
+        payment?.financialSnapshot?.provider ||
+        settings?.paymentProvider?.activeProvider,
+      environmentOverride:
+        payment?.financialSnapshot?.environment || settings?.paymentProvider?.providerEnvironment,
+    });
     if (!providerStatus.ready) {
       throw buildCheckoutConfigError(providerStatus);
     }
@@ -1691,6 +2971,48 @@ module.exports = function buildFinanceFoundation(deps = {}) {
         }
       );
     }
+    if (
+      providerStatus.provider === "mpesa" &&
+      normalizeCurrency(payment?.currency || "KES") !== "KES"
+    ) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "M-PESA checkout currently supports KES only."
+      );
+    }
+
+    const payerIdentity =
+      safeStr(callerUid, 180) ||
+      safeStr(requestData?.uid, 180) ||
+      safeEmail(payerEmail) ||
+      normalizePhoneNumber(payerPhone) ||
+      safeStr(shareToken ? hashShareToken(shareToken) : "", 200);
+    const payerFingerprint = hashIdentity(
+      [
+        safeRequestId,
+        safePaymentId,
+        safeStr(payerMode, 80),
+        safeStr(payerIdentity, 220),
+        String(roundMoney(payment?.amount || 0)),
+      ].join("|")
+    );
+    const safeIdempotencyKey = safeStr(idempotencyKey, 180);
+    const normalizedPhoneForCheckout = normalizePhoneNumber(payerPhone || requestData?.phone);
+    if (providerStatus.provider === "mpesa" && !normalizedPhoneForCheckout) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "A valid phone number is required for M-PESA checkout."
+      );
+    }
+    await enforceCheckoutRateLimit({
+      scopeKey: buildCheckoutRateLimitScope({
+        requestId: safeRequestId,
+        paymentId: safePaymentId,
+        payerMode,
+        shareToken,
+        payerIdentity,
+      }),
+    });
 
     const existingAttempt =
       payment?.latestAttempt && typeof payment.latestAttempt === "object"
@@ -1712,6 +3034,69 @@ module.exports = function buildFinanceFoundation(deps = {}) {
         });
       }
     }
+
+    if (safeIdempotencyKey) {
+      const idemSnap = await paymentAttemptsCol(requestId, payment.id)
+        .where("metadata.idempotencyKey", "==", safeIdempotencyKey)
+        .limit(1)
+        .get();
+      if (!idemSnap.empty) {
+        const row = idemSnap.docs[0]?.data() || {};
+        const status = lower(row?.status, 80);
+        const authorizationUrl = safeStr(row?.authorizationUrl, 1000);
+        if (
+          authorizationUrl &&
+          (status === PAYMENT_STATUSES.AWAITING_PAYMENT ||
+            status === PAYMENT_STATUSES.PAYMENT_SESSION_CREATED ||
+            status === "initializing")
+        ) {
+          return {
+            authorizationUrl,
+            reference: safeStr(
+              row?.providerReference || row?.internalReference || row?.paystackReference,
+              120
+            ),
+            attemptId: safeStr(row?.attemptId || idemSnap.docs[0]?.id, 180),
+            reused: true,
+            environment: providerStatus.environment,
+            provider: providerStatus.provider,
+          };
+        }
+      }
+    }
+
+    const duplicateAttempt = await detectDuplicateCheckoutAttempt({
+      requestId: safeRequestId,
+      paymentId: safePaymentId,
+      amount: payment?.amount,
+      payerFingerprint,
+    });
+    if (duplicateAttempt?.type === "already_paid") {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "A payment for this request has already been processed recently.",
+        {
+          reason: "duplicate_paid_transaction",
+          requestId: safeRequestId,
+          paymentId: safePaymentId,
+        }
+      );
+    }
+    if (
+      duplicateAttempt?.type === "in_flight" &&
+      safeStr(duplicateAttempt?.authorizationUrl) &&
+      toNum(duplicateAttempt?.expiresAtMs, 0) > currentMs
+    ) {
+      return {
+        authorizationUrl: safeStr(duplicateAttempt.authorizationUrl, 1000),
+        reference: safeStr(duplicateAttempt.reference, 120),
+        attemptId: safeStr(duplicateAttempt.attemptId, 180),
+        reused: true,
+        environment: providerStatus.environment,
+        provider: providerStatus.provider,
+      };
+    }
+
     const sameResumeContext = existingAttemptRecord
       ? safeStr(existingAttemptRecord?.metadata?.returnTo || "", 600) === safeStr(returnTo, 600) &&
         safeStr(existingAttemptRecord?.metadata?.draftId || "", 160) === safeStr(draftId, 160) &&
@@ -1752,6 +3137,18 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       draftId,
       shareToken,
     });
+    const providerCallbackUrl =
+      providerStatus?.provider === "paystack"
+        ? callbackUrl
+        : buildDarajaWebhookUrl({
+            callbackBaseUrl:
+              providerStatus.callbackBaseUrl ||
+              process.env.PAYMENT_PROVIDER_WEBHOOK_BASE_URL ||
+              process.env.DARAJA_WEBHOOK_BASE_URL,
+            reference,
+            requestId,
+            paymentId: payment.id,
+          });
     const metadata = {
       requestId,
       paymentId: payment.id,
@@ -1763,6 +3160,10 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       requestOwnerUid: safeStr(requestData?.uid),
       partnerId: safeStr(requestData?.assignedPartnerId),
       assignedAdminId: safeStr(requestData?.assignedAdminId),
+      idempotencyKey: safeIdempotencyKey,
+      payerFingerprint: safeStr(payerFingerprint, 160),
+      payerEmail: safeEmail(payerEmail),
+      payerPhoneLast4: safeStr(normalizedPhoneForCheckout, 24).slice(-4),
     };
 
     const baseAttempt = {
@@ -1774,13 +3175,15 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       environment: providerStatus.environment,
       payerMode,
       internalReference: reference,
+      providerReference: reference,
       paystackReference: reference,
+      idempotencyKey: safeIdempotencyKey,
       expectedAmount: roundMoney(payment?.amount),
       expectedAmountMinor: amountMinor,
       expectedCurrency: normalizeCurrency(payment?.currency),
       status: "initializing",
       authorizationUrl: "",
-      callbackUrl,
+      callbackUrl: providerCallbackUrl,
       verificationSummary: null,
       redirectResult: null,
       webhookReceipt: null,
@@ -1806,6 +3209,8 @@ module.exports = function buildFinanceFoundation(deps = {}) {
         expectedCurrency: normalizeCurrency(payment?.currency),
         requestUid: safeStr(requestData?.uid),
         shareTokenHash: shareToken ? hashShareToken(shareToken) : "",
+        payerFingerprint: safeStr(payerFingerprint, 160),
+        idempotencyKey: safeIdempotencyKey,
         status: "initializing",
         createdAt: FieldValue.serverTimestamp(),
         createdAtMs: currentMs,
@@ -1831,17 +3236,31 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     ]);
 
     try {
-      const initPayload = await initializePaystackTransaction({
+      const initPayload = await initializeProviderTransaction({
+        providerStatus,
         email: payerEmail,
         amountMinor,
         currency: payment?.currency,
         reference,
-        callbackUrl,
+        callbackUrl: providerCallbackUrl,
         metadata,
-        secretKey: providerStatus.secretKey,
+        phoneNumber: normalizedPhoneForCheckout,
       });
-      const authorizationUrl = safeStr(initPayload?.data?.authorization_url, 1000);
-      const accessCode = safeStr(initPayload?.data?.access_code, 200);
+      const authorizationUrl =
+        providerStatus.provider === "paystack"
+          ? safeStr(initPayload?.data?.authorization_url, 1000)
+          : callbackUrl;
+      const accessCode =
+        providerStatus.provider === "paystack"
+          ? safeStr(initPayload?.data?.access_code, 200)
+          : safeStr(initPayload?.CheckoutRequestID, 200);
+      const providerReference =
+        providerStatus.provider === "paystack"
+          ? safeStr(reference, 160)
+          : safeStr(
+              initPayload?.CheckoutRequestID || initPayload?.MerchantRequestID || reference,
+              200
+            );
       const expiresAtMs = currentMs + DEFAULT_ATTEMPT_REUSE_WINDOW_MS;
 
       await Promise.all([
@@ -1850,7 +3269,11 @@ module.exports = function buildFinanceFoundation(deps = {}) {
             status: PAYMENT_STATUSES.AWAITING_PAYMENT,
             authorizationUrl,
             accessCode,
-            providerInitializeResult: initPayload?.data || null,
+            providerReference,
+            providerInitializeResult:
+              providerStatus.provider === "paystack"
+                ? initPayload?.data || null
+                : initPayload || null,
             updatedAt: FieldValue.serverTimestamp(),
             updatedAtMs: nowMs(),
             expiresAtMs,
@@ -1878,6 +3301,8 @@ module.exports = function buildFinanceFoundation(deps = {}) {
           {
             authorizationUrl,
             accessCode,
+            providerReference,
+            callbackUrl: providerCallbackUrl,
             status: PAYMENT_STATUSES.AWAITING_PAYMENT,
             updatedAt: FieldValue.serverTimestamp(),
             updatedAtMs: nowMs(),
@@ -1981,10 +3406,14 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     const queueId = safeStr(payment?.payoutState?.queueItemId) || `payout_${payment.id}`;
     const queueRef = topLevelRef(PAYOUT_QUEUE_COLLECTION, queueId);
     const snapshot = payment?.financialSnapshot || payment?.breakdown || {};
-    const missingDestination =
-      profile?.payoutDestinationReady !== true || !profile?.payoutDestination;
-    const queueStatus = missingDestination ? PAYOUT_STATUSES.ON_HOLD : PAYOUT_STATUSES.READY;
-    const holdReason = missingDestination ? "missing_partner_payout_destination" : "";
+    const payoutDestinationReady =
+      profile?.payoutDestinationReady === true && Boolean(profile?.payoutDestination);
+    const queueState = derivePayoutQueueState({
+      requestData,
+      payoutDestinationReady,
+    });
+    const queueStatus = queueState.queueStatus;
+    const holdReason = queueState.holdReason;
     const partnerPayable = Math.max(
       0,
       roundMoney(snapshot?.estimatedNetPartnerPayable || payment?.amount || 0) -
@@ -2008,7 +3437,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       holdReason,
       releaseNotes: "",
       settlementReference: "",
-      payoutDestinationReady: profile?.payoutDestinationReady === true,
+      payoutDestinationReady,
       payoutDestination: profile?.payoutDestination || null,
       createdAt: FieldValue.serverTimestamp(),
       createdAtMs: nowMs(),
@@ -2020,7 +3449,10 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       releasedByRole: "",
       providerMetadata: {
         paymentReference: safeStr(payment?.transactionReference || payment?.latestReference),
-        provider: "paystack",
+        provider: safeStr(
+          payment?.paymentMethod || payment?.financialSnapshot?.provider || "unknown",
+          80
+        ),
       },
       financialSnapshot:
         payment?.financialSnapshot && typeof payment.financialSnapshot === "object"
@@ -2105,9 +3537,15 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     const payment = normalizePaymentRow({ id: paymentSnap.id, ...(paymentSnap.data() || {}) });
     const attemptData = attemptSnap.data() || {};
     const settings = await getFinanceSettings();
-    const providerStatus = buildProviderStatus(settings);
-    const verificationPayload = await verifyPaystackTransaction(safeReference, providerStatus.secretKey);
-    const verificationSummary = summarizePaystackVerification(verificationPayload);
+    const provider = normalizeProviderKey(
+      refData?.provider || attemptData?.provider || settings?.paymentProvider?.activeProvider,
+      "mpesa"
+    );
+    const providerStatus = await buildProviderStatus(settings, {
+      providerOverride: provider,
+      environmentOverride:
+        safeStr(refData?.environment, 40) || safeStr(attemptData?.environment, 40),
+    });
 
     const expectedAmountMinor = roundMoney(
       refData?.expectedAmountMinor || attemptData?.expectedAmountMinor
@@ -2115,10 +3553,24 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     const expectedCurrency = normalizeCurrency(
       refData?.expectedCurrency || attemptData?.expectedCurrency || payment.currency
     );
+    const verificationPayload = await verifyProviderTransaction({
+      providerStatus,
+      reference: safeReference,
+      attemptData,
+      webhookPayload,
+      expectedAmountMinor,
+    });
+    const verificationSummary = summarizeProviderVerification({
+      provider: providerStatus.provider,
+      payload: verificationPayload,
+      reference: safeReference,
+      fallbackAmountMinor: expectedAmountMinor,
+    });
     const amountMatches = verificationSummary.amount === expectedAmountMinor;
     const currencyMatches = verificationSummary.currency === expectedCurrency;
     const referenceMatches = safeStr(verificationSummary.reference) === safeReference;
     const statusMatches = lower(verificationSummary.status) === "success";
+    const statusPending = lower(verificationSummary.status) === "pending";
     const paidAtMs = verificationSummary.paidAt
       ? Date.parse(verificationSummary.paidAt) || nowMs()
       : nowMs();
@@ -2136,9 +3588,24 @@ module.exports = function buildFinanceFoundation(deps = {}) {
         webhookReceipt:
           webhookPayload && typeof webhookPayload === "object"
             ? {
-                event: safeStr(webhookPayload?.event, 120),
-                reference: safeStr(webhookPayload?.data?.reference, 120),
-                transactionId: webhookPayload?.data?.id ?? null,
+                provider: providerStatus.provider,
+                event: safeStr(
+                  webhookPayload?.event ||
+                    webhookPayload?.Body?.stkCallback?.ResultDesc ||
+                    "provider_callback",
+                  160
+                ),
+                reference: safeStr(
+                  webhookPayload?.data?.reference || safeReference,
+                  120
+                ),
+                transactionId:
+                  webhookPayload?.data?.id ??
+                  safeStr(
+                    webhookPayload?.Body?.stkCallback?.CheckoutRequestID,
+                    200
+                  ) ??
+                  null,
                 receivedAtMs: nowMs(),
               }
             : FieldValue.delete(),
@@ -2147,6 +3614,39 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       },
       { merge: true }
     );
+
+    if (statusPending) {
+      await Promise.all([
+        attemptRef.set(
+          {
+            status: PAYMENT_STATUSES.AWAITING_PAYMENT,
+            updatedAt: FieldValue.serverTimestamp(),
+            updatedAtMs: nowMs(),
+          },
+          { merge: true }
+        ),
+        referenceRef.set(
+          {
+            status: PAYMENT_STATUSES.AWAITING_PAYMENT,
+            verificationSummary,
+            updatedAt: FieldValue.serverTimestamp(),
+            updatedAtMs: nowMs(),
+          },
+          { merge: true }
+        ),
+      ]);
+      return {
+        ok: false,
+        pending: true,
+        message: "Payment is still processing. Complete the prompt and retry verification.",
+        requestId,
+        paymentId,
+        status: PAYMENT_STATUSES.AWAITING_PAYMENT,
+        provider: providerStatus.provider,
+        paymentMethod: providerStatus.provider,
+        verificationSummary,
+      };
+    }
 
     if (!referenceMatches || !statusMatches || !amountMatches || !currencyMatches) {
       await Promise.all([
@@ -2202,6 +3702,8 @@ module.exports = function buildFinanceFoundation(deps = {}) {
         requestId,
         paymentId,
         status: PAYMENT_STATUSES.FAILED,
+        provider: providerStatus.provider,
+        paymentMethod: providerStatus.provider,
         verificationSummary,
       };
     }
@@ -2220,6 +3722,8 @@ module.exports = function buildFinanceFoundation(deps = {}) {
         requestId,
         paymentId,
         status: payment.status,
+        provider: providerStatus.provider,
+        paymentMethod: providerStatus.provider,
         verificationSummary,
       };
     }
@@ -2234,9 +3738,15 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       {
         status: nextPaymentStatus,
         transactionReference,
-        providerReference: safeReference,
-        providerTransactionId: verificationSummary.id,
-        paymentMethod: "paystack",
+        providerReference:
+          safeStr(
+            attemptData?.providerReference ||
+              verificationSummary?.authorization?.checkoutRequestId ||
+              safeReference,
+            200
+          ) || safeReference,
+        providerTransactionId: safeStr(verificationSummary.id, 200),
+        paymentMethod: safeStr(providerStatus.provider, 80),
         paidAt: FieldValue.serverTimestamp(),
         paidAtMs,
         providerVerification: verificationSummary,
@@ -2270,6 +3780,35 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       ),
     ]);
 
+    const shareTokenHash = safeStr(refData?.shareTokenHash, 120);
+    if (shareTokenHash) {
+      await Promise.allSettled([
+        topLevelRef(PAYMENT_SHARE_LINKS_COLLECTION, shareTokenHash).set(
+          {
+            status: "paid",
+            paidAt: FieldValue.serverTimestamp(),
+            paidAtMs,
+            usedReference: safeReference,
+            updatedAt: FieldValue.serverTimestamp(),
+            updatedAtMs: nowMs(),
+          },
+          { merge: true }
+        ),
+        paymentRef.set(
+          {
+            shareLink: {
+              tokenHash: shareTokenHash,
+              status: "paid",
+              paidAtMs,
+            },
+            updatedAt: FieldValue.serverTimestamp(),
+            updatedAtMs: nowMs(),
+          },
+          { merge: true }
+        ),
+      ]);
+    }
+
     let flowContext = null;
 
     if (payment.paymentType === PAYMENT_TYPES.UNLOCK_REQUEST) {
@@ -2278,12 +3817,17 @@ module.exports = function buildFinanceFoundation(deps = {}) {
         1,
         720
       );
+      const unlockVisibility = deriveUnlockVisibilityState(requestData);
+      const unlockAutoRefundEligibleAtMs =
+        unlockVisibility.unlockAutoRefundStatus === "pending"
+          ? paidAtMs + unlockAutoRefundHours * 60 * 60 * 1000
+          : 0;
       await requestDocRef(requestId).set(
         {
-          paid: true,
+          paid: unlockVisibility.paid,
           paymentMeta: {
-            status: "paid",
-            method: "paystack",
+            status: unlockVisibility.paymentMetaStatus,
+            method: safeStr(providerStatus.provider, 80),
             paidAt: paidAtMs,
             ref: transactionReference,
             requestId,
@@ -2291,8 +3835,9 @@ module.exports = function buildFinanceFoundation(deps = {}) {
           },
           unlockPaymentId: paymentId,
           unlockPaymentRequestId: requestId,
-          unlockAutoRefundEligibleAtMs: paidAtMs + unlockAutoRefundHours * 60 * 60 * 1000,
-          unlockAutoRefundStatus: "pending",
+          unlockState: unlockVisibility.unlockState,
+          unlockAutoRefundEligibleAtMs,
+          unlockAutoRefundStatus: unlockVisibility.unlockAutoRefundStatus,
           updatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
@@ -2305,6 +3850,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
         payment,
         transactionReference,
         paidAtMs,
+        paymentMethod: providerStatus.provider,
       });
     } else {
       const payout = await createOrUpdatePayoutQueue({
@@ -2319,6 +3865,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
             payment.financialSnapshot && typeof payment.financialSnapshot === "object"
               ? payment.financialSnapshot
               : null,
+          paymentMethod: providerStatus.provider,
           transactionReference,
         },
         paymentRef,
@@ -2385,6 +3932,8 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       paymentId,
       status: nextPaymentStatus,
       paymentType: payment.paymentType,
+      provider: providerStatus.provider,
+      paymentMethod: providerStatus.provider,
       verificationSummary,
       draftId: safeStr(attemptData?.metadata?.draftId || ""),
       returnTo: safeStr(attemptData?.metadata?.returnTo || ""),
@@ -2426,7 +3975,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     }
 
     const settings = await getFinanceSettings();
-    const providerStatus = buildProviderStatus(settings);
+    const providerStatus = await buildProviderStatus(settings);
     const refundRefId = `auto_${unlockPaymentId}`;
     const refundRef = refundDocRef(requestId, refundRefId);
     const refundSnap = await refundRef.get();
@@ -2447,14 +3996,15 @@ module.exports = function buildFinanceFoundation(deps = {}) {
 
     if (providerStatus.secretConfigured && safeStr(payment?.providerTransactionId)) {
       try {
-        const refundPayload = await createPaystackRefund({
+        const refundPayload = await createProviderRefund({
+          providerStatus,
           transaction: safeStr(payment?.providerTransactionId),
           amountMinor: moneyToMinorUnits(payment.amount, payment.currency),
           merchantNote: "Auto-refund after unlock request exceeded start-work timeline",
           customerNote: "Auto-refund processed by system rule",
-          secretKey: providerStatus.secretKey,
+          requestId,
         });
-        providerRefund = summarizePaystackRefund(refundPayload);
+        providerRefund = summarizeProviderRefund(providerStatus.provider, refundPayload);
         if (
           providerRefund?.status &&
           providerRefund.status !== "processed" &&
@@ -2615,7 +4165,80 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     return {
       ok: true,
       settings,
-      providerStatus: buildPublicProviderStatus(buildProviderStatus(settings)),
+      providerStatus: buildPublicProviderStatus(await buildProviderStatus(settings)),
+    };
+  });
+
+  const getPaymentProviderConfigStatus = functions.https.onCall(async (_, context) => {
+    await requireAdminCallerContext(context, {
+      allowManager: true,
+      requiredManagerModule: "finances",
+      allowAssignedAdmin: false,
+    });
+    const [settings, config] = await Promise.all([
+      getFinanceSettings(),
+      getPaymentProviderConfig(),
+    ]);
+    return {
+      ok: true,
+      encryptionReady: Boolean(resolveProviderConfigMasterKey()),
+      config: maskPaymentProviderConfig(config),
+      providerStatus: buildPublicProviderStatus(await buildProviderStatus(settings)),
+    };
+  });
+
+  const savePaymentProviderConfig = functions.https.onCall(async (data, context) => {
+    const caller = await requireAdminCallerContext(context, {
+      allowManager: true,
+      requiredManagerModule: "finances",
+      allowAssignedAdmin: false,
+    });
+    const currentConfig = await getPaymentProviderConfig();
+    const nextPatch =
+      data?.config && typeof data.config === "object"
+        ? data.config
+        : data?.updates && typeof data.updates === "object"
+          ? data.updates
+          : data && typeof data === "object"
+            ? data
+            : {};
+    const result = applyProviderConfigPatch(currentConfig, nextPatch, {
+      encryptionKey: resolveProviderConfigMasterKey(),
+      updatedByUid: caller.callerUid,
+      updatedByEmail: safeEmail(caller?.callerDoc?.email),
+    });
+    const nextConfig = normalizePaymentProviderConfig(result?.config || currentConfig);
+    if (result?.changed) {
+      await paymentProviderConfigRef().set(
+        {
+          ...nextConfig,
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedAtMs: nowMs(),
+          updatedByUid: caller.callerUid,
+          updatedByEmail: safeEmail(caller?.callerDoc?.email),
+        },
+        { merge: true }
+      );
+      await logFinancialAudit({
+        action: "payment_provider_config_updated",
+        actorUid: caller.callerUid,
+        actorRole: caller.callerRole,
+        next: maskPaymentProviderConfig(nextConfig),
+      });
+      await logFinanceManagerActivity(
+        caller,
+        "payment_provider_config_updated",
+        "Payment provider configuration updated",
+        {}
+      );
+    }
+    const settings = await getFinanceSettings();
+    return {
+      ok: true,
+      changed: result?.changed === true,
+      encryptionReady: Boolean(resolveProviderConfigMasterKey()),
+      config: maskPaymentProviderConfig(nextConfig),
+      providerStatus: buildPublicProviderStatus(await buildProviderStatus(settings)),
     };
   });
 
@@ -2675,7 +4298,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       ok: true,
       role: caller.callerRole,
       settings,
-      providerStatus: buildPublicProviderStatus(buildProviderStatus(settings)),
+      providerStatus: buildPublicProviderStatus(await buildProviderStatus(settings)),
     };
   });
 
@@ -2757,6 +4380,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
             paymentRef: unlockPayment.ref,
             payerMode: "direct_user",
             payerEmail: safeEmail(fullPackage.data?.email || caller.callerEmail),
+            payerPhone: safeStr(existingRequest.data?.phone, 40),
             callerUid: caller.callerUid,
             appBaseUrl,
             returnTo,
@@ -2813,6 +4437,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       paymentRef: unlockPayment.ref,
       payerMode: "direct_user",
       payerEmail: safeEmail(fullPackage.data?.email || caller.callerEmail),
+      payerPhone: safeStr(createdRequest.data?.phone, 40),
       callerUid: caller.callerUid,
       appBaseUrl,
       returnTo,
@@ -2874,6 +4499,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       paymentRef: unlockPayment.ref,
       payerMode: "direct_user",
       payerEmail: safeEmail(requestRow.data?.email || caller?.callerDoc?.email),
+      payerPhone: safeStr(requestRow.data?.phone, 40),
       callerUid: caller.callerUid,
       appBaseUrl,
       returnTo,
@@ -2939,7 +4565,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
         routingStatus: "awaiting_route",
         paymentMeta: {
           status: "paid",
-          method: "paystack",
+          method: safeStr(paymentRow.data?.paymentMethod || "unknown", 80),
           paidAt: paymentRow.data.paidAtMs,
           ref: paymentRow.data.transactionReference,
           requestId,
@@ -2969,7 +4595,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       unlockPaymentId,
       paymentMeta: {
         status: "paid",
-        method: "paystack",
+        method: safeStr(paymentRow.data?.paymentMethod || "unknown", 80),
         paidAt: paymentRow.data.paidAtMs,
         ref: paymentRow.data.transactionReference,
       },
@@ -3019,6 +4645,10 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     const serviceFee = roundMoney(
       settings?.inProgressPricing?.allowServiceFeeInput === false ? 0 : data?.serviceFee
     );
+    const requestDiscountPercentage = resolveRequestDiscountPercentage(
+      requestRow.data,
+      data?.requestDiscountPercentage
+    );
     if (officialAmount <= 0) {
       throw new functions.https.HttpsError("invalid-argument", "officialAmount must be greater than zero");
     }
@@ -3027,7 +4657,10 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       officialAmount,
       serviceFee,
       currency: data?.currency || settings?.inProgressPricing?.defaultCurrency || "KES",
+      requestDiscountPercentage,
       requestId,
+      paymentType: PAYMENT_TYPES.IN_PROGRESS,
+      overridePlatformCutEnabled: false,
       partnerId: requestRow.data?.assignedPartnerId,
       assignedAdminId: requestRow.data?.assignedAdminId,
       partnerProfile,
@@ -3067,6 +4700,8 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       refundState: null,
       approvalMeta: null,
       revocationMeta: null,
+      platformCutEnabledGlobal: settings?.inProgressPricing?.platformCutEnabledGlobal !== false,
+      platformCutEnabledRequest: false,
     };
 
     await paymentRef.set(payload);
@@ -3143,6 +4778,21 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     );
     const paymentLabel = safeStr(data?.paymentLabel || payment.paymentLabel, 180);
     const note = cleanParagraph(data?.note ?? payment?.note, 2000);
+    const requestDiscountPercentage = resolveRequestDiscountPercentage(
+      requestRow.data,
+      data?.requestDiscountPercentage ??
+        payment?.breakdown?.requestDiscountPercentage ??
+        payment?.financialSnapshot?.requestDiscountPercentage
+    );
+    const platformCutEnabledGlobal = settings?.inProgressPricing?.platformCutEnabledGlobal !== false;
+    const platformCutEnabledRequest =
+      typeof data?.platformCutEnabled === "boolean"
+        ? data.platformCutEnabled
+        : typeof payment?.platformCutEnabledRequest === "boolean"
+          ? payment.platformCutEnabledRequest
+          : typeof payment?.approvalMeta?.platformCutEnabledRequest === "boolean"
+            ? payment.approvalMeta.platformCutEnabledRequest
+            : platformCutEnabledGlobal;
 
     if (!paymentLabel || officialAmount <= 0) {
       throw new functions.https.HttpsError(
@@ -3155,7 +4805,10 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       officialAmount,
       serviceFee,
       currency: payment.currency || settings?.inProgressPricing?.defaultCurrency || "KES",
+      requestDiscountPercentage,
       requestId,
+      paymentType: PAYMENT_TYPES.IN_PROGRESS,
+      overridePlatformCutEnabled: platformCutEnabledRequest,
       partnerId: requestRow.data?.assignedPartnerId,
       assignedAdminId: requestRow.data?.assignedAdminId,
       partnerProfile,
@@ -3191,7 +4844,13 @@ module.exports = function buildFinanceFoundation(deps = {}) {
           approvedByUid: caller.callerUid,
           approvedByRole: caller.callerRole,
           approvedAtMs: nowMs(),
+          platformCutEnabledGlobal,
+          platformCutEnabledRequest,
+          platformCutEnabledEffective: breakdown?.platformCutEnabled === true,
+          requestDiscountPercentage,
         },
+        platformCutEnabledGlobal,
+        platformCutEnabledRequest,
         updatedAt: FieldValue.serverTimestamp(),
         updatedAtMs: nowMs(),
         revocationMeta: null,
@@ -3318,7 +4977,12 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     let requestRow = null;
     let paymentRow = null;
     let payerEmail = "";
+    let payerPhone = "";
     let payerMode = "direct_user";
+    const idempotencyKey = safeStr(
+      data?.idempotencyKey || context?.rawRequest?.headers?.["idempotency-key"],
+      180
+    );
 
     if (shareToken) {
       const share = await getShareLinkData(shareToken);
@@ -3326,6 +4990,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       paymentRow = await loadPaymentData(requestRow.requestId, share.data?.paymentId);
       payerMode = "shared_full_link";
       payerEmail = safeEmail(data?.email || "shared-link@majuu.app");
+      payerPhone = normalizePhoneNumber(data?.phoneNumber || data?.phone);
 
       const payment = paymentRow.data;
       const expiredAtMs = toNum(share.data?.expiresAtMs, 0);
@@ -3355,6 +5020,7 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       const caller = await requireRequestOwner(context, requestRow.data);
       paymentRow = await loadPaymentData(requestId, paymentId);
       payerEmail = safeEmail(requestRow.data?.email || caller?.callerDoc?.email);
+      payerPhone = normalizePhoneNumber(data?.phoneNumber || data?.phone || requestRow.data?.phone);
     }
 
     const session = await createOrReuseCheckoutSession({
@@ -3367,10 +5033,12 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       paymentRef: paymentRow.ref,
       payerMode,
       payerEmail,
+      payerPhone,
       callerUid: shareToken ? "shared_link" : safeStr(context?.auth?.uid),
       appBaseUrl,
       returnTo,
       shareToken,
+      idempotencyKey,
     });
 
     return {
@@ -3461,7 +5129,11 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       ),
     ]);
 
-    const baseUrl = safeStr(appBaseUrl, 400).replace(/\/+$/, "");
+    const configuredBaseUrl = safeStr(
+      settings?.paymentProvider?.paymentLinkBaseUrl || settings?.provider?.paymentLinkBaseUrl,
+      400
+    );
+    const baseUrl = safeStr(configuredBaseUrl || appBaseUrl, 400).replace(/\/+$/, "");
     const shareUrl = baseUrl
       ? `${baseUrl}/pay/shared/${encodeURIComponent(shareToken)}`
       : `/pay/shared/${encodeURIComponent(shareToken)}`;
@@ -3499,22 +5171,42 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       normalizeCurrency(share.data?.currency || payment.currency) ===
       normalizeCurrency(payment.currency);
     const tokenHashMatches = safeStr(payment?.shareLink?.tokenHash) === safeStr(share.tokenHash);
-    const invalid =
-      lower(share.data?.status) !== "active" ||
-      isExpired ||
-      payment.paymentType !== PAYMENT_TYPES.IN_PROGRESS ||
-      isTerminalPaymentStatus(payment.status) ||
+    const shareStatus = lower(share.data?.status, 80);
+    const alreadyPaid =
+      shareStatus === "paid" ||
       payment.status === PAYMENT_STATUSES.HELD ||
       payment.status === PAYMENT_STATUSES.SETTLED ||
       payment.status === PAYMENT_STATUSES.REFUNDED ||
       payment.status === PAYMENT_STATUSES.AUTO_REFUNDED ||
+      payment.status === PAYMENT_STATUSES.PAID;
+    const invalid =
+      shareStatus !== "active" ||
+      isExpired ||
+      payment.paymentType !== PAYMENT_TYPES.IN_PROGRESS ||
+      isTerminalPaymentStatus(payment.status) ||
+      alreadyPaid ||
       !amountMatches ||
       !currencyMatches ||
       !tokenHashMatches;
+    const reason = alreadyPaid
+      ? "already_paid"
+      : isExpired
+        ? "expired"
+        : shareStatus !== "active"
+          ? "inactive"
+          : !amountMatches || !currencyMatches || !tokenHashMatches
+            ? "mismatch"
+            : payment.paymentType !== PAYMENT_TYPES.IN_PROGRESS
+              ? "unsupported_payment_type"
+              : invalid
+                ? "invalid"
+                : "";
 
     return {
       ok: true,
       valid: !invalid,
+      alreadyPaid,
+      reason,
       requestId: requestRow.requestId,
       paymentId: paymentRow.paymentId,
       expiresAtMs: expiredAtMs,
@@ -3524,6 +5216,15 @@ module.exports = function buildFinanceFoundation(deps = {}) {
         amount: payment.amount,
         currency: payment.currency,
         status: payment.status,
+        note: cleanParagraph(payment?.note, 600),
+        discountAmount: roundMoney(
+          payment?.breakdown?.discountAmount ??
+            payment?.financialSnapshot?.breakdown?.discountAmount
+        ),
+        discountAppliedPercentage: roundRate(
+          payment?.breakdown?.discountAppliedPercentage ??
+            payment?.financialSnapshot?.breakdown?.discountAppliedPercentage
+        ),
         partnerName: safeStr(requestRow.data?.assignedPartnerName),
       },
     };
@@ -3794,7 +5495,14 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     ]);
 
     const settings = await getFinanceSettings();
-    const providerStatus = buildProviderStatus(settings);
+    const providerStatus = await buildProviderStatus(settings, {
+      providerOverride:
+        payment?.paymentMethod ||
+        payment?.financialSnapshot?.provider ||
+        settings?.paymentProvider?.activeProvider,
+      environmentOverride:
+        payment?.financialSnapshot?.environment || settings?.paymentProvider?.providerEnvironment,
+    });
     let providerRefund = null;
     let finalRefundStatus = REFUND_STATUSES.REFUNDED;
     let finalPaymentStatus = PAYMENT_STATUSES.REFUNDED;
@@ -3802,14 +5510,15 @@ module.exports = function buildFinanceFoundation(deps = {}) {
 
     if (providerStatus.secretConfigured && safeStr(payment?.providerTransactionId)) {
       try {
-        const refundPayload = await createPaystackRefund({
+        const refundPayload = await createProviderRefund({
+          providerStatus,
           transaction: safeStr(payment.providerTransactionId),
           amountMinor: moneyToMinorUnits(payment.amount, payment.currency),
           merchantNote: note,
           customerNote: note,
-          secretKey: providerStatus.secretKey,
+          requestId,
         });
-        providerRefund = summarizePaystackRefund(refundPayload);
+        providerRefund = summarizeProviderRefund(providerStatus.provider, refundPayload);
         if (
           providerRefund?.status &&
           providerRefund.status !== "processed" &&
@@ -4172,6 +5881,138 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     }
   );
 
+  function readRequestRawBody(req = {}) {
+    if (req?.rawBody && Buffer.isBuffer(req.rawBody)) return req.rawBody;
+    return Buffer.from(JSON.stringify(req?.body || {}));
+  }
+
+  function resolveWebhookRequestIp(req = {}) {
+    const forwarded = safeStr(req?.headers?.["x-forwarded-for"], 500);
+    const candidate = forwarded ? forwarded.split(",")[0] : req?.ip || req?.socket?.remoteAddress;
+    const ip = safeStr(candidate, 120).replace(/^::ffff:/i, "");
+    return ip;
+  }
+
+  function darajaIpAllowed(ip = "") {
+    const safeIp = safeStr(ip, 120).replace(/^::ffff:/i, "");
+    if (!safeIp) return false;
+    if (DARAJA_WEBHOOK_IPS.includes(safeIp)) return true;
+    return false;
+  }
+
+  async function resolveReferenceByProviderRef(providerReference = "") {
+    const safeProviderReference = safeStr(providerReference, 220);
+    if (!safeProviderReference) return "";
+    const snap = await db
+      .collection(PAYMENT_PROVIDER_REFS_COLLECTION)
+      .where("providerReference", "==", safeProviderReference)
+      .limit(1)
+      .get();
+    if (snap.empty) return "";
+    return safeStr(snap.docs[0]?.id, 120);
+  }
+
+  async function resolvePaystackStatusForWebhook({
+    settings = {},
+    signature = "",
+    rawBody = Buffer.from(""),
+  } = {}) {
+    const safeSignature = safeStr(signature, 300).toLowerCase();
+    if (!safeSignature) return null;
+    const envOrder = Array.from(
+      new Set([
+        lower(settings?.paymentProvider?.providerEnvironment, 20) === "live" ? "live" : "test",
+        "live",
+        "test",
+      ])
+    );
+    for (const environment of envOrder) {
+      const status = await buildProviderStatus(settings, {
+        providerOverride: "paystack",
+        environmentOverride: environment,
+      });
+      if (!status?.secretConfigured) continue;
+      const signatureSecret = safeStr(status?.webhookSecret || status?.secretKey, 2000);
+      if (!signatureSecret) continue;
+      const expectedSignature = crypto
+        .createHmac("sha512", signatureSecret)
+        .update(rawBody)
+        .digest("hex")
+        .toLowerCase();
+      if (safeSignature === expectedSignature) {
+        return status;
+      }
+    }
+    return null;
+  }
+
+  async function markProviderCallbackFailure({
+    reference = "",
+    reason = "",
+    callbackPayload = null,
+  } = {}) {
+    const safeReference = safeStr(reference, 120);
+    if (!safeReference) return;
+    const refSnap = await topLevelRef(PAYMENT_PROVIDER_REFS_COLLECTION, safeReference).get();
+    if (!refSnap.exists) return;
+    const refData = refSnap.data() || {};
+    const requestId = safeStr(refData?.requestId, 180);
+    const paymentId = safeStr(refData?.paymentId, 180);
+    const attemptId = safeStr(refData?.attemptId, 180);
+    if (!requestId || !paymentId || !attemptId) return;
+
+    const [paymentSnap, attemptSnap] = await Promise.all([
+      paymentDocRef(requestId, paymentId).get(),
+      paymentAttemptsCol(requestId, paymentId).doc(attemptId).get(),
+    ]);
+    if (!paymentSnap.exists || !attemptSnap.exists) return;
+    const payment = normalizePaymentRow({ id: paymentSnap.id, ...(paymentSnap.data() || {}) });
+    if (
+      payment.status === PAYMENT_STATUSES.PAID ||
+      payment.status === PAYMENT_STATUSES.HELD ||
+      isTerminalPaymentStatus(payment.status)
+    ) {
+      return;
+    }
+    await Promise.allSettled([
+      paymentSnap.ref.set(
+        {
+          status: PAYMENT_STATUSES.FAILED,
+          failureReason: safeStr(reason, 260),
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedAtMs: nowMs(),
+        },
+        { merge: true }
+      ),
+      attemptSnap.ref.set(
+        {
+          status: PAYMENT_STATUSES.FAILED,
+          failureReason: safeStr(reason, 260),
+          webhookReceipt:
+            callbackPayload && typeof callbackPayload === "object"
+              ? {
+                  provider: safeStr(refData?.provider || "unknown", 40),
+                  payload: callbackPayload,
+                  receivedAtMs: nowMs(),
+                }
+              : FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedAtMs: nowMs(),
+        },
+        { merge: true }
+      ),
+      refSnap.ref.set(
+        {
+          status: PAYMENT_STATUSES.FAILED,
+          failureReason: safeStr(reason, 260),
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedAtMs: nowMs(),
+        },
+        { merge: true }
+      ),
+    ]);
+  }
+
   const paystackWebhook = functions.region(REGION).https.onRequest(async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method not allowed");
@@ -4179,25 +6020,6 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     }
 
     const settings = await getFinanceSettings();
-    const providerStatus = buildProviderStatus(settings);
-    if (!providerStatus.secretConfigured) {
-      res.status(503).send("Provider not configured");
-      return;
-    }
-
-    const signature = safeStr(req.headers["x-paystack-signature"], 300).toLowerCase();
-    const expectedSignature = crypto
-      .createHmac("sha512", providerStatus.secretKey)
-      .update(req.rawBody || Buffer.from(JSON.stringify(req.body || {})))
-      .digest("hex")
-      .toLowerCase();
-
-    if (!signature || signature !== expectedSignature) {
-      logger.warn("invalid paystack webhook signature");
-      res.status(401).send("invalid signature");
-      return;
-    }
-
     const eventPayload = req.body && typeof req.body === "object" ? req.body : {};
     const eventName = safeStr(eventPayload?.event, 120) || "unknown";
     const reference = safeStr(eventPayload?.data?.reference, 120);
@@ -4206,6 +6028,17 @@ module.exports = function buildFinanceFoundation(deps = {}) {
       reference ||
       crypto.randomBytes(8).toString("hex");
     const lockId = `paystack_${eventName}_${providerEventId}`;
+    const signature = safeStr(req.headers["x-paystack-signature"], 300).toLowerCase();
+    const providerStatus = await resolvePaystackStatusForWebhook({
+      settings,
+      signature,
+      rawBody: readRequestRawBody(req),
+    });
+    if (!providerStatus) {
+      logger.warn("invalid paystack webhook signature");
+      res.status(401).send("invalid signature");
+      return;
+    }
 
     if (!(await claimEventLock(lockId, "paystack_webhook"))) {
       res.status(200).json({ ok: true, duplicate: true });
@@ -4229,6 +6062,12 @@ module.exports = function buildFinanceFoundation(deps = {}) {
           source: "paystack_webhook",
           webhookPayload: eventPayload,
         });
+      } else if (reference && eventName === "charge.failed") {
+        await markProviderCallbackFailure({
+          reference,
+          reason: "charge_failed",
+          callbackPayload: eventPayload,
+        });
       }
       res.status(200).json({ ok: true });
     } catch (error) {
@@ -4241,8 +6080,91 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     }
   });
 
-  return {
+  const darajaWebhook = functions.region(REGION).https.onRequest(async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).send("Method not allowed");
+      return;
+    }
+    const requestIp = resolveWebhookRequestIp(req);
+    if (!darajaIpAllowed(requestIp)) {
+      logger.warn("daraja webhook rejected due to ip mismatch", { requestIp });
+      res.status(401).send("invalid source");
+      return;
+    }
+
+    const payload = req.body && typeof req.body === "object" ? req.body : {};
+    const callback = payload?.Body?.stkCallback && typeof payload.Body.stkCallback === "object"
+      ? payload.Body.stkCallback
+      : {};
+    const resultCode = Number(callback?.ResultCode);
+    const checkoutRequestId = safeStr(callback?.CheckoutRequestID, 220);
+    const merchantRequestId = safeStr(callback?.MerchantRequestID, 220);
+    let reference = safeStr(req?.query?.reference, 120);
+    if (!reference && checkoutRequestId) {
+      reference = await resolveReferenceByProviderRef(checkoutRequestId);
+    }
+    if (!reference && merchantRequestId) {
+      reference = await resolveReferenceByProviderRef(merchantRequestId);
+    }
+
+    const providerEventId = checkoutRequestId || merchantRequestId || reference || crypto.randomBytes(8).toString("hex");
+    const lockId = `daraja_stk_${providerEventId}_${Number.isFinite(resultCode) ? resultCode : "unknown"}`;
+    if (!(await claimEventLock(lockId, "daraja_webhook"))) {
+      res.status(200).json({ ok: true, duplicate: true });
+      return;
+    }
+
+    await topLevelRef(PAYMENT_PROVIDER_EVENTS_COLLECTION, lockId).set({
+      provider: "mpesa",
+      event: "stk_callback",
+      reference,
+      transactionId: checkoutRequestId || merchantRequestId,
+      payload,
+      sourceIp: requestIp,
+      createdAt: FieldValue.serverTimestamp(),
+      createdAtMs: nowMs(),
+    });
+
+    if (!reference) {
+      logger.warn("daraja webhook missing linkage reference", {
+        checkoutRequestId,
+        merchantRequestId,
+      });
+      res.status(200).json({ ok: true, unresolved: true });
+      return;
+    }
+
+    try {
+      if (resultCode === 0) {
+        await finalizeSuccessfulPayment({
+          reference,
+          source: "daraja_webhook",
+          webhookPayload: payload,
+        });
+      } else {
+        await markProviderCallbackFailure({
+          reference,
+          reason: safeStr(callback?.ResultDesc || "daraja_payment_failed", 260),
+          callbackPayload: payload,
+        });
+      }
+      res.status(200).json({ ok: true });
+    } catch (error) {
+      logger.error("daraja webhook processing failed", {
+        reference,
+        checkoutRequestId,
+        merchantRequestId,
+        resultCode,
+        error: error?.message || String(error),
+      });
+      res.status(200).json({ ok: false, retrySafe: true });
+    }
+  });
+
+  const api = {
     saveFinanceSettings,
+    getPaymentProviderConfigStatus,
+    savePaymentProviderConfig,
     savePartnerFinancialProfile,
     getFinanceEnvironmentStatus,
     createFullPackageUnlockCheckoutSession,
@@ -4262,5 +6184,16 @@ module.exports = function buildFinanceFoundation(deps = {}) {
     runUnlockAutoRefundSweep,
     sweepUnlockPaymentAutoRefunds,
     paystackWebhook,
+    darajaWebhook,
   };
+  Object.defineProperty(api, "__test", {
+    value: {
+      deriveUnlockVisibilityState,
+      derivePayoutQueueState,
+    },
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+  return api;
 };

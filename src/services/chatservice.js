@@ -26,7 +26,6 @@
 //   NOTHING stays stuck in pending and staff WILL see it in chat once assigned.
 
 import {
-  addDoc,
   collection,
   doc,
   getDoc,
@@ -41,7 +40,8 @@ import {
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { createStaffNotification, createUserNotification } from "./notificationDocs";
-import { sendPushToAdmin } from "./pushServerClient";
+import { mirrorPublishedChatAttachment, mirrorPublishedChatPdf } from "./documentEngineService";
+import { sendMessageCommand } from "./requestcommandservice";
 
 /* -------------------- Paths -------------------- */
 const reqRef = (requestId) => doc(db, "serviceRequests", String(requestId));
@@ -74,24 +74,65 @@ function normalizeRole(role) {
 
 function normalizeType(type) {
   const t = safeStr(type).toLowerCase();
-  if (!["text", "pdf", "bundle"].includes(t)) throw new Error("Invalid type");
+  if (t === "pdf") return "document";
+  if (!["text", "document", "image", "photo", "bundle"].includes(t)) throw new Error("Invalid type");
   return t;
 }
 
-/**
- * Dumb PDF meta (no Storage yet).
- * Example:
- * { name: "passport.pdf", size: 123456, mime: "application/pdf", note: "..." }
- */
-function normalizePdfMeta(pdfMeta) {
-  if (!pdfMeta) return null;
-  const name = safeStr(pdfMeta.name);
-  const mime = safeStr(pdfMeta.mime || pdfMeta.type || "application/pdf");
-  const size = Number(pdfMeta.size || 0) || 0;
-  const note = safeStr(pdfMeta.note || "");
+function normalizeAttachmentKind(kind, mime = "") {
+  const raw = safeStr(kind).toLowerCase();
+  if (raw === "photo" || raw === "image" || raw === "document") return raw;
+  const cleanMime = safeStr(mime).toLowerCase();
+  if (cleanMime.startsWith("image/")) return "image";
+  return "document";
+}
 
-  if (!name) throw new Error("pdfMeta.name required");
-  return { name, mime, size, note };
+function normalizeAttachmentMeta(meta) {
+  if (!meta) return null;
+  const name = safeStr(meta.name || meta.fileName || meta.filename);
+  const mime = safeStr(meta.mime || meta.type || meta.contentType || "");
+  const size = Number(meta.size || meta.sizeBytes || 0) || 0;
+  const note = safeStr(meta.note || "");
+  const attachmentKind = normalizeAttachmentKind(meta.attachmentKind || meta.kind, mime);
+
+  if (!name) throw new Error("attachmentMeta.name required");
+  return {
+    name,
+    mime: mime || (attachmentKind === "document" ? "application/octet-stream" : "image/jpeg"),
+    size,
+    note,
+    attachmentKind,
+    source: safeStr(meta.source || "").toLowerCase(),
+    optimizedBytes: Number(meta.optimizedBytes || 0) || 0,
+    originalBytes: Number(meta.originalBytes || 0) || 0,
+  };
+}
+
+function normalizeLegacyPdfMeta(pdfMeta) {
+  const normalized = normalizeAttachmentMeta(pdfMeta);
+  if (!normalized) return null;
+  return {
+    ...normalized,
+    attachmentKind: normalized.attachmentKind || "document",
+    mime: normalized.mime || "application/pdf",
+  };
+}
+
+function inferMessageKindFromType(type = "", attachmentMeta = null) {
+  const normalizedType = normalizeType(type);
+  if (normalizedType === "text") return "message";
+  if (normalizedType === "photo" || normalizedType === "image") return "photo";
+  const attachmentKind = normalizeAttachmentKind(attachmentMeta?.attachmentKind, attachmentMeta?.mime);
+  if (attachmentKind === "photo" || attachmentKind === "image") return "photo";
+  return "document";
+}
+
+function mapAttachmentType(attachmentMeta = null, typeHint = "") {
+  const hint = safeStr(typeHint).toLowerCase();
+  if (hint === "photo" || hint === "image" || hint === "document") return hint;
+  const kind = normalizeAttachmentKind(attachmentMeta?.attachmentKind, attachmentMeta?.mime);
+  if (kind === "photo" || kind === "image") return kind;
+  return "document";
 }
 
 /**
@@ -110,27 +151,62 @@ function resolveReceiverUid({ req, toRole }) {
   return "";
 }
 
-async function notifyAdminPendingModeration({ requestId, pendingId } = {}) {
+async function mirrorPublishedChatDocument({
+  requestId,
+  requestData,
+  messageId,
+  fromRole,
+  fromUid,
+  toRole,
+  toUid,
+  attachmentMeta,
+  actorUid,
+  sourceChannel,
+} = {}) {
   const rid = safeStr(requestId);
-  const pid = safeStr(pendingId);
-  if (!rid || !pid) return;
+  const requestUid = safeStr(requestData?.uid);
+  const mid = safeStr(messageId);
+  const normalizedMeta = normalizeAttachmentMeta(attachmentMeta);
+  if (!rid || !requestUid || !mid || !normalizedMeta) return;
 
-  await sendPushToAdmin({
-    title: "New message for moderation",
-    body: "A user or staff message is waiting for admin review.",
-    data: {
-      type: "ADMIN_NEW_MESSAGE",
+  try {
+    await mirrorPublishedChatAttachment({
       requestId: rid,
-      pendingId: pid,
-      route: `/app/admin/request/${encodeURIComponent(rid)}?openChat=1`,
-    },
-  });
+      requestUid,
+      messageId: mid,
+      attachmentMeta: normalizedMeta,
+      fromRole,
+      fromUid,
+      toRole,
+      toUid,
+      actorUid,
+      sourceChannel,
+    });
+  } catch (error) {
+    try {
+      // Backward fallback to old mirror path if attachment mirror fails.
+      await mirrorPublishedChatPdf({
+        requestId: rid,
+        requestUid,
+        messageId: mid,
+        pdfMeta: normalizedMeta,
+        fromRole,
+        fromUid,
+        toRole,
+        toUid,
+        actorUid,
+        sourceChannel,
+      });
+    } catch (fallbackError) {
+      console.warn("document engine mirror failed for chat attachment:", fallbackError?.message || error);
+    }
+  }
 }
 
 /* -------------------- Sender: User/Staff -> Pending -------------------- */
 
 export async function sendPendingText({ requestId, fromRole, toRole, text } = {}) {
-  const user = mustUser();
+  mustUser();
   const rid = safeStr(requestId);
   const fr = normalizeRole(fromRole);
   const tr = normalizeRole(toRole);
@@ -141,100 +217,119 @@ export async function sendPendingText({ requestId, fromRole, toRole, text } = {}
   if (fr === "admin") throw new Error("Admin should publish directly, not pending");
   if (tr === "admin") throw new Error("toRole cannot be admin");
 
-  const payload = {
-    fromRole: fr,
-    fromUid: user.uid,
+  const result = await sendMessageCommand({
+    requestId: rid,
     toRole: tr,
     type: "text",
     text: msg,
-    pdfMeta: null,
-    status: "pending",
-    createdAt: serverTimestamp(),
-  };
-
-  const ref = await addDoc(pendingCol(rid), payload);
-  try {
-    await notifyAdminPendingModeration({ requestId: rid, pendingId: ref.id });
-  } catch (error) {
-    console.warn("Failed to trigger admin pending-text push:", error?.message || error);
+    actorRole: fr === "staff" ? "staff" : "user",
+  });
+  if (!result?.ok) {
+    throw new Error("Failed to send message.");
   }
-  return { ok: true, id: ref.id };
+  return { ok: true, id: safeStr(result?.messageId) };
 }
 
-export async function sendPendingPdf({ requestId, fromRole, toRole, pdfMeta } = {}) {
-  const user = mustUser();
+export async function sendPendingAttachment({
+  requestId,
+  fromRole,
+  toRole,
+  attachmentMeta = null,
+  typeHint = "",
+} = {}) {
+  mustUser();
   const rid = safeStr(requestId);
   const fr = normalizeRole(fromRole);
   const tr = normalizeRole(toRole);
-  const meta = normalizePdfMeta(pdfMeta);
+  const meta = normalizeAttachmentMeta(attachmentMeta);
+  const msgType = mapAttachmentType(meta, typeHint);
 
   if (!rid) throw new Error("requestId required");
-  if (!meta) throw new Error("pdfMeta required");
+  if (!meta) throw new Error("attachmentMeta required");
   if (fr === "admin") throw new Error("Admin should publish directly, not pending");
   if (tr === "admin") throw new Error("toRole cannot be admin");
 
-  const payload = {
-    fromRole: fr,
-    fromUid: user.uid,
+  const result = await sendMessageCommand({
+    requestId: rid,
     toRole: tr,
-    type: "pdf",
-    text: "",
+    type: msgType,
+    attachmentMeta: meta,
     pdfMeta: meta,
-    status: "pending",
-    createdAt: serverTimestamp(),
-  };
-
-  const ref = await addDoc(pendingCol(rid), payload);
-  try {
-    await notifyAdminPendingModeration({ requestId: rid, pendingId: ref.id });
-  } catch (error) {
-    console.warn("Failed to trigger admin pending-pdf push:", error?.message || error);
+    actorRole: fr === "staff" ? "staff" : "user",
+  });
+  if (!result?.ok) {
+    throw new Error("Failed to send message.");
   }
-  return { ok: true, id: ref.id };
+  return { ok: true, id: safeStr(result?.messageId) };
+}
+
+export async function sendPendingPdf({ requestId, fromRole, toRole, pdfMeta } = {}) {
+  return sendPendingAttachment({
+    requestId,
+    fromRole,
+    toRole,
+    attachmentMeta: normalizeLegacyPdfMeta(pdfMeta),
+    typeHint: "document",
+  });
+}
+
+export async function sendPendingImage({ requestId, fromRole, toRole, attachmentMeta } = {}) {
+  return sendPendingAttachment({
+    requestId,
+    fromRole,
+    toRole,
+    attachmentMeta,
+    typeHint: "image",
+  });
+}
+
+export async function sendPendingPhoto({ requestId, fromRole, toRole, attachmentMeta } = {}) {
+  return sendPendingAttachment({
+    requestId,
+    fromRole,
+    toRole,
+    attachmentMeta,
+    typeHint: "photo",
+  });
 }
 
 /**
- * ✅ One pending message that can include BOTH text + pdfMeta
- * Use this when user attaches doc AND types a message.
+ * ✅ One pending message that can include BOTH text + attachment metadata.
  */
 export async function sendPendingBundle({
   requestId,
   fromRole,
   toRole,
   text = "",
+  attachmentMeta = null,
   pdfMeta = null,
 } = {}) {
-  const user = mustUser();
+  mustUser();
   const rid = safeStr(requestId);
   const fr = normalizeRole(fromRole);
   const tr = normalizeRole(toRole);
 
   const msg = safeStr(text);
-  const meta = normalizePdfMeta(pdfMeta);
+  const meta = normalizeAttachmentMeta(attachmentMeta || pdfMeta);
 
   if (!rid) throw new Error("requestId required");
   if (fr === "admin") throw new Error("Admin should publish directly, not pending");
   if (tr === "admin") throw new Error("toRole cannot be admin");
-  if (!msg && !meta) throw new Error("Bundle is empty (needs text and/or pdf)");
+  if (!msg && !meta) throw new Error("Bundle is empty (needs text and/or attachment)");
 
-  const payload = {
-    fromRole: fr,
-    fromUid: user.uid,
+  const result = await sendMessageCommand({
+    requestId: rid,
     toRole: tr,
     type: "bundle",
-    text: msg, // can be ""
-    pdfMeta: meta, // can be null
-    status: "pending",
-    createdAt: serverTimestamp(),
-  };
-
-  const ref = await addDoc(pendingCol(rid), payload);
-  try {
-    await notifyAdminPendingModeration({ requestId: rid, pendingId: ref.id });
-  } catch (error) {
-    console.warn("Failed to trigger admin pending-bundle push:", error?.message || error);
+    text: msg,
+    attachmentMeta: meta,
+    pdfMeta: meta,
+    actorRole: fr === "staff" ? "staff" : "user",
+  });
+  if (!result?.ok) {
+    throw new Error("Failed to send message.");
   }
-  return { ok: true, id: ref.id };
+  return { ok: true, id: safeStr(result?.messageId) };
 }
 
 /* -------------------- Reading lists -------------------- */
@@ -323,13 +418,17 @@ export async function adminApprovePending({
   const fromUid = safeStr(p.fromUid);
 
   const finalText = editedText != null ? safeStr(editedText) : safeStr(p.text);
-  const finalPdfMeta =
-    editedPdfMeta != null ? normalizePdfMeta(editedPdfMeta) : p.pdfMeta || null;
+  const finalAttachmentMeta =
+    editedPdfMeta != null
+      ? normalizeAttachmentMeta(editedPdfMeta)
+      : normalizeAttachmentMeta(p.attachmentMeta || p.pdfMeta);
 
   // ✅ Validate based on type
   if (type === "text" && !finalText) throw new Error("Final text is empty");
-  if (type === "pdf" && !finalPdfMeta) throw new Error("Final pdfMeta missing");
-  if (type === "bundle" && !finalText && !finalPdfMeta)
+  if ((type === "document" || type === "image" || type === "photo") && !finalAttachmentMeta) {
+    throw new Error("Final attachment meta missing");
+  }
+  if (type === "bundle" && !finalText && !finalAttachmentMeta)
     throw new Error("Final bundle is empty");
 
   // ✅ FIX: allow staff receiver to be missing (not assigned yet)
@@ -347,8 +446,15 @@ export async function adminApprovePending({
     toUid: receiverUid || null, // ✅ null if not assigned yet
 
     type,
-    text: type === "pdf" ? "" : finalText, // bundle/text can have text
-    pdfMeta: type === "text" ? null : finalPdfMeta, // bundle/pdf can have pdfMeta
+    messageKind: inferMessageKindFromType(type, finalAttachmentMeta),
+    text: type === "text" ? finalText : type === "bundle" ? finalText : "",
+    attachmentMeta: type === "text" ? null : finalAttachmentMeta,
+    pdfMeta:
+      type === "document" ||
+      (type === "bundle" &&
+        normalizeAttachmentKind(finalAttachmentMeta?.attachmentKind, finalAttachmentMeta?.mime) === "document")
+        ? finalAttachmentMeta
+        : null,
 
     sourcePendingId: pid,
     approvedBy: admin.uid,
@@ -365,7 +471,8 @@ export async function adminApprovePending({
   batch.update(pRef, {
     status: "approved",
     editedText: editedText != null ? finalText : null,
-    editedPdfMeta: editedPdfMeta != null ? finalPdfMeta : null,
+    editedAttachmentMeta: editedPdfMeta != null ? finalAttachmentMeta : null,
+    editedPdfMeta: editedPdfMeta != null ? finalAttachmentMeta : null,
     editedBy: admin.uid,
     editedAt: serverTimestamp(),
     approvedAt: serverTimestamp(),
@@ -375,17 +482,21 @@ export async function adminApprovePending({
   // Chat unread is derived from published /messages + readState; no chat notification docs here.
 
   await batch.commit();
-  try {
-    await notifyPublishedRecipient({
-      rid,
-      req,
+  if (finalAttachmentMeta) {
+    await mirrorPublishedChatDocument({
+      requestId: rid,
+      requestData: req,
+      messageId: pubRef.id,
+      fromRole,
+      fromUid,
       toRole,
-      receiverUid,
-      publishedId: pubRef.id,
+      toUid: receiverUid || "",
+      attachmentMeta: finalAttachmentMeta,
+      actorUid: admin.uid,
+      sourceChannel: "chat_approved_message",
     });
-  } catch (error) {
-    console.warn("Failed to write message notification after approval:", error?.message || error);
   }
+  // Notification fan-out is handled by Cloud Functions on message publish.
   return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
 }
 
@@ -404,7 +515,11 @@ export async function adminEditPending({
 
   const patch = {};
   if (editedText != null) patch.editedText = safeStr(editedText);
-  if (editedPdfMeta != null) patch.editedPdfMeta = normalizePdfMeta(editedPdfMeta);
+  if (editedPdfMeta != null) {
+    const normalized = normalizeAttachmentMeta(editedPdfMeta);
+    patch.editedAttachmentMeta = normalized;
+    patch.editedPdfMeta = normalized;
+  }
 
   patch.editedAt = serverTimestamp();
   patch.editedBy = admin.uid;
@@ -445,47 +560,6 @@ export async function adminRejectPending({ requestId, pendingId, reason = "" } =
   }
 
   return { ok: true };
-}
-
-async function notifyPublishedRecipient({ rid, req, toRole, receiverUid, publishedId } = {}) {
-  const requestId = safeStr(rid);
-  const role = normalizeRole(toRole);
-  const requestData = req && typeof req === "object" ? req : {};
-
-  let uid =
-    role === "user"
-      ? safeStr(requestData?.uid)
-      : role === "staff"
-      ? safeStr(requestData?.assignedTo)
-      : "";
-
-  // Fallback to explicit resolver if the caller already computed one.
-  if (!uid) uid = safeStr(receiverUid);
-
-  if (!requestId || !uid) return;
-
-  if (role === "user") {
-    await createUserNotification({
-      uid,
-      type: "NEW_MESSAGE",
-      requestId,
-      extras: {
-        messageId: safeStr(publishedId) || null,
-      },
-    });
-    return;
-  }
-
-  if (role === "staff") {
-    await createStaffNotification({
-      uid,
-      type: "STAFF_NEW_MESSAGE",
-      requestId,
-      extras: {
-        messageId: safeStr(publishedId) || null,
-      },
-    });
-  }
 }
 
 async function notifyRejectedPendingSender({ requestId, pendingId, pending } = {}) {
@@ -557,7 +631,7 @@ export async function adminHidePending({ requestId, pendingId, reason = "" } = {
 /* -------------------- Admin: Direct send (publish without pending) -------------------- */
 
 export async function adminSendTextDirect({ requestId, toRole, text } = {}) {
-  const admin = mustUser();
+  mustUser();
   const rid = safeStr(requestId);
   const tr = normalizeRole(toRole);
   const msg = safeStr(text);
@@ -566,105 +640,60 @@ export async function adminSendTextDirect({ requestId, toRole, text } = {}) {
   if (!msg) throw new Error("Message is empty");
   if (tr === "admin") throw new Error("toRole cannot be admin");
 
-  const rSnap = await getDoc(reqRef(rid));
-  if (!rSnap.exists()) throw new Error("Request not found");
-  const req = { id: rSnap.id, ...rSnap.data() };
-
-  const receiverUid = resolveReceiverUid({ req, toRole: tr }); // may be ""
-
-  // ✅ FIX: allow staff direct send even if not assigned yet (publish anyway, skip notif)
-  const batch = writeBatch(db);
-
-  const pubRef = doc(publishedCol(rid));
-  batch.set(pubRef, {
+  const commandResult = await sendMessageCommand({
     requestId: rid,
-    fromRole: "admin",
-    fromUid: admin.uid,
     toRole: tr,
-    toUid: receiverUid || null,
-
     type: "text",
     text: msg,
-    pdfMeta: null,
-
-    sourcePendingId: null,
-    approvedBy: admin.uid,
-    approvedAt: serverTimestamp(),
-    createdAt: serverTimestamp(),
-
-    needsAssignment: tr === "staff" && !receiverUid ? true : false,
+    actorRole: "admin",
   });
+  if (!commandResult?.ok) throw new Error("Failed to send message.");
+  return {
+    ok: true,
+    publishedId: safeStr(commandResult?.messageId),
+    receiverUid: null,
+  };
+}
 
-  // Chat unread is derived from published /messages + readState; no chat notification docs here.
+export async function adminSendAttachmentDirect({
+  requestId,
+  toRole,
+  attachmentMeta = null,
+  typeHint = "",
+} = {}) {
+  mustUser();
+  const rid = safeStr(requestId);
+  const tr = normalizeRole(toRole);
+  const meta = normalizeAttachmentMeta(attachmentMeta);
+  const msgType = mapAttachmentType(meta, typeHint);
 
-  await batch.commit();
-  try {
-    await notifyPublishedRecipient({
-      rid,
-      req,
-      toRole: tr,
-      receiverUid,
-      publishedId: pubRef.id,
-    });
-  } catch (error) {
-    console.warn("Failed to write direct text message notification:", error?.message || error);
-  }
-  return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
+  if (!rid) throw new Error("requestId required");
+  if (!meta) throw new Error("attachmentMeta required");
+  if (tr === "admin") throw new Error("toRole cannot be admin");
+
+  const commandResult = await sendMessageCommand({
+    requestId: rid,
+    toRole: tr,
+    type: msgType,
+    attachmentMeta: meta,
+    pdfMeta: meta,
+    actorRole: "admin",
+  });
+  if (!commandResult?.ok) throw new Error("Failed to send message.");
+  return {
+    ok: true,
+    publishedId: safeStr(commandResult?.messageId),
+    receiverUid: null,
+  };
 }
 
 export async function adminSendPdfMetaDirect({ requestId, toRole, pdfMeta } = {}) {
-  const admin = mustUser();
-  const rid = safeStr(requestId);
-  const tr = normalizeRole(toRole);
-  const meta = normalizePdfMeta(pdfMeta);
-
-  if (!rid) throw new Error("requestId required");
-  if (!meta) throw new Error("pdfMeta required");
-  if (tr === "admin") throw new Error("toRole cannot be admin");
-
-  const rSnap = await getDoc(reqRef(rid));
-  if (!rSnap.exists()) throw new Error("Request not found");
-  const req = { id: rSnap.id, ...rSnap.data() };
-
-  const receiverUid = resolveReceiverUid({ req, toRole: tr }); // may be ""
-
-  const batch = writeBatch(db);
-
-  const pubRef = doc(publishedCol(rid));
-  batch.set(pubRef, {
-    requestId: rid,
-    fromRole: "admin",
-    fromUid: admin.uid,
-    toRole: tr,
-    toUid: receiverUid || null,
-
-    type: "pdf",
-    text: "",
-    pdfMeta: meta,
-
-    sourcePendingId: null,
-    approvedBy: admin.uid,
-    approvedAt: serverTimestamp(),
-    createdAt: serverTimestamp(),
-
-    needsAssignment: tr === "staff" && !receiverUid ? true : false,
+  return adminSendAttachmentDirect({
+    requestId,
+    toRole,
+    attachmentMeta: normalizeLegacyPdfMeta(pdfMeta),
+    typeHint: "document",
   });
-
-  // Chat unread is derived from published /messages + readState; no chat notification docs here.
-
-  await batch.commit();
-  try {
-    await notifyPublishedRecipient({
-      rid,
-      req,
-      toRole: tr,
-      receiverUid,
-      publishedId: pubRef.id,
-    });
-  } catch (error) {
-    console.warn("Failed to write direct pdf message notification:", error?.message || error);
-  }
-  return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
 }
 
 /**
@@ -676,60 +705,32 @@ export async function adminSendBundleDirect({
   text = "",
   pdfMeta = null,
 } = {}) {
-  const admin = mustUser();
+  mustUser();
   const rid = safeStr(requestId);
   const tr = normalizeRole(toRole);
 
   const msg = safeStr(text);
-  const meta = normalizePdfMeta(pdfMeta);
+  const meta = normalizeAttachmentMeta(pdfMeta);
 
   if (!rid) throw new Error("requestId required");
   if (tr === "admin") throw new Error("toRole cannot be admin");
   if (!msg && !meta) throw new Error("Bundle is empty (needs text and/or pdf)");
 
-  const rSnap = await getDoc(reqRef(rid));
-  if (!rSnap.exists()) throw new Error("Request not found");
-  const req = { id: rSnap.id, ...rSnap.data() };
-
-  const receiverUid = resolveReceiverUid({ req, toRole: tr }); // may be ""
-
-  const batch = writeBatch(db);
-
-  const pubRef = doc(publishedCol(rid));
-  batch.set(pubRef, {
+  const commandResult = await sendMessageCommand({
     requestId: rid,
-    fromRole: "admin",
-    fromUid: admin.uid,
     toRole: tr,
-    toUid: receiverUid || null,
-
     type: "bundle",
     text: msg,
+    attachmentMeta: meta,
     pdfMeta: meta,
-
-    sourcePendingId: null,
-    approvedBy: admin.uid,
-    approvedAt: serverTimestamp(),
-    createdAt: serverTimestamp(),
-
-    needsAssignment: tr === "staff" && !receiverUid ? true : false,
+    actorRole: "admin",
   });
-
-  // Chat unread is derived from published /messages + readState; no chat notification docs here.
-
-  await batch.commit();
-  try {
-    await notifyPublishedRecipient({
-      rid,
-      req,
-      toRole: tr,
-      receiverUid,
-      publishedId: pubRef.id,
-    });
-  } catch (error) {
-    console.warn("Failed to write direct bundle message notification:", error?.message || error);
-  }
-  return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
+  if (!commandResult?.ok) throw new Error("Failed to send message.");
+  return {
+    ok: true,
+    publishedId: safeStr(commandResult?.messageId),
+    receiverUid: null,
+  };
 }
 
 /* -------------------- ✅ Compatibility exports -------------------- */

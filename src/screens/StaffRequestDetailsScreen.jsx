@@ -22,15 +22,11 @@ import {
   deleteDoc,
   doc,
   getDoc,
-  getDocs,
   orderBy,
   query,
   serverTimestamp,
-  updateDoc,
-  writeBatch,
   onSnapshot,
   addDoc,
-  where,
 } from "firebase/firestore";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -57,6 +53,11 @@ import {
   subscribeRequestProgressUpdates,
 } from "../services/requestcontinuityservice";
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
+import {
+  staffClaimAssignedOrphanMessages,
+  staffUpdateRequestNote,
+  staffMarkRequestDone,
+} from "../services/requestcommandservice";
 
 /* ---------- Minimal icons ---------- */
 function IconChevronLeft(props) {
@@ -212,20 +213,6 @@ function pill(status) {
   if (s === "rejected")
     return { label: "Rejected", cls: "bg-rose-50 text-rose-700 border border-rose-100" };
   return { label: s, cls: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800" };
-}
-
-function safeMinutesBetween(startTs, endMs) {
-  let startMs = 0;
-  if (typeof startTs === "number") startMs = startTs;
-  else if (startTs?.seconds) startMs = startTs.seconds * 1000;
-
-  if (!startMs || !endMs) return null;
-
-  const diff = endMs - startMs;
-  if (!Number.isFinite(diff) || diff <= 0) return null;
-
-  const mins = Math.round(diff / 60000);
-  return Math.max(1, mins);
 }
 
 function permissionAwareMessage(error, fallback) {
@@ -514,14 +501,6 @@ export default function StaffRequestDetailsScreen() {
     return () => unsub();
   }, [requestId]);
 
-  const updateRequest = async (patch) => {
-    if (!uid) throw new Error("Not signed in");
-    await updateDoc(doc(db, "serviceRequests", requestId), {
-      ...patch,
-      staffUpdatedAt: serverTimestamp(),
-    });
-  };
-
   const addDraft = async () => {
     const name = String(draftName || "").trim();
     const url = String(draftUrl || "").trim();
@@ -585,40 +564,25 @@ export default function StaffRequestDetailsScreen() {
     }
   };
 
-  const syncDraftsToAdmin = async () => {
-    const staffRef = collection(db, "serviceRequests", requestId, "staffFileDrafts");
-    const staffSnap = await getDocs(staffRef);
-    if (staffSnap.empty) return;
-
-    const batch = writeBatch(db);
-
-    staffSnap.docs.forEach((sd) => {
-      const data = sd.data() || {};
-      const adminDocRef = doc(db, "serviceRequests", requestId, "adminFileDrafts", sd.id);
-
-      batch.set(
-        adminDocRef,
-        {
-          name: String(data?.name || "File").trim(),
-          url: String(data?.url || "").trim(),
-          fromStaff: true,
-          staffUid: String(data?.staffUid || uid || "").trim(),
-          createdAt: data?.createdAt || serverTimestamp(),
-          syncedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-    });
-
-    await batch.commit();
-  };
-
   const saveNote = async () => {
     try {
       setBusy("save");
       setErr("");
-      await updateRequest({ staffNote: String(note || "").trim() });
-      await load();
+      const result = await staffUpdateRequestNote({
+        requestId,
+        staffNote: String(note || "").trim(),
+      });
+      if (!result?.ok) {
+        throw new Error("Save failed.");
+      }
+      setReq((prev) =>
+        prev
+          ? {
+              ...prev,
+              staffNote: String(note || "").trim(),
+            }
+          : prev
+      );
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Save failed (check rules).");
@@ -682,35 +646,14 @@ export default function StaffRequestDetailsScreen() {
         return;
       }
 
-      const nowMs = Date.now();
-
-      await syncDraftsToAdmin();
-
-      const startTs = req?.staffStartedAt || req?.staffStartedAtMs;
-      const workMinutes = safeMinutesBetween(startTs, nowMs);
-
-      await updateRequest({
-        status: status === "new" ?"contacted" : status,
-        staffStatus: "done",
+      const result = await staffMarkRequestDone({
+        requestId,
         staffDecision: dec,
-
-        staffCompletedAt: serverTimestamp(),
-        staffCompletedAtMs: nowMs,
-        staffCompletedBy: uid,
-
-        staffWorkMinutes: workMinutes,
         staffNote: String(note || "").trim(),
       });
-
-      // ✅ Task doc update (admin created it)
-      await updateDoc(doc(db, "staff", uid, "tasks", requestId), {
-        status: "done",
-        doneAt: serverTimestamp(),
-        doneAtMs: nowMs,
-        completedAt: serverTimestamp(),
-        workMinutes: workMinutes,
-        staffDecision: dec,
-      });
+      if (!result?.ok) {
+        throw new Error("Mark done failed.");
+      }
 
       navigate("/staff/tasks", { replace: true });
     } catch (e) {
@@ -744,44 +687,10 @@ export default function StaffRequestDetailsScreen() {
 
     const run = async () => {
       try {
-        // Find messages intended for staff but missing a receiver id
-        const msgCol = collection(db, "serviceRequests", requestId, "messages");
-
-        // NOTE: Firestore can't OR in one query.
-        // We'll query the most common: toUid == null
-        const qNull = query(msgCol, where("toRole", "==", "staff"), where("toUid", "==", null));
-        const snapNull = await getDocs(qNull);
-
-        // Also try toUid == "" (in case older code wrote empty string)
-        const qEmpty = query(msgCol, where("toRole", "==", "staff"), where("toUid", "==", ""));
-        const snapEmpty = await getDocs(qEmpty);
-
-        const rows = [];
-        snapNull.docs.forEach((d) => rows.push({ id: d.id, ref: d.ref, data: d.data() || {} }));
-        snapEmpty.docs.forEach((d) => rows.push({ id: d.id, ref: d.ref, data: d.data() || {} }));
-
-        // Dedupe by id
-        const seen = new Set();
-        const unique = rows.filter((r) => {
-          if (seen.has(r.id)) return false;
-          seen.add(r.id);
-          return true;
+        await staffClaimAssignedOrphanMessages({
+          requestId,
+          max: 250,
         });
-
-        if (unique.length === 0) return;
-
-        const batch = writeBatch(db);
-
-        unique.forEach((m) => {
-          batch.update(m.ref, {
-            toUid: uid,
-            needsAssignment: false,
-            assignedAt: serverTimestamp(),
-          });
-
-        });
-
-        await batch.commit();
       } catch (e) {
         // Don't block UI; just log
         console.warn("claim orphan staff messages failed:", e?.message || e);
@@ -1159,8 +1068,9 @@ export default function StaffRequestDetailsScreen() {
                               <div className="mt-2 grid gap-1 text-xs text-zinc-600 dark:text-zinc-300">
                                 <div>Official amount: {formatMoney(p.breakdown.officialAmount, p.currency)}</div>
                                 <div>Service fee: {formatMoney(p.breakdown.serviceFee, p.currency)}</div>
-                                <div>Platform cut: {formatMoney(p.breakdown.platformCutAmount, p.currency)}</div>
-                                <div>Tax: {formatMoney(p.breakdown.taxAmount, p.currency)}</div>
+                                {Number(p?.breakdown?.discountAmount || 0) > 0 ? (
+                                  <div>Discount: {formatMoney(p.breakdown.discountAmount, p.currency)}</div>
+                                ) : null}
                                 <div>
                                   Estimated partner payout:{" "}
                                   {formatMoney(p.breakdown.estimatedNetPartnerPayable, p.currency)}
@@ -1400,6 +1310,7 @@ export default function StaffRequestDetailsScreen() {
     </div>
   );
 }
+
 
 
 

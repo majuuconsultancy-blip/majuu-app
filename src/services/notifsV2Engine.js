@@ -288,12 +288,38 @@ function createAdminForegroundPushWatchers({ role, uid }) {
               const rid = parseRequestIdFromPendingDoc(change.doc);
               const mid = safeStr(change.doc.id);
               if (!rid || !mid) return;
+              const row = normalizeTextDeep(change.doc.data() || {});
+              const type = safeStr(row?.type).toLowerCase();
+              const attachment = row?.attachmentMeta || row?.pdfMeta || {};
+              const attachmentKind = safeStr(attachment?.attachmentKind || attachment?.kind).toLowerCase();
+              const kind =
+                type === "image" || type === "photo" || attachmentKind === "photo" || attachmentKind === "image"
+                  ? "photo"
+                  : type === "document" || type === "pdf" || attachment?.name
+                  ? "document"
+                  : "message";
+              const title = kind === "photo" ? "New photo for moderation" : kind === "document" ? "New document for moderation" : "New message for moderation";
+              const body =
+                kind === "photo"
+                  ? "A user or staff photo is waiting for admin review."
+                  : kind === "document"
+                  ? "A user or staff document is waiting for admin review."
+                  : "A user or staff message is waiting for admin review.";
               scheduleForegroundLocalNotification({
                 dedupeKey: `admin:pending:${rid}:${mid}`,
-                title: "New message for moderation",
-                body: "A user or staff message is waiting for admin review.",
+                title,
+                body,
                 route: `/app/admin/request/${encodeURIComponent(rid)}?openChat=1`,
-                extra: { type: "ADMIN_NEW_MESSAGE", requestId: rid, pendingId: mid },
+                extra: {
+                  type:
+                    kind === "photo"
+                      ? "ADMIN_NEW_PHOTO"
+                      : kind === "document"
+                      ? "ADMIN_NEW_DOCUMENT"
+                      : "ADMIN_NEW_MESSAGE",
+                  requestId: rid,
+                  pendingId: mid,
+                },
               }).catch(() => {
                 // ignore foreground notification scheduling failures
               });

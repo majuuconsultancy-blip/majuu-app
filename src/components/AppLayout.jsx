@@ -116,7 +116,7 @@ function IconNews(props) {
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const online = useNetworkStatus();
+  const { online } = useNetworkStatus();
   const pathRef = useRef(location.pathname);
 
   useEffect(() => {

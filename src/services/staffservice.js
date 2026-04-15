@@ -29,6 +29,7 @@ export async function setStaffAccessByEmail({
   specialities = [],
   tracks = [],
   ownerAdminUid = "",
+  autoApproveChatMessages = null,
 } = {}) {
   const actorUid = String(auth.currentUser?.uid || "").trim();
   if (!actorUid) throw new Error("You must be signed in.");
@@ -58,6 +59,8 @@ export async function setStaffAccessByEmail({
     if (!normalizedSpecs.length) {
       throw new Error("Select at least one speciality.");
     }
+    const normalizedAutoApprove =
+      typeof autoApproveChatMessages === "boolean" ? autoApproveChatMessages : null;
 
     const normalizedTracks = Array.isArray(tracks)
       ? tracks.map((t) => String(t || "").trim().toLowerCase()).filter(Boolean)
@@ -90,6 +93,18 @@ export async function setStaffAccessByEmail({
         maxActive: Math.max(1, toNum(maxActive, 2)),
         specialities: normalizedSpecs,
         tracks: normalizedTracks,
+        autoApproveChatMessages:
+          normalizedAutoApprove == null
+            ? existing?.autoApproveChatMessages === true
+            : normalizedAutoApprove,
+        chatModeration: {
+          ...(existing?.chatModeration || {}),
+          autoApproveMessages:
+            normalizedAutoApprove == null
+              ? existing?.autoApproveChatMessages === true
+              : normalizedAutoApprove,
+          updatedAt: serverTimestamp(),
+        },
         updatedAt: serverTimestamp(),
         access: {
           revokeCount,
@@ -227,4 +242,50 @@ export async function setStaffAccessByEmail({
   }
 
   throw new Error("Invalid action. Use 'grant' or 'revoke'.");
+}
+
+export async function setStaffChatAutoApproval({
+  staffUid = "",
+  enabled = false,
+} = {}) {
+  const actorUid = String(auth.currentUser?.uid || "").trim();
+  if (!actorUid) throw new Error("You must be signed in.");
+
+  const roleCtx = await getCurrentUserRoleContext(actorUid);
+  if (!roleCtx?.isAdmin) {
+    throw new Error("Only admins can manage staff.");
+  }
+
+  const safeStaffUid = String(staffUid || "").trim();
+  if (!safeStaffUid) throw new Error("staffUid is required.");
+
+  const safeEnabled = enabled === true;
+  const staffRef = doc(db, "staff", safeStaffUid);
+
+  return runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(staffRef);
+    if (!snap.exists()) throw new Error("Staff record not found.");
+    const existing = snap.data() || {};
+    const ownerAdminUid = String(existing?.ownerAdminUid || "").trim();
+
+    if (roleCtx?.isAssignedAdmin && ownerAdminUid && ownerAdminUid !== roleCtx.uid) {
+      throw new Error("You cannot edit staff owned by another assigned admin.");
+    }
+
+    transaction.set(
+      staffRef,
+      {
+        autoApproveChatMessages: safeEnabled,
+        chatModeration: {
+          ...(existing?.chatModeration || {}),
+          autoApproveMessages: safeEnabled,
+          updatedAt: serverTimestamp(),
+        },
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return { ok: true, staffUid: safeStaffUid, autoApproveChatMessages: safeEnabled };
+  });
 }

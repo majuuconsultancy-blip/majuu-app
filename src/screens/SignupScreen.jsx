@@ -5,20 +5,23 @@
 // - ✅ Slightly more “finished product” polish: spacing, helper text, subtle states
 // - ✅ No backend logic changes (your Firebase flow kept)
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
   signInWithPopup,
   signInWithRedirect,
+  getRedirectResult,
 } from "firebase/auth";
 import { auth, authPersistenceReady, googleProvider } from "../firebase";
 import { redeemManagerInvite } from "../services/managerservice";
 import { ensureUserDoc } from "../services/userservice";
 
 import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
-import { resolveLandingPathFromUserState } from "../journey/journeyLanding";
+import { resolvePostAuthLandingPath } from "../utils/postAuthLanding";
+import { shouldPreferGoogleRedirect } from "../utils/googleAuth";
+import { useNetworkStatus } from "../hooks/useNetworkStatus";
 
 /* ---------------- Icons ---------------- */
 function IconMail(props) {
@@ -201,6 +204,9 @@ export default function SignupScreen() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // ✅ network awareness via robust hook
+  const { online } = useNetworkStatus();
+
   const passwordOk = useMemo(() => password.trim().length >= 6, [password]);
   const matchOk = useMemo(() => confirm === password, [confirm, password]);
 
@@ -233,9 +239,59 @@ export default function SignupScreen() {
     return redeemManagerInvite(token);
   }
 
+  // ✅ Handle redirect result from Google sign-in
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (!result?.user) return;
+        try {
+          const state = await finishLogin(result.user);
+          await applyManagerInviteIfPresent();
+
+          if (!result.user.emailVerified) {
+            navigate("/verify-email", {
+              replace: true,
+              state: { email: result.user.email || "", from: "/dashboard" },
+            });
+            return;
+          }
+
+          const landing = await resolvePostAuthLandingPath({
+            uid: result.user.uid,
+            userState: state || {},
+          });
+          navigate(landing, { replace: true });
+        } catch (err) {
+          setError(friendlyAuthError(err));
+        }
+      })
+      .catch((err) => {
+        const code = String(err?.code || "").toLowerCase();
+        if (!code.includes("auth/popup-closed-by-user")) {
+          setError(friendlyAuthError(err));
+        }
+      });
+  // ✅ Automatically clear/set message based on hook status
+  useEffect(() => {
+    if (online) {
+      if (error && error.includes("offline")) {
+        setError("");
+      }
+    } else {
+      setError("You’re offline. Check your network and try again.");
+      setLoading(false);
+    }
+  }, [online, error]);
+
   const handleGoogle = async () => {
     if (!acceptedLegal) {
       setError("Please review and accept the Terms & Conditions and Privacy Policy to continue.");
+      return;
+    }
+
+    // Block if offline
+    if (!online) {
+      setError("You’re offline. Check your network and try again.");
       return;
     }
 
@@ -243,9 +299,20 @@ export default function SignupScreen() {
     setLoading(true);
     try {
       await authPersistenceReady.catch(() => {});
+
+      // On Capacitor / PWA home-screen / embedded WebViews, redirect directly
+      if (shouldPreferGoogleRedirect()) {
+        await signInWithRedirect(auth, googleProvider);
+        return; // page navigates away; getRedirectResult handles return
+      }
+
       const res = await signInWithPopup(auth, googleProvider);
+
+      // Always create user doc first, then redeem invite
+      const state = await finishLogin(res.user);
+      await applyManagerInviteIfPresent();
+
       if (!res.user?.emailVerified) {
-        await applyManagerInviteIfPresent();
         navigate("/verify-email", {
           replace: true,
           state: { email: res.user?.email || email.trim(), from: "/dashboard" },
@@ -253,9 +320,10 @@ export default function SignupScreen() {
         return;
       }
 
-      const state = await finishLogin(res.user);
-      await applyManagerInviteIfPresent();
-      const landing = resolveLandingPathFromUserState(state || {});
+      const landing = await resolvePostAuthLandingPath({
+        uid: res.user.uid,
+        userState: state || {},
+      });
       navigate(landing, { replace: true });
     } catch (err) {
       const code = String(err?.code || "").toLowerCase();
@@ -297,12 +365,16 @@ export default function SignupScreen() {
       await applyManagerInviteIfPresent();
 
       await sendEmailVerification(userCred.user);
+      const verifyLanding = await resolvePostAuthLandingPath({
+        uid: userCred.user.uid,
+        userState: state || {},
+      });
 
       navigate("/verify-email", {
         replace: true,
         state: {
           email: cleanEmail,
-          from: resolveLandingPathFromUserState(state || {}),
+          from: verifyLanding,
         },
       });
     } catch (err) {

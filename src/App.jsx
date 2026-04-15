@@ -19,6 +19,7 @@ import SignupScreen from "./screens/SignupScreen";
 import VerifyEmailScreen from "./screens/VerifyEmailScreen";
 import TrackSelectScreen from "./screens/TrackSelectScreen";
 import SetupProfileJourneyScreen from "./screens/SetupProfileJourneyScreen";
+import BiometricSetupPromptScreen from "./screens/BiometricSetupPromptScreen";
 
 // App shell + core screens (non-lazy)
 import AppLayout from "./components/AppLayout";
@@ -47,13 +48,14 @@ import { touchManagerLastLogin } from "./services/managerservice";
 import { hasSeenIntro } from "./utils/introFlag";
 import { isResumableRoute, setSnapshot } from "./resume/resumeEngine";
 import BiometricAppLock from "./components/BiometricAppLock";
+import BiometricSetupGate from "./components/BiometricSetupGate";
 import { getUserState } from "./services/userservice";
-import { resolveLandingPathFromUserState } from "./journey/journeyLanding";
 import { normalizeJourney } from "./journey/journeyModel";
 import { ANALYTICS_EVENT_TYPES } from "./constants/analyticsEvents";
 import { logAnalyticsEvent } from "./services/analyticsService";
 import { useI18n } from "./lib/i18n";
 import { AuthSessionProvider, useAuthSession } from "./auth/AuthSessionContext";
+import { resolvePostAuthLandingPath } from "./utils/postAuthLanding";
 
 const LAZY_RELOAD_GUARD_KEY = "__majuu_lazy_route_reload_once__";
 
@@ -133,6 +135,7 @@ const FullPackageMissingScreen = lazy(() => import("./screens/FullPackageMissing
 const SettingsScreen = lazy(() => import("./screens/SettingsScreen"));
 const NotificationsScreen = lazy(() => import("./screens/NotificationsScreen"));
 const RequestStatusScreen = lazy(() => import("./screens/RequestStatusScreen"));
+const ProfileDocumentsScreen = lazy(() => import("./screens/ProfileDocumentsScreen"));
 const LegalPortalScreen = lazy(() => import("./screens/LegalPortalScreen"));
 const LegalDocumentScreen = lazy(() => import("./screens/LegalDocumentScreen"));
 
@@ -151,12 +154,18 @@ const AdminNewsManagementScreen = lazyWithRetry(() => import("./screens/AdminNew
 const AdminPricingControlsScreen = lazyWithRetry(() => import("./screens/AdminPricingControlsScreen"));
 const AdminFinancesScreen = lazyWithRetry(() => import("./screens/AdminFinancesScreen"));
 const AdminPartnershipsScreen = lazyWithRetry(() => import("./screens/AdminPartnershipsScreen"));
+const AdminPushCampaignsScreen = lazyWithRetry(() =>
+  import("./screens/AdminPushCampaignsScreen")
+);
 const AdminCountryManagementScreen = lazyWithRetry(() =>
   import("./screens/AdminCountryManagementScreen")
 );
 const AdminHomeDesignScreen = lazyWithRetry(() => import("./screens/AdminHomeDesignScreen"));
 const AdminRequestManagementScreen = lazyWithRetry(() =>
   import("./screens/AdminRequestManagementScreen")
+);
+const AdminDocumentEngineScreen = lazyWithRetry(() =>
+  import("./screens/AdminDocumentEngineScreen")
 );
 const AdminSelfHelpLinksManagementScreen = lazyWithRetry(() =>
   import("./screens/AdminSelfHelpLinksManagementScreen")
@@ -213,6 +222,7 @@ function preloadCriticalScreens() {
 
   import("./screens/FullPackageMissingScreen");
   import("./screens/RequestStatusScreen");
+  import("./screens/ProfileDocumentsScreen");
   import("./screens/SettingsScreen");
   import("./screens/NotificationsScreen");
   import("./screens/PaymentScreen");
@@ -224,9 +234,11 @@ function preloadCriticalScreens() {
   import("./screens/ServicePartnerOnboardingScreen");
   import("./screens/AdminSelfHelpLinksManagementScreen");
   import("./screens/AdminRequestManagementScreen");
+  import("./screens/AdminDocumentEngineScreen");
   import("./screens/AdminCountryManagementScreen");
   import("./screens/AdminHomeDesignScreen");
   import("./screens/AdminPartnershipsScreen");
+  import("./screens/AdminPushCampaignsScreen");
   import("./screens/AdminFinancesScreen");
 }
 
@@ -244,7 +256,11 @@ function runWhenIdle(fn) {
 
 function StartupRoute() {
   const { user, isAuthenticated } = useAuthSession();
-  const [target, setTarget] = useState(null);
+  const [target, setTarget] = useState(() => {
+    if (!hasSeenIntro()) return "/intro";
+    if (!isAuthenticated || !user) return "/login";
+    return null;
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -300,7 +316,10 @@ function StartupRoute() {
         }
 
         const state = await getUserState(refreshedUser.uid, refreshedUser.email || "");
-        const landing = resolveLandingPathFromUserState(state || {});
+        const landing = await resolvePostAuthLandingPath({
+          uid: refreshedUser.uid,
+          userState: state || {},
+        });
 
         const journey = normalizeJourney(state?.journey);
         const didHaveSavedJourney = Boolean(journey?.track);
@@ -624,9 +643,8 @@ function ResumeRouteWatcher() {
 }
 
 function AppRoutes() {
-  const { authInitializing } = useAuthSession();
-
-  if (authInitializing) {
+  const { authInitializing, restoreLikelySession } = useAuthSession();
+  if (authInitializing && restoreLikelySession && hasSeenIntro()) {
     return (
       <AppLoading
         title="Restoring your session..."
@@ -646,6 +664,7 @@ function AppRoutes() {
       <AndroidBackHandler />
       <RouteScrollReset />
       <BiometricAppLock />
+      <BiometricSetupGate />
 
       <Suspense fallback={<AppLoading />}>
         <Routes>
@@ -682,6 +701,14 @@ function AppRoutes() {
             element={
               <RequireAuthRoute>
                 <SetupProfileJourneyScreen />
+              </RequireAuthRoute>
+            }
+          />
+          <Route
+            path="/setup/biometric"
+            element={
+              <RequireAuthRoute>
+                <BiometricSetupPromptScreen />
               </RequireAuthRoute>
             }
           />
@@ -803,6 +830,7 @@ function AppRoutes() {
             <Route path="profile" element={<ProfileScreen />} />
             <Route path="profile/edit" element={<EditProfileScreen />} />
             <Route path="profile/journey" element={<EditJourneyScreen />} />
+            <Route path="profile/documents" element={<ProfileDocumentsScreen />} />
             <Route path="legal" element={<LegalPortalScreen mode="app" />} />
             <Route path="legal/:docKey" element={<LegalDocumentScreen />} />
 
@@ -926,6 +954,10 @@ function AppRoutes() {
               })}
             />
             <Route
+              path="admin/sacc/document-engine"
+              element={renderAdminRoute(<AdminDocumentEngineScreen />, "/app/admin/sacc")}
+            />
+            <Route
               path="admin/sacc/home-design"
               element={renderAdminRoute(<AdminHomeDesignScreen />, "/app/admin/sacc")}
             />
@@ -939,6 +971,12 @@ function AppRoutes() {
             <Route
               path="admin/sacc/partnerships"
               element={renderAdminRoute(<AdminPartnershipsScreen />, "/app/admin/sacc")}
+            />
+            <Route
+              path="admin/sacc/push-campaigns"
+              element={renderAdminRoute(<AdminPushCampaignsScreen />, "/app/admin/sacc", {
+                superAdminOnly: true,
+              })}
             />
             <Route
               path="admin/sacc/pricing"

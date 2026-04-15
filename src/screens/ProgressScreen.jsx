@@ -3,9 +3,6 @@ import { onAuthStateChanged } from "firebase/auth";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   collection,
-  deleteDoc,
-  doc,
-  getDocs,
   onSnapshot,
   query,
   where,
@@ -31,6 +28,7 @@ import { useCountryDirectory } from "../hooks/useCountryDirectory";
 import { useNotifsV2Store } from "../services/notifsV2Store";
 import { clearActiveProcess, getUserState } from "../services/userservice";
 import { getMyApplications } from "../services/progressservice";
+import { deleteOwnRequestDeep } from "../services/requestcommandservice";
 import { getResumeTarget } from "../resume/resumeEngine";
 import { clearDummyPaymentDraft, clearDummyPaymentState } from "../utils/dummyPayment";
 import {
@@ -956,7 +954,10 @@ export default function ProgressScreen() {
     setDraftDeleteBusyId(draftId);
     try {
       if (!isFullPackage && linkedRequestId) {
-        await deleteRequestDeep(linkedRequestId);
+        const result = await deleteOwnRequestDeep({ requestId: linkedRequestId });
+        if (!result?.ok) {
+          throw new Error("Failed to delete linked request draft.");
+        }
       }
       await deleteWorkflowDraft(draftId);
       clearDummyPaymentState(draftId);
@@ -1089,20 +1090,6 @@ export default function ProgressScreen() {
       setSelfHelpBusyId("");
     }
   };
-
-  async function deleteRequestSubcollection(requestId, subcollectionName) {
-    const snap = await getDocs(collection(db, "serviceRequests", requestId, subcollectionName));
-    for (const row of snap.docs) {
-      await deleteDoc(doc(db, "serviceRequests", requestId, subcollectionName, row.id));
-    }
-  }
-
-  async function deleteRequestDeep(requestId) {
-    await deleteRequestSubcollection(requestId, "attachments");
-    await deleteRequestSubcollection(requestId, "payments");
-    await deleteRequestSubcollection(requestId, "refundRequests");
-    await deleteDoc(doc(db, "serviceRequests", requestId));
-  }
 
   if (loading) {
     return (
@@ -1584,7 +1571,10 @@ export default function ProgressScreen() {
                                 setErr("");
 
                                 try {
-                                  await deleteRequestDeep(request.id);
+                                  const result = await deleteOwnRequestDeep({ requestId: request.id });
+                                  if (!result?.ok) {
+                                    throw new Error("Failed to delete request.");
+                                  }
                                   const user = auth.currentUser;
                                   if (user) {
                                     setPinnedIds((current) => {

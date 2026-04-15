@@ -15,7 +15,7 @@ import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
 import { auth, db } from "../firebase";
-import DemoPaystackCheckoutModal from "../components/DemoPaystackCheckoutModal";
+import DemoProviderCheckoutModal from "../components/DemoPaystackCheckoutModal";
 import { resolveFullPackageCoverageState } from "./fullpackageservice";
 import { getRequestStartedAtMs } from "../utils/requestWorkProgress";
 
@@ -28,6 +28,10 @@ const PAYMENT_MODE = lower(import.meta.env.VITE_PAYMENT_MODE || "", 40);
 const PAYMENT_CHECKOUT_START_ERROR = "payment checkout could not start right now";
 const PAYMENT_VERIFY_ERROR = "We could not confirm this payment yet.";
 const PAYMENT_DEBUG = String(import.meta.env.VITE_PAYMENT_DEBUG || "").trim().toLowerCase() === "true";
+const ACTIVE_PAYMENT_PROVIDER = normalizeProviderKey(
+  import.meta.env.VITE_PAYMENT_PROVIDER || "mpesa"
+);
+const DEMO_PROVIDER_KEY = `demo_${ACTIVE_PAYMENT_PROVIDER}`;
 const VERIFIED_PAYMENT_STATUSES = new Set([
   "success",
   "paid",
@@ -80,6 +84,13 @@ function cleanStr(value, max = 400) {
 
 function lower(value, max = 400) {
   return cleanStr(value, max).toLowerCase();
+}
+
+function normalizeProviderKey(value, fallback = "mpesa") {
+  const raw = lower(value, 40);
+  if (raw === "mpesa" || raw === "paystack") return raw;
+  const safeFallback = lower(fallback, 40);
+  return safeFallback === "paystack" ? "paystack" : "mpesa";
 }
 
 function trimTrailingSlash(value) {
@@ -159,6 +170,25 @@ function paymentCallable(name) {
   return httpsCallable(functions, name);
 }
 
+function isCheckoutPayableStatus(status = "") {
+  const safeStatus = lower(status, 80);
+  return new Set([
+    PAYMENT_STATUSES.PAYABLE,
+    PAYMENT_STATUSES.PAYMENT_SESSION_CREATED,
+    PAYMENT_STATUSES.AWAITING_PAYMENT,
+    PAYMENT_STATUSES.FAILED,
+    "pending_payment",
+  ]).has(safeStatus);
+}
+
+function ensureCheckoutPayable(paymentData = {}, { source = "payment" } = {}) {
+  const status = lower(paymentData?.status, 80);
+  if (!isCheckoutPayableStatus(status)) {
+    const label = cleanStr(source, 60) || "payment";
+    throw new Error(`This ${label} is not ready for payment.`);
+  }
+}
+
 function resolveCheckoutEmail(...candidates) {
   for (const candidate of candidates) {
     const email = lower(candidate, 160);
@@ -208,6 +238,9 @@ function buildHostedPaymentMetadata({
   payerMode,
   currency,
   selectedItems,
+  discountAmount,
+  discountAppliedPercentage,
+  note,
   metadata,
 } = {}) {
   const extra = metadata && typeof metadata === "object" ? metadata : {};
@@ -231,6 +264,9 @@ function buildHostedPaymentMetadata({
     payerMode,
     currency,
     selectedItems: cleanStringList(selectedItems, 60, 120),
+    discountAmount: cleanAmount(discountAmount),
+    discountAppliedPercentage: Number(discountAppliedPercentage || 0),
+    note,
     ...extra,
   });
 }
@@ -314,7 +350,7 @@ function buildDemoInlinePaymentReceipt({
   };
 }
 
-function openDemoPaystackCheckoutModal(options = {}) {
+function openDemoProviderCheckoutModal(options = {}) {
   if (typeof document === "undefined") {
     return Promise.reject(new Error("Demo checkout is unavailable right now."));
   }
@@ -342,7 +378,7 @@ function openDemoPaystackCheckoutModal(options = {}) {
     };
 
     root.render(
-      createElement(DemoPaystackCheckoutModal, {
+      createElement(DemoProviderCheckoutModal, {
         email: options?.email,
         amount: options?.amount,
         currency: options?.currency,
@@ -362,7 +398,7 @@ async function initializeDemoHostedCheckout({
   currency,
   metadata,
 } = {}) {
-  const result = await openDemoPaystackCheckoutModal({
+  const result = await openDemoProviderCheckoutModal({
     email,
     amount,
     currency,
@@ -390,7 +426,7 @@ async function initializeDemoHostedCheckout({
       ok: true,
       success: true,
       demo: true,
-      provider: "demo_paystack",
+      provider: DEMO_PROVIDER_KEY,
       status: "success",
       reference: demoReference,
       data: {
@@ -556,6 +592,41 @@ async function callLocalPaymentBackend(path, { method = "GET", body } = {}, fall
   });
 }
 
+async function callLocalPaymentBackendWithFallback(
+  paths,
+  { method = "GET", body } = {},
+  fallbackMessage
+) {
+  const candidates = (Array.isArray(paths) ? paths : [paths]).filter(Boolean);
+  if (!candidates.length) {
+    throw new Error(fallbackMessage);
+  }
+
+  let lastError = null;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const path = candidates[index];
+    try {
+      return await callLocalPaymentBackend(path, { method, body }, fallbackMessage);
+    } catch (error) {
+      lastError = error;
+      const status = Number(error?.status || error?.cause?.status || 0) || 0;
+      const isNotFound = status === 404;
+      const hasFallback = index < candidates.length - 1;
+      if (isNotFound && hasFallback) {
+        paymentDebugLog("backend_path_fallback", {
+          failedPath: path,
+          nextPath: candidates[index + 1],
+          status,
+        });
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError || new Error(fallbackMessage);
+}
+
 function extractAuthorizationUrl(payload) {
   return cleanStr(
     payload?.data?.authorization_url ||
@@ -622,6 +693,7 @@ async function initializeHostedCheckout({
     amount: payableAmount,
     currency: payCurrency,
     reference: txReference,
+    provider: ACTIVE_PAYMENT_PROVIDER,
     metadata: metadata && typeof metadata === "object" ? metadata : {},
   };
   paymentDebugLog("initialize_checkout_payload", initBody);
@@ -629,8 +701,8 @@ async function initializeHostedCheckout({
     return initializeDemoHostedCheckout(initBody);
   }
   try {
-    payload = await callLocalPaymentBackend(
-      "/paystack/initialize",
+    payload = await callLocalPaymentBackendWithFallback(
+      ["/payments/initialize", "/paystack/initialize"],
       {
         method: "POST",
         body: initBody,
@@ -698,11 +770,14 @@ async function activatePreparedUnlockRequestDemo({
     cleanStr(requestData?.unlockPaymentId, 180) ||
     cleanStr(unlockPaymentReceipt?.paymentId, 180) ||
     "unlock_request_payment";
+  const currentUnlockState = lower(requestData?.unlockState, 80);
 
   if (currentStatus !== "payment_pending") {
     if (
-      requestData?.paid === true &&
-      new Set(["new", "contacted", "closed", "rejected"]).has(currentStatus)
+      new Set(["new", "contacted", "closed", "rejected"]).has(currentStatus) &&
+      (requestData?.paid === true ||
+        currentUnlockState === "paid_held" ||
+        currentUnlockState === "consumed")
     ) {
       return {
         ok: true,
@@ -727,7 +802,7 @@ async function activatePreparedUnlockRequestDemo({
   const paidAtMs =
     Number(unlockPaymentReceipt?.paidAtMs || unlockPaymentReceipt?.paidAt || 0) || Date.now();
   const paymentMethod =
-    lower(unlockPaymentReceipt?.method, 80) || "demo_paystack";
+    lower(unlockPaymentReceipt?.method, 80) || DEMO_PROVIDER_KEY;
 
   await syncDemoUnlockPaymentRecord({
     requestId: safeRequestId,
@@ -744,11 +819,11 @@ async function activatePreparedUnlockRequestDemo({
   await setDoc(
     requestRef,
     {
-      paid: true,
+      paid: false,
       status: "new",
       routingStatus: "awaiting_route",
       paymentMeta: {
-        status: "paid",
+        status: "paid_held",
         method: paymentMethod,
         paidAt: paidAtMs,
         ref: transactionReference,
@@ -757,6 +832,7 @@ async function activatePreparedUnlockRequestDemo({
       },
       unlockPaymentId,
       unlockPaymentRequestId: safeRequestId,
+      unlockState: "paid_held",
       updatedAt: serverTimestamp(),
       updatedAtMs: Date.now(),
     },
@@ -833,7 +909,7 @@ async function syncDemoUnlockPaymentRecord({
         status: PAYMENT_STATUSES.PAID,
         transactionReference: cleanStr(reference, 160),
         providerReference: cleanStr(reference, 160),
-        paymentMethod: cleanStr(method, 80) || "demo_paystack",
+        paymentMethod: cleanStr(method, 80) || DEMO_PROVIDER_KEY,
         paidAt: paidAtMs || nowMs,
         paidAtMs: paidAtMs || nowMs,
         latestReference: cleanStr(reference, 160),
@@ -916,6 +992,7 @@ async function loadExistingPaymentCheckoutContext({
     id: paymentSnap.id,
     ...(paymentSnap.data() || {}),
   });
+  ensureCheckoutPayable(paymentData, { source: "payment" });
   const email = resolveCheckoutEmail(requestData?.email, auth.currentUser?.email);
   if (!email || paymentData.amount <= 0) {
     throw new Error(PAYMENT_CHECKOUT_START_ERROR);
@@ -951,6 +1028,7 @@ async function loadSharedPaymentCheckoutContext({
     id: cleanStr(result?.paymentId || result?.payment?.id, 180),
     ...(result?.payment || {}),
   });
+  ensureCheckoutPayable(paymentData, { source: "payment link" });
   const payerEmail = resolveCheckoutEmail(email);
   if (!payerEmail || paymentData.amount <= 0) {
     throw new Error(PAYMENT_CHECKOUT_START_ERROR);
@@ -1046,6 +1124,15 @@ export function buildDummyTransactionReference(nowMs = Date.now()) {
   const dd = String(d.getUTCDate()).padStart(2, "0");
   const rand = Math.floor(1000 + Math.random() * 9000);
   return `MJ-PAY-${yyyy}${mm}${dd}-${rand}`;
+}
+
+export function buildIdempotencyKey(prefix = "MJ") {
+  const now = Date.now().toString(36).toUpperCase();
+  const rand = Math.floor(Math.random() * 0xffffff)
+    .toString(36)
+    .toUpperCase()
+    .padStart(5, "0");
+  return `${cleanStr(prefix, 12).toUpperCase()}-${now}-${rand}`;
 }
 
 export function normalizePaymentDoc(row) {
@@ -1173,6 +1260,25 @@ export function isUnlockPaymentAutoRefundEligible({
 }
 
 export async function createUnlockCheckoutSession(payload = {}) {
+  if (!isDemoPaymentMode()) {
+    const result = await callFinance("createUnlockCheckoutSession", {
+      ...payload,
+      appBaseUrl: resolveFrontendAppBaseUrl(payload?.appBaseUrl),
+      idempotencyKey:
+        cleanStr(payload?.idempotencyKey, 180) || buildIdempotencyKey("UNLOCK"),
+      phoneNumber: cleanStr(payload?.phoneNumber || payload?.phone, 40),
+    });
+    const authorizationUrl = cleanStr(
+      result?.authorizationUrl || result?.redirectUrl,
+      1000
+    );
+    return {
+      ...(result || {}),
+      authorizationUrl,
+      redirectUrl: authorizationUrl,
+    };
+  }
+
   const context = await loadRequestCheckoutContext(payload?.requestId);
   const metadata = buildHostedPaymentMetadata({
     flowType: cleanStr(context.requestData?.paymentFlowType || "unlock_request", 80),
@@ -1225,7 +1331,7 @@ export async function createUnlockCheckoutSession(payload = {}) {
         currency: context.currency,
         status: PAYMENT_STATUSES.PAID,
         reference: session.reference,
-        method: inlinePaymentReceipt?.method || "demo_paystack",
+        method: inlinePaymentReceipt?.method || DEMO_PROVIDER_KEY,
         paidAtMs: inlinePaymentReceipt?.paidAtMs || Date.now(),
       });
     } catch (error) {
@@ -1249,7 +1355,13 @@ export async function createUnlockCheckoutSession(payload = {}) {
 
 export async function createFullPackageUnlockCheckoutSession(payload = {}) {
   if (!isDemoPaymentMode()) {
-    return callFinance("createFullPackageUnlockCheckoutSession", payload);
+    return callFinance("createFullPackageUnlockCheckoutSession", {
+      ...payload,
+      appBaseUrl: resolveFrontendAppBaseUrl(payload?.appBaseUrl),
+      idempotencyKey:
+        cleanStr(payload?.idempotencyKey, 180) || buildIdempotencyKey("FULLPKG"),
+      phoneNumber: cleanStr(payload?.phoneNumber || payload?.phone, 40),
+    });
   }
 
   const context = await loadFullPackageCheckoutContext({
@@ -1366,6 +1478,25 @@ export async function adminRejectInProgressPayment({
 }
 
 export async function createPaymentCheckoutSession(payload = {}) {
+  if (!isDemoPaymentMode()) {
+    const result = await callFinance("createPaymentCheckoutSession", {
+      ...payload,
+      appBaseUrl: resolveFrontendAppBaseUrl(payload?.appBaseUrl),
+      idempotencyKey:
+        cleanStr(payload?.idempotencyKey, 180) || buildIdempotencyKey("INPROGRESS"),
+      phoneNumber: cleanStr(payload?.phoneNumber || payload?.phone, 40),
+    });
+    const authorizationUrl = cleanStr(
+      result?.authorizationUrl || result?.redirectUrl,
+      1000
+    );
+    return {
+      ...(result || {}),
+      authorizationUrl,
+      redirectUrl: authorizationUrl,
+    };
+  }
+
   const shareToken = cleanStr(payload?.shareToken, 400);
   const context = shareToken
     ? await loadSharedPaymentCheckoutContext({
@@ -1388,6 +1519,11 @@ export async function createPaymentCheckoutSession(payload = {}) {
     paymentLabel: cleanStr(context.paymentData?.paymentLabel, 180),
     payerMode: cleanStr(context.payerMode, 80),
     currency: context.currency,
+    discountAmount: cleanAmount(context.paymentData?.breakdown?.discountAmount || 0),
+    discountAppliedPercentage: Number(
+      context.paymentData?.breakdown?.discountAppliedPercentage || 0
+    ),
+    note: cleanStr(context.paymentData?.note, 600),
     metadata: payload?.metadata,
   });
   const session = await initializeHostedCheckout({
@@ -1434,7 +1570,7 @@ export async function reconcilePaymentReference(payload = {}) {
         ok: true,
         success: true,
         demo: true,
-        provider: "demo_paystack",
+        provider: DEMO_PROVIDER_KEY,
         status: "success",
         message: "Demo payment verified successfully.",
         data: {
@@ -1446,8 +1582,31 @@ export async function reconcilePaymentReference(payload = {}) {
     );
   }
 
-  const result = await callLocalPaymentBackend(
-    `/paystack/verify/${encodeURIComponent(reference)}`,
+  try {
+    const result = await callFinance("reconcilePaymentReference", { reference });
+    return normalizeVerificationResponse(result, reference);
+  } catch (callableError) {
+    const code = cleanStr(callableError?.code, 120).toLowerCase();
+    const message = cleanStr(callableError?.message, 500).toLowerCase();
+    const shouldFallback =
+      code.includes("functions/unavailable") ||
+      code.includes("functions/unimplemented") ||
+      code.includes("functions/not-found") ||
+      code.includes("functions/internal") ||
+      code.includes("functions/deadline-exceeded") ||
+      message.includes("deploy cloud functions");
+    if (!shouldFallback) {
+      throw callableError;
+    }
+  }
+
+  const result = await callLocalPaymentBackendWithFallback(
+    [
+      `/payments/verify/${encodeURIComponent(reference)}?provider=${encodeURIComponent(
+        ACTIVE_PAYMENT_PROVIDER
+      )}`,
+      `/paystack/verify/${encodeURIComponent(reference)}`,
+    ],
     { method: "GET" },
     PAYMENT_VERIFY_ERROR
   );

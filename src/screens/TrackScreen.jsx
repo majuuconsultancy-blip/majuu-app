@@ -1568,7 +1568,7 @@ export default function TrackScreen({ track }) {
                         key={entry.id || country}
                         type="button"
                         onClick={() => openCountry(country)}
-                        className="group relative h-[14.2rem] min-w-[16.8rem] flex-none snap-start overflow-hidden rounded-[28px] border border-zinc-200/80 text-left shadow-sm transition active:scale-[0.99] dark:border-zinc-700/80"
+                        className="group relative w-[16.8rem] aspect-[6/5] shrink-0 flex-none snap-start overflow-hidden rounded-[28px] border border-zinc-200/80 text-left shadow-sm transition active:scale-[0.99] dark:border-zinc-700/80"
                         style={buildCountryAccentSurfaceStyle(accentColor, { strong: true })}
                       >
                         {imageUrl ? (
@@ -1577,7 +1577,7 @@ export default function TrackScreen({ track }) {
                             alt=""
                             loading="lazy"
                             decoding="async"
-                            className="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+                            className="absolute inset-0 h-full w-full object-cover object-center transition duration-300 group-hover:scale-[1.03]"
                           />
                         ) : null}
                         <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/65 via-black/25 to-black/0" />

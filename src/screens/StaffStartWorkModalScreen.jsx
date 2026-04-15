@@ -8,13 +8,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 
 import { auth, db } from "../firebase";
-import {
-  buildRequestContinuityPatch,
-  REQUEST_BACKEND_STATUSES,
-} from "../utils/requestLifecycle";
+import { staffStartWork } from "../services/requestcommandservice";
 
 /* ---------- Icons ---------- */
 function IconX(props) {
@@ -148,51 +145,13 @@ export default function StaffStartWorkModalScreen() {
     setBusy(true);
     setErr("");
 
-    const nowMs = Date.now();
-    const currentStatus = String(req.status || "new").toLowerCase();
-
-    // Only write status if new -> contacted
-    const requestUpdate = {
-      staffStatus: "in_progress",
-      staffDecision: "none",
-      staffCompletedAt: null,
-
-      staffStartedAt: serverTimestamp(),
-      staffStartedAtMs: nowMs,
-      staffStartedBy: uid,
-      markedInProgressAt: serverTimestamp(),
-      markedInProgressAtMs: nowMs,
-
-      staffUpdatedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      ...buildRequestContinuityPatch(req, {
-        backendStatus: REQUEST_BACKEND_STATUSES.IN_PROGRESS,
-        userStatus: "in_progress",
-        everAssigned: true,
-      }),
-    };
-
-    if (currentStatus === "new") {
-      requestUpdate.status = "contacted";
-    }
-
     try {
-      // 1) update request (this is the main thing)
-      await updateDoc(doc(db, "serviceRequests", rid), requestUpdate);
-
-      // 2) update task doc ONLY if it exists under THIS uid
-      const taskRef = doc(db, "staff", uid, "tasks", rid);
-      const taskSnap = await getDoc(taskRef);
-
-      if (taskSnap.exists()) {
-        await updateDoc(taskRef, {
-          status: "active",
-          startedAt: serverTimestamp(),
-          startedAtMs: nowMs,
-        });
-      } else {
-        // Don’t hard-fail UX; show a clear debug message
-        console.warn("⚠️ Task doc missing at staff/" + uid + "/tasks/" + rid);
+      const result = await staffStartWork({ requestId: rid });
+      if (!result?.ok) {
+        throw new Error("Start work failed.");
+      }
+      if (!result?.taskUpdated) {
+        console.warn("Task doc missing at staff/" + uid + "/tasks/" + rid);
       }
 
       navigate(`/staff/request/${rid}`, { replace: true });
@@ -357,4 +316,5 @@ export default function StaffStartWorkModalScreen() {
     </div>
   );
 }
+
 

@@ -8,10 +8,12 @@
 // Everything else untouched.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { onSnapshot, collection, query, orderBy, where } from "firebase/firestore";
+import { onSnapshot, collection, query, orderBy, where, doc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
-import { sendPendingText, sendPendingPdf, sendPendingBundle } from "../services/chatservice";
+import { sendPendingText, sendPendingAttachment, sendPendingBundle } from "../services/chatservice";
+import { CHAT_ATTACHMENT_OPTIONS, prepareChatAttachmentFromFile } from "../services/chatAttachmentService";
+import { buildParticipantSummary } from "../services/chatParticipantService";
 import useKeyboardInset from "../hooks/useKeyboardInset";
 import { normalizeTextDeep } from "../utils/textNormalizer";
 import { getSystemChatMessageLabel, isSystemChatMessage } from "../utils/chatSystemMessages";
@@ -71,14 +73,6 @@ function formatDayLabel(ms) {
   if (diffDays === 0) return "Today";
   if (diffDays === 1) return "Yesterday";
   return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
-}
-
-function roleLabel(role) {
-  const r = String(role || "").toLowerCase();
-  if (r === "user") return "You";
-  if (r === "staff") return "Staff";
-  if (r === "system") return "System";
-  return "Admin";
 }
 
 function shouldFallbackToSplitSend(error) {
@@ -401,7 +395,18 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
   const [text, setText] = useState("");
 
   const fileInputRef = useRef(null);
-  const [pickedPdf, setPickedPdf] = useState(null); // { name, size, mime }
+  const attachMenuRef = useRef(null);
+  const [pickedPdf, setPickedPdf] = useState(null); // attachment meta
+  const [pickerMode, setPickerMode] = useState("document");
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [attachmentPreparing, setAttachmentPreparing] = useState(false);
+  const [headerAgent, setHeaderAgent] = useState(() => ({
+    uid: "",
+    name: "Agent pending assignment",
+    online: false,
+    statusLabel: "Offline",
+    lastSeenAtMs: 0,
+  }));
   const scrollRef = useRef(null);
   const keyboardInset = useKeyboardInset(true);
 
@@ -415,6 +420,94 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
   useEffect(() => {
     saveOptimisticToStorage(storageKey, optimistic);
   }, [storageKey, optimistic]);
+
+  useEffect(() => {
+    if (!attachmentMenuOpen) return undefined;
+    const onPointerDown = (event) => {
+      if (!attachMenuRef.current) return;
+      if (!attachMenuRef.current.contains(event.target)) {
+        setAttachmentMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [attachmentMenuOpen]);
+
+  useEffect(() => {
+    if (!rid) return undefined;
+    let unsubStaff = () => {};
+
+    const unsubRequest = onSnapshot(
+      doc(db, "serviceRequests", rid),
+      (snap) => {
+        const requestRow = snap.exists() ? snap.data() || {} : {};
+        const staffUid = safeStr(requestRow?.assignedTo);
+        const fallbackPartnerName = safeStr(requestRow?.assignedPartnerName);
+        try {
+          unsubStaff?.();
+        } catch {
+          // ignore listener cleanup issues
+        }
+        unsubStaff = () => {};
+
+        if (!staffUid) {
+          setHeaderAgent({
+            uid: "",
+            name: fallbackPartnerName ? `${fallbackPartnerName} agent` : "Agent pending assignment",
+            online: false,
+            statusLabel: "Offline",
+            lastSeenAtMs: 0,
+          });
+          return;
+        }
+
+        unsubStaff = onSnapshot(
+          doc(db, "staff", staffUid),
+          (staffSnap) => {
+            const staffRow = staffSnap.exists() ? staffSnap.data() || {} : {};
+            setHeaderAgent(
+              buildParticipantSummary({
+                uid: staffUid,
+                row: staffRow,
+                fallbackLabel: fallbackPartnerName || `Agent ${staffUid.slice(0, 6)}`,
+              })
+            );
+          },
+          () => {
+            setHeaderAgent({
+              uid: staffUid,
+              name: fallbackPartnerName || `Agent ${staffUid.slice(0, 6)}`,
+              online: false,
+              statusLabel: "Offline",
+              lastSeenAtMs: 0,
+            });
+          }
+        );
+      },
+      () => {
+        setHeaderAgent({
+          uid: "",
+          name: "Agent pending assignment",
+          online: false,
+          statusLabel: "Offline",
+          lastSeenAtMs: 0,
+        });
+      }
+    );
+
+    return () => {
+      try {
+        unsubRequest?.();
+      } catch {
+        // ignore listener cleanup issues
+      }
+      try {
+        unsubStaff?.();
+      } catch {
+        // ignore listener cleanup issues
+      }
+    };
+  }, [rid]);
 
   useEffect(() => {
     if (!rid) return;
@@ -710,22 +803,33 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
 
   const toRole = myRole === "user" ?"staff" : "user";
 
-  const openPicker = () => fileInputRef.current?.click();
-
-  const onPickFile = (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-
-    setPickedPdf({
-      name: f.name || "document.pdf",
-      size: Number(f.size || 0) || 0,
-      mime: f.type || "application/pdf",
-    });
-
-    e.target.value = "";
+  const openPicker = (mode = "document") => {
+    setPickerMode(mode);
+    setAttachmentMenuOpen(false);
+    window.setTimeout(() => fileInputRef.current?.click(), 0);
   };
 
-  const canSend = Boolean(safeStr(text) || pickedPdf);
+  const onPickFile = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+
+    setAttachmentPreparing(true);
+    try {
+      const prepared = await prepareChatAttachmentFromFile({
+        file: f,
+        mode: pickerMode,
+      });
+      setPickedPdf(prepared);
+    } catch (error) {
+      console.error(error);
+      setErr(error?.message || "Failed to prepare attachment.");
+    } finally {
+      setAttachmentPreparing(false);
+    }
+  };
+
+  const canSend = Boolean(safeStr(text) || pickedPdf) && !attachmentPreparing;
 
   const pushOptimistic = (data) => {
     const createdAtMs = Date.now();
@@ -759,7 +863,8 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
           fromUid: myUid,
           toRole,
           text: t,
-          pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime },
+          attachmentMeta: pdf,
+          pdfMeta: pdf,
           status: "pending",
         });
 
@@ -769,7 +874,8 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
             fromRole: myRole,
             toRole,
             text: t,
-            pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
+            attachmentMeta: pdf,
+            pdfMeta: pdf,
           });
         } catch (bundleErr) {
           if (!shouldFallbackToSplitSend(bundleErr)) throw bundleErr;
@@ -780,11 +886,12 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
             toRole,
             text: t,
           });
-          await sendPendingPdf({
+          await sendPendingAttachment({
             requestId: rid,
             fromRole: myRole,
             toRole,
-            pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
+            attachmentMeta: pdf,
+            typeHint: pdf?.attachmentKind || "document",
           });
         }
       } else if (pdf) {
@@ -792,17 +899,19 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
           fromRole: myRole,
           fromUid: myUid,
           toRole,
-          type: "pdf",
+          type: pdf?.attachmentKind || "document",
           text: "",
-          pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime },
+          attachmentMeta: pdf,
+          pdfMeta: pdf,
           status: "pending",
         });
 
-        await sendPendingPdf({
+        await sendPendingAttachment({
           requestId: rid,
           fromRole: myRole,
           toRole,
-          pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
+          attachmentMeta: pdf,
+          typeHint: pdf?.attachmentKind || "document",
         });
       } else {
         pushOptimistic({
@@ -865,7 +974,12 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     const time = formatTime(m.createdAt || m._createdAtMs || null);
 
     const type = String(m.type || "text").toLowerCase();
-    const isPdf = type === "pdf";
+    const attachment = m?.attachmentMeta || m?.pdfMeta || null;
+    const attachmentKind = String(attachment?.attachmentKind || type || "document").toLowerCase();
+    const attachmentLabel =
+      attachmentKind === "photo" || attachmentKind === "image" ? "Photo" : "Document";
+    const isAttachmentOnly =
+      type === "pdf" || type === "document" || type === "image" || type === "photo";
     const isBundleView = type === "bundle_view" || type === "bundle" || item._kind === "bundle_view";
     const isComboOptimistic = type === "combo" && item._kind === "optimistic";
 
@@ -886,12 +1000,12 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
               {safeStr(m.text) ?<div>{safeText(m.text)}</div> : null}
               
 
-              {m?.pdfMeta?.name ?(
+              {attachment?.name ?(
                 <div className={`${mine ?"bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
-                  <div className="text-xs font-semibold opacity-90">PDF</div>
+                  <div className="text-xs font-semibold opacity-90">{attachmentLabel}</div>
                   <div className="text-xs opacity-90">
-                    {safeText(m?.pdfMeta?.name) || "document.pdf"}
-                    {m?.pdfMeta?.size ?` - ${m.pdfMeta.size} bytes` : ""}
+                    {safeText(attachment?.name) || "attachment"}
+                    {attachment?.size ?` - ${attachment.size} bytes` : ""}
                   </div>
                 </div>
               ) : null}
@@ -899,22 +1013,22 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
           ) : isComboOptimistic ?(
             <div className="mt-1 grid gap-2">
               {safeStr(m.text) ?<div>{safeText(m.text)}</div> : null}
-              {m?.pdfMeta?.name ?(
+              {attachment?.name ?(
                 <div className={`${mine ?"bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
-                  <div className="text-xs font-semibold opacity-90">PDF</div>
+                  <div className="text-xs font-semibold opacity-90">{attachmentLabel}</div>
                   <div className="text-xs opacity-90">
-                    {safeText(m?.pdfMeta?.name) || "document.pdf"}
-                    {m?.pdfMeta?.size ?` - ${m.pdfMeta.size} bytes` : ""}
+                    {safeText(attachment?.name) || "attachment"}
+                    {attachment?.size ?` - ${attachment.size} bytes` : ""}
                   </div>
                 </div>
               ) : null}
             </div>
-          ) : isPdf ?(
+          ) : isAttachmentOnly ?(
             <div className="mt-1">
-              <div className="font-semibold">PDF</div>
+              <div className="font-semibold">{attachmentLabel}</div>
               <div className="text-xs opacity-90">
-                {safeText(m?.pdfMeta?.name) || "document.pdf"}
-                {m?.pdfMeta?.size ?` - ${m.pdfMeta.size} bytes` : ""}
+                {safeText(attachment?.name) || "attachment"}
+                {attachment?.size ?` - ${attachment.size} bytes` : ""}
               </div>
             </div>
           ) : (
@@ -952,6 +1066,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
   const sendBtnTone = canSend
     ?"bg-emerald-600 text-white shadow-[0_0_0_3px_rgba(16,185,129,0.22)] hover:bg-emerald-700"
     : "bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
+  const activePicker = CHAT_ATTACHMENT_OPTIONS[pickerMode] || CHAT_ATTACHMENT_OPTIONS.document;
 
   return (
     <div
@@ -961,7 +1076,13 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
       <div className="flex items-center justify-between gap-3 border-b border-zinc-200/80 dark:border-zinc-800/80 px-4 pb-2.5 pt-[calc(var(--app-safe-top)+0.6rem)]">
         <div>
           <div className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">Request Chat</div>
-          <div className="text-xs text-zinc-500">{roleLabel(myRole)} support thread</div>
+          <div className="text-xs text-zinc-500">
+            <span className="font-semibold text-zinc-700 dark:text-zinc-300">Assigned Agent:</span>{" "}
+            {safeText(headerAgent?.name || "Assigned agent")}
+            <span className={`ml-2 font-semibold ${headerAgent?.online ? "text-emerald-600" : "text-zinc-500"}`}>
+              {headerAgent?.statusLabel || "Offline"}
+            </span>
+          </div>
         </div>
 
         <button
@@ -1014,14 +1135,22 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
         <input
           ref={fileInputRef}
           type="file"
-          accept="application/pdf"
+          accept={activePicker.accept}
+          capture={activePicker.capture || undefined}
           className="hidden"
           onChange={onPickFile}
         />
 
         {pickedPdf ?(
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs">
-            <span className="font-semibold text-zinc-900 dark:text-zinc-100">{safeText(pickedPdf.name)}</span>
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+              {safeText(pickedPdf.name)}
+            </span>
+            {pickedPdf?.originalBytes > pickedPdf?.size ?(
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
+                Optimized
+              </span>
+            ) : null}
             <button
               type="button"
               onClick={() => setPickedPdf(null)}
@@ -1031,18 +1160,42 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
             </button>
           </div>
         ) : null}
+        {attachmentPreparing ?(
+          <div className="mb-2 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+            Preparing attachment...
+          </div>
+        ) : null}
 
         <div className="flex items-end gap-2">
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onTouchStart={(e) => e.preventDefault()}
-            onClick={openPicker}
-            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-300"
-            title="Attach PDF"
-          >
-            <IconPlus className="h-5 w-5" />
-          </button>
+          <div ref={attachMenuRef} className="relative">
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onTouchStart={(e) => e.preventDefault()}
+              onClick={() => setAttachmentMenuOpen((value) => !value)}
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-300"
+              title="Attach"
+            >
+              <IconPlus className="h-5 w-5" />
+            </button>
+            {attachmentMenuOpen ?(
+              <div className="absolute bottom-12 left-0 z-20 w-56 rounded-2xl border border-zinc-200 bg-white/95 p-1.5 text-xs shadow-xl dark:border-zinc-800 dark:bg-zinc-900/95">
+                {Object.values(CHAT_ATTACHMENT_OPTIONS).map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => openPicker(option.key)}
+                    className="mb-1 inline-flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-left font-semibold text-zinc-700 transition hover:border-emerald-200 hover:bg-emerald-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    <span>{option.label}</span>
+                    <span className="text-[10px] text-zinc-400">
+                      {option.key === "scan" || option.key === "photo" ? "Camera" : "Files"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
 
           <textarea
             ref={taRef}
@@ -1062,7 +1215,7 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
             onMouseDown={(e) => e.preventDefault()}
             onTouchStart={(e) => e.preventDefault()}
             onClick={sendNow}
-            disabled={sending || !canSend}
+            disabled={sending || !canSend || attachmentPreparing}
             className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition ${sendBtnTone}`}
             title="Send"
           >

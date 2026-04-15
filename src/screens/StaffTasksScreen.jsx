@@ -6,7 +6,6 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
   collection,
-  deleteDoc,
   doc,
   getDoc,
   onSnapshot,
@@ -17,6 +16,7 @@ import {
 import { auth, db } from "../firebase";
 import { useCountryDirectory } from "../hooks/useCountryDirectory";
 import { useNotifsV2Store } from "../services/notifsV2Store";
+import { staffDeleteDoneTask } from "../services/requestcommandservice";
 import { smartBack } from "../utils/navBack";
 import {
   buildCountryAccentRailStyle,
@@ -722,7 +722,10 @@ export default function StaffTasksScreen() {
     try {
       setBusy("delete");
       setErr("");
-      await deleteDoc(doc(db, "staff", uid, "tasks", rid));
+      const result = await staffDeleteDoneTask({ requestId: rid });
+      if (!result?.ok) {
+        throw new Error("Failed to delete done request.");
+      }
       setTasks((prev) =>
         (prev || []).filter((t) => {
           const id = String(t?.id || "");

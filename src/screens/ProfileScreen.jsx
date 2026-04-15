@@ -504,7 +504,7 @@ export default function ProfileScreen() {
 
           <Motion.button
             type="button"
-            onClick={() => navigate("/app/legal")}
+            onClick={() => navigate("/app/profile/documents")}
             variants={floatCard}
             initial="rest"
             whileHover="hover"
@@ -515,6 +515,33 @@ export default function ProfileScreen() {
               <div className="flex min-w-0 items-center gap-3">
                 <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200/80 bg-white/85 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-200">
                   <AppIcon size={ICON_MD} icon={FileText} />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    Documents
+                  </div>
+                  <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                    Uploaded and received files in one place.
+                  </div>
+                </div>
+              </div>
+              <AppIcon size={ICON_MD} icon={ChevronRight} className="text-zinc-400 dark:text-zinc-500" />
+            </div>
+          </Motion.button>
+
+          <Motion.button
+            type="button"
+            onClick={() => navigate("/app/legal")}
+            variants={floatCard}
+            initial="rest"
+            whileHover="hover"
+            whileTap="tap"
+            className={actionCard}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200/80 bg-white/85 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-200">
+                  <AppIcon size={ICON_MD} icon={ShieldCheck} />
                 </span>
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">

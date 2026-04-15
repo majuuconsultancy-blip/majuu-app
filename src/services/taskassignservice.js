@@ -23,6 +23,7 @@ import {
 } from "../constants/staffSpecialities";
 import { createStaffNotification, createUserNotification } from "./notificationDocs";
 import { buildRequestContinuityPatch, REQUEST_BACKEND_STATUSES } from "../utils/requestLifecycle";
+import { assignStaffCommand, unassignStaffCommand } from "./requestcommandservice";
 
 const ACTIVE_TASK_STATUSES = new Set(["assigned", "active"]);
 
@@ -205,6 +206,25 @@ export async function assignRequestToStaff({
   if (!admin) throw new Error("Not signed in");
   const roleCtx = await getCurrentUserRoleContext(admin.uid);
   if (!roleCtx?.isAdmin) throw new Error("Admin access required.");
+
+  const commandResult = await assignStaffCommand({
+    requestId: String(requestId || "").trim(),
+    staffUid: String(staffUid || "").trim(),
+    speciality: String(speciality || "").trim().toLowerCase(),
+    track: String(track || "").trim().toLowerCase(),
+    country: String(country || "").trim(),
+    requestType: String(requestType || "").trim().toLowerCase(),
+    serviceName: String(serviceName || "").trim(),
+    applicantName: String(applicantName || "").trim(),
+  });
+  if (!commandResult?.ok) {
+    throw new Error("Assign failed.");
+  }
+  return {
+    ok: true,
+    requestId: String(commandResult?.requestId || requestId || "").trim(),
+    staffUid: String(commandResult?.staffUid || staffUid || "").trim(),
+  };
 
   const safeRequestId = String(requestId || "").trim();
   const safeStaffUid = String(staffUid || "").trim();
@@ -460,6 +480,16 @@ export async function unassignRequest({ requestId, staffUid, reason = "Manual un
   if (!admin) throw new Error("Not signed in");
   const roleCtx = await getCurrentUserRoleContext(admin.uid);
   if (!roleCtx?.isAdmin) throw new Error("Admin access required.");
+
+  const commandResult = await unassignStaffCommand({
+    requestId: String(requestId || "").trim(),
+    staffUid: String(staffUid || "").trim(),
+    forceOverride: false,
+  });
+  if (!commandResult?.ok) {
+    throw new Error("Unassign failed.");
+  }
+  return { ok: true };
 
   const safeRequestId = String(requestId || "").trim();
   const requestedUid = String(staffUid || "").trim();

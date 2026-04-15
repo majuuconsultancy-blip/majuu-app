@@ -12,13 +12,19 @@ import {
   signInWithEmailAndPassword,
   signInWithPopup,
   signInWithRedirect,
+  getRedirectResult,
   sendPasswordResetEmail,
 } from "firebase/auth";
 import { auth, authPersistenceReady, googleProvider } from "../firebase";
 import { ensureUserDoc } from "../services/userservice";
 
 import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
-import { resolveLandingPathFromUserState } from "../journey/journeyLanding";
+import {
+  BIOMETRIC_SETUP_PATH,
+  resolvePostAuthLandingPath,
+} from "../utils/postAuthLanding";
+import { shouldPreferGoogleRedirect } from "../utils/googleAuth";
+import { useNetworkStatus } from "../hooks/useNetworkStatus";
 
 /* ---------------- Icons ---------------- */
 function IconMail(props) {
@@ -271,7 +277,8 @@ export default function LoginScreen() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // ✅ network banner state
+  // ✅ network awareness via robust hook
+  const { online, checkConnectivity } = useNetworkStatus();
   const [netMsg, setNetMsg] = useState("");
   const [retryInfo, setRetryInfo] = useState(""); // "Retrying 2/3…"
 
@@ -311,7 +318,13 @@ export default function LoginScreen() {
         lastLoginAt: Date.now(),
       });
 
-      const target = requestedPath || resolveLandingPathFromUserState(state || {});
+      const resolvedLanding = await resolvePostAuthLandingPath({
+        uid: user.uid,
+        userState: state || {},
+      });
+      const mustUseResolvedLanding =
+        resolvedLanding === "/setup" || resolvedLanding === BIOMETRIC_SETUP_PATH;
+      const target = mustUseResolvedLanding ? resolvedLanding : requestedPath || resolvedLanding;
       navigate(target, { replace: true });
       return state;
     },
@@ -362,30 +375,32 @@ export default function LoginScreen() {
     };
   }, [finishLogin, navigate, requestedPath]);
 
-  // ✅ watch online/offline
+  // ✅ Handle redirect result errors (Google sign-in redirect flow)
   useEffect(() => {
-    const onOnline = () => {
+    getRedirectResult(auth)
+      .then((result) => {
+        // onAuthStateChanged handles navigation for successful redirects;
+        // this catch block handles errors from failed redirects.
+        void result;
+      })
+      .catch((err) => {
+        const code = String(err?.code || "").toLowerCase();
+        if (!code.includes("auth/popup-closed-by-user")) {
+          setError(friendlyAuthError(err));
+        }
+      });
+  }, []);
+
+  // ✅ Automatically clear/set message based on hook status
+  useEffect(() => {
+    if (online) {
       setNetMsg("");
       setRetryInfo("");
-    };
-    const onOffline = () => {
+    } else {
       setNetMsg("You’re offline. Check your network and try again.");
-      setRetryInfo("");
-    };
-
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
-
-    // initial
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
-      setNetMsg("You’re offline. Check your network and try again.");
+      setLoading(false);
     }
-
-    return () => {
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("offline", onOffline);
-    };
-  }, []);
+  }, [online]);
 
   const canSubmit = useMemo(() => {
     return email.trim().length > 0 && password.trim().length > 0 && !loading;
@@ -400,7 +415,7 @@ export default function LoginScreen() {
     const cleanEmail = email.trim();
 
     // hard block if offline
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    if (!online) {
       setNetMsg("You’re offline. Check your network and try again.");
       return;
     }
@@ -429,7 +444,7 @@ export default function LoginScreen() {
     } catch (err) {
       setRetryInfo("");
 
-      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      if (!online) {
         setNetMsg("You’re offline. Check your network and try again.");
       } else if (isNetworkishAuthError(err)) {
         setNetMsg("Couldn’t connect. Check your internet connection and try again.");
@@ -446,7 +461,7 @@ export default function LoginScreen() {
     setNetMsg("");
     setRetryInfo("");
 
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    if (!online) {
       setNetMsg("You’re offline. Check your network and try again.");
       return;
     }
@@ -455,6 +470,14 @@ export default function LoginScreen() {
     lastAttemptRef.current = { type: "google", payload: {} };
 
     try {
+      await authPersistenceReady.catch(() => {});
+
+      // On Capacitor / PWA home-screen / embedded WebViews, redirect directly
+      if (shouldPreferGoogleRedirect()) {
+        await signInWithRedirect(auth, googleProvider);
+        return; // page navigates away; getRedirectResult handles return
+      }
+
       const res = await withRetries(
         async () => {
           return await signInWithPopup(auth, googleProvider);
@@ -484,7 +507,7 @@ export default function LoginScreen() {
         } catch (e2) {
           setError(friendlyAuthError(e2));
         }
-      } else if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      } else if (!online) {
         setNetMsg("You’re offline. Check your network and try again.");
       } else if (isNetworkishAuthError(err)) {
         setNetMsg("Couldn’t connect. Check your internet connection and try again.");
@@ -498,11 +521,19 @@ export default function LoginScreen() {
 
   const retryNow = async () => {
     const last = lastAttemptRef.current;
-    if (!last) return;
+    
+    // Manual check connectivity (ping check)
+    setRetryInfo("Checking connection…");
+    const actuallyOnline = await checkConnectivity();
+    if (!actuallyOnline) {
+      setNetMsg("Still offline. Check your network and try again.");
+      setRetryInfo("");
+      return;
+    }
 
-    // block if offline
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
-      setNetMsg("You’re offline. Check your network and try again.");
+    if (!last) {
+      setNetMsg("");
+      setRetryInfo("");
       return;
     }
 
@@ -526,7 +557,7 @@ export default function LoginScreen() {
         await finishLogin(userCred.user);
       } catch (err) {
         setRetryInfo("");
-        if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        if (!online) {
           setNetMsg("You’re offline. Check your network and try again.");
         } else if (isNetworkishAuthError(err)) {
           setNetMsg("Couldn’t connect. Check your internet connection and try again.");
@@ -558,7 +589,7 @@ export default function LoginScreen() {
     }
 
     // block if offline
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    if (!online) {
       setResetMsg("You’re offline. Connect to the internet and try again.");
       return;
     }
@@ -838,4 +869,3 @@ export default function LoginScreen() {
     </div>
   );
 }
-

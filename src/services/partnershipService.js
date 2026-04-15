@@ -45,6 +45,12 @@ function normalizeBoolean(value, fallback = false) {
   return fallback;
 }
 
+function roundRate(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.round(n * 100) / 100);
+}
+
 function toTimestampMs(value) {
   if (!value) return 0;
   if (typeof value?.toMillis === "function") {
@@ -127,20 +133,231 @@ function normalizePartnerStatus(value, fallback = "active") {
   return PARTNER_STATUS_OPTIONS.includes(raw) ? raw : fallback;
 }
 
+function normalizeBranchPayoutDestination(input = {}) {
+  const source = input && typeof input === "object" ? input : {};
+  const typeRaw = lower(source?.type, 40);
+  const type = typeRaw === "mpesa" ? "mpesa" : typeRaw === "other" ? "other" : "bank_transfer";
+  const mpesaModeRaw = lower(
+    source?.mpesaMode || source?.mode || (safeString(source?.paybillNumber || source?.businessNumber) ? "paybill" : "till"),
+    20
+  );
+  const mpesaMode = mpesaModeRaw === "paybill" ? "paybill" : "till";
+  const bankName = safeString(source?.bankName, 120);
+  const bankBranchName = safeString(source?.bankBranchName || source?.branchName, 120);
+  const accountName = safeString(source?.accountName, 120);
+  const accountNumber = safeString(source?.accountNumber || source?.accountNo, 80);
+  const accountNumberLast4 = safeString(
+    source?.accountNumberLast4 || source?.accountLast4 || accountNumber,
+    12
+  ).slice(-4);
+  const phoneNumber = safeString(source?.phoneNumber || source?.msisdn, 40);
+  const shortCode = safeString(
+    source?.shortCode || source?.paybillNumber || source?.businessNumber,
+    80
+  );
+  const tillNumber = safeString(source?.tillNumber, 80);
+  const paybillNumber = safeString(source?.paybillNumber || source?.businessNumber, 80);
+  const paybillAccountNumber = safeString(
+    source?.paybillAccountNumber || source?.accountReference || source?.accountNumber,
+    120
+  );
+  const reference = safeString(source?.reference || source?.destinationReference, 160);
+  const otherLabel = safeString(source?.otherLabel || source?.providerName, 120);
+  const destinationDetails = safeString(
+    source?.destinationDetails || source?.details || source?.accountDetails,
+    280
+  );
+  const hasAny = Boolean(
+    bankName ||
+      bankBranchName ||
+      accountName ||
+      accountNumber ||
+      accountNumberLast4 ||
+      phoneNumber ||
+      shortCode ||
+      tillNumber ||
+      paybillNumber ||
+      paybillAccountNumber ||
+      reference ||
+      otherLabel ||
+      destinationDetails
+  );
+  return hasAny
+    ? {
+        type,
+        mpesaMode,
+        bankName,
+        bankBranchName,
+        accountName,
+        accountNumber,
+        accountNumberLast4,
+        phoneNumber,
+        shortCode,
+        tillNumber,
+        paybillNumber,
+        businessNumber: paybillNumber,
+        paybillAccountNumber,
+        reference,
+        otherLabel,
+        destinationDetails,
+      }
+    : null;
+}
+
+function normalizeBranchPayoutMetadata(input = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const out = {};
+  Object.entries(input).forEach(([key, value]) => {
+    const safeKey = safeString(key, 80);
+    if (!safeKey) return;
+    out[safeKey] = safeString(value, 400);
+  });
+  return out;
+}
+
+function normalizeBranchFinancialStatus(value, fallback = "active") {
+  return lower(value, 40) === "inactive" ? "inactive" : fallback === "inactive" ? "inactive" : "active";
+}
+
+function normalizeBranchPlatformCutType(value, fallback = "percentage") {
+  const safe = lower(value, 40);
+  return safe === "flat" ? "flat" : fallback === "flat" ? "flat" : "percentage";
+}
+
+function normalizeBranchPlatformCutBase(value, fallback = "official_plus_service_fee") {
+  const safe = lower(value, 60);
+  return safe === "official_amount"
+    ? "official_amount"
+    : fallback === "official_amount"
+    ? "official_amount"
+    : "official_plus_service_fee";
+}
+
+function normalizeBranchReleaseBehavior(value, fallback = "manual_review") {
+  const safe = lower(value, 60);
+  if (safe === "auto_release" || safe === "auto") return "auto_release";
+  if (safe === "manual_review" || safe === "manual") return "manual_review";
+  return fallback === "auto_release" ? "auto_release" : "manual_review";
+}
+
+function normalizeBranchFinancialSettings(input = {}, { payoutDestination = null } = {}) {
+  const source = input && typeof input === "object" ? input : {};
+  const activeFinancialStatus = normalizeBranchFinancialStatus(
+    source?.activeFinancialStatus || source?.financialStatus,
+    "active"
+  );
+  const platformCutType = normalizeBranchPlatformCutType(
+    source?.platformCutType || source?.defaultPlatformCutType,
+    "percentage"
+  );
+  const platformCutValue = roundRate(
+    source?.platformCutValue ?? source?.defaultPlatformCutValue ?? 10
+  );
+  const platformCutBase = normalizeBranchPlatformCutBase(
+    source?.platformCutBase,
+    "official_plus_service_fee"
+  );
+  const releaseBehaviorOverride = normalizeBranchReleaseBehavior(
+    source?.releaseBehaviorOverride || source?.payoutReleaseBehavior,
+    "manual_review"
+  );
+  const payoutDestinationReady =
+    typeof source?.payoutDestinationReady === "boolean"
+      ? source.payoutDestinationReady
+      : Boolean(payoutDestination);
+  return {
+    activeFinancialStatus,
+    financialStatus: activeFinancialStatus,
+    platformCutType,
+    platformCutValue,
+    defaultPlatformCutType: platformCutType,
+    defaultPlatformCutValue: platformCutValue,
+    platformCutBase,
+    releaseBehaviorOverride,
+    payoutReleaseBehavior: releaseBehaviorOverride,
+    payoutDestinationReady,
+  };
+}
+
+function mergeBranchCoverage(primaryCounty = "", neighboringCounties = []) {
+  return normalizeCountyList([primaryCounty, ...(neighboringCounties || [])]);
+}
+
 function normalizeBranchRecord(raw = {}, index = 0) {
   const source = raw && typeof raw === "object" ? raw : {};
   const country = normalizeCountryValue(source?.country);
-  const county = safeString(source?.county, 120);
+  const branchId = safeString(source?.branchId || source?.id, 80) || createLocalId(`branch_${index + 1}`);
+  const branchName = safeString(source?.branchName || source?.name, 120);
+  const primaryCounty = normalizeCountyList([source?.primaryCounty || source?.county || ""])[0] || "";
+  const neighboringCounties = normalizeCountyList(
+    source?.neighboringCounties ||
+      source?.neighboring ||
+      source?.coverageCounties
+  ).filter((county) => county !== primaryCounty);
+  const coverageCounties = mergeBranchCoverage(primaryCounty, neighboringCounties);
+  const physicalTown = safeString(source?.physicalTown || source?.town || source?.city, 120);
+  const active =
+    source?.active === false
+      ? false
+      : source?.isActive === false
+      ? false
+      : normalizeBoolean(source?.active, normalizeBoolean(source?.isActive, true));
+  const payoutDestination = normalizeBranchPayoutDestination(
+    source?.payoutDestination && typeof source.payoutDestination === "object"
+      ? source.payoutDestination
+      : source?.payoutDetails
+  );
+  const payoutMetadata = normalizeBranchPayoutMetadata(
+    source?.payoutMetadata && typeof source.payoutMetadata === "object"
+      ? source.payoutMetadata
+      : source?.metadata
+  );
+  const financial = normalizeBranchFinancialSettings(
+    source?.financial && typeof source.financial === "object"
+      ? source.financial
+      : source,
+    { payoutDestination }
+  );
   return {
-    id: safeString(source?.id, 80) || createLocalId(`branch_${index + 1}`),
-    name: safeString(source?.name, 120),
+    branchId,
+    id: branchId, // legacy alias
+    branchName,
+    name: branchName, // legacy alias
     country,
     countryLower: lower(country, 120),
-    county,
-    countyLower: lower(county, 120),
-    town: safeString(source?.town || source?.city, 120),
+    primaryCounty,
+    county: primaryCounty, // legacy alias
+    primaryCountyLower: lower(primaryCounty, 120),
+    countyLower: lower(primaryCounty, 120), // legacy alias
+    neighboringCounties,
+    neighboringCountiesLower: normalizeCountyLowerList(neighboringCounties),
+    coverageCounties,
+    coverageCountiesLower: normalizeCountyLowerList(coverageCounties),
+    physicalTown,
+    town: physicalTown, // legacy alias
+    city: physicalTown,
     address: safeParagraph(source?.address, 240),
-    isActive: normalizeBoolean(source?.isActive, true),
+    payoutDestination,
+    payoutMetadata,
+    payoutDestinationLabel:
+      safeString(
+        source?.payoutDestinationLabel ||
+          source?.payoutLabel ||
+          source?.payoutDestination?.reference ||
+          payoutDestination?.reference,
+        160
+      ) || "",
+    financial,
+    activeFinancialStatus: financial.activeFinancialStatus,
+    financialStatus: financial.financialStatus,
+    platformCutType: financial.platformCutType,
+    platformCutValue: financial.platformCutValue,
+    platformCutBase: financial.platformCutBase,
+    releaseBehaviorOverride: financial.releaseBehaviorOverride,
+    payoutReleaseBehavior: financial.payoutReleaseBehavior,
+    payoutDestinationReady: financial.payoutDestinationReady,
+    active,
+    isActive: active, // legacy alias
     notes: safeParagraph(source?.notes, 240),
   };
 }
@@ -151,12 +368,37 @@ function normalizeBranchList(value) {
   const rows = [];
   value.forEach((branch, index) => {
     const clean = normalizeBranchRecord(branch, index);
-    const key = lower(clean.id, 80);
-    if (!clean.name || !key || seen.has(key)) return;
+    const key = lower(clean.branchId || clean.id, 80);
+    if (!clean.branchName || !key || seen.has(key)) return;
     seen.add(key);
     rows.push(clean);
   });
   return rows.slice(0, 50);
+}
+
+function deriveBranchCoverage(branches = [], { activeOnly = true } = {}) {
+  const rows = normalizeBranchList(branches);
+  const filtered = activeOnly
+    ? rows.filter((branch) => branch?.active !== false && branch?.isActive !== false)
+    : rows;
+  const primaryCounties = normalizeCountyList(filtered.map((branch) => branch.primaryCounty || branch.county));
+  const neighboringCounties = normalizeCountyList(
+    filtered.flatMap((branch) =>
+      Array.isArray(branch?.neighboringCounties) ? branch.neighboringCounties : []
+    )
+  );
+  const coverageCounties = mergeCoverageCounties([...primaryCounties, ...neighboringCounties]);
+  return {
+    branches: filtered,
+    primaryCounties,
+    neighboringCounties,
+    coverageCounties,
+  };
+}
+
+export function deriveOperationalBranchCoverage(source, { activeOnly = true } = {}) {
+  const branches = Array.isArray(source) ? source : source?.branches;
+  return deriveBranchCoverage(branches, { activeOnly });
 }
 
 function normalizePartnerCorePayload(input = {}, { existingId = "" } = {}) {
@@ -189,12 +431,22 @@ function normalizePartnerCorePayload(input = {}, { existingId = "" } = {}) {
   };
 }
 
-function normalizePartnerCoveragePayload(input = {}, { partnerId = "" } = {}) {
+function normalizePartnerCoveragePayload(
+  input = {},
+  { partnerId = "", strictBranchCountryFromHome = false } = {}
+) {
+  const branches = normalizeBranchList(input?.branches);
+  const branchCoverage = deriveBranchCoverage(branches, { activeOnly: true });
   const supportedTracks = normalizeTrackList(input?.supportedTracks);
   const supportedCountries = normalizeCountryList(input?.supportedCountries);
   const homeCountries = normalizeHomeCountryList(input?.homeCountries);
-  const supportedCounties = normalizeCountyList(input?.supportedCounties || []);
-  const neighboringCounties = [];
+  const legacySupportedCounties = normalizeCountyList(input?.supportedCounties || []);
+  const supportedCounties = branchCoverage.coverageCounties.length
+    ? mergeCoverageCounties([...branchCoverage.coverageCounties, ...legacySupportedCounties])
+    : legacySupportedCounties;
+  const neighboringCounties = branchCoverage.neighboringCounties.length
+    ? branchCoverage.neighboringCounties
+    : normalizeCountyList(input?.neighboringCounties || []);
   const coverageCounties = mergeCoverageCounties(supportedCounties);
 
   if (!partnerId) {
@@ -212,6 +464,18 @@ function normalizePartnerCoveragePayload(input = {}, { partnerId = "" } = {}) {
   if (!supportedCounties.length) {
     throw new Error("Select at least one supported county.");
   }
+  if (strictBranchCountryFromHome) {
+    const homeCountryLowerSet = new Set(homeCountries.map((country) => lower(country, 120)));
+    const invalidBranch = branches.find((branch) => {
+      const branchCountry = safeString(branch?.country, 120);
+      return branchCountry && !homeCountryLowerSet.has(lower(branchCountry, 120));
+    });
+    if (invalidBranch) {
+      throw new Error(
+        `Branch '${safeString(invalidBranch?.branchName || invalidBranch?.name || invalidBranch?.branchId, 120)}' country must be selected from Home Countries.`
+      );
+    }
+  }
 
   return {
     id: partnerId,
@@ -224,10 +488,16 @@ function normalizePartnerCoveragePayload(input = {}, { partnerId = "" } = {}) {
     supportedCounties,
     supportedCountiesLower: normalizeCountyLowerList(supportedCounties),
     neighboringCounties,
-    neighboringCountiesLower: [],
+    neighboringCountiesLower: normalizeCountyLowerList(neighboringCounties),
     coverageCounties,
     coverageCountiesLower: normalizeCountyLowerList(coverageCounties),
-    branchCount: normalizeBranchList(input?.branches).length,
+    branchCoverageCounties: branchCoverage.coverageCounties,
+    branchCoverageCountiesLower: normalizeCountyLowerList(branchCoverage.coverageCounties),
+    branchPrimaryCounties: branchCoverage.primaryCounties,
+    branchPrimaryCountiesLower: normalizeCountyLowerList(branchCoverage.primaryCounties),
+    branchNeighboringCounties: branchCoverage.neighboringCounties,
+    branchNeighboringCountiesLower: normalizeCountyLowerList(branchCoverage.neighboringCounties),
+    branchCount: branches.length,
     notes: safeParagraph(input?.coverageNotes || input?.notes, 1000),
   };
 }
@@ -285,6 +555,18 @@ function safeMergePartnerAndCoverage(id, partnerData = {}, coverageData = {}) {
     return mergePartnerAndCoverage(id, partnerSource, coverageSource);
   } catch (error) {
     console.warn("partner merge failed:", error?.message || error);
+    const branches = normalizeBranchList(partnerSource?.branches || coverageSource?.branches);
+    const branchCoverage = deriveBranchCoverage(branches, { activeOnly: true });
+    const baseSupportedCounties = normalizeCountyList(
+      coverageSource?.supportedCounties || partnerSource?.supportedCounties || []
+    );
+    const supportedCounties = branchCoverage.coverageCounties.length
+      ? mergeCoverageCounties([...branchCoverage.coverageCounties, ...baseSupportedCounties])
+      : baseSupportedCounties;
+    const neighboringCounties = branchCoverage.neighboringCounties.length
+      ? branchCoverage.neighboringCounties
+      : normalizeCountyList(coverageSource?.neighboringCounties || partnerSource?.neighboringCounties || []);
+    const coverageCounties = mergeCoverageCounties(supportedCounties);
     return {
       id: safeString(id, 140),
       displayName,
@@ -299,8 +581,8 @@ function safeMergePartnerAndCoverage(id, partnerData = {}, coverageData = {}) {
       ) === "active",
       notes: safeParagraph(partnerSource?.notes, 2000),
       metadata: partnerSource?.metadata && typeof partnerSource.metadata === "object" ? partnerSource.metadata : {},
-      branches: normalizeBranchList(partnerSource?.branches),
-      branchCount: normalizeBranchList(partnerSource?.branches).length,
+      branches,
+      branchCount: branches.length,
       supportedTracks: normalizeTrackList(coverageSource?.supportedTracks || partnerSource?.supportedTracks),
       homeCountries: normalizeHomeCountryList(
         coverageSource?.homeCountries || partnerSource?.homeCountries
@@ -314,22 +596,18 @@ function safeMergePartnerAndCoverage(id, partnerData = {}, coverageData = {}) {
       supportedCountriesLower: normalizeCountryList(
         coverageSource?.supportedCountries || partnerSource?.supportedCountries
       ).map((country) => lower(country, 120)),
-      supportedCounties: normalizeCountyList(
-        coverageSource?.supportedCounties || partnerSource?.supportedCounties || []
-      ),
-      supportedCountiesLower: normalizeCountyLowerList(
-        coverageSource?.supportedCounties || partnerSource?.supportedCounties || []
-      ),
-      neighboringCounties: [],
-      neighboringCountiesLower: [],
-      coverageCounties: mergeCoverageCounties(
-        coverageSource?.supportedCounties || partnerSource?.supportedCounties || []
-      ),
-      coverageCountiesLower: normalizeCountyLowerList(
-        mergeCoverageCounties(
-          coverageSource?.supportedCounties || partnerSource?.supportedCounties || []
-        )
-      ),
+      supportedCounties,
+      supportedCountiesLower: normalizeCountyLowerList(supportedCounties),
+      neighboringCounties,
+      neighboringCountiesLower: normalizeCountyLowerList(neighboringCounties),
+      coverageCounties,
+      coverageCountiesLower: normalizeCountyLowerList(coverageCounties),
+      branchCoverageCounties: branchCoverage.coverageCounties,
+      branchCoverageCountiesLower: normalizeCountyLowerList(branchCoverage.coverageCounties),
+      branchPrimaryCounties: branchCoverage.primaryCounties,
+      branchPrimaryCountiesLower: normalizeCountyLowerList(branchCoverage.primaryCounties),
+      branchNeighboringCounties: branchCoverage.neighboringCounties,
+      branchNeighboringCountiesLower: normalizeCountyLowerList(branchCoverage.neighboringCounties),
       createdAt: partnerSource?.createdAt || null,
       updatedAt: partnerSource?.updatedAt || null,
       createdAtMs: Number(partnerSource?.createdAtMs || 0) || toTimestampMs(partnerSource?.createdAt),
@@ -405,7 +683,7 @@ export function createEmptyPartnerDraft() {
     homeCountries: [],
     supportedCountries: [],
     supportedCounties: [],
-    neighboringCounties: [],
+    neighboringCounties: [], // legacy top-level fallback
     branches: [],
     metadata: {},
   };
@@ -455,6 +733,7 @@ export function evaluatePartnerRequestCompatibility(
     county = "",
     countryOfResidence = "",
     filterMode = PARTNER_FILTER_MODES.DESTINATION_COUNTRY,
+    eligiblePartnerIds = [],
   } = {}
 ) {
   const safePartner = partner && typeof partner === "object" ? partner : {};
@@ -462,6 +741,8 @@ export function evaluatePartnerRequestCompatibility(
   const safeTrack = normalizeTrackValue(trackType);
   const safeCountry = normalizeCountryValue(country);
   const safeCountryLower = lower(safeCountry, 120);
+  const safeCounty = safeString(county, 120);
+  const safeCountyLower = lower(safeCounty, 120);
   const safeResidenceCountry = safeString(countryOfResidence, 120);
   const safeResidenceLower = lower(safeResidenceCountry, 120);
 
@@ -470,9 +751,27 @@ export function evaluatePartnerRequestCompatibility(
   const homeCountriesLower = homeCountries.map((value) => lower(value, 120));
   const supportedCountries = normalizeCountryList(safePartner?.supportedCountries);
   const supportedCountriesLower = supportedCountries.map((value) => lower(value, 120));
+  const branches = normalizeBranchList(safePartner?.branches);
+  const activeBranchCoverage = deriveBranchCoverage(branches, { activeOnly: true });
+  const branchPrimaryLower = normalizeCountyLowerList(activeBranchCoverage.primaryCounties);
+  const branchNeighborLower = normalizeCountyLowerList(activeBranchCoverage.neighboringCounties);
+  const supportedCounties = normalizeCountyList(
+    activeBranchCoverage.coverageCounties.length
+      ? [...activeBranchCoverage.coverageCounties, ...(safePartner?.supportedCounties || [])]
+      : safePartner?.coverageCounties || safePartner?.supportedCounties || []
+  );
+  const supportedCountiesLower = normalizeCountyLowerList(supportedCounties);
   const partnerActive =
     normalizePartnerStatus(safePartner?.status, safePartner?.isActive === false ? "inactive" : "active") ===
     "active";
+  const safePartnerId = safeString(safePartner?.id, 140);
+  const eligiblePartnerSet = new Set(
+    (Array.isArray(eligiblePartnerIds) ? eligiblePartnerIds : [])
+      .map((value) => safeString(value, 140).toLowerCase())
+      .filter(Boolean)
+  );
+  const requestTypeAllowed =
+    eligiblePartnerSet.size === 0 || eligiblePartnerSet.has(safePartnerId.toLowerCase());
 
   const trackOk = Boolean(safeTrack) && supportedTracks.includes(safeTrack);
   const residenceHomeCountryOk = Boolean(safeResidenceLower) && homeCountriesLower.includes(safeResidenceLower);
@@ -484,9 +783,20 @@ export function evaluatePartnerRequestCompatibility(
     : targetCoverageOk;
   const hasResidenceCountry = Boolean(safeResidenceLower);
   const hasDestinationCountry = Boolean(safeCountryLower);
+  const hasCounty = Boolean(safeCountyLower);
+  const countyDirectOk = hasCounty && (
+    branchPrimaryLower.includes(safeCountyLower) ||
+    (!branchPrimaryLower.length && supportedCountiesLower.includes(safeCountyLower))
+  );
+  const countyNeighborOk = hasCounty && (
+    branchNeighborLower.includes(safeCountyLower) ||
+    (!branchPrimaryLower.length && !countyDirectOk && supportedCountiesLower.includes(safeCountyLower))
+  );
+  const countyOk = hasCounty ? countyDirectOk || countyNeighborOk : true;
 
   const reasons = [];
   if (!partnerActive) reasons.push("partner_inactive");
+  if (!requestTypeAllowed) reasons.push("request_type_not_allowed");
   if (!safeTrack || !trackOk) reasons.push("track_not_supported");
   if (hasResidenceCountry && !homeCountryOk) {
     reasons.push("home_country_not_supported");
@@ -494,22 +804,28 @@ export function evaluatePartnerRequestCompatibility(
   if (!usesHomeCountryFilter && hasDestinationCountry && !countryOk) {
     reasons.push("country_not_supported");
   }
+  if (hasCounty && !countyOk) {
+    reasons.push("county_not_supported");
+  }
 
   return {
     partnerId: safeString(safePartner?.id, 140),
     partnerName: safeString(safePartner?.displayName, 120),
     eligible: reasons.length === 0,
     reasons,
-    countyMatchType: "",
+    countyMatchType: countyDirectOk ? "direct" : countyNeighborOk ? "neighboring" : "",
     matches: {
       active: partnerActive,
+      requestTypeAllowed,
       track: trackOk,
       filterMode: safeFilterMode,
       homeCountry: homeCountryOk,
       country: countryOk,
-      county: true,
-      countyDirect: false,
-      countyNeighbor: false,
+      county: countyOk,
+      countyDirect: countyDirectOk,
+      countyNeighbor: countyNeighborOk,
+      hasCounty,
+      supportedCounties,
     },
   };
 }
@@ -523,6 +839,9 @@ export function preferredAgentReasonLabel(reason) {
   }
   if (safeReason === "country_not_supported") return "Selected agent does not support this country.";
   if (safeReason === "county_not_supported") return "Selected agent does not support this county.";
+  if (safeReason === "request_type_not_allowed") {
+    return "Selected agent is not eligible for this request type.";
+  }
   if (safeReason === "partner_not_found") return "Selected agent was not found.";
   return "Selected agent is not valid for this request.";
 }
@@ -534,6 +853,7 @@ export async function validatePreferredAgentSelection({
   county = "",
   countryOfResidence = "",
   filterMode = PARTNER_FILTER_MODES.DESTINATION_COUNTRY,
+  eligiblePartnerIds = [],
 } = {}) {
   const safePartnerId = safeString(partnerId, 140);
   if (!safePartnerId) {
@@ -559,6 +879,7 @@ export async function validatePreferredAgentSelection({
     county,
     countryOfResidence,
     filterMode,
+    eligiblePartnerIds,
   });
 
   return {
@@ -575,6 +896,7 @@ export async function listEligiblePreferredAgents({
   county = "",
   countryOfResidence = "",
   filterMode = PARTNER_FILTER_MODES.DESTINATION_COUNTRY,
+  eligiblePartnerIds = [],
   max = 250,
 } = {}) {
   const safeFilterMode = normalizePartnerFilterMode(filterMode);
@@ -588,6 +910,7 @@ export async function listEligiblePreferredAgents({
         county,
         countryOfResidence,
         filterMode: safeFilterMode,
+        eligiblePartnerIds,
       }),
     }))
     .filter((row) => row.compatibility?.eligible)
@@ -622,7 +945,7 @@ export async function createPartner(input = {}) {
       branches: corePayload.branches,
       notes: safeParagraph(input?.notes, 2000),
     },
-    { partnerId: ref.id }
+    { partnerId: ref.id, strictBranchCountryFromHome: true }
   );
 
   await ensureUniquePartnerName({
@@ -677,7 +1000,7 @@ export async function updatePartner(partnerId, input = {}) {
       branches: corePayload.branches,
       notes: safeParagraph(input?.notes, 2000),
     },
-    { partnerId: safeId }
+    { partnerId: safeId, strictBranchCountryFromHome: true }
   );
 
   await ensureUniquePartnerName({

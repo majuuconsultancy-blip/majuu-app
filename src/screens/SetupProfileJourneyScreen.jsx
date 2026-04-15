@@ -17,7 +17,6 @@ import {
 import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
 import { auth } from "../firebase";
 import { useManagedDestinationCountries } from "../hooks/useManagedDestinationCountries";
-import { resolveLandingPathFromUserState } from "../journey/journeyLanding";
 import {
   JOURNEY_COUNTRY_TYPES,
   JOURNEY_SOURCES,
@@ -25,8 +24,10 @@ import {
   normalizeJourneyTrack,
 } from "../journey/journeyModel";
 import { buildTrackEventKey, logAnalyticsEvent } from "../services/analyticsService";
+import { setBiometricPromptPending } from "../services/biometricLockService";
 import { markProfileJourneySetupCompleted, updateUserJourney } from "../services/journeyService";
 import { getUserState, updateUserProfile } from "../services/userservice";
+import { resolvePostAuthLandingPath } from "../utils/postAuthLanding";
 import {
   PROFILE_LANGUAGE_OPTIONS,
   getDefaultLanguageForCountry,
@@ -289,7 +290,10 @@ export default function SetupProfileJourneyScreen() {
         }
         if (journey.stage) setStage(journey.stage);
 
-        const landing = resolveLandingPathFromUserState(state || {});
+        const landing = await resolvePostAuthLandingPath({
+          uid: user.uid,
+          userState: state || {},
+        });
         if (landing !== "/setup") {
           navigate(landing, { replace: true });
           return;
@@ -350,14 +354,11 @@ export default function SetupProfileJourneyScreen() {
           },
           { source: JOURNEY_SOURCES.setup }
         );
-
-        await markProfileJourneySetupCompleted(uid);
-        navigate(`/app/${journeyTrack}`, { replace: true });
-        return;
       }
 
       await markProfileJourneySetupCompleted(uid);
-      navigate("/dashboard", { replace: true });
+      await setBiometricPromptPending(uid, true).catch(() => {});
+      navigate("/setup/biometric", { replace: true });
     } catch (err) {
       console.error(err);
       setError(err?.message || "Could not save your setup.");

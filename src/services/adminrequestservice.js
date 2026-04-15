@@ -16,6 +16,11 @@ import {
 import { db, auth } from "../firebase";
 import { createStaffNotification, createUserNotification } from "./notificationDocs";
 import { getCurrentUserRoleContext } from "./adminroleservice";
+import {
+  adminArchiveRequestCommand,
+  finalizeDecisionCommand,
+  markCompletedCommand,
+} from "./requestcommandservice";
 import { normalizeTextDeep } from "../utils/textNormalizer";
 import {
   buildRequestHistoryPayload,
@@ -514,7 +519,24 @@ async function updateStaffStatsAfterDecision({ requestId, finalDecision }) {
 
 export async function adminAcceptRequest({ requestId, note = "" }) {
   if (!requestId) throw new Error("Missing requestId");
-  const { actorUid: actingAdminUid, roleCtx } = await requireAdminActorContext();
+  await requireAdminActorContext();
+  const trimmedNote = String(note || "").trim();
+  const finalizeResult = await finalizeDecisionCommand({
+    requestId,
+    decision: "accept",
+    note: trimmedNote,
+  });
+  if (!finalizeResult?.ok) {
+    throw new Error("Failed to finalize decision.");
+  }
+  const completeResult = await markCompletedCommand({
+    requestId,
+    decision: "accept",
+  });
+  if (!completeResult?.ok) {
+    throw new Error("Failed to complete request.");
+  }
+  return true;
 
   const reqRef = doc(db, "serviceRequests", requestId);
   const snap = await getDoc(reqRef);
@@ -602,7 +624,24 @@ export async function adminAcceptRequest({ requestId, note = "" }) {
 export async function adminRejectRequest({ requestId, note = "" }) {
   if (!requestId) throw new Error("Missing requestId");
   if (!String(note || "").trim()) throw new Error("Note is required for rejection");
-  const { actorUid: actingAdminUid, roleCtx } = await requireAdminActorContext();
+  await requireAdminActorContext();
+  const trimmedNote = String(note || "").trim();
+  const finalizeResult = await finalizeDecisionCommand({
+    requestId,
+    decision: "reject",
+    note: trimmedNote,
+  });
+  if (!finalizeResult?.ok) {
+    throw new Error("Failed to finalize decision.");
+  }
+  const completeResult = await markCompletedCommand({
+    requestId,
+    decision: "reject",
+  });
+  if (!completeResult?.ok) {
+    throw new Error("Failed to complete request.");
+  }
+  return true;
 
   const reqRef = doc(db, "serviceRequests", requestId);
   const snap = await getDoc(reqRef);
@@ -686,7 +725,12 @@ export async function adminRejectRequest({ requestId, note = "" }) {
 
 export async function adminSoftDeleteRequest({ requestId } = {}) {
   if (!requestId) throw new Error("Missing requestId");
-  const { actorUid: actingAdminUid, roleCtx } = await requireAdminActorContext();
+  await requireAdminActorContext();
+  const commandResult = await adminArchiveRequestCommand({ requestId });
+  if (!commandResult?.ok) {
+    throw new Error("Failed to archive request.");
+  }
+  return true;
 
   const reqRef = doc(db, "serviceRequests", requestId);
   const snap = await getDoc(reqRef);

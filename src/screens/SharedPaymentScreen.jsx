@@ -16,6 +16,10 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function normalizePhone(value) {
+  return String(value || "").replace(/\D+/g, "").slice(-12);
+}
+
 export default function SharedPaymentScreen() {
   const { shareToken = "" } = useParams();
   const location = useLocation();
@@ -24,6 +28,7 @@ export default function SharedPaymentScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [email, setEmail] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
   const [payload, setPayload] = useState(null);
 
   useEffect(() => {
@@ -62,6 +67,7 @@ export default function SharedPaymentScreen() {
       const session = await createPaymentCheckoutSession({
         shareToken,
         email: cleanEmail,
+        phoneNumber: normalizePhone(phoneNumber),
         appBaseUrl: typeof window !== "undefined" ? window.location.origin : "",
         returnTo: `${location.pathname}${location.search || ""}`,
       });
@@ -78,6 +84,7 @@ export default function SharedPaymentScreen() {
 
   const payment = payload?.payment || null;
   const valid = payload?.valid === true && payment;
+  const alreadyPaid = payload?.alreadyPaid === true || payload?.reason === "already_paid";
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white px-5 py-10">
@@ -101,6 +108,8 @@ export default function SharedPaymentScreen() {
             ? "We are checking whether this payment request is still valid."
             : valid
             ? "This link can only be used to pay the full currently approved amount."
+            : alreadyPaid
+            ? "This payment link has already been paid."
             : error || "This payment link is no longer valid."}
         </p>
 
@@ -111,6 +120,17 @@ export default function SharedPaymentScreen() {
               <div className="mt-2 text-2xl font-semibold text-emerald-700">
                 {payment.currency} {Number(payment.amount || 0).toLocaleString()}
               </div>
+              {Number(payment?.discountAmount || 0) > 0 ? (
+                <div className="mt-2 text-xs text-emerald-700">
+                  Discount applied: {payment.currency}{" "}
+                  {Number(payment.discountAmount || 0).toLocaleString()}
+                </div>
+              ) : null}
+              {safeStr(payment?.note, 600) ? (
+                <div className="mt-2 text-xs text-zinc-600 whitespace-pre-wrap">
+                  {safeStr(payment.note, 600)}
+                </div>
+              ) : null}
               <div className="mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold">
                 <span className={paymentStatusUi(payment.status).cls}>
                   {paymentStatusUi(payment.status).label}
@@ -129,13 +149,24 @@ export default function SharedPaymentScreen() {
               />
             </label>
 
+            <label className="grid gap-2 text-sm font-medium text-zinc-800">
+              Phone number (M-PESA)
+              <input
+                value={phoneNumber}
+                onChange={(event) => setPhoneNumber(event.target.value)}
+                placeholder="0712345678"
+                className="rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none focus:border-emerald-300"
+                disabled={busy}
+              />
+            </label>
+
             <button
               type="button"
               onClick={startPayment}
               disabled={busy}
               className="rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
             >
-              {busy ? "Redirecting..." : "Pay full amount"}
+              {busy ? "Redirecting..." : "Pay Directly"}
             </button>
           </div>
         ) : null}

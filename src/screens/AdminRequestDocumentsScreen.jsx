@@ -7,6 +7,14 @@ import DocumentExtractPanel from "../components/DocumentExtractPanel";
 import DocumentProofreadPanel from "../components/DocumentProofreadPanel";
 import RequestDocumentFieldsSection from "../components/RequestDocumentFieldsSection";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import {
+  splitRequestDocumentsForLegacyViews,
+  subscribeRequestDocumentContext,
+} from "../services/documentEngineService";
+import {
+  getDocumentEngineReadMode,
+  subscribeDocumentEngineModeState,
+} from "../services/documentEngineFlags";
 
 function IconBack(props) {
   return (
@@ -84,6 +92,23 @@ function safeStr(x) {
   return String(x || "").trim();
 }
 
+function mergeDocumentRows(primaryRows = [], fallbackRows = []) {
+  const rows = [...(Array.isArray(primaryRows) ? primaryRows : []), ...(Array.isArray(fallbackRows) ? fallbackRows : [])];
+  const seen = new Set();
+  const out = [];
+
+  rows.forEach((row) => {
+    const id = safeStr(row?.id);
+    const signature = `${safeStr(row?.name).toLowerCase()}|${Number(row?.size || row?.sizeBytes || 0) || 0}|${safeStr(row?.url)}`;
+    const key = id || signature;
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(row);
+  });
+
+  return out;
+}
+
 function isExtraFieldAttachment(item) {
   const kind = safeStr(item?.kind).toLowerCase();
   return Boolean(
@@ -101,10 +126,13 @@ export default function AdminRequestDocumentsScreen() {
     const id = String(requestId || "").trim();
     return id || null;
   }, [requestId]);
+  const [docsReadMode, setDocsReadMode] = useState(getDocumentEngineReadMode());
 
   const [attachmentRequestId, setAttachmentRequestId] = useState("");
   const [err, setErr] = useState("");
   const [attachments, setAttachments] = useState([]);
+  const [canonicalRows, setCanonicalRows] = useState([]);
+  const [canonicalErr, setCanonicalErr] = useState("");
   const [requestData, setRequestData] = useState(null);
 
   useEffect(() => {
@@ -131,6 +159,18 @@ export default function AdminRequestDocumentsScreen() {
   }, [validId]);
 
   useEffect(() => {
+    const unsub = subscribeDocumentEngineModeState({
+      onData: (state) => {
+        setDocsReadMode(state?.effectiveMode || "merge");
+      },
+      onError: (error) => {
+        console.error("document engine mode subscription error:", error);
+      },
+    });
+    return () => unsub?.();
+  }, []);
+
+  useEffect(() => {
     if (!validId) return undefined;
 
     const colRef = collection(db, "serviceRequests", validId, "attachments");
@@ -154,12 +194,65 @@ export default function AdminRequestDocumentsScreen() {
     return () => unsub();
   }, [validId]);
 
-  const legacyAttachments = useMemo(
-    () => attachments.filter((item) => !isExtraFieldAttachment(item)),
-    [attachments]
+  useEffect(() => {
+    if (!validId || docsReadMode === "legacy") return undefined;
+    const unsub = subscribeRequestDocumentContext({
+      requestId: validId,
+      viewerRole: "admin",
+      onData: (rows) => {
+        setCanonicalRows(Array.isArray(rows) ? rows : []);
+        setCanonicalErr("");
+      },
+      onError: (error) => {
+        console.error("canonical request docs snapshot error:", error);
+        setCanonicalErr(error?.message || "Failed to load unified request documents.");
+      },
+    });
+    return () => unsub?.();
+  }, [validId, docsReadMode]);
+
+  const canonicalSplit = useMemo(
+    () => splitRequestDocumentsForLegacyViews(canonicalRows),
+    [canonicalRows]
   );
-  const effectiveError = validId && attachmentRequestId === validId ? err : "";
-  const loading = Boolean(validId) && attachmentRequestId !== validId && !effectiveError;
+  const effectiveAttachments = useMemo(
+    () => {
+      if (docsReadMode === "legacy") return attachments;
+      if (docsReadMode === "canonical") return canonicalSplit.attachments;
+      return mergeDocumentRows(canonicalSplit.attachments, attachments);
+    },
+    [docsReadMode, canonicalSplit.attachments, attachments]
+  );
+
+  const legacyAttachments = useMemo(
+    () => effectiveAttachments.filter((item) => !isExtraFieldAttachment(item)),
+    [effectiveAttachments]
+  );
+  const effectiveError = useMemo(() => {
+    if (effectiveAttachments.length > 0) return "";
+    if (docsReadMode === "legacy") {
+      return validId && attachmentRequestId === validId ? err : "";
+    }
+    if (docsReadMode === "canonical") return canonicalErr || err;
+    return (validId && attachmentRequestId === validId ? err : "") || canonicalErr;
+  }, [
+    docsReadMode,
+    effectiveAttachments.length,
+    validId,
+    attachmentRequestId,
+    err,
+    canonicalErr,
+  ]);
+  const loading =
+    Boolean(validId) &&
+    !effectiveError &&
+    (
+      docsReadMode === "legacy"
+        ? attachmentRequestId !== validId
+        : docsReadMode === "canonical"
+        ? canonicalRows.length === 0 && !canonicalErr
+        : canonicalRows.length === 0 && attachmentRequestId !== validId && !canonicalErr
+    );
   const pageError = !validId ? "Missing request ID." : effectiveError;
 
   const cardBase =
@@ -211,7 +304,7 @@ export default function AdminRequestDocumentsScreen() {
               requestId={validId}
               title="Document fields"
               viewerRole="admin"
-              attachments={attachments}
+              attachments={effectiveAttachments}
               attachmentsLoading={loading}
               attachmentsError={effectiveError}
               showLegacySection={false}

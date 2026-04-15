@@ -4,12 +4,14 @@ import {
   serverTimestamp,
   doc,
   deleteDoc,
+  getDoc,
   getDocs,
   writeBatch,
   setDoc,
   updateDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { mirrorLegacyPublishedRequestDocument } from "./documentEngineService";
 
 
 /* ======================================================
@@ -127,12 +129,18 @@ export async function deleteStagedAdminFile({ requestId, draftId }) {
 export async function publishStagedAdminFiles({ requestId }) {
   if (!requestId) throw new Error("Missing requestId");
 
+  const requestSnap = await getDoc(doc(db, "serviceRequests", requestId));
+  const requestUid = requestSnap.exists()
+    ? String(requestSnap.data()?.uid || "").trim()
+    : "";
+
   const draftsRef = collection(db, "serviceRequests", requestId, "adminFileDrafts");
   const snap = await getDocs(draftsRef);
 
   if (snap.empty) return { published: 0 };
 
   const batch = writeBatch(db);
+  const mirrorRows = [];
   let publishedCount = 0;
 
   snap.docs.forEach((d) => {
@@ -160,11 +168,42 @@ export async function publishStagedAdminFiles({ requestId }) {
       publishedAt: serverTimestamp(),
     });
 
+    mirrorRows.push({
+      fileId: targetRef.id,
+      name,
+      url,
+      meta: data.meta || {},
+    });
+
     batch.delete(d.ref);
     publishedCount += 1;
   });
 
   await batch.commit();
+
+  if (requestUid && mirrorRows.length > 0) {
+    await Promise.all(
+      mirrorRows.map((row) =>
+        mirrorLegacyPublishedRequestDocument({
+          requestId,
+          requestUid,
+          adminFileId: row.fileId,
+          file: {
+            name: row.name,
+            url: row.url,
+            contentType: "link",
+            size: 0,
+            meta: row.meta || {},
+          },
+          actorUid: "",
+        }).catch((error) => {
+          console.warn("document engine mirror failed for admin published file:", error?.message || error);
+          return null;
+        })
+      )
+    );
+  }
+
   return { published: publishedCount };
 }
 

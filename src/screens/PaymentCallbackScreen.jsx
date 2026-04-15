@@ -21,6 +21,13 @@ function isSuccessfulPaymentStatus(status = "") {
   );
 }
 
+function normalizePaymentMethod(value = "", fallback = "mpesa") {
+  const raw = safeStr(value, 80).toLowerCase();
+  if (raw === "mpesa" || raw === "paystack") return raw;
+  const fallbackValue = safeStr(fallback, 80).toLowerCase();
+  return fallbackValue === "paystack" ? "paystack" : "mpesa";
+}
+
 function resolveDraftIdFromReturnTo(returnTo = "") {
   const raw = safeStr(returnTo, 1200);
   if (!raw) return "";
@@ -207,9 +214,13 @@ export default function PaymentCallbackScreen() {
             verificationResult: result,
             returnTo: nextReturnTo,
           });
+          const method = normalizePaymentMethod(
+            result?.paymentMethod || result?.provider || result?.verificationSummary?.provider,
+            "mpesa"
+          );
           markDummyPaymentPaid(nextDraftId, {
             status: "paid",
-            method: "paystack",
+            method,
             paidAtMs: Date.now(),
             transactionReference: reference,
             requestId: nextRequestId,

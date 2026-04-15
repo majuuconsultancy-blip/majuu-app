@@ -500,7 +500,7 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
       if (inlinePaymentReceipt) {
         const unlockPaymentMeta = {
           status: "paid",
-          method: String(inlinePaymentReceipt.method || "demo_paystack").trim() || "demo_paystack",
+          method: String(inlinePaymentReceipt.method || "demo_provider").trim() || "demo_provider",
           paidAt: Number(inlinePaymentReceipt.paidAtMs || Date.now()) || Date.now(),
           amount: Number(session?.amount || gateAmount) || gateAmount,
           currency: String(session?.currency || "KES").trim().toUpperCase() || "KES",

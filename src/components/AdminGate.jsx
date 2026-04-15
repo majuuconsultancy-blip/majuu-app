@@ -10,12 +10,13 @@ export default function AdminGate({
   children,
   allowManager = false,
   requiredManagerModule = "",
+  superAdminOnly = false,
   fallbackPath = "/dashboard",
 }) {
   const { user, isAuthenticated, authInitializing } = useAuthSession();
   const navigate = useNavigate();
   const [grantedAccessKey, setGrantedAccessKey] = useState("");
-  const accessKey = `${user?.uid || "anonymous"}:${allowManager ? "manager" : "admin"}:${requiredManagerModule || "all"}`;
+  const accessKey = `${user?.uid || "anonymous"}:${allowManager ? "manager" : "admin"}:${requiredManagerModule || "all"}:${superAdminOnly ? "super" : "any_admin"}`;
   const checking = authInitializing || grantedAccessKey !== accessKey;
 
   useEffect(() => {
@@ -38,8 +39,9 @@ export default function AdminGate({
       try {
         const roleCtx = await getCurrentUserRoleContext(user.uid);
         if (cancelled) return;
-        const adminAllowed = Boolean(roleCtx?.isAdmin);
+        const adminAllowed = Boolean(roleCtx?.isAdmin) && (!superAdminOnly || Boolean(roleCtx?.isSuperAdmin));
         const managerAllowed =
+          !superAdminOnly &&
           Boolean(allowManager) &&
           Boolean(roleCtx?.isManager) &&
           (!requiredManagerModule ||
@@ -66,6 +68,7 @@ export default function AdminGate({
     isAuthenticated,
     navigate,
     requiredManagerModule,
+    superAdminOnly,
     accessKey,
     user?.uid,
   ]);

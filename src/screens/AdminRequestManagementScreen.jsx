@@ -26,6 +26,7 @@ import { useCountryDirectory } from "../hooks/useCountryDirectory";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import { managerHasModuleAccess } from "../services/managerModules";
 import { countrySupportsTrack } from "../services/countryService";
+import { listPartners } from "../services/partnershipService";
 import {
   createEmptyRequestDefinitionDraft,
   createEmptyRequestExtraFieldDraft,
@@ -134,6 +135,7 @@ export default function AdminRequestManagementScreen() {
   const [hasRequestManagementAccess, setHasRequestManagementAccess] = useState(false);
   const [loading, setLoading] = useState(true);
   const [definitions, setDefinitions] = useState([]);
+  const [partners, setPartners] = useState([]);
   const [search, setSearch] = useState("");
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
@@ -146,6 +148,8 @@ export default function AdminRequestManagementScreen() {
   const [editingFieldId, setEditingFieldId] = useState("");
   const [fieldDraft, setFieldDraft] = useState(createEmptyRequestExtraFieldDraft());
   const [fieldErr, setFieldErr] = useState("");
+  const [partnerSearch, setPartnerSearch] = useState("");
+  const [partnerPick, setPartnerPick] = useState("");
 
   const { countries: allCountries } = useCountryDirectory();
 
@@ -195,6 +199,24 @@ export default function AdminRequestManagementScreen() {
     });
   }, [hasRequestManagementAccess]);
 
+  useEffect(() => {
+    if (!hasRequestManagementAccess) return undefined;
+    let cancelled = false;
+    void listPartners({ activeOnly: false, max: 300 })
+      .then((rows) => {
+        if (!cancelled) setPartners(Array.isArray(rows) ? rows : []);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error("request management partner load failed:", error);
+          setPartners([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasRequestManagementAccess]);
+
   const filteredDefinitions = useMemo(
     () => definitions.filter((definition) => matchesDefinitionSearch(definition, search)),
     [definitions, search]
@@ -236,6 +258,43 @@ export default function AdminRequestManagementScreen() {
   }, [allCountries, draft.country, draftTrackTypes]);
   const isTrackSimplePlacement = draft.entryPlacement === "track_simple";
   const allTracksSelected = draftTrackTypes.length === APP_TRACK_OPTIONS.length;
+  const selectedEligiblePartnerIds = useMemo(
+    () =>
+      Array.isArray(draft?.eligiblePartnerIds)
+        ? draft.eligiblePartnerIds.map((value) => safeString(value, 140)).filter(Boolean)
+        : [],
+    [draft?.eligiblePartnerIds]
+  );
+  const partnerNameById = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(partners) ? partners : []).forEach((partner) => {
+      const id = safeString(partner?.id, 140);
+      const name = safeString(partner?.displayName, 140) || id;
+      if (!id) return;
+      map.set(id, name);
+    });
+    return map;
+  }, [partners]);
+  const partnerOptions = useMemo(
+    () =>
+      (Array.isArray(partners) ? partners : [])
+        .map((partner) => ({
+          id: safeString(partner?.id, 140),
+          name: safeString(partner?.displayName, 140) || safeString(partner?.id, 140),
+        }))
+        .filter((row) => row.id && row.name)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [partners]
+  );
+  const eligiblePartnerOptions = useMemo(() => {
+    const selected = new Set(selectedEligiblePartnerIds.map((value) => value.toLowerCase()));
+    const needle = safeString(partnerSearch, 120).toLowerCase();
+    return partnerOptions.filter((row) => {
+      if (selected.has(row.id.toLowerCase())) return false;
+      if (!needle) return true;
+      return `${row.name} ${row.id}`.toLowerCase().includes(needle);
+    });
+  }, [partnerOptions, partnerSearch, selectedEligiblePartnerIds]);
 
   const pageBg =
     "min-h-screen bg-gradient-to-b from-emerald-50/35 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
@@ -308,6 +367,8 @@ export default function AdminRequestManagementScreen() {
     setMsg("");
     setEditingId("");
     setDraft(createEmptyRequestDefinitionDraft());
+    setPartnerSearch("");
+    setPartnerPick("");
     resetFieldEditor();
     setFormOpen(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -318,6 +379,8 @@ export default function AdminRequestManagementScreen() {
     setMsg("");
     setEditingId(definition?.id || "");
     setDraft(draftFromRequestDefinition(definition));
+    setPartnerSearch("");
+    setPartnerPick("");
     resetFieldEditor();
     setFormOpen(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -328,6 +391,8 @@ export default function AdminRequestManagementScreen() {
     setFormOpen(false);
     setEditingId("");
     setDraft(createEmptyRequestDefinitionDraft());
+    setPartnerSearch("");
+    setPartnerPick("");
     resetFieldEditor();
   };
 
@@ -492,6 +557,27 @@ export default function AdminRequestManagementScreen() {
     } finally {
       setBusy("");
     }
+  };
+
+  const addEligiblePartner = () => {
+    const safeId = safeString(partnerPick, 140);
+    if (!safeId) return;
+    const exists = selectedEligiblePartnerIds.some((row) => row.toLowerCase() === safeId.toLowerCase());
+    if (exists) return;
+    updateDraft({
+      eligiblePartnerIds: [...selectedEligiblePartnerIds, safeId],
+    });
+    setPartnerPick("");
+  };
+
+  const removeEligiblePartner = (partnerId) => {
+    const safeId = safeString(partnerId, 140);
+    if (!safeId) return;
+    updateDraft({
+      eligiblePartnerIds: selectedEligiblePartnerIds.filter(
+        (row) => row.toLowerCase() !== safeId.toLowerCase()
+      ),
+    });
   };
 
   const toggleDefinitionActive = async (definition) => {
@@ -736,7 +822,7 @@ export default function AdminRequestManagementScreen() {
                     )}
                   </div>
 
-                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,0.6fr)]">
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)]">
                     <label className="grid gap-1.5">
                       <span className={label}>Summary</span>
                       <input
@@ -756,18 +842,81 @@ export default function AdminRequestManagementScreen() {
                         placeholder="Visa"
                       />
                     </label>
+                  </div>
 
-                    <label className="grid gap-1.5">
-                      <span className={label}>Sort Order</span>
-                      <input
-                        type="number"
-                        min={0}
-                        className={input}
-                        value={draft.sortOrder}
-                        onChange={(event) => updateDraft({ sortOrder: event.target.value })}
-                        placeholder="0"
-                      />
-                    </label>
+                  <div className="grid gap-2 rounded-2xl border border-zinc-200 bg-white/80 p-4 dark:border-zinc-700 dark:bg-zinc-900/70">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                          Eligible Partners
+                        </div>
+                        <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                          Restrict this request type to selected partners only.
+                        </div>
+                      </div>
+                      <FieldMetaPill>
+                        {selectedEligiblePartnerIds.length} selected
+                      </FieldMetaPill>
+                    </div>
+
+                    <div className="grid gap-2 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+                      <label className="grid gap-1.5">
+                        <span className={label}>Search</span>
+                        <input
+                          className={input}
+                          placeholder="Search partner"
+                          value={partnerSearch}
+                          onChange={(event) => setPartnerSearch(event.target.value)}
+                        />
+                      </label>
+                      <label className="grid gap-1.5">
+                        <span className={label}>Partner</span>
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                          <select
+                            className={input}
+                            value={partnerPick}
+                            onChange={(event) => setPartnerPick(event.target.value)}
+                          >
+                            <option value="">Select partner</option>
+                            {eligiblePartnerOptions.map((row) => (
+                              <option key={row.id} value={row.id}>
+                                {row.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={addEligiblePartner}
+                            disabled={!partnerPick}
+                            className="rounded-2xl border border-emerald-200 bg-emerald-50/80 px-3.5 py-2 text-sm font-semibold text-emerald-800 disabled:opacity-50"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      </label>
+                    </div>
+
+                    <div className="min-h-[42px] rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/70 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/45">
+                      {selectedEligiblePartnerIds.length ? (
+                        <div className="flex flex-wrap gap-2">
+                          {selectedEligiblePartnerIds.map((partnerId) => (
+                            <button
+                              key={partnerId}
+                              type="button"
+                              onClick={() => removeEligiblePartner(partnerId)}
+                              className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1 text-xs font-semibold text-emerald-800"
+                            >
+                              <span>{partnerNameById.get(partnerId) || partnerId}</span>
+                              <span className="text-emerald-500">x</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-zinc-500 dark:text-zinc-400">
+                          No partner restriction configured. All compatible partners will be eligible.
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-900/40 dark:bg-emerald-950/20">
@@ -1182,9 +1331,9 @@ export default function AdminRequestManagementScreen() {
                             <FieldMetaPill>
                               Source: {formatCountrySource(definition.countrySource)}
                             </FieldMetaPill>
-                            {Number(definition.sortOrder || 0) > 0 ? (
-                              <FieldMetaPill>Order: {definition.sortOrder}</FieldMetaPill>
-                            ) : null}
+                            <FieldMetaPill>
+                              Eligible partners: {Array.isArray(definition?.eligiblePartnerIds) ? definition.eligiblePartnerIds.length : 0}
+                            </FieldMetaPill>
                             <FieldMetaPill>Extra Fields: {activeFieldLabel}</FieldMetaPill>
                           </div>
 

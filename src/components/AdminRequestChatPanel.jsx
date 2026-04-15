@@ -18,12 +18,14 @@ import {
   adminHidePendingMessage,
   adminSendBundleDirect,
   adminSendTextDirect,
-  adminSendPdfMetaDirect,
+  adminSendAttachmentDirect,
 } from "../services/chatservice";
+import { CHAT_ATTACHMENT_OPTIONS, prepareChatAttachmentFromFile } from "../services/chatAttachmentService";
 import useKeyboardInset from "../hooks/useKeyboardInset";
 import { normalizeTextDeep } from "../utils/textNormalizer";
 import { getSystemChatMessageLabel, isSystemChatMessage } from "../utils/chatSystemMessages";
 import { safeText } from "../utils/safeText";
+import { buildParticipantSummary } from "../services/chatParticipantService";
 
 /* ---------------- helpers ---------------- */
 function safeStr(x) {
@@ -84,12 +86,20 @@ function pickCreatedAt(docu) {
 
 function msgPreview(m) {
   const type = String(m?.type || "text").toLowerCase();
-  if (type === "pdf") return `PDF: ${safeText(m?.pdfMeta?.name) || "document.pdf"}`;
+  const attachment = m?.attachmentMeta || m?.pdfMeta || null;
+  const attachmentKind = String(attachment?.attachmentKind || "").toLowerCase();
+  const attachmentLabel =
+    type === "photo" || type === "image" || attachmentKind === "photo" || attachmentKind === "image"
+      ? "Photo"
+      : "Document";
+  if (type === "document" || type === "pdf" || type === "image" || type === "photo") {
+    return `${attachmentLabel}: ${safeText(attachment?.name) || "attachment"}`;
+  }
   if (type === "bundle") {
     const text = safeText(m?.text);
-    const pdf = safeText(m?.pdfMeta?.name);
-    if (text && pdf) return `${text}\nPDF: ${pdf}`;
-    if (pdf) return `PDF: ${pdf}`;
+    const fileName = safeText(attachment?.name);
+    if (text && fileName) return `${text}\n${attachmentLabel}: ${fileName}`;
+    if (fileName) return `${attachmentLabel}: ${fileName}`;
     return text;
   }
   return safeText(m?.text || "");
@@ -235,8 +245,20 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   const [busyKey, setBusyKey] = useState(""); // message id or bundle id
   const [err, setErr] = useState("");
 
-  // Track whether staff is assigned
-  const [assignedStaffUid, setAssignedStaffUid] = useState("");
+  const [headerUser, setHeaderUser] = useState(() => ({
+    uid: "",
+    name: "User",
+    online: false,
+    statusLabel: "Offline",
+    lastSeenAtMs: 0,
+  }));
+  const [headerStaff, setHeaderStaff] = useState(() => ({
+    uid: "",
+    name: "Staff pending assignment",
+    online: false,
+    statusLabel: "Offline",
+    lastSeenAtMs: 0,
+  }));
 
   // Hide removes message instantly (optimistic)
   const [optimisticHidden, setOptimisticHidden] = useState(() => new Set());
@@ -247,11 +269,15 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   // admin composer
   const [sendTo, setSendTo] = useState("user"); // user | staff
   const [text, setText] = useState("");
-  const [pickedPdf, setPickedPdf] = useState(null); // { name, size, mime }
+  const [pickedPdf, setPickedPdf] = useState(null); // attachment meta
+  const [pickerMode, setPickerMode] = useState("document");
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [attachmentPreparing, setAttachmentPreparing] = useState(false);
   const [sending, setSending] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
 
   const fileInputRef = useRef(null);
+  const attachMenuRef = useRef(null);
   const threadRef = useRef(null);
   const composerRef = useRef(null);
   const pendingObservedAtRef = useRef(new Map());
@@ -300,30 +326,138 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
   /* ---------- NEW: watch request assignment ---------- */
   useEffect(() => {
-    if (!rid) return;
+    if (!rid) return undefined;
+    let unsubUser = () => {};
+    let unsubStaff = () => {};
 
     const reqRef = doc(db, "serviceRequests", rid);
     const unsub = onSnapshot(
       reqRef,
       (snap) => {
-        const d = snap.exists() ?snap.data() : null;
+        const d = snap.exists() ? snap.data() || {} : {};
+        const staffUid = String(
+          d?.assignedTo ||
+            d?.assignedStaffUid ||
+            d?.assignedToUid ||
+            d?.staffUid ||
+            d?.staffAssignedUid ||
+            ""
+        ).trim();
+        const ownerUid = String(d?.uid || "").trim();
+        const ownerFallback = String(d?.applicantName || d?.name || "").trim();
+        const staffFallback = String(d?.assignedStaffName || d?.assignedStaffEmail || "").trim();
 
-        // support a few possible field names (use whichever you have)
-        const uid =
-          d?.assignedStaffUid ||
-          d?.assignedToUid ||
-          d?.staffUid ||
-          d?.staffAssignedUid ||
-          "";
+        try {
+          unsubUser?.();
+        } catch {
+          // ignore listener cleanup issues
+        }
+        unsubUser = () => {};
+        if (ownerUid) {
+          unsubUser = onSnapshot(
+            doc(db, "users", ownerUid),
+            (userSnap) => {
+              setHeaderUser(
+                buildParticipantSummary({
+                  uid: ownerUid,
+                  row: userSnap.exists() ? userSnap.data() || {} : {},
+                  fallbackLabel: ownerFallback || `User ${ownerUid.slice(0, 6)}`,
+                })
+              );
+            },
+            () => {
+              setHeaderUser({
+                uid: ownerUid,
+                name: ownerFallback || `User ${ownerUid.slice(0, 6)}`,
+                online: false,
+                statusLabel: "Offline",
+                lastSeenAtMs: 0,
+              });
+            }
+          );
+        } else {
+          setHeaderUser({
+            uid: "",
+            name: ownerFallback || "User",
+            online: false,
+            statusLabel: "Offline",
+            lastSeenAtMs: 0,
+          });
+        }
 
-        setAssignedStaffUid(String(uid || "").trim());
+        try {
+          unsubStaff?.();
+        } catch {
+          // ignore listener cleanup issues
+        }
+        unsubStaff = () => {};
+        if (staffUid) {
+          unsubStaff = onSnapshot(
+            doc(db, "staff", staffUid),
+            (staffSnap) => {
+              setHeaderStaff(
+                buildParticipantSummary({
+                  uid: staffUid,
+                  row: staffSnap.exists() ? staffSnap.data() || {} : {},
+                  fallbackLabel: staffFallback || `Staff ${staffUid.slice(0, 6)}`,
+                })
+              );
+            },
+            () => {
+              setHeaderStaff({
+                uid: staffUid,
+                name: staffFallback || `Staff ${staffUid.slice(0, 6)}`,
+                online: false,
+                statusLabel: "Offline",
+                lastSeenAtMs: 0,
+              });
+            }
+          );
+        } else {
+          setHeaderStaff({
+            uid: "",
+            name: "Staff pending assignment",
+            online: false,
+            statusLabel: "Offline",
+            lastSeenAtMs: 0,
+          });
+        }
       },
       () => {
-        setAssignedStaffUid("");
+        setHeaderUser({
+          uid: "",
+          name: "User",
+          online: false,
+          statusLabel: "Offline",
+          lastSeenAtMs: 0,
+        });
+        setHeaderStaff({
+          uid: "",
+          name: "Staff pending assignment",
+          online: false,
+          statusLabel: "Offline",
+          lastSeenAtMs: 0,
+        });
       }
     );
 
-    return () => unsub();
+    return () => {
+      try {
+        unsub?.();
+      } catch {
+        // ignore listener cleanup issues
+      }
+      try {
+        unsubUser?.();
+      } catch {
+        // ignore listener cleanup issues
+      }
+      try {
+        unsubStaff?.();
+      } catch {
+        // ignore listener cleanup issues
+      }
+    };
   }, [rid]);
 
   /* ---------- listeners ---------- */
@@ -558,6 +692,18 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   }, [timeline.length, err]);
 
   useEffect(() => {
+    if (!attachmentMenuOpen) return undefined;
+    const onPointerDown = (event) => {
+      if (!attachMenuRef.current) return;
+      if (!attachMenuRef.current.contains(event.target)) {
+        setAttachmentMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [attachmentMenuOpen]);
+
+  useEffect(() => {
     if (!composerFocused && !keyboardInset) return;
     const timer = window.setTimeout(() => {
       scrollToBottom();
@@ -673,25 +819,35 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   };
 
   /* ---------- admin direct send ---------- */
-  const openPicker = () => fileInputRef.current?.click();
+  const openPicker = (mode = "document") => {
+    setPickerMode(mode);
+    setAttachmentMenuOpen(false);
+    window.setTimeout(() => fileInputRef.current?.click(), 0);
+  };
   const keepComposerFocusOnAction = (event) => {
     event.preventDefault();
   };
 
-  const onPickFile = (e) => {
+  const onPickFile = async (e) => {
     const f = e.target.files?.[0];
-    if (!f) return;
-
-    setPickedPdf({
-      name: f.name || "document.pdf",
-      size: Number(f.size || 0) || 0,
-      mime: f.type || "application/pdf",
-    });
-
     e.target.value = "";
+    if (!f) return;
+    setAttachmentPreparing(true);
+    try {
+      const prepared = await prepareChatAttachmentFromFile({
+        file: f,
+        mode: pickerMode,
+      });
+      setPickedPdf(prepared);
+    } catch (error) {
+      console.error(error);
+      setErr(error?.message || "Failed to prepare attachment.");
+    } finally {
+      setAttachmentPreparing(false);
+    }
   };
 
-  const canSend = Boolean(safeStr(text) || pickedPdf);
+  const canSend = Boolean(safeStr(text) || pickedPdf) && !attachmentPreparing;
 
   const sendNow = async () => {
     setErr("");
@@ -708,7 +864,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             requestId: rid,
             toRole: sendTo,
             text: t,
-            pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
+            pdfMeta: pdf,
           });
         } catch (bundleErr) {
           const code = String(bundleErr?.code || "").toLowerCase();
@@ -721,17 +877,19 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
           if (!fallback) throw bundleErr;
 
           await adminSendTextDirect({ requestId: rid, toRole: sendTo, text: t });
-          await adminSendPdfMetaDirect({
+          await adminSendAttachmentDirect({
             requestId: rid,
             toRole: sendTo,
-            pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
+            attachmentMeta: pdf,
+            typeHint: pdf?.attachmentKind || "document",
           });
         }
       } else if (pdf) {
-        await adminSendPdfMetaDirect({
+        await adminSendAttachmentDirect({
           requestId: rid,
           toRole: sendTo,
-          pdfMeta: { name: pdf.name, size: pdf.size, mime: pdf.mime, note: "" },
+          attachmentMeta: pdf,
+          typeHint: pdf?.attachmentKind || "document",
         });
       } else if (t) {
         await adminSendTextDirect({ requestId: rid, toRole: sendTo, text: t });
@@ -765,6 +923,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
   const sendBtnTone = canSend
     ?"bg-emerald-600 text-white shadow-[0_0_0_3px_rgba(16,185,129,0.22)] hover:bg-emerald-700"
     : "bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
+  const activePicker = CHAT_ATTACHMENT_OPTIONS[pickerMode] || CHAT_ATTACHMENT_OPTIONS.document;
 
   return (
     <div
@@ -779,12 +938,20 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
           <div className="min-w-0">
             <div className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">Request Chat</div>
             <div className="text-xs text-zinc-500">
-              Moderation thread
-              {assignedStaffUid ?(
-                <span className="ml-2 font-semibold text-emerald-700">- Staff assigned</span>
-              ) : (
-                <span className="ml-2 font-semibold text-amber-700">- No staff assigned</span>
-              )}
+              <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                User: {safeText(headerUser?.name || "User")}
+              </span>
+              <span className={`ml-2 font-semibold ${headerUser?.online ? "text-emerald-600" : "text-zinc-500"}`}>
+                {headerUser?.statusLabel || "Offline"}
+              </span>
+            </div>
+            <div className="text-xs text-zinc-500">
+              <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                Staff: {safeText(headerStaff?.name || "Staff pending assignment")}
+              </span>
+              <span className={`ml-2 font-semibold ${headerStaff?.online ? "text-emerald-600" : "text-zinc-500"}`}>
+                {headerStaff?.statusLabel || "Offline"}
+              </span>
             </div>
           </div>
         </div>
@@ -868,6 +1035,10 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
               const busy = busyKey === m.id || busyKey === item.id;
               const status = item._kind === "published" ?"delivered" : String(m.status || "pending").toLowerCase();
+              const attachment = m?.attachmentMeta || m?.pdfMeta || null;
+              const attachmentKind = String(attachment?.attachmentKind || "").toLowerCase();
+              const attachmentLabel =
+                attachmentKind === "photo" || attachmentKind === "image" ? "Photo" : "Document";
 
               return (
                 <div key={item.id} className={`chat-bubble-in flex ${isLeft ?"justify-start" : "justify-end"}`}>
@@ -876,7 +1047,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                       <div className="mt-1 grid gap-2">
                         {safeStr(m.text) ?<div className="break-words">{safeText(m.text)}</div> : null}
 
-                        {m?.pdfMeta?.name ?(
+                        {attachment?.name ?(
                           <div
                             className={`${
                               isLeft
@@ -884,10 +1055,10 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                                 : "bg-white/10 dark:bg-zinc-900/60"
                             } rounded-xl p-2`}
                           >
-                            <div className="text-xs font-semibold opacity-90">PDF</div>
+                            <div className="text-xs font-semibold opacity-90">{attachmentLabel}</div>
                             <div className="text-xs opacity-90">
-                              {safeText(m?.pdfMeta?.name) || "document.pdf"}
-                              {m?.pdfMeta?.size ?` - ${m.pdfMeta.size} bytes` : ""}
+                              {safeText(attachment?.name) || "attachment"}
+                              {attachment?.size ?` - ${attachment.size} bytes` : ""}
                             </div>
                           </div>
                         ) : null}
@@ -956,7 +1127,8 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
         <input
           ref={fileInputRef}
           type="file"
-          accept="application/pdf"
+          accept={activePicker.accept}
+          capture={activePicker.capture || undefined}
           className="hidden"
           onChange={onPickFile}
         />
@@ -976,6 +1148,11 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
         {pickedPdf ?(
           <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs">
             <span className="font-semibold text-zinc-900 dark:text-zinc-100">{safeText(pickedPdf.name)}</span>
+            {pickedPdf?.originalBytes > pickedPdf?.size ?(
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
+                Optimized
+              </span>
+            ) : null}
             <button
               type="button"
               onClick={() => setPickedPdf(null)}
@@ -985,18 +1162,42 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             </button>
           </div>
         ) : null}
+        {attachmentPreparing ?(
+          <div className="mt-2 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+            Preparing attachment...
+          </div>
+        ) : null}
 
         <div className="mt-2 flex items-end gap-2">
-          <button
-            type="button"
-            onMouseDown={keepComposerFocusOnAction}
-            onTouchStart={keepComposerFocusOnAction}
-            onClick={openPicker}
-            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-300"
-            title="Attach PDF"
-          >
-            <IconPlus className="h-5 w-5" />
-          </button>
+          <div ref={attachMenuRef} className="relative">
+            <button
+              type="button"
+              onMouseDown={keepComposerFocusOnAction}
+              onTouchStart={keepComposerFocusOnAction}
+              onClick={() => setAttachmentMenuOpen((value) => !value)}
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-300"
+              title="Attach"
+            >
+              <IconPlus className="h-5 w-5" />
+            </button>
+            {attachmentMenuOpen ?(
+              <div className="absolute bottom-12 left-0 z-20 w-56 rounded-2xl border border-zinc-200 bg-white/95 p-1.5 text-xs shadow-xl dark:border-zinc-800 dark:bg-zinc-900/95">
+                {Object.values(CHAT_ATTACHMENT_OPTIONS).map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => openPicker(option.key)}
+                    className="mb-1 inline-flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-left font-semibold text-zinc-700 transition hover:border-emerald-200 hover:bg-emerald-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    <span>{option.label}</span>
+                    <span className="text-[10px] text-zinc-400">
+                      {option.key === "scan" || option.key === "photo" ? "Camera" : "Files"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
 
           <textarea
             ref={taRef}
@@ -1021,7 +1222,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             onMouseDown={keepComposerFocusOnAction}
             onTouchStart={keepComposerFocusOnAction}
             onClick={sendNow}
-            disabled={sending || !canSend}
+            disabled={sending || !canSend || attachmentPreparing}
             className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition ${sendBtnTone}`}
             title="Send"
           >

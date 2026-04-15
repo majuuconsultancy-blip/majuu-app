@@ -196,7 +196,7 @@ export default function DiscoveryScreen({ track = "study" }) {
                   key={`spotlight-${country.name}`}
                   type="button"
                   onClick={() => openCountry(country.name)}
-                  className="group relative h-[11.5rem] min-w-[15rem] flex-none snap-start overflow-hidden rounded-[26px] border border-zinc-200/80 text-left shadow-sm transition active:scale-[0.99] [scroll-snap-stop:always] dark:border-zinc-700/80"
+                  className="group relative w-[15rem] aspect-[4/3] shrink-0 flex-none snap-start overflow-hidden rounded-[26px] border border-zinc-200/80 text-left shadow-sm transition active:scale-[0.99] [scroll-snap-stop:always] dark:border-zinc-700/80"
                   style={buildCountryAccentSurfaceStyle(country.accentColor, { strong: true })}
                 >
                   {country.heroImage ? (
@@ -205,7 +205,7 @@ export default function DiscoveryScreen({ track = "study" }) {
                       alt=""
                       loading="lazy"
                       decoding="async"
-                      className="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+                      className="absolute inset-0 h-full w-full object-cover object-center transition duration-300 group-hover:scale-[1.03]"
                     />
                   ) : null}
                   <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/0" />

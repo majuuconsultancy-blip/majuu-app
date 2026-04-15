@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import { updateProgressCommand } from "./requestcommandservice";
 import {
   REQUEST_BACKEND_STATUSES,
   buildRequestContinuityPatch,
@@ -154,6 +155,21 @@ export async function createRequestProgressUpdate({
 } = {}) {
   const rid = safeStr(requestId, 180);
   if (!rid) throw new Error("requestId required");
+  const commandResult = await updateProgressCommand({
+    requestId: rid,
+    progressPercent: Number(progressPercent ?? 0),
+    content: safeStr(content, 2000),
+    visibleToUser: visibleToUser !== false,
+  });
+  if (!commandResult?.ok) throw new Error("Failed to create progress update.");
+  return {
+    id: safeStr(commandResult?.updateId, 180),
+    requestId: rid,
+    progressPercent: Number(commandResult?.progressPercent || 0),
+    content: safeStr(content, 2000),
+    visibleToUser: visibleToUser !== false,
+    createdBy: safeStr(staffId || auth.currentUser?.uid, 180),
+  };
 
   const actorUid = safeStr(staffId || auth.currentUser?.uid, 180);
   if (!actorUid) throw new Error("Not signed in");
@@ -189,6 +205,22 @@ export async function postRequestProgressUpdate({
 } = {}) {
   const rid = safeStr(requestId, 180);
   if (!rid) throw new Error("requestId required");
+  const commandProgress = Math.round(Number(progressPercent));
+  if (!Number.isFinite(commandProgress) || commandProgress < 0 || commandProgress > 100) {
+    throw new Error("A valid progress percentage is required.");
+  }
+  const commandResult = await updateProgressCommand({
+    requestId: rid,
+    progressPercent: commandProgress,
+    content: safeStr(content, 2000),
+    visibleToUser: visibleToUser !== false,
+  });
+  if (!commandResult?.ok) throw new Error("Progress update failed.");
+  return {
+    ok: true,
+    updateId: safeStr(commandResult?.updateId, 180),
+    progressPercent: Number(commandResult?.progressPercent || commandProgress),
+  };
 
   const actorUid = safeStr(auth.currentUser?.uid, 180);
   if (!actorUid) throw new Error("Not signed in");

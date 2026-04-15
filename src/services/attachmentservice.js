@@ -4,6 +4,7 @@
 
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import { mirrorLegacyRequestAttachment } from "./documentEngineService";
 
 const MAX_PDF_MB = 10;
 const MAX_BYTES = MAX_PDF_MB * 1024 * 1024;
@@ -92,6 +93,19 @@ export async function createPendingAttachment({ requestId, file }) {
   if (kind) payload.kind = kind;
 
   const docRef = await addDoc(ref, payload);
+  try {
+    await mirrorLegacyRequestAttachment({
+      requestId: rid,
+      requestUid: user.uid,
+      attachmentId: docRef.id,
+      attachment: payload,
+      actorUid: user.uid,
+      actorRole: "user",
+      sourceChannel: "request_modal",
+    });
+  } catch (error) {
+    console.warn("document engine mirror failed for attachment:", error?.message || error);
+  }
 
   return docRef.id;
 }
@@ -142,6 +156,19 @@ export async function createPendingAttachmentFromMeta({ requestId, fileMeta } = 
   if (kind) payload.kind = kind;
 
   const docRef = await addDoc(ref, payload);
+  try {
+    await mirrorLegacyRequestAttachment({
+      requestId: rid,
+      requestUid: user.uid,
+      attachmentId: docRef.id,
+      attachment: payload,
+      actorUid: user.uid,
+      actorRole: "user",
+      sourceChannel: "request_modal_meta_restore",
+    });
+  } catch (error) {
+    console.warn("document engine mirror failed for meta attachment:", error?.message || error);
+  }
 
   return docRef.id;
 }
@@ -193,6 +220,28 @@ export async function createLinkAttachment({
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  try {
+    await mirrorLegacyRequestAttachment({
+      requestId: rid,
+      requestUid: user.uid,
+      attachmentId: docRef.id,
+      attachment: {
+        name: cleanName,
+        url: cleanUrl,
+        size: 0,
+        contentType: "link",
+        status: "uploaded",
+        label: safeStr(label, 60),
+        metaNote: safeStr(metaNote, 800),
+        kind: safeStr(kind, 60) || "link",
+      },
+      actorUid: user.uid,
+      actorRole: "user",
+      sourceChannel: "request_link_attachment",
+    });
+  } catch (error) {
+    console.warn("document engine mirror failed for link attachment:", error?.message || error);
+  }
 
   return docRef.id;
 }
@@ -239,6 +288,28 @@ export async function createMetaAttachment({
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  try {
+    await mirrorLegacyRequestAttachment({
+      requestId: rid,
+      requestUid: user.uid,
+      attachmentId: docRef.id,
+      attachment: {
+        name: cleanLabel,
+        size: 0,
+        contentType: cleanUrl ? "link" : "meta",
+        status: "pending_upload",
+        label: cleanLabel,
+        metaNote: safeStr(metaNote, 800),
+        kind: safeStr(kind, 60) || "user_dummy_upload",
+        url: cleanUrl || "",
+      },
+      actorUid: user.uid,
+      actorRole: "user",
+      sourceChannel: "request_meta_attachment",
+    });
+  } catch (error) {
+    console.warn("document engine mirror failed for meta-only attachment:", error?.message || error);
+  }
 
   return docRef.id;
 }

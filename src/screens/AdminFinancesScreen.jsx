@@ -16,20 +16,16 @@ import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import { managerHasModuleAccess } from "../services/managerModules";
 import {
   defaultFinanceSettings,
-  defaultPartnerFinancialProfile,
   getFinanceEnvironmentStatus,
-  PAYOUT_RELEASE_BEHAVIORS,
-  PLATFORM_CUT_BASE_OPTIONS,
-  PLATFORM_CUT_TYPES,
+  getPaymentProviderConfigStatus,
+  PAYMENT_PROVIDERS,
   releaseQueuedPartnerPayout,
   saveFinanceSettings,
-  savePartnerFinancialProfile,
+  savePaymentProviderConfig,
   subscribeFinanceSettings,
   subscribeFinancialAuditLog,
-  subscribePartnerFinancialProfiles,
   subscribePayoutQueue,
   subscribeSettlementHistory,
-  TAX_MODES,
 } from "../services/financeservice";
 import { listPartners } from "../services/partnershipService";
 import { smartBack } from "../utils/navBack";
@@ -62,10 +58,18 @@ function formatMoney(amount, currency = "KES") {
   return `${safeCurrency} ${safeAmount.toLocaleString()}`;
 }
 
+function paymentProviderLabel(value) {
+  const key = safeString(value, 40).toLowerCase();
+  if (key === "mpesa") return "M-Pesa";
+  if (key === "paystack") return "Paystack";
+  return key ? key.toUpperCase() : "Unknown";
+}
+
 function createOpenSections() {
   return {
     environment: false,
-    partnerProfiles: false,
+    providers: false,
+    branchFinance: false,
     payoutQueue: false,
     settlementHistory: false,
     auditLog: false,
@@ -157,7 +161,6 @@ export default function AdminFinancesScreen() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isFinanceManager, setIsFinanceManager] = useState(false);
   const [partners, setPartners] = useState([]);
-  const [partnerProfiles, setPartnerProfiles] = useState([]);
   const [payoutQueue, setPayoutQueue] = useState([]);
   const [settlementHistory, setSettlementHistory] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
@@ -166,10 +169,11 @@ export default function AdminFinancesScreen() {
   const [settingsDraft, setSettingsDraft] = useState(defaultFinanceSettings());
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
-  const [selectedPartnerId, setSelectedPartnerId] = useState("");
-  const [partnerDraft, setPartnerDraft] = useState(defaultPartnerFinancialProfile());
-  const [partnerDirty, setPartnerDirty] = useState(false);
-  const [partnerBusy, setPartnerBusy] = useState(false);
+  const [providerConfigSnapshot, setProviderConfigSnapshot] = useState(null);
+  const [providerConfigDraft, setProviderConfigDraft] = useState(null);
+  const [providerConfigDirty, setProviderConfigDirty] = useState(false);
+  const [providerConfigBusy, setProviderConfigBusy] = useState(false);
+  const [providerEncryptionReady, setProviderEncryptionReady] = useState(false);
   const [releaseDraftByQueueId, setReleaseDraftByQueueId] = useState({});
   const [releaseBusyId, setReleaseBusyId] = useState("");
   const [openSections, setOpenSections] = useState(createOpenSections);
@@ -249,16 +253,6 @@ export default function AdminFinancesScreen() {
 
   useEffect(() => {
     if (!hasFinanceAccess) return undefined;
-    return subscribePartnerFinancialProfiles({
-      onData: (rows) => setPartnerProfiles(Array.isArray(rows) ? rows : []),
-      onError: (error) => {
-        handleFinanceReadError(error, "Failed to load partner financial profiles.", setErr);
-      },
-    });
-  }, [hasFinanceAccess]);
-
-  useEffect(() => {
-    if (!hasFinanceAccess) return undefined;
     return subscribePayoutQueue({
       onData: (rows) => setPayoutQueue(Array.isArray(rows) ? rows : []),
       onError: (error) => {
@@ -296,48 +290,30 @@ export default function AdminFinancesScreen() {
     }
   };
 
+  const refreshProviderConfigStatus = async () => {
+    try {
+      const result = await getPaymentProviderConfigStatus();
+      const config = result?.config || null;
+      setProviderConfigSnapshot(config);
+      if (!providerConfigDirty) setProviderConfigDraft(config);
+      setProviderEncryptionReady(result?.encryptionReady === true);
+      if (result?.providerStatus) setEnvironmentStatus(result.providerStatus);
+    } catch (error) {
+      console.error(error);
+      handleFinanceReadError(error, "Failed to load payment provider configuration.", setErr);
+    }
+  };
+
   useEffect(() => {
     if (!hasFinanceAccess) return;
     void refreshEnvironmentStatus();
   }, [hasFinanceAccess]);
 
   useEffect(() => {
-    if (!partners.length) {
-      setSelectedPartnerId("");
-      return;
-    }
-    if (partners.some((row) => safeString(row?.id) === selectedPartnerId)) return;
-    setSelectedPartnerId(safeString(partners[0]?.id));
-  }, [partners, selectedPartnerId]);
-
-  const selectedPartner = useMemo(
-    () => partners.find((row) => safeString(row?.id) === selectedPartnerId) || null,
-    [partners, selectedPartnerId]
-  );
-
-  useEffect(() => {
-    if (!selectedPartner) {
-      setPartnerDraft(defaultPartnerFinancialProfile());
-      setPartnerDirty(false);
-      return;
-    }
-    const existingProfile =
-      partnerProfiles.find((row) => safeString(row?.partnerId) === safeString(selectedPartner?.id)) ||
-      null;
-    const baseDraft = defaultPartnerFinancialProfile(selectedPartner);
-    const nextDraft = existingProfile
-      ? {
-          ...baseDraft,
-          ...existingProfile,
-          payoutDestination: {
-            ...(baseDraft.payoutDestination || {}),
-            ...(existingProfile?.payoutDestination || {}),
-          },
-        }
-      : baseDraft;
-    setPartnerDraft(nextDraft);
-    setPartnerDirty(false);
-  }, [selectedPartner, partnerProfiles]);
+    if (!hasFinanceAccess) return;
+    void refreshProviderConfigStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasFinanceAccess]);
 
   const readyPayoutCount = useMemo(
     () => payoutQueue.filter((row) => row.status === "ready").length,
@@ -368,10 +344,10 @@ export default function AdminFinancesScreen() {
     });
   };
 
-  const updatePartnerDraft = (path, value) => {
-    setPartnerDirty(true);
-    setPartnerDraft((prev) => {
-      const next = { ...(prev || defaultPartnerFinancialProfile(selectedPartner)) };
+  const updateProviderConfigDraft = (path, value) => {
+    setProviderConfigDirty(true);
+    setProviderConfigDraft((prev) => {
+      const next = { ...(prev || {}) };
       const parts = String(path || "").split(".");
       let cursor = next;
       while (parts.length > 1) {
@@ -408,34 +384,6 @@ export default function AdminFinancesScreen() {
     }
   };
 
-  const saveSelectedPartnerProfile = async () => {
-    const partnerId = safeString(selectedPartner?.id);
-    if (!partnerId) {
-      setErr("Select a partner first.");
-      return;
-    }
-    setPartnerBusy(true);
-    setErr("");
-    setMsg("");
-    try {
-      await savePartnerFinancialProfile({
-        partnerId,
-        profile: {
-          ...partnerDraft,
-          taxOverrides:
-            partnerDraft?.taxOverrides?.enabled === true ? partnerDraft.taxOverrides : null,
-        },
-      });
-      setPartnerDirty(false);
-      setMsg("Partner financial profile saved.");
-    } catch (error) {
-      console.error(error);
-      setErr("Failed to save. Please try again.");
-    } finally {
-      setPartnerBusy(false);
-    }
-  };
-
   const releasePayout = async (row) => {
     if (!canEditFinance) {
       setErr("Only authorized finance managers can release payouts.");
@@ -460,6 +408,31 @@ export default function AdminFinancesScreen() {
       setErr(error?.message || "Failed to release payout.");
     } finally {
       setReleaseBusyId("");
+    }
+  };
+
+  const saveProviderConfig = async () => {
+    if (!canEditFinance) {
+      setErr("Only authorized finance managers can update provider config.");
+      return;
+    }
+    setProviderConfigBusy(true);
+    setErr("");
+    setMsg("");
+    try {
+      const result = await savePaymentProviderConfig(providerConfigDraft || {});
+      const nextConfig = result?.config || providerConfigDraft;
+      setProviderConfigSnapshot(nextConfig);
+      setProviderConfigDraft(nextConfig);
+      setProviderConfigDirty(false);
+      setProviderEncryptionReady(result?.encryptionReady === true);
+      if (result?.providerStatus) setEnvironmentStatus(result.providerStatus);
+      setMsg(result?.changed ? "Payment provider config saved." : "No provider config changes.");
+    } catch (error) {
+      console.error(error);
+      setErr(error?.message || "Failed to save payment provider config.");
+    } finally {
+      setProviderConfigBusy(false);
     }
   };
 
@@ -527,8 +500,17 @@ export default function AdminFinancesScreen() {
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <TinyStat
             label="Provider"
-            value={`${safeString(environmentStatus?.provider || "paystack")} • ${safeString(
-              environmentStatus?.environment || settingsSnapshot?.provider?.environment || "test"
+            value={`${paymentProviderLabel(
+              environmentStatus?.provider ||
+                settingsSnapshot?.paymentProvider?.activeProvider ||
+                settingsSnapshot?.provider?.active ||
+                settingsSnapshot?.provider?.name ||
+                "mpesa"
+            )} • ${safeString(
+              environmentStatus?.environment ||
+                settingsSnapshot?.paymentProvider?.providerEnvironment ||
+                settingsSnapshot?.provider?.environment ||
+                "test"
             )}`}
             tone={environmentStatus?.ready ? "good" : "warn"}
           />
@@ -544,8 +526,8 @@ export default function AdminFinancesScreen() {
         <div className="mt-4 grid gap-4">
           <SectionCard
             icon={ShieldCheck}
-            title="Environment, pricing, and platform rules"
-            subtitle="Payment and payout rules."
+            title="Global Finance Settings"
+            subtitle="Provider, refund, and payout rules that apply platform-wide."
             open={openSections.environment}
             onToggle={() => toggleSection("environment")}
             meta={
@@ -555,14 +537,42 @@ export default function AdminFinancesScreen() {
             }
           >
             <div className="grid gap-4">
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-3">
                 <label className="grid gap-1.5">
-                  <span className={labelClass}>Paystack environment</span>
+                  <span className={labelClass}>Payment Provider</span>
                   <select
-                    value={settingsDraft?.provider?.environment || "test"}
-                    onChange={(event) =>
-                      updateSettingsDraft("provider.environment", event.target.value)
+                    value={
+                      settingsDraft?.paymentProvider?.activeProvider ||
+                      settingsDraft?.provider?.active ||
+                      settingsDraft?.provider?.name ||
+                      "mpesa"
                     }
+                    onChange={(event) => {
+                      updateSettingsDraft("paymentProvider.activeProvider", event.target.value);
+                      updateSettingsDraft("provider.active", event.target.value);
+                      updateSettingsDraft("provider.name", event.target.value);
+                    }}
+                    className={inputClass}
+                  >
+                    {PAYMENT_PROVIDERS.map((providerKey) => (
+                      <option key={providerKey} value={providerKey}>
+                        {paymentProviderLabel(providerKey)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1.5">
+                  <span className={labelClass}>Provider Environment</span>
+                  <select
+                    value={
+                      settingsDraft?.paymentProvider?.providerEnvironment ||
+                      settingsDraft?.provider?.environment ||
+                      "test"
+                    }
+                    onChange={(event) => {
+                      updateSettingsDraft("paymentProvider.providerEnvironment", event.target.value);
+                      updateSettingsDraft("provider.environment", event.target.value);
+                    }}
                     className={inputClass}
                   >
                     <option value="test">Test</option>
@@ -570,156 +580,74 @@ export default function AdminFinancesScreen() {
                   </select>
                 </label>
                 <label className="grid gap-1.5">
-                  <span className={labelClass}>Callback base URL</span>
+                  <span className={labelClass}>Provider Callback URL</span>
                   <input
-                    value={settingsDraft?.provider?.callbackBaseUrl || ""}
-                    onChange={(event) =>
-                      updateSettingsDraft("provider.callbackBaseUrl", event.target.value)
+                    value={
+                      settingsDraft?.paymentProvider?.providerCallbackUrl ||
+                      settingsDraft?.provider?.callbackBaseUrl ||
+                      ""
                     }
+                    onChange={(event) => {
+                      updateSettingsDraft("paymentProvider.providerCallbackUrl", event.target.value);
+                      updateSettingsDraft("provider.callbackBaseUrl", event.target.value);
+                    }}
                     placeholder="https://app.majuu.example"
                     className={inputClass}
                   />
                 </label>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="grid gap-1.5">
-                  <span className={labelClass}>Default in-progress currency</span>
-                  <input
-                    value={settingsDraft?.inProgressPricing?.defaultCurrency || "KES"}
-                    onChange={(event) =>
-                      updateSettingsDraft("inProgressPricing.defaultCurrency", event.target.value)
-                    }
-                    className={inputClass}
-                  />
-                </label>
-                <div className="grid gap-3">
-                  <ToggleRow
-                    checked={settingsDraft?.inProgressPricing?.allowServiceFeeInput !== false}
-                    onChange={(checked) =>
-                      updateSettingsDraft("inProgressPricing.allowServiceFeeInput", checked)
-                    }
-                    label="Allow service-fee input during staff prompt"
-                    hint="Staff can add an optional service fee, but MAJUU platform cut remains system-calculated."
-                  />
-                  <ToggleRow
-                    checked={settingsDraft?.inProgressPricing?.allowAdminAdjustAmounts !== false}
-                    onChange={(checked) =>
-                      updateSettingsDraft("inProgressPricing.allowAdminAdjustAmounts", checked)
-                    }
-                    label="Allow admin adjustment before approval"
-                    hint="Assigned admin can edit the official amount and service fee before freezing the approval snapshot."
-                  />
-                </div>
-              </div>
-
               <div className="grid gap-3 sm:grid-cols-3">
                 <label className="grid gap-1.5">
-                  <span className={labelClass}>Default platform cut type</span>
-                  <select
-                    value={settingsDraft?.platformFee?.defaultCutType || "percentage"}
-                    onChange={(event) =>
-                      updateSettingsDraft("platformFee.defaultCutType", event.target.value)
-                    }
-                    className={inputClass}
-                  >
-                    {PLATFORM_CUT_TYPES.map((option) => (
-                      <option key={option} value={option}>
-                        {option === "flat" ? "Flat" : "Percentage"}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="grid gap-1.5">
-                  <span className={labelClass}>Default platform cut value</span>
+                  <span className={labelClass}>Share Link Base URL</span>
                   <input
-                    value={settingsDraft?.platformFee?.defaultCutValue ?? 10}
-                    onChange={(event) =>
-                      updateSettingsDraft("platformFee.defaultCutValue", event.target.value)
+                    value={
+                      settingsDraft?.paymentProvider?.paymentLinkBaseUrl ||
+                      settingsDraft?.provider?.paymentLinkBaseUrl ||
+                      ""
                     }
-                    inputMode="decimal"
+                    onChange={(event) => {
+                      updateSettingsDraft("paymentProvider.paymentLinkBaseUrl", event.target.value);
+                      updateSettingsDraft("provider.paymentLinkBaseUrl", event.target.value);
+                    }}
+                    placeholder="https://pay.majuu.app"
                     className={inputClass}
                   />
                 </label>
                 <label className="grid gap-1.5">
-                  <span className={labelClass}>Platform cut base</span>
-                  <select
-                    value={settingsDraft?.platformFee?.cutBase || "official_plus_service_fee"}
-                    onChange={(event) =>
-                      updateSettingsDraft("platformFee.cutBase", event.target.value)
+                  <span className={labelClass}>Default Currency</span>
+                  <input
+                    value={
+                      settingsDraft?.defaultCurrency ||
+                      settingsDraft?.inProgressPricing?.defaultCurrency ||
+                      "KES"
                     }
+                    onChange={(event) => {
+                      updateSettingsDraft("defaultCurrency", event.target.value);
+                      updateSettingsDraft("inProgressPricing.defaultCurrency", event.target.value);
+                    }}
                     className={inputClass}
-                  >
-                    {PLATFORM_CUT_BASE_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option === "official_amount"
-                          ? "Official amount only"
-                          : "Official amount + service fee"}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </label>
-              </div>
-
-              <div className="grid gap-3 rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                <ToggleRow
-                  checked={settingsDraft?.tax?.enabled === true}
-                  onChange={(checked) => updateSettingsDraft("tax.enabled", checked)}
-                  label="Enable tax architecture"
-                  hint="Keeps tax configurable without hardcoding legal truth."
-                />
-                <div className="grid gap-3 sm:grid-cols-4">
-                  <label className="grid gap-1.5">
-                    <span className={labelClass}>Tax label</span>
-                    <input
-                      value={settingsDraft?.tax?.label || "Tax"}
-                      onChange={(event) => updateSettingsDraft("tax.label", event.target.value)}
-                      className={inputClass}
-                    />
-                  </label>
-                  <label className="grid gap-1.5">
-                    <span className={labelClass}>Tax type</span>
-                    <select
-                      value={settingsDraft?.tax?.type || "percentage"}
-                      onChange={(event) => updateSettingsDraft("tax.type", event.target.value)}
-                      className={inputClass}
-                    >
-                      {PLATFORM_CUT_TYPES.map((option) => (
-                        <option key={option} value={option}>
-                          {option === "flat" ? "Flat" : "Percentage"}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="grid gap-1.5">
-                    <span className={labelClass}>Tax rate/value</span>
-                    <input
-                      value={settingsDraft?.tax?.rate ?? 0}
-                      onChange={(event) => updateSettingsDraft("tax.rate", event.target.value)}
-                      inputMode="decimal"
-                      className={inputClass}
-                    />
-                  </label>
-                  <label className="grid gap-1.5">
-                    <span className={labelClass}>Tax mode</span>
-                    <select
-                      value={settingsDraft?.tax?.mode || "exclusive"}
-                      onChange={(event) => updateSettingsDraft("tax.mode", event.target.value)}
-                      className={inputClass}
-                    >
-                      {TAX_MODES.map((option) => (
-                        <option key={option} value={option}>
-                          {option === "inclusive" ? "Inclusive" : "Exclusive"}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
                 <label className="grid gap-1.5">
-                  <span className={labelClass}>Unlock auto-refund hours</span>
+                  <span className={labelClass}>Global Discount %</span>
+                  <input
+                    value={settingsDraft?.pricingControls?.globalDiscountPercentage ?? 0}
+                    onChange={(event) =>
+                      updateSettingsDraft(
+                        "pricingControls.globalDiscountPercentage",
+                        Number(event.target.value || 0)
+                      )
+                    }
+                    inputMode="numeric"
+                    min={0}
+                    max={100}
+                    disabled={settingsDraft?.pricingControls?.globalDiscountEnabled !== true}
+                    className={inputClass}
+                  />
+                </label>
+                <label className="grid gap-1.5">
+                  <span className={labelClass}>Unlock Auto-refund Hours</span>
                   <input
                     value={settingsDraft?.refundControls?.unlockAutoRefundHours ?? 48}
                     onChange={(event) =>
@@ -730,7 +658,7 @@ export default function AdminFinancesScreen() {
                   />
                 </label>
                 <label className="grid gap-1.5">
-                  <span className={labelClass}>Shared-link expiry hours</span>
+                  <span className={labelClass}>Shared-link Expiry Hours</span>
                   <input
                     value={settingsDraft?.refundControls?.sharedLinkExpiryHours ?? 72}
                     onChange={(event) =>
@@ -748,8 +676,16 @@ export default function AdminFinancesScreen() {
                   onChange={(checked) =>
                     updateSettingsDraft("refundControls.autoRefundEnabled", checked)
                   }
-                  label="Enable unlock auto-refund sweep"
-                  hint="Prevents frontend-controlled unlock refunds and keeps retry-safe server execution."
+                  label="Enable Auto-refund Sweep"
+                  hint="Runs backend-safe unlock refund processing when no work starts."
+                />
+                <ToggleRow
+                  checked={settingsDraft?.pricingControls?.globalDiscountEnabled === true}
+                  onChange={(checked) =>
+                    updateSettingsDraft("pricingControls.globalDiscountEnabled", checked)
+                  }
+                  label="Enable Global Discount"
+                  hint="When on, global discount overrides per-request discount values."
                 />
                 <div className="grid gap-3">
                   <ToggleRow
@@ -757,27 +693,24 @@ export default function AdminFinancesScreen() {
                     onChange={(checked) =>
                       updateSettingsDraft("payoutControls.manualReleaseOnly", checked)
                     }
-                    label="Manual payout release only"
-                    hint="Collected in-progress money stays held until Super Admin explicitly releases payout."
+                    label="Manual Payout Release Only"
+                    hint="Payouts remain held until explicit release from finance control."
                   />
                   <ToggleRow
                     checked={settingsDraft?.payoutControls?.requireDestination !== false}
                     onChange={(checked) =>
                       updateSettingsDraft("payoutControls.requireDestination", checked)
                     }
-                    label="Require payout destination metadata"
-                    hint="Prevents payout release when partner payout destination is missing."
+                    label="Require Payout Destination Metadata"
+                    hint="Prevents payout release when partner destination metadata is incomplete."
                   />
                   <ToggleRow
-                    checked={settingsDraft?.payoutControls?.deductProcessorFeeFromPartner === true}
+                    checked={settingsDraft?.inProgressPricing?.platformCutEnabledGlobal !== false}
                     onChange={(checked) =>
-                      updateSettingsDraft(
-                        "payoutControls.deductProcessorFeeFromPartner",
-                        checked
-                      )
+                      updateSettingsDraft("inProgressPricing.platformCutEnabledGlobal", checked)
                     }
-                    label="Deduct processor fee from partner payout"
-                    hint="Leaves room for later split-payout and settlement policy changes."
+                    label="Global Platform Cut Toggle"
+                    hint="Default cut toggle for all in-progress payment approvals."
                   />
                 </div>
               </div>
@@ -801,319 +734,281 @@ export default function AdminFinancesScreen() {
 
           <SectionCard
             icon={Link2}
-            title="Partner financial profiles"
-            subtitle="Partner payout settings."
-            open={openSections.partnerProfiles}
-            onToggle={() => toggleSection("partnerProfiles")}
+            title="Payment Providers"
+            subtitle="Configure Daraja and Paystack credentials per environment."
+            open={openSections.providers}
+            onToggle={() => toggleSection("providers")}
             meta={
-              <span className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200">
-                {partnerProfiles.length} configured
+              <span
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                  providerEncryptionReady
+                    ? "border-emerald-200 bg-emerald-50/80 text-emerald-800"
+                    : "border-amber-200 bg-amber-50/80 text-amber-900"
+                }`}
+              >
+                {providerEncryptionReady ? "Encryption ready" : "Encryption key missing"}
               </span>
             }
           >
             <div className="grid gap-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="grid gap-1.5">
-                  <span className={labelClass}>Partner</span>
-                  <select
-                    value={selectedPartnerId}
-                    onChange={(event) => setSelectedPartnerId(event.target.value)}
-                    className={inputClass}
-                  >
-                    <option value="">Select partner</option>
-                    {partners.map((partner) => (
-                      <option key={partner.id} value={partner.id}>
-                        {partner.displayName}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <TinyStat
-                    label="Partner status"
-                    value={safeString(selectedPartner?.status || "not selected")}
-                    tone={selectedPartner?.isActive ? "good" : "warn"}
-                  />
-                  <TinyStat
-                    label="Coverage"
-                    value={
-                      selectedPartner
-                        ? `${Number(selectedPartner?.supportedCounties?.length || 0)} counties`
-                        : "Select a partner"
-                    }
-                  />
-                </div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                {providerConfigSnapshot
+                  ? "Provider config loaded from backend."
+                  : "Provider config has not loaded yet."}
               </div>
-
-              {selectedPartner ? (
-                <>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <label className="grid gap-1.5">
-                      <span className={labelClass}>Financial status</span>
-                      <select
-                        value={partnerDraft?.activeFinancialStatus || "active"}
-                        onChange={(event) =>
-                          updatePartnerDraft("activeFinancialStatus", event.target.value)
-                        }
-                        className={inputClass}
-                      >
-                        <option value="active">Active</option>
-                        <option value="inactive">Inactive</option>
-                      </select>
-                    </label>
-                    <label className="grid gap-1.5">
-                      <span className={labelClass}>Platform cut type</span>
-                      <select
-                        value={partnerDraft?.defaultPlatformCutType || "percentage"}
-                        onChange={(event) =>
-                          updatePartnerDraft("defaultPlatformCutType", event.target.value)
-                        }
-                        className={inputClass}
-                      >
-                        {PLATFORM_CUT_TYPES.map((option) => (
-                          <option key={option} value={option}>
-                            {option === "flat" ? "Flat" : "Percentage"}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="grid gap-1.5">
-                      <span className={labelClass}>Platform cut value</span>
-                      <input
-                        value={partnerDraft?.defaultPlatformCutValue ?? 10}
-                        onChange={(event) =>
-                          updatePartnerDraft("defaultPlatformCutValue", event.target.value)
-                        }
-                        inputMode="decimal"
-                        className={inputClass}
-                      />
-                    </label>
+              {PAYMENT_PROVIDERS.map((providerKey) => (
+                <div
+                  key={providerKey}
+                  className="rounded-2xl border border-zinc-200 bg-white/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+                >
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    {paymentProviderLabel(providerKey)}
                   </div>
-
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="grid gap-1.5">
-                      <span className={labelClass}>Platform cut base</span>
-                      <select
-                        value={partnerDraft?.platformCutBase || "official_plus_service_fee"}
-                        onChange={(event) =>
-                          updatePartnerDraft("platformCutBase", event.target.value)
-                        }
-                        className={inputClass}
-                      >
-                        {PLATFORM_CUT_BASE_OPTIONS.map((option) => (
-                          <option key={option} value={option}>
-                            {option === "official_amount"
-                              ? "Official amount only"
-                              : "Official amount + service fee"}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="grid gap-1.5">
-                      <span className={labelClass}>Payout release behavior</span>
-                      <select
-                        value={partnerDraft?.payoutReleaseBehavior || "manual_review"}
-                        onChange={(event) =>
-                          updatePartnerDraft("payoutReleaseBehavior", event.target.value)
-                        }
-                        className={inputClass}
-                      >
-                        {PAYOUT_RELEASE_BEHAVIORS.map((option) => (
-                          <option key={option} value={option}>
-                            {option === "auto_release" ? "Auto release" : "Manual review"}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-
-                  <div className="grid gap-3 rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                    <ToggleRow
-                      checked={partnerDraft?.taxOverrides?.enabled === true}
-                      onChange={(checked) =>
-                        updatePartnerDraft(
-                          "taxOverrides",
-                          checked
-                            ? {
-                                enabled: true,
-                                label: safeString(
-                                  partnerDraft?.taxOverrides?.label || settingsSnapshot?.tax?.label || "Tax"
-                                ),
-                                type: safeString(
-                                  partnerDraft?.taxOverrides?.type || settingsSnapshot?.tax?.type || "percentage"
-                                ),
-                                rate:
-                                  partnerDraft?.taxOverrides?.rate ??
-                                  settingsSnapshot?.tax?.rate ??
-                                  0,
-                                mode: safeString(
-                                  partnerDraft?.taxOverrides?.mode || settingsSnapshot?.tax?.mode || "exclusive"
-                                ),
+                  <div className="mt-3 grid gap-4">
+                    {["test", "live"].map((envKey) => {
+                      const row =
+                        providerConfigDraft?.providers?.[providerKey]?.[envKey] || {};
+                      const maskedSecrets = row?.secretConfigured || {};
+                      return (
+                        <div
+                          key={`${providerKey}_${envKey}`}
+                          className="rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/60"
+                        >
+                          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                            {envKey} environment
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <ToggleRow
+                              checked={row?.active === true}
+                              onChange={(checked) =>
+                                updateProviderConfigDraft(
+                                  `providers.${providerKey}.${envKey}.active`,
+                                  checked
+                                )
                               }
-                            : null
-                        )
-                      }
-                      label="Enable partner tax override"
-                      hint="Freezes partner-specific tax behavior without touching old approved snapshots."
-                    />
-                    {partnerDraft?.taxOverrides ? (
-                      <div className="grid gap-3 sm:grid-cols-4">
-                        <label className="grid gap-1.5">
-                          <span className={labelClass}>Override label</span>
-                          <input
-                            value={partnerDraft?.taxOverrides?.label || ""}
-                            onChange={(event) =>
-                              updatePartnerDraft("taxOverrides", {
-                                ...(partnerDraft?.taxOverrides || {}),
-                                label: event.target.value,
-                              })
-                            }
-                            className={inputClass}
-                          />
-                        </label>
-                        <label className="grid gap-1.5">
-                          <span className={labelClass}>Type</span>
-                          <select
-                            value={partnerDraft?.taxOverrides?.type || "percentage"}
-                            onChange={(event) =>
-                              updatePartnerDraft("taxOverrides", {
-                                ...(partnerDraft?.taxOverrides || {}),
-                                type: event.target.value,
-                              })
-                            }
-                            className={inputClass}
-                          >
-                            {PLATFORM_CUT_TYPES.map((option) => (
-                              <option key={option} value={option}>
-                                {option === "flat" ? "Flat" : "Percentage"}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="grid gap-1.5">
-                          <span className={labelClass}>Rate/value</span>
-                          <input
-                            value={partnerDraft?.taxOverrides?.rate ?? 0}
-                            onChange={(event) =>
-                              updatePartnerDraft("taxOverrides", {
-                                ...(partnerDraft?.taxOverrides || {}),
-                                rate: event.target.value,
-                              })
-                            }
-                            inputMode="decimal"
-                            className={inputClass}
-                          />
-                        </label>
-                        <label className="grid gap-1.5">
-                          <span className={labelClass}>Mode</span>
-                          <select
-                            value={partnerDraft?.taxOverrides?.mode || "exclusive"}
-                            onChange={(event) =>
-                              updatePartnerDraft("taxOverrides", {
-                                ...(partnerDraft?.taxOverrides || {}),
-                                mode: event.target.value,
-                              })
-                            }
-                            className={inputClass}
-                          >
-                            {TAX_MODES.map((option) => (
-                              <option key={option} value={option}>
-                                {option === "inclusive" ? "Inclusive" : "Exclusive"}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                    ) : null}
-                  </div>
+                              label="Active"
+                              hint="Enable this provider in this environment."
+                            />
+                            <label className="grid gap-1.5">
+                              <span className={labelClass}>Callback URL</span>
+                              <input
+                                value={row?.callbackUrl || ""}
+                                onChange={(event) =>
+                                  updateProviderConfigDraft(
+                                    `providers.${providerKey}.${envKey}.callbackUrl`,
+                                    event.target.value
+                                  )
+                                }
+                                placeholder="https://..."
+                                className={inputClass}
+                              />
+                            </label>
+                          </div>
 
-                  <div className="grid gap-3 rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                    <ToggleRow
-                      checked={partnerDraft?.payoutDestinationReady === true}
-                      onChange={(checked) => updatePartnerDraft("payoutDestinationReady", checked)}
-                      label="Payout destination ready"
-                      hint="Queue release stays blocked until this destination metadata is ready."
-                    />
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <label className="grid gap-1.5">
-                        <span className={labelClass}>Bank name</span>
-                        <input
-                          value={partnerDraft?.payoutDestination?.bankName || ""}
-                          onChange={(event) =>
-                            updatePartnerDraft("payoutDestination.bankName", event.target.value)
-                          }
-                          className={inputClass}
-                        />
-                      </label>
-                      <label className="grid gap-1.5">
-                        <span className={labelClass}>Account name</span>
-                        <input
-                          value={partnerDraft?.payoutDestination?.accountName || ""}
-                          onChange={(event) =>
-                            updatePartnerDraft("payoutDestination.accountName", event.target.value)
-                          }
-                          className={inputClass}
-                        />
-                      </label>
-                      <label className="grid gap-1.5">
-                        <span className={labelClass}>Account number last 4</span>
-                        <input
-                          value={partnerDraft?.payoutDestination?.accountNumberLast4 || ""}
-                          onChange={(event) =>
-                            updatePartnerDraft("payoutDestination.accountNumberLast4", event.target.value)
-                          }
-                          className={inputClass}
-                          inputMode="numeric"
-                        />
-                      </label>
-                      <label className="grid gap-1.5">
-                        <span className={labelClass}>Destination reference</span>
-                        <input
-                          value={partnerDraft?.payoutDestination?.reference || ""}
-                          onChange={(event) =>
-                            updatePartnerDraft("payoutDestination.reference", event.target.value)
-                          }
-                          className={inputClass}
-                        />
-                      </label>
-                    </div>
+                          {providerKey === "mpesa" ? (
+                            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                              <label className="grid gap-1.5">
+                                <span className={labelClass}>Shortcode</span>
+                                <input
+                                  value={row?.settings?.shortcode || ""}
+                                  onChange={(event) =>
+                                    updateProviderConfigDraft(
+                                      `providers.${providerKey}.${envKey}.settings.shortcode`,
+                                      event.target.value
+                                    )
+                                  }
+                                  className={inputClass}
+                                />
+                              </label>
+                              <label className="grid gap-1.5">
+                                <span className={labelClass}>Paybill</span>
+                                <input
+                                  value={row?.settings?.paybill || ""}
+                                  onChange={(event) =>
+                                    updateProviderConfigDraft(
+                                      `providers.${providerKey}.${envKey}.settings.paybill`,
+                                      event.target.value
+                                    )
+                                  }
+                                  className={inputClass}
+                                />
+                              </label>
+                              <label className="grid gap-1.5">
+                                <span className={labelClass}>
+                                  Consumer Key {maskedSecrets?.consumerKey ? "(set)" : ""}
+                                </span>
+                                <input
+                                  type="password"
+                                  value={row?.secrets?.consumerKey || ""}
+                                  onChange={(event) =>
+                                    updateProviderConfigDraft(
+                                      `providers.${providerKey}.${envKey}.secrets.consumerKey`,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="Enter new value to update"
+                                  className={inputClass}
+                                />
+                              </label>
+                              <label className="grid gap-1.5">
+                                <span className={labelClass}>
+                                  Consumer Secret {maskedSecrets?.consumerSecret ? "(set)" : ""}
+                                </span>
+                                <input
+                                  type="password"
+                                  value={row?.secrets?.consumerSecret || ""}
+                                  onChange={(event) =>
+                                    updateProviderConfigDraft(
+                                      `providers.${providerKey}.${envKey}.secrets.consumerSecret`,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="Enter new value to update"
+                                  className={inputClass}
+                                />
+                              </label>
+                              <label className="grid gap-1.5">
+                                <span className={labelClass}>
+                                  Passkey {maskedSecrets?.passkey ? "(set)" : ""}
+                                </span>
+                                <input
+                                  type="password"
+                                  value={row?.secrets?.passkey || ""}
+                                  onChange={(event) =>
+                                    updateProviderConfigDraft(
+                                      `providers.${providerKey}.${envKey}.secrets.passkey`,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="Enter new value to update"
+                                  className={inputClass}
+                                />
+                              </label>
+                              <label className="grid gap-1.5">
+                                <span className={labelClass}>Initiator Name</span>
+                                <input
+                                  value={row?.settings?.initiatorName || ""}
+                                  onChange={(event) =>
+                                    updateProviderConfigDraft(
+                                      `providers.${providerKey}.${envKey}.settings.initiatorName`,
+                                      event.target.value
+                                    )
+                                  }
+                                  className={inputClass}
+                                />
+                              </label>
+                            </div>
+                          ) : (
+                            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                              <label className="grid gap-1.5">
+                                <span className={labelClass}>Public Key</span>
+                                <input
+                                  value={row?.settings?.publicKey || ""}
+                                  onChange={(event) =>
+                                    updateProviderConfigDraft(
+                                      `providers.${providerKey}.${envKey}.settings.publicKey`,
+                                      event.target.value
+                                    )
+                                  }
+                                  className={inputClass}
+                                />
+                              </label>
+                              <label className="grid gap-1.5">
+                                <span className={labelClass}>
+                                  Secret Key {maskedSecrets?.secretKey ? "(set)" : ""}
+                                </span>
+                                <input
+                                  type="password"
+                                  value={row?.secrets?.secretKey || ""}
+                                  onChange={(event) =>
+                                    updateProviderConfigDraft(
+                                      `providers.${providerKey}.${envKey}.secrets.secretKey`,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="Enter new value to update"
+                                  className={inputClass}
+                                />
+                              </label>
+                              <label className="grid gap-1.5 sm:col-span-2">
+                                <span className={labelClass}>
+                                  Webhook Secret {maskedSecrets?.webhookSecret ? "(set)" : ""}
+                                </span>
+                                <input
+                                  type="password"
+                                  value={row?.secrets?.webhookSecret || ""}
+                                  onChange={(event) =>
+                                    updateProviderConfigDraft(
+                                      `providers.${providerKey}.${envKey}.secrets.webhookSecret`,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="Enter new value to update"
+                                  className={inputClass}
+                                />
+                              </label>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-
-                  <label className="grid gap-1.5">
-                    <span className={labelClass}>Internal notes</span>
-                    <textarea
-                      value={partnerDraft?.notes || ""}
-                      onChange={(event) => updatePartnerDraft("notes", event.target.value)}
-                      rows={4}
-                      className={inputClass}
-                      placeholder="Partner-specific finance notes, payout instructions, or internal restrictions."
-                    />
-                  </label>
-
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                      Effective at {toDateTimeLabel(partnerDraft?.effectiveAtMs)}. Last updated by{" "}
-                      {safeString(partnerDraft?.updatedByEmail || "system")} on{" "}
-                      {toDateTimeLabel(partnerDraft?.updatedAtMs)}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void saveSelectedPartnerProfile()}
-                      disabled={partnerBusy || !partnerDirty}
-                      className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
-                    >
-                      {partnerBusy ? "Saving..." : "Save partner finance profile"}
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-zinc-200 bg-white/60 px-4 py-6 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
-                  Select a partner to manage finance rules.
                 </div>
-              )}
+              ))}
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Provider config updates are encrypted before storage.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void saveProviderConfig()}
+                  disabled={providerConfigBusy || !providerConfigDirty || !canEditFinance}
+                  className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+                >
+                  {providerConfigBusy ? "Saving..." : "Save provider config"}
+                </button>
+              </div>
             </div>
           </SectionCard>
 
+          <SectionCard
+            icon={Link2}
+            title="Branch financial controls"
+            subtitle="Legacy partner financial profiles are deprecated."
+            open={openSections.branchFinance}
+            onToggle={() => toggleSection("branchFinance")}
+            meta={
+              <span className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200">
+                Managed in Partnerships
+              </span>
+            }
+          >
+            <div className="grid gap-3">
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-100">
+                Partner Financial Profile is deprecated. Configure payout routing and platform cut at
+                branch level under Partnerships.
+              </div>
+              <div className="rounded-2xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-200">
+                Branch-level finance controls include:
+                <ul className="mt-2 list-disc pl-5">
+                  <li>Financial status (active or inactive)</li>
+                  <li>Platform cut type, value, and base</li>
+                  <li>Release behavior override (manual or auto)</li>
+                  <li>Payout destination metadata and readiness</li>
+                </ul>
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => navigate("/app/admin/sacc/partnerships")}
+                    className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99]"
+                  >
+                    Open Branch Management
+                  </button>
+                </div>
+              </div>
+            </div>
+          </SectionCard>
           <SectionCard
             icon={Package}
             title="Payout queue"
@@ -1309,3 +1204,7 @@ export default function AdminFinancesScreen() {
     </div>
   );
 }
+
+
+
+

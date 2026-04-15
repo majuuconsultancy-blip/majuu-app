@@ -343,6 +343,7 @@ function StaffAccessPanel() {
   const [email, setEmail] = useState("");
   const [maxActive, setMaxActive] = useState(2);
   const [selectedSpecialities, setSelectedSpecialities] = useState([]);
+  const [autoApproveChatMessages, setAutoApproveChatMessages] = useState(false);
   const [specialityOpen, setSpecialityOpen] = useState(false);
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState("");
@@ -421,6 +422,7 @@ function StaffAccessPanel() {
         action, // "grant" | "revoke"
         maxActive: Number(maxActive) || 2,
         specialities: selectedSpecialities,
+        autoApproveChatMessages,
       });
 
       setMsg(action === "grant" ?`✅ Staff enabled: ${res.email}` : `✅ Staff revoked: ${res.email}`);
@@ -560,6 +562,30 @@ function StaffAccessPanel() {
                       ) : null}
                     </div>
                   </div>
+
+                  <label className="flex items-center justify-between rounded-2xl border border-zinc-200 bg-white/85 px-3 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-900/70">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                        Auto approve chat messages
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                        ON = user and staff chat goes direct. OFF = admin moderation required.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAutoApproveChatMessages((value) => !value)}
+                      className={`ml-3 inline-flex h-7 w-12 items-center rounded-full border transition ${
+                        autoApproveChatMessages
+                          ? "border-emerald-500 bg-emerald-500 justify-end"
+                          : "border-zinc-300 bg-zinc-200 justify-start dark:border-zinc-600 dark:bg-zinc-800"
+                      }`}
+                      aria-pressed={autoApproveChatMessages}
+                      title="Toggle auto-approve chat"
+                    >
+                      <span className="mx-1 inline-flex h-5 w-5 rounded-full bg-white shadow-sm" />
+                    </button>
+                  </label>
 
                   <div className="grid grid-cols-2 gap-3">
                     <button

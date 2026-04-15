@@ -14,15 +14,12 @@ const functions = getFunctions(undefined, "us-central1");
 
 export const FINANCE_SETTINGS_COLLECTION = "financeSettings";
 export const FINANCE_SETTINGS_DOC = "global";
-export const PARTNER_FINANCIAL_PROFILES_COLLECTION = "partnerFinancialProfiles";
 export const PAYOUT_QUEUE_COLLECTION = "payoutQueue";
 export const SETTLEMENT_HISTORY_COLLECTION = "settlementHistory";
 export const FINANCIAL_AUDIT_LOG_COLLECTION = "financialAuditLogs";
 
 export const PLATFORM_CUT_TYPES = ["percentage", "flat"];
-export const PLATFORM_CUT_BASE_OPTIONS = ["official_plus_service_fee", "official_amount"];
-export const TAX_MODES = ["exclusive", "inclusive"];
-export const PAYOUT_RELEASE_BEHAVIORS = ["manual_review", "auto_release"];
+export const PAYMENT_PROVIDERS = ["mpesa", "paystack"];
 export const PAYOUT_QUEUE_STATUSES = [
   "pending",
   "on_hold",
@@ -76,12 +73,39 @@ function normalizeFeeType(value, fallback = "percentage") {
   return lower(value) === "flat" ? "flat" : fallback === "flat" ? "flat" : "percentage";
 }
 
-function normalizeTaxMode(value, fallback = "exclusive") {
-  return lower(value) === "inclusive"
-    ? "inclusive"
-    : fallback === "inclusive"
-      ? "inclusive"
-      : "exclusive";
+function normalizeProviderKey(value, fallback = "mpesa") {
+  const raw = lower(value, 40);
+  if (PAYMENT_PROVIDERS.includes(raw)) return raw;
+  return PAYMENT_PROVIDERS.includes(lower(fallback, 40)) ? lower(fallback, 40) : "mpesa";
+}
+
+function defaultProviderCatalog() {
+  return {
+    mpesa: {
+      enabled: true,
+      label: "M-Pesa",
+    },
+    paystack: {
+      enabled: false,
+      label: "Paystack",
+    },
+  };
+}
+
+function normalizeProviderCatalog(input = {}) {
+  const source = input && typeof input === "object" ? input : {};
+  const defaults = defaultProviderCatalog();
+  return PAYMENT_PROVIDERS.reduce((acc, providerKey) => {
+    const row = source?.[providerKey] && typeof source[providerKey] === "object" ? source[providerKey] : {};
+    acc[providerKey] = {
+      enabled:
+        typeof row?.enabled === "boolean"
+          ? row.enabled
+          : defaults?.[providerKey]?.enabled === true,
+      label: safeString(row?.label || defaults?.[providerKey]?.label, 80) || defaults?.[providerKey]?.label,
+    };
+    return acc;
+  }, {});
 }
 
 function callFinance(name, payload = {}) {
@@ -90,29 +114,29 @@ function callFinance(name, payload = {}) {
 }
 
 export function defaultFinanceSettings() {
+  const providers = defaultProviderCatalog();
   return {
+    paymentProvider: {
+      activeProvider: "mpesa",
+      providerEnvironment: "test",
+      providerCallbackUrl: "",
+      paymentLinkBaseUrl: "",
+      providers,
+    },
+    pricingControls: {
+      globalDiscountEnabled: false,
+      globalDiscountPercentage: 0,
+    },
+    // Backward-compatible alias retained for older readers.
     provider: {
-      name: "paystack",
+      name: "mpesa",
+      active: "mpesa",
       environment: "test",
       callbackBaseUrl: "",
+      paymentLinkBaseUrl: "",
+      providers,
     },
-    inProgressPricing: {
-      defaultCurrency: "KES",
-      allowServiceFeeInput: true,
-      allowAdminAdjustAmounts: true,
-    },
-    platformFee: {
-      defaultCutType: "percentage",
-      defaultCutValue: 10,
-      cutBase: "official_plus_service_fee",
-    },
-    tax: {
-      enabled: false,
-      label: "Tax",
-      type: "percentage",
-      rate: 0,
-      mode: "exclusive",
-    },
+    defaultCurrency: "KES",
     refundControls: {
       unlockAutoRefundHours: 48,
       autoRefundEnabled: true,
@@ -123,49 +147,98 @@ export function defaultFinanceSettings() {
       requireDestination: true,
       deductProcessorFeeFromPartner: false,
     },
+    // Legacy fallbacks preserved to avoid breaking older finance logic paths.
+    inProgressPricing: {
+      defaultCurrency: "KES",
+      allowServiceFeeInput: true,
+      allowAdminAdjustAmounts: true,
+      platformCutEnabledGlobal: true,
+    },
+    platformFee: {
+      defaultCutType: "percentage",
+      defaultCutValue: 10,
+      cutBase: "official_plus_service_fee",
+    },
   };
 }
 
 export function normalizeFinanceSettingsDoc(row = {}) {
   const source = row && typeof row === "object" ? row : {};
   const defaults = defaultFinanceSettings();
+  const providerCatalog = normalizeProviderCatalog(
+    source?.paymentProvider?.providers ||
+      source?.provider?.providers ||
+      defaults?.paymentProvider?.providers
+  );
+  const activeProvider = normalizeProviderKey(
+    source?.paymentProvider?.activeProvider ||
+      source?.provider?.active ||
+      source?.provider?.name,
+    defaults?.paymentProvider?.activeProvider
+  );
+  const providerEnvironment =
+    lower(
+      source?.paymentProvider?.providerEnvironment ||
+        source?.provider?.environment ||
+        defaults?.paymentProvider?.providerEnvironment
+    ) === "live"
+      ? "live"
+      : "test";
+  const providerCallbackUrl = safeString(
+    source?.paymentProvider?.providerCallbackUrl ||
+      source?.paymentProvider?.callbackBaseUrl ||
+      source?.provider?.callbackBaseUrl ||
+      defaults?.paymentProvider?.providerCallbackUrl,
+    400
+  );
+  const defaultCurrency = normalizeCurrency(
+    source?.defaultCurrency ||
+      source?.inProgressPricing?.defaultCurrency ||
+      defaults.defaultCurrency
+  );
+  const allowServiceFeeInput =
+    source?.inProgressPricing?.allowServiceFeeInput !== false;
+  const allowAdminAdjustAmounts =
+    source?.inProgressPricing?.allowAdminAdjustAmounts !== false;
+  const platformCutType = normalizeFeeType(
+    source?.platformFee?.defaultCutType || defaults?.platformFee?.defaultCutType
+  );
+  const platformCutValue = roundRate(
+    source?.platformFee?.defaultCutValue ?? defaults?.platformFee?.defaultCutValue
+  );
+  const platformCutBase =
+    lower(source?.platformFee?.cutBase) === "official_amount"
+      ? "official_amount"
+      : "official_plus_service_fee";
   return {
-    provider: {
-      name: "paystack",
-      environment: lower(source?.provider?.environment || defaults.provider.environment) === "live"
-        ? "live"
-        : "test",
-      callbackBaseUrl: safeString(
-        source?.provider?.callbackBaseUrl || defaults.provider.callbackBaseUrl,
+    paymentProvider: {
+      activeProvider,
+      providerEnvironment,
+      providerCallbackUrl,
+      paymentLinkBaseUrl: safeString(
+        source?.paymentProvider?.paymentLinkBaseUrl ||
+          source?.provider?.paymentLinkBaseUrl,
         400
       ),
+      providers: providerCatalog,
     },
-    inProgressPricing: {
-      defaultCurrency: normalizeCurrency(
-        source?.inProgressPricing?.defaultCurrency || defaults.inProgressPricing.defaultCurrency
+    pricingControls: {
+      globalDiscountEnabled: source?.pricingControls?.globalDiscountEnabled === true,
+      globalDiscountPercentage: roundRate(source?.pricingControls?.globalDiscountPercentage),
+    },
+    provider: {
+      name: activeProvider,
+      active: activeProvider,
+      environment: providerEnvironment,
+      callbackBaseUrl: providerCallbackUrl,
+      paymentLinkBaseUrl: safeString(
+        source?.paymentProvider?.paymentLinkBaseUrl ||
+          source?.provider?.paymentLinkBaseUrl,
+        400
       ),
-      allowServiceFeeInput: source?.inProgressPricing?.allowServiceFeeInput !== false,
-      allowAdminAdjustAmounts: source?.inProgressPricing?.allowAdminAdjustAmounts !== false,
+      providers: providerCatalog,
     },
-    platformFee: {
-      defaultCutType: normalizeFeeType(
-        source?.platformFee?.defaultCutType || defaults.platformFee.defaultCutType
-      ),
-      defaultCutValue: roundRate(
-        source?.platformFee?.defaultCutValue ?? defaults.platformFee.defaultCutValue
-      ),
-      cutBase:
-        lower(source?.platformFee?.cutBase) === "official_amount"
-          ? "official_amount"
-          : "official_plus_service_fee",
-    },
-    tax: {
-      enabled: source?.tax?.enabled === true,
-      label: safeString(source?.tax?.label || defaults.tax.label, 80) || "Tax",
-      type: normalizeFeeType(source?.tax?.type || defaults.tax.type),
-      rate: roundRate(source?.tax?.rate ?? defaults.tax.rate),
-      mode: normalizeTaxMode(source?.tax?.mode || defaults.tax.mode),
-    },
+    defaultCurrency,
     refundControls: {
       unlockAutoRefundHours: roundMoney(
         source?.refundControls?.unlockAutoRefundHours ?? defaults.refundControls.unlockAutoRefundHours
@@ -181,92 +254,18 @@ export function normalizeFinanceSettingsDoc(row = {}) {
       deductProcessorFeeFromPartner:
         source?.payoutControls?.deductProcessorFeeFromPartner === true,
     },
-    updatedAtMs: Number(source?.updatedAtMs || 0) || toMillis(source?.updatedAt),
-    updatedByUid: safeString(source?.updatedByUid, 160),
-    updatedByEmail: safeString(source?.updatedByEmail, 180),
-  };
-}
-
-export function defaultPartnerFinancialProfile(partner = {}) {
-  return {
-    partnerId: safeString(partner?.id, 140),
-    partnerName: safeString(partner?.displayName || partner?.partnerName, 140),
-    activeFinancialStatus: "active",
-    defaultPlatformCutType: "percentage",
-    defaultPlatformCutValue: 10,
-    platformCutBase: "official_plus_service_fee",
-    taxProfileReference: "",
-    taxOverrides: null,
-    payoutReleaseBehavior: "manual_review",
-    payoutDestinationReady: false,
-    payoutDestination: {
-      type: "bank_transfer",
-      bankName: "",
-      accountName: "",
-      accountNumberLast4: "",
-      reference: "",
+    inProgressPricing: {
+      defaultCurrency,
+      allowServiceFeeInput,
+      allowAdminAdjustAmounts,
+      platformCutEnabledGlobal:
+        source?.inProgressPricing?.platformCutEnabledGlobal !== false,
     },
-    notes: "",
-    effectiveAtMs: Date.now(),
-    updatedAtMs: 0,
-  };
-}
-
-function normalizePayoutDestination(input = {}) {
-  const source = input && typeof input === "object" ? input : {};
-  return {
-    type: safeString(source?.type || "bank_transfer", 40) || "bank_transfer",
-    bankName: safeString(source?.bankName, 120),
-    accountName: safeString(source?.accountName, 120),
-    accountNumberLast4: safeString(source?.accountNumberLast4, 8).slice(-4),
-    reference: safeString(source?.reference, 160),
-  };
-}
-
-export function normalizePartnerFinancialProfileDoc(row = {}, partner = {}) {
-  const source = row && typeof row === "object" ? row : {};
-  const defaults = defaultPartnerFinancialProfile(partner);
-  return {
-    partnerId: safeString(source?.partnerId || defaults.partnerId, 140),
-    partnerName: safeString(source?.partnerName || defaults.partnerName, 140),
-    activeFinancialStatus:
-      lower(source?.activeFinancialStatus || defaults.activeFinancialStatus) === "inactive"
-        ? "inactive"
-        : "active",
-    defaultPlatformCutType: normalizeFeeType(
-      source?.defaultPlatformCutType || defaults.defaultPlatformCutType
-    ),
-    defaultPlatformCutValue: roundRate(
-      source?.defaultPlatformCutValue ?? defaults.defaultPlatformCutValue
-    ),
-    platformCutBase:
-      lower(source?.platformCutBase || defaults.platformCutBase) === "official_amount"
-        ? "official_amount"
-        : "official_plus_service_fee",
-    taxProfileReference: safeString(
-      source?.taxProfileReference || defaults.taxProfileReference,
-      160
-    ),
-    taxOverrides:
-      source?.taxOverrides && typeof source.taxOverrides === "object"
-        ? {
-            enabled: source.taxOverrides.enabled === true,
-            label: safeString(source.taxOverrides.label, 80),
-            type: normalizeFeeType(source.taxOverrides.type || "percentage"),
-            rate: roundRate(source.taxOverrides.rate),
-            mode: normalizeTaxMode(source.taxOverrides.mode || "exclusive"),
-          }
-        : null,
-    payoutReleaseBehavior:
-      lower(source?.payoutReleaseBehavior || defaults.payoutReleaseBehavior) === "auto_release"
-        ? "auto_release"
-        : "manual_review",
-    payoutDestinationReady: source?.payoutDestinationReady === true,
-    payoutDestination: normalizePayoutDestination(
-      source?.payoutDestination || defaults.payoutDestination
-    ),
-    notes: safeString(source?.notes || defaults.notes, 4000),
-    effectiveAtMs: Number(source?.effectiveAtMs || 0) || defaults.effectiveAtMs,
+    platformFee: {
+      defaultCutType: platformCutType,
+      defaultCutValue: platformCutValue,
+      cutBase: platformCutBase,
+    },
     updatedAtMs: Number(source?.updatedAtMs || 0) || toMillis(source?.updatedAt),
     updatedByUid: safeString(source?.updatedByUid, 160),
     updatedByEmail: safeString(source?.updatedByEmail, 180),
@@ -347,22 +346,6 @@ export function subscribeFinanceSettings({ onData, onError } = {}) {
   );
 }
 
-export function subscribePartnerFinancialProfiles({ onData, onError, max = 250 } = {}) {
-  const ref = query(collection(db, PARTNER_FINANCIAL_PROFILES_COLLECTION), limit(max));
-  return onSnapshot(
-    ref,
-    (snap) => {
-      const rows = snap.docs
-        .map((docSnap) =>
-          normalizePartnerFinancialProfileDoc({ id: docSnap.id, ...(docSnap.data() || {}) })
-        )
-        .sort((left, right) => left.partnerName.localeCompare(right.partnerName));
-      onData?.(rows);
-    },
-    onError
-  );
-}
-
 export function subscribePayoutQueue({ onData, onError, max = 120 } = {}) {
   const ref = query(
     collection(db, PAYOUT_QUEUE_COLLECTION),
@@ -428,10 +411,42 @@ export async function saveFinanceSettings(settings = {}) {
   return callFinance("saveFinanceSettings", { settings });
 }
 
-export async function savePartnerFinancialProfile({ partnerId, profile } = {}) {
-  return callFinance("savePartnerFinancialProfile", { partnerId, profile });
+export async function getPaymentProviderConfigStatus() {
+  return callFinance("getPaymentProviderConfigStatus", {});
+}
+
+export async function savePaymentProviderConfig(config = {}) {
+  return callFinance("savePaymentProviderConfig", { config });
 }
 
 export async function releaseQueuedPartnerPayout(payload = {}) {
   return callFinance("releasePartnerPayout", payload);
+}
+
+export async function createInProgressPaymentProposal(payload = {}) {
+  return callFinance("createInProgressPaymentProposal", payload);
+}
+
+export async function adminApprovePaymentRequest(payload = {}) {
+  return callFinance("adminApprovePaymentRequest", payload);
+}
+
+export async function adminRevokePaymentRequest(payload = {}) {
+  return callFinance("adminRevokePaymentRequest", payload);
+}
+
+export async function createUnlockCheckoutSession(payload = {}) {
+  return callFinance("createUnlockCheckoutSession", payload);
+}
+
+export async function createPaymentCheckoutSession(payload = {}) {
+  return callFinance("createPaymentCheckoutSession", payload);
+}
+
+export async function getOrCreateSharedPaymentLink(payload = {}) {
+  return callFinance("getOrCreateSharedPaymentLink", payload);
+}
+
+export async function resolveSharedPaymentLink(payload = {}) {
+  return callFinance("resolveSharedPaymentLink", payload);
 }

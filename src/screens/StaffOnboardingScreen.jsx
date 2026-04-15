@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 
 import { auth, db } from "../firebase";
+import { staffAcceptOnboarding } from "../services/requestcommandservice";
 import { smartBack } from "../utils/navBack";
 import { getSpecialityLabel, normalizeSpecialities } from "../constants/staffSpecialities";
 import {
@@ -210,15 +211,12 @@ export default function StaffOnboardingScreen() {
     try {
       writeLocalChecklistState(uid, checklistState);
 
-      const ref = doc(db, "staff", uid);
-      await setDoc(ref, { uid }, { merge: true });
-      await updateDoc(ref, {
-        onboarded: true,
-        onboardingAccepted: true,
-        onboardingAcceptedAt: serverTimestamp(),
+      const result = await staffAcceptOnboarding({
         onboardingVersion: ONBOARDING_VERSION,
-        updatedAt: serverTimestamp(),
       });
+      if (!result?.ok) {
+        throw new Error("Failed to save onboarding acceptance.");
+      }
 
       const completedState = hydrateStaffOnboardingState({}, { forceComplete: true });
       setAlreadyAccepted(true);

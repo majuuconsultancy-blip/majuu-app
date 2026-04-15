@@ -214,7 +214,7 @@ service cloud.firestore {
     }
 
     function chatTypeOk(t) {
-      return t in ["text", "pdf", "bundle"];
+      return t in ["text", "pdf", "document", "image", "photo", "bundle"];
     }
 
     function chatRoleOk(r) {
@@ -228,6 +228,14 @@ service cloud.firestore {
 
       allow read: if isSuperAdmin();
       allow update, delete: if false;
+    }
+
+    match /partnerPushSubscriptions/{partnerId} {
+      allow read, create, update, delete: if isSuperAdmin();
+    }
+
+    match /pushCampaigns/{campaignId} {
+      allow read, create, update, delete: if isSuperAdmin();
     }
 
     match /users/{uid} {

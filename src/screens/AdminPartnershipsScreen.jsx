@@ -26,6 +26,7 @@ import { subscribeAllCountries } from "../services/countryService";
 import {
   createEmptyPartnerDraft,
   createPartner,
+  deriveOperationalBranchCoverage,
   draftFromPartner,
   listPartners,
   setPartnerActiveState,
@@ -43,15 +44,48 @@ function makeId(prefix = "row") {
     .slice(2, 7)}`;
 }
 
-function makeBranch() {
+function makeBranch(defaultCountry = "") {
+  const branchId = makeId("branch");
   return {
-    id: makeId("branch"),
+    branchId,
+    branchName: "",
+    id: branchId,
     name: "",
-    country: "",
+    country: safeString(defaultCountry, 120),
+    primaryCounty: "",
+    neighboringCounties: [],
+    coverageCounties: [],
     county: "",
+    physicalTown: "",
     town: "",
     address: "",
+    payoutDestination: {
+      type: "bank_transfer",
+      mpesaMode: "till",
+      bankName: "",
+      bankBranchName: "",
+      accountName: "",
+      accountNumber: "",
+      accountNumberLast4: "",
+      phoneNumber: "",
+      paybillNumber: "",
+      paybillAccountNumber: "",
+      tillNumber: "",
+      reference: "",
+      otherLabel: "",
+      destinationDetails: "",
+    },
+    financial: {
+      activeFinancialStatus: "active",
+      platformCutType: "percentage",
+      platformCutValue: 10,
+      platformCutBase: "official_plus_service_fee",
+      releaseBehaviorOverride: "manual_review",
+      payoutDestinationReady: false,
+    },
+    payoutMetadata: {},
     notes: "",
+    active: true,
     isActive: true,
   };
 }
@@ -337,6 +371,21 @@ export default function AdminPartnershipsScreen() {
         county.toLowerCase().includes(needle)
     );
   }, [countySearch, draft?.supportedCounties]);
+  const branchPhysicalCountryOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          (draft?.homeCountries || [])
+            .map((country) => safeString(country, 120))
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b)),
+    [draft?.homeCountries]
+  );
+  const branchCoverageSummary = useMemo(
+    () => deriveOperationalBranchCoverage(draft?.branches || [], { activeOnly: true }),
+    [draft?.branches]
+  );
 
   const updateDraft = (patch) => setDraft((current) => ({ ...current, ...(patch || {}) }));
 
@@ -399,11 +448,43 @@ export default function AdminPartnershipsScreen() {
   };
 
   const updateBranch = (branchId, patch) => {
+    const safeBranchId = safeString(branchId, 120);
     setDraft((current) => ({
       ...current,
       branches: (current?.branches || []).map((branch) =>
-        branch?.id === branchId ? { ...branch, ...(patch || {}) } : branch
+        (safeString(branch?.branchId || branch?.id, 120) === safeBranchId)
+          ? {
+              ...branch,
+              ...(patch || {}),
+              branchId: safeBranchId || safeString(branch?.branchId || branch?.id, 120),
+              id: safeBranchId || safeString(branch?.branchId || branch?.id, 120),
+            }
+          : branch
       ),
+    }));
+  };
+
+  const updateBranchPrimaryCounty = (branchId, nextPrimaryCounty) => {
+    const safePrimary = normalizeCountyList([nextPrimaryCounty])[0] || "";
+    setDraft((current) => ({
+      ...current,
+      branches: (current?.branches || []).map((branch) => {
+        const currentBranchId = branch?.branchId || branch?.id;
+        if (currentBranchId !== branchId) return branch;
+        const neighboring = normalizeCountyList(branch?.neighboringCounties || []).filter(
+          (county) => county !== safePrimary
+        );
+        const coverage = normalizeCountyList([safePrimary, ...neighboring]);
+        return {
+          ...branch,
+          branchId: currentBranchId,
+          id: currentBranchId,
+          primaryCounty: safePrimary,
+          county: safePrimary,
+          neighboringCounties: neighboring,
+          coverageCounties: coverage,
+        };
+      }),
     }));
   };
 
@@ -428,7 +509,7 @@ export default function AdminPartnershipsScreen() {
     setErr("");
     setMsg("");
     setEditingId(partner?.id || "");
-    setDraft({ ...draftFromPartner(partner), branches: partner?.branches || [] });
+    setDraft(draftFromPartner(partner));
     setMetadataRows(metaRowsFromObject(partner?.metadata));
     setHomeCountrySearch("");
     setHomeCountryPick("");
@@ -547,7 +628,7 @@ export default function AdminPartnershipsScreen() {
                         {editingId ? "Edit Partner" : "Create Partner"}
                       </div>
                       <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                        Partner onboarding, county coverage, optional branches, and internal metadata.
+                        Partner onboarding, operational branch routing, fallback county coverage, and internal metadata.
                       </div>
                     </div>
                     <button type="button" onClick={closeForm} className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/80 px-3 py-2 text-sm font-semibold text-zinc-700">
@@ -637,7 +718,10 @@ export default function AdminPartnershipsScreen() {
                   />
                 </Section>
 
-                <Section title="County Coverage" subtitle="This is the routing source of truth for the partner.">
+                <Section
+                  title="County Coverage (Legacy Fallback)"
+                  subtitle="Operational routing now comes from branch coverage. Keep this for backward compatibility."
+                >
                   <SelectionDropdown
                     label="County list"
                     inputClass={input}
@@ -655,41 +739,683 @@ export default function AdminPartnershipsScreen() {
                   />
                 </Section>
 
-                <Section title="Branch Metadata" subtitle="Optional physical offices or liaison points under this partner.">
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
-                    Branches are internal reference points only. They do not expand routing coverage. Routing still comes from the county coverage above, and branch country means the branch's physical country.
+                <Section
+                  title="Operational Branch Routing"
+                  subtitle="Branches now drive county routing coverage, admin assignment, and payout destination mapping. Physical country must be selected from Home Countries."
+                >
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <MetaPill active>Active Branches: {(branchCoverageSummary?.branches || []).length}</MetaPill>
+                    <MetaPill>
+                      Coverage Counties: {(branchCoverageSummary?.coverageCounties || []).length}
+                    </MetaPill>
+                    <MetaPill>
+                      Primary Counties: {(branchCoverageSummary?.primaryCounties || []).length}
+                    </MetaPill>
                   </div>
-                  <div className="grid gap-3">
-                    {(draft?.branches || []).map((branch, index) => (
-                      <div key={branch?.id || index} className="rounded-2xl border border-zinc-200 bg-white/80 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Branch {index + 1}</div>
-                          <button type="button" onClick={() => updateDraft({ branches: (draft?.branches || []).filter((item) => item?.id !== branch?.id) })} className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs font-semibold text-rose-700">
-                            <AppIcon icon={Trash2} size={ICON_SM} />
-                            Remove
-                          </button>
+                  <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                    Branch coverage summary: {(branchCoverageSummary?.coverageCounties || []).join(", ") || "No branch coverage configured yet."}
+                  </div>
+
+                  <div className="mt-3 grid gap-3">
+                    {(draft?.branches || []).map((branch, index) => {
+                      const branchId = safeString(branch?.branchId || branch?.id, 120) || makeId("branch");
+                      const branchCountry = safeString(branch?.country, 120);
+                      const branchCountryInHomeCountries = branchPhysicalCountryOptions.includes(branchCountry);
+                      const branchCountryOptions =
+                        branchCountry && !branchCountryInHomeCountries
+                          ? [branchCountry, ...branchPhysicalCountryOptions]
+                          : branchPhysicalCountryOptions;
+                      const payoutDestination =
+                        branch?.payoutDestination && typeof branch.payoutDestination === "object"
+                          ? branch.payoutDestination
+                          : {};
+                      const payoutType =
+                        safeString(payoutDestination?.type, 40).toLowerCase() === "mpesa"
+                          ? "mpesa"
+                          : safeString(payoutDestination?.type, 40).toLowerCase() === "other"
+                          ? "other"
+                          : "bank_transfer";
+                      const mpesaMode =
+                        safeString(
+                          payoutDestination?.mpesaMode ||
+                            (safeString(payoutDestination?.paybillNumber, 80) ? "paybill" : ""),
+                          20
+                        ).toLowerCase() === "paybill"
+                          ? "paybill"
+                          : "till";
+                      const primaryCounty = normalizeCountyList([
+                        branch?.primaryCounty || branch?.county || "",
+                      ])[0] || "";
+                      const neighboring = normalizeCountyList(branch?.neighboringCounties || []).filter(
+                        (county) => county !== primaryCounty
+                      );
+                      const coverage = normalizeCountyList([
+                        primaryCounty,
+                        ...neighboring,
+                      ]);
+                      const financialSource =
+                        branch?.financial && typeof branch.financial === "object"
+                          ? branch.financial
+                          : branch;
+                      const branchFinancial = {
+                        activeFinancialStatus:
+                          safeString(
+                            financialSource?.activeFinancialStatus || financialSource?.financialStatus,
+                            40
+                          ).toLowerCase() === "inactive"
+                            ? "inactive"
+                            : "active",
+                        platformCutType:
+                          safeString(
+                            financialSource?.platformCutType || financialSource?.defaultPlatformCutType,
+                            40
+                          ).toLowerCase() === "flat"
+                            ? "flat"
+                            : "percentage",
+                        platformCutValue:
+                          Number(
+                            financialSource?.platformCutValue ??
+                              financialSource?.defaultPlatformCutValue ??
+                              10
+                          ) || 0,
+                        platformCutBase:
+                          safeString(financialSource?.platformCutBase, 60).toLowerCase() ===
+                          "official_amount"
+                            ? "official_amount"
+                            : "official_plus_service_fee",
+                        releaseBehaviorOverride:
+                          safeString(
+                            financialSource?.releaseBehaviorOverride ||
+                              financialSource?.payoutReleaseBehavior,
+                            60
+                          ).toLowerCase() === "auto_release"
+                            ? "auto_release"
+                            : "manual_review",
+                        payoutDestinationReady:
+                          typeof financialSource?.payoutDestinationReady === "boolean"
+                            ? financialSource.payoutDestinationReady
+                            : Boolean(branch?.payoutDestination),
+                      };
+                      return (
+                        <div
+                          key={branchId || index}
+                          className="rounded-2xl border border-zinc-200 bg-white/80 p-3 dark:border-zinc-800 dark:bg-zinc-900/60"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                              Branch {index + 1}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateDraft({
+                                  branches: (draft?.branches || []).filter(
+                                    (item) =>
+                                      safeString(item?.branchId || item?.id, 120) !== branchId
+                                  ),
+                                })
+                              }
+                              className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs font-semibold text-rose-700"
+                            >
+                              <AppIcon icon={Trash2} size={ICON_SM} />
+                              Remove
+                            </button>
+                          </div>
+
+                          <div className="mt-3 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+                            <label className="grid gap-1.5">
+                              <div className={label}>Branch Name</div>
+                              <input
+                                className={input}
+                                placeholder="Branch name"
+                                value={branch?.branchName || branch?.name || ""}
+                                onChange={(e) =>
+                                  updateBranch(branchId, {
+                                    branchName: e.target.value,
+                                    name: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="grid gap-1.5">
+                              <div className={label}>Physical Country</div>
+                              <select
+                                className={input}
+                                value={branch?.country || ""}
+                                onChange={(e) => updateBranch(branchId, { country: e.target.value })}
+                                disabled={!branchPhysicalCountryOptions.length}
+                              >
+                                <option value="">
+                                  {branchPhysicalCountryOptions.length
+                                    ? "Select branch home country"
+                                    : "Select home countries first"}
+                                </option>
+                                {branchCountryOptions.map((country) => (
+                                  <option key={`branch-country-${country}`} value={country}>
+                                    {country}
+                                  </option>
+                                ))}
+                              </select>
+                              {branchCountry && !branchCountryInHomeCountries ? (
+                                <div className="text-xs text-amber-700 dark:text-amber-300">
+                                  This branch country is outside selected home countries. Please re-select from Home Countries.
+                                </div>
+                              ) : null}
+                            </label>
+                            <label className="grid gap-1.5">
+                              <div className={label}>Physical Town / City</div>
+                              <input
+                                className={input}
+                                placeholder="Town / City"
+                                value={branch?.physicalTown || branch?.town || ""}
+                                onChange={(e) =>
+                                  updateBranch(branchId, {
+                                    physicalTown: e.target.value,
+                                    town: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+
+                          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                            <label className="grid gap-1.5">
+                              <div className={label}>Primary County</div>
+                              <select
+                                className={input}
+                                value={primaryCounty}
+                                onChange={(e) => updateBranchPrimaryCounty(branchId, e.target.value)}
+                              >
+                                <option value="">Select primary county</option>
+                                {KENYA_COUNTY_OPTIONS.map((countyName) => (
+                                  <option key={`${branchId}-primary-${countyName}`} value={countyName}>
+                                    {countyName}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="grid gap-1.5">
+                              <div className={label}>Neighboring Counties (Multi-select)</div>
+                              <select
+                                multiple
+                                size={Math.min(8, Math.max(4, KENYA_COUNTY_OPTIONS.length))}
+                                className={input}
+                                value={neighboring}
+                                onChange={(e) => {
+                                  const selected = Array.from(e.target.selectedOptions).map(
+                                    (option) => option.value
+                                  );
+                                  const nextNeighboring = normalizeCountyList(selected).filter(
+                                    (county) => county !== primaryCounty
+                                  );
+                                  updateBranch(branchId, {
+                                    neighboringCounties: nextNeighboring,
+                                    coverageCounties: normalizeCountyList([
+                                      primaryCounty,
+                                      ...nextNeighboring,
+                                    ]),
+                                  });
+                                }}
+                              >
+                                {KENYA_COUNTY_OPTIONS.filter((county) => county !== primaryCounty).map(
+                                  (countyName) => (
+                                    <option key={`${branchId}-neighbor-${countyName}`} value={countyName}>
+                                      {countyName}
+                                    </option>
+                                  )
+                                )}
+                              </select>
+                            </label>
+                          </div>
+
+                          <div className="mt-3 grid gap-3 rounded-2xl border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-700 dark:bg-zinc-900/45">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                              Branch Financial Controls
+                            </div>
+                            <div className="grid gap-3 lg:grid-cols-3">
+                              <label className="grid gap-1.5">
+                                <div className={label}>Financial Status</div>
+                                <select
+                                  className={input}
+                                  value={branchFinancial.activeFinancialStatus}
+                                  onChange={(e) =>
+                                    updateBranch(branchId, {
+                                      financial: {
+                                        ...(branch?.financial || {}),
+                                        activeFinancialStatus:
+                                          safeString(e.target.value, 40).toLowerCase() === "inactive"
+                                            ? "inactive"
+                                            : "active",
+                                      },
+                                    })
+                                  }
+                                >
+                                  <option value="active">Active</option>
+                                  <option value="inactive">Inactive</option>
+                                </select>
+                              </label>
+                              <label className="grid gap-1.5">
+                                <div className={label}>Platform Cut Type</div>
+                                <select
+                                  className={input}
+                                  value={branchFinancial.platformCutType}
+                                  onChange={(e) =>
+                                    updateBranch(branchId, {
+                                      financial: {
+                                        ...(branch?.financial || {}),
+                                        platformCutType:
+                                          safeString(e.target.value, 40).toLowerCase() === "flat"
+                                            ? "flat"
+                                            : "percentage",
+                                      },
+                                    })
+                                  }
+                                >
+                                  <option value="percentage">Percentage</option>
+                                  <option value="flat">Flat Rate</option>
+                                </select>
+                              </label>
+                              <label className="grid gap-1.5">
+                                <div className={label}>Platform Cut Value</div>
+                                <input
+                                  className={input}
+                                  inputMode="decimal"
+                                  value={branchFinancial.platformCutValue}
+                                  onChange={(e) =>
+                                    updateBranch(branchId, {
+                                      financial: {
+                                        ...(branch?.financial || {}),
+                                        platformCutValue: Number(e.target.value || 0),
+                                      },
+                                    })
+                                  }
+                                />
+                              </label>
+                            </div>
+                            <div className="grid gap-3 lg:grid-cols-2">
+                              <label className="grid gap-1.5">
+                                <div className={label}>Platform Cut Base</div>
+                                <select
+                                  className={input}
+                                  value={branchFinancial.platformCutBase}
+                                  onChange={(e) =>
+                                    updateBranch(branchId, {
+                                      financial: {
+                                        ...(branch?.financial || {}),
+                                        platformCutBase:
+                                          safeString(e.target.value, 60).toLowerCase() ===
+                                          "official_amount"
+                                            ? "official_amount"
+                                            : "official_plus_service_fee",
+                                      },
+                                    })
+                                  }
+                                >
+                                  <option value="official_amount">Official Amount Only</option>
+                                  <option value="official_plus_service_fee">
+                                    Official Amount + Service Fee
+                                  </option>
+                                </select>
+                              </label>
+                              <label className="grid gap-1.5">
+                                <div className={label}>Release Behavior</div>
+                                <select
+                                  className={input}
+                                  value={branchFinancial.releaseBehaviorOverride}
+                                  onChange={(e) =>
+                                    updateBranch(branchId, {
+                                      financial: {
+                                        ...(branch?.financial || {}),
+                                        releaseBehaviorOverride:
+                                          safeString(e.target.value, 60).toLowerCase() ===
+                                          "auto_release"
+                                            ? "auto_release"
+                                            : "manual_review",
+                                      },
+                                    })
+                                  }
+                                >
+                                  <option value="manual_review">Manual</option>
+                                  <option value="auto_release">Auto</option>
+                                </select>
+                              </label>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 grid gap-3 rounded-2xl border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-700 dark:bg-zinc-900/45">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                              Payout Destination
+                            </div>
+                            <div className="grid gap-3">
+                              <label className="grid gap-1.5">
+                                <div className={label}>Destination Type</div>
+                                <select
+                                  className={input}
+                                  value={payoutType}
+                                  onChange={(e) =>
+                                    updateBranch(branchId, {
+                                      payoutDestination: {
+                                        ...(branch?.payoutDestination || {}),
+                                        type: ["mpesa", "other"].includes(
+                                          safeString(e.target.value, 40).toLowerCase()
+                                        )
+                                          ? safeString(e.target.value, 40).toLowerCase()
+                                          : "bank_transfer",
+                                        mpesaMode:
+                                          safeString(e.target.value, 40).toLowerCase() === "mpesa"
+                                            ? mpesaMode
+                                            : "",
+                                      },
+                                    })
+                                  }
+                                >
+                                  <option value="bank_transfer">Bank transfer</option>
+                                  <option value="mpesa">M-Pesa</option>
+                                  <option value="other">Other</option>
+                                </select>
+                              </label>
+
+                              {payoutType === "mpesa" ? (
+                                <div className="grid gap-3 lg:grid-cols-3">
+                                  <label className="grid gap-1.5">
+                                    <div className={label}>M-Pesa Route</div>
+                                    <select
+                                      className={input}
+                                      value={mpesaMode}
+                                      onChange={(e) =>
+                                        updateBranch(branchId, {
+                                          payoutDestination: {
+                                            ...(branch?.payoutDestination || {}),
+                                            type: "mpesa",
+                                            mpesaMode:
+                                              safeString(e.target.value, 20).toLowerCase() === "paybill"
+                                                ? "paybill"
+                                                : "till",
+                                          },
+                                        })
+                                      }
+                                    >
+                                      <option value="till">Till</option>
+                                      <option value="paybill">Paybill</option>
+                                    </select>
+                                  </label>
+
+                                  {mpesaMode === "paybill" ? (
+                                    <>
+                                      <label className="grid gap-1.5">
+                                        <div className={label}>Business Number</div>
+                                        <input
+                                          className={input}
+                                          value={
+                                            branch?.payoutDestination?.paybillNumber ||
+                                            branch?.payoutDestination?.shortCode ||
+                                            ""
+                                          }
+                                          onChange={(e) =>
+                                            updateBranch(branchId, {
+                                              payoutDestination: {
+                                                ...(branch?.payoutDestination || {}),
+                                                type: "mpesa",
+                                                mpesaMode: "paybill",
+                                                paybillNumber: safeString(e.target.value, 80),
+                                                shortCode: safeString(e.target.value, 80),
+                                              },
+                                            })
+                                          }
+                                        />
+                                      </label>
+                                      <label className="grid gap-1.5">
+                                        <div className={label}>Account Number</div>
+                                        <input
+                                          className={input}
+                                          value={branch?.payoutDestination?.paybillAccountNumber || ""}
+                                          onChange={(e) =>
+                                            updateBranch(branchId, {
+                                              payoutDestination: {
+                                                ...(branch?.payoutDestination || {}),
+                                                type: "mpesa",
+                                                mpesaMode: "paybill",
+                                                paybillAccountNumber: safeString(e.target.value, 120),
+                                              },
+                                            })
+                                          }
+                                        />
+                                      </label>
+                                    </>
+                                  ) : (
+                                    <label className="grid gap-1.5">
+                                      <div className={label}>Till Number</div>
+                                      <input
+                                        className={input}
+                                        value={branch?.payoutDestination?.tillNumber || ""}
+                                        onChange={(e) =>
+                                          updateBranch(branchId, {
+                                            payoutDestination: {
+                                              ...(branch?.payoutDestination || {}),
+                                              type: "mpesa",
+                                              mpesaMode: "till",
+                                              tillNumber: safeString(e.target.value, 80),
+                                            },
+                                          })
+                                        }
+                                      />
+                                    </label>
+                                  )}
+
+                                  <label className="grid gap-1.5">
+                                    <div className={label}>Reference</div>
+                                    <input
+                                      className={input}
+                                      value={branch?.payoutDestination?.reference || ""}
+                                      onChange={(e) =>
+                                        updateBranch(branchId, {
+                                          payoutDestination: {
+                                            ...(branch?.payoutDestination || {}),
+                                            type: "mpesa",
+                                            reference: e.target.value,
+                                          },
+                                        })
+                                      }
+                                    />
+                                  </label>
+                                </div>
+                              ) : payoutType === "other" ? (
+                                <div className="grid gap-3 lg:grid-cols-2">
+                                  <label className="grid gap-1.5">
+                                    <div className={label}>Destination Label</div>
+                                    <input
+                                      className={input}
+                                      value={branch?.payoutDestination?.otherLabel || ""}
+                                      onChange={(e) =>
+                                        updateBranch(branchId, {
+                                          payoutDestination: {
+                                            ...(branch?.payoutDestination || {}),
+                                            type: "other",
+                                            otherLabel: e.target.value,
+                                          },
+                                        })
+                                      }
+                                    />
+                                  </label>
+                                  <label className="grid gap-1.5">
+                                    <div className={label}>Destination Details</div>
+                                    <input
+                                      className={input}
+                                      value={branch?.payoutDestination?.destinationDetails || ""}
+                                      onChange={(e) =>
+                                        updateBranch(branchId, {
+                                          payoutDestination: {
+                                            ...(branch?.payoutDestination || {}),
+                                            type: "other",
+                                            destinationDetails: e.target.value,
+                                          },
+                                        })
+                                      }
+                                    />
+                                  </label>
+                                  <label className="grid gap-1.5 lg:col-span-2">
+                                    <div className={label}>Reference</div>
+                                    <input
+                                      className={input}
+                                      value={branch?.payoutDestination?.reference || ""}
+                                      onChange={(e) =>
+                                        updateBranch(branchId, {
+                                          payoutDestination: {
+                                            ...(branch?.payoutDestination || {}),
+                                            type: "other",
+                                            reference: e.target.value,
+                                          },
+                                        })
+                                      }
+                                    />
+                                  </label>
+                                </div>
+                              ) : (
+                                <div className="grid gap-3 lg:grid-cols-3">
+                                  <label className="grid gap-1.5">
+                                    <div className={label}>Bank Name</div>
+                                    <input
+                                      className={input}
+                                      value={branch?.payoutDestination?.bankName || ""}
+                                      onChange={(e) =>
+                                        updateBranch(branchId, {
+                                          payoutDestination: {
+                                            ...(branch?.payoutDestination || {}),
+                                            type: "bank_transfer",
+                                            bankName: e.target.value,
+                                          },
+                                        })
+                                      }
+                                    />
+                                  </label>
+                                  <label className="grid gap-1.5">
+                                    <div className={label}>Bank Branch</div>
+                                    <input
+                                      className={input}
+                                      value={branch?.payoutDestination?.bankBranchName || ""}
+                                      onChange={(e) =>
+                                        updateBranch(branchId, {
+                                          payoutDestination: {
+                                            ...(branch?.payoutDestination || {}),
+                                            type: "bank_transfer",
+                                            bankBranchName: e.target.value,
+                                          },
+                                        })
+                                      }
+                                    />
+                                  </label>
+                                  <label className="grid gap-1.5">
+                                    <div className={label}>Account Name</div>
+                                    <input
+                                      className={input}
+                                      value={branch?.payoutDestination?.accountName || ""}
+                                      onChange={(e) =>
+                                        updateBranch(branchId, {
+                                          payoutDestination: {
+                                            ...(branch?.payoutDestination || {}),
+                                            type: "bank_transfer",
+                                            accountName: e.target.value,
+                                          },
+                                        })
+                                      }
+                                    />
+                                  </label>
+                                  <label className="grid gap-1.5">
+                                    <div className={label}>Account Number</div>
+                                    <input
+                                      className={input}
+                                      value={branch?.payoutDestination?.accountNumber || ""}
+                                      onChange={(e) =>
+                                        updateBranch(branchId, {
+                                          payoutDestination: {
+                                            ...(branch?.payoutDestination || {}),
+                                            type: "bank_transfer",
+                                            accountNumber: safeString(e.target.value, 80),
+                                            accountNumberLast4: safeString(e.target.value, 80).slice(-4),
+                                          },
+                                        })
+                                      }
+                                    />
+                                  </label>
+                                  <label className="grid gap-1.5">
+                                    <div className={label}>Reference</div>
+                                    <input
+                                      className={input}
+                                      value={branch?.payoutDestination?.reference || ""}
+                                      onChange={(e) =>
+                                        updateBranch(branchId, {
+                                          payoutDestination: {
+                                            ...(branch?.payoutDestination || {}),
+                                            type: "bank_transfer",
+                                            reference: e.target.value,
+                                          },
+                                        })
+                                      }
+                                    />
+                                  </label>
+                                </div>
+                              )}
+                              <label className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/80 px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200">
+                                <input
+                                  type="checkbox"
+                                  checked={branchFinancial.payoutDestinationReady === true}
+                                  onChange={(e) =>
+                                    updateBranch(branchId, {
+                                      financial: {
+                                        ...(branch?.financial || {}),
+                                        payoutDestinationReady: e.target.checked,
+                                      },
+                                    })
+                                  }
+                                  className="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-400"
+                                />
+                                Payout destination ready for release
+                              </label>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 grid gap-3 lg:grid-cols-[auto_1fr]">
+                            <label className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/80 px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200">
+                              <input
+                                type="checkbox"
+                                checked={branch?.active !== false && branch?.isActive !== false}
+                                onChange={(e) =>
+                                  updateBranch(branchId, {
+                                    active: e.target.checked,
+                                    isActive: e.target.checked,
+                                  })
+                                }
+                                className="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-400"
+                              />
+                              Active branch
+                            </label>
+                            <textarea
+                              className={input}
+                              rows={2}
+                              placeholder="Branch operational notes"
+                              value={branch?.notes || ""}
+                              onChange={(e) => updateBranch(branchId, { notes: e.target.value })}
+                            />
+                          </div>
+
+                          <div className="mt-3 rounded-2xl border border-dashed border-zinc-200 bg-white/70 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-300">
+                            Routing coverage: {coverage.join(", ") || "No county coverage configured yet."}
+                          </div>
                         </div>
-                        <div className="mt-3 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
-                          <input className={input} placeholder="Branch name" value={branch?.name || ""} onChange={(e) => updateBranch(branch?.id, { name: e.target.value })} />
-                          <select className={input} value={branch?.country || ""} onChange={(e) => updateBranch(branch?.id, { country: e.target.value })}>
-                            <option value="">
-                              {activeCountries.length ? "Select branch country" : "No active countries"}
-                            </option>
-                            {activeCountries.map((country) => <option key={`branch-country-${country}`} value={country}>{country}</option>)}
-                          </select>
-                          <select className={input} value={branch?.county || ""} onChange={(e) => updateBranch(branch?.id, { county: e.target.value })} disabled={(draft?.supportedCounties || []).length === 0}>
-                            <option value="">
-                              {(draft?.supportedCounties || []).length ? "Select branch county" : "Select county coverage first"}
-                            </option>
-                            {(draft?.supportedCounties || []).map((county) => <option key={`branch-${county}`} value={county}>{county}</option>)}
-                          </select>
-                          <input className={input} placeholder="Town / City" value={branch?.town || ""} onChange={(e) => updateBranch(branch?.id, { town: e.target.value })} />
-                          <textarea className={input} rows={2} placeholder="Address" value={branch?.address || ""} onChange={(e) => updateBranch(branch?.id, { address: e.target.value })} />
-                          <textarea className={input} rows={2} placeholder="Branch notes" value={branch?.notes || ""} onChange={(e) => updateBranch(branch?.id, { notes: e.target.value })} />
-                        </div>
-                      </div>
-                    ))}
-                    <button type="button" onClick={() => updateDraft({ branches: [...(draft?.branches || []), makeBranch()] })} className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-2.5 text-sm font-semibold text-emerald-800">
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateDraft({
+                          branches: [
+                            ...(draft?.branches || []),
+                            makeBranch(branchPhysicalCountryOptions[0] || ""),
+                          ],
+                        })
+                      }
+                      className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-2.5 text-sm font-semibold text-emerald-800"
+                    >
                       <AppIcon icon={Plus} size={ICON_SM} />
                       Add Branch
                     </button>
@@ -751,7 +1477,7 @@ export default function AdminPartnershipsScreen() {
                     Partners ({activeCount} active / {partners.length} total)
                   </div>
                   <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                    Home-country eligibility is applied before county routing.
+                    Home-country eligibility is applied before branch/county routing.
                   </div>
                 </div>
                 <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">

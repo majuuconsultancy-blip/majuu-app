@@ -8,6 +8,14 @@ import DocumentExtractPanel from "../components/DocumentExtractPanel";
 import DocumentProofreadPanel from "../components/DocumentProofreadPanel";
 import RequestDocumentFieldsSection from "../components/RequestDocumentFieldsSection";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import {
+  splitRequestDocumentsForLegacyViews,
+  subscribeRequestDocumentContext,
+} from "../services/documentEngineService";
+import {
+  getDocumentEngineReadMode,
+  subscribeDocumentEngineModeState,
+} from "../services/documentEngineFlags";
 
 function IconBack(props) {
   return (
@@ -85,6 +93,23 @@ function safeStr(x) {
   return String(x || "").trim();
 }
 
+function mergeDocumentRows(primaryRows = [], fallbackRows = []) {
+  const rows = [...(Array.isArray(primaryRows) ? primaryRows : []), ...(Array.isArray(fallbackRows) ? fallbackRows : [])];
+  const seen = new Set();
+  const out = [];
+
+  rows.forEach((row) => {
+    const id = safeStr(row?.id);
+    const signature = `${safeStr(row?.name).toLowerCase()}|${Number(row?.size || row?.sizeBytes || 0) || 0}|${safeStr(row?.url)}`;
+    const key = id || signature;
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(row);
+  });
+
+  return out;
+}
+
 function isExtraFieldAttachment(item) {
   const kind = safeStr(item?.kind).toLowerCase();
   return Boolean(
@@ -102,12 +127,15 @@ export default function StaffRequestDocumentsScreen() {
     const id = String(requestId || "").trim();
     return id || null;
   }, [requestId]);
+  const [docsReadMode, setDocsReadMode] = useState(getDocumentEngineReadMode());
 
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [uid, setUid] = useState("");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [attachments, setAttachments] = useState([]);
+  const [canonicalRows, setCanonicalRows] = useState([]);
+  const [canonicalErr, setCanonicalErr] = useState("");
   const [requestData, setRequestData] = useState(null);
   const [allowed, setAllowed] = useState(false);
 
@@ -122,6 +150,18 @@ export default function StaffRequestDocumentsScreen() {
     });
     return () => unsub();
   }, [navigate]);
+
+  useEffect(() => {
+    const unsub = subscribeDocumentEngineModeState({
+      onData: (state) => {
+        setDocsReadMode(state?.effectiveMode || "merge");
+      },
+      onError: (error) => {
+        console.error("document engine mode subscription error:", error);
+      },
+    });
+    return () => unsub?.();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -188,9 +228,54 @@ export default function StaffRequestDocumentsScreen() {
     return () => unsub();
   }, [allowed, validId]);
 
+  useEffect(() => {
+    if (!validId || !allowed || docsReadMode === "legacy") return undefined;
+    const unsub = subscribeRequestDocumentContext({
+      requestId: validId,
+      viewerRole: "staff",
+      onData: (rows) => {
+        setCanonicalRows(Array.isArray(rows) ? rows : []);
+        setCanonicalErr("");
+      },
+      onError: (error) => {
+        console.error("canonical request docs snapshot error:", error);
+        setCanonicalErr(error?.message || "Failed to load unified request documents.");
+      },
+    });
+    return () => unsub?.();
+  }, [allowed, validId, docsReadMode]);
+
+  const canonicalSplit = useMemo(
+    () => splitRequestDocumentsForLegacyViews(canonicalRows),
+    [canonicalRows]
+  );
+  const effectiveAttachments = useMemo(
+    () => {
+      if (docsReadMode === "legacy") return attachments;
+      if (docsReadMode === "canonical") return canonicalSplit.attachments;
+      return mergeDocumentRows(canonicalSplit.attachments, attachments);
+    },
+    [docsReadMode, canonicalSplit.attachments, attachments]
+  );
+  const effectiveErr = useMemo(() => {
+    if (effectiveAttachments.length > 0) return "";
+    if (docsReadMode === "legacy") return err;
+    if (docsReadMode === "canonical") return canonicalErr || err;
+    return err || canonicalErr;
+  }, [docsReadMode, effectiveAttachments.length, err, canonicalErr]);
+  const effectiveLoading =
+    loading &&
+    (
+      docsReadMode === "legacy"
+        ? true
+        : docsReadMode === "canonical"
+        ? canonicalSplit.attachments.length === 0 && !canonicalErr
+        : canonicalSplit.attachments.length === 0 && !canonicalErr
+    );
+
   const legacyAttachments = useMemo(
-    () => attachments.filter((item) => !isExtraFieldAttachment(item)),
-    [attachments]
+    () => effectiveAttachments.filter((item) => !isExtraFieldAttachment(item)),
+    [effectiveAttachments]
   );
 
   const cardBase =
@@ -239,9 +324,9 @@ export default function StaffRequestDocumentsScreen() {
           </button>
         </div>
 
-        {err ? (
+        {effectiveErr ? (
           <div className="mt-6 rounded-2xl border border-rose-100 bg-rose-50/70 p-4 text-sm text-rose-700">
-            {err}
+            {effectiveErr}
           </div>
         ) : null}
 
@@ -258,9 +343,9 @@ export default function StaffRequestDocumentsScreen() {
               requestId={validId}
               title="Document fields"
               viewerRole="staff"
-              attachments={attachments}
-              attachmentsLoading={loading}
-              attachmentsError={err}
+              attachments={effectiveAttachments}
+              attachmentsLoading={effectiveLoading}
+              attachmentsError={effectiveErr}
               showLegacySection={false}
               className={`mt-6 ${cardBase} p-5`}
             />

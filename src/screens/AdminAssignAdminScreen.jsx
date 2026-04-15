@@ -3,33 +3,41 @@ import { ArrowLeft, CheckCircle2, ChevronDown, UserPlus } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import AppIcon from "../components/AppIcon";
-import { EAST_AFRICA_RESIDENCE_COUNTRIES } from "../constants/eastAfricaProfile";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
 import {
   getNearbyCountySuggestions,
   normalizeCountyList,
 } from "../constants/kenyaCounties";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
+import { normalizeSingleAssignedBranchIds } from "../services/assignedAdminBranchBinding";
 import { setAssignedAdminByEmail } from "../services/assignedadminservice";
-import { listPartners } from "../services/partnershipService";
+import {
+  deriveOperationalBranchCoverage,
+  listPartners,
+} from "../services/partnershipService";
 import { smartBack } from "../utils/navBack";
 
 function safeStr(value) {
   return String(value || "").trim();
 }
 
+function normalizeCountryOptions(values = []) {
+  const seen = new Set();
+  return (Array.isArray(values) ? values : [])
+    .map((value) => safeStr(value))
+    .filter((value) => {
+      const key = value.toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.localeCompare(b));
+}
+
 function toBoundedInt(value, fallback, min, max) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.round(n)));
-}
-
-function timeoutToMinutes(value, unit) {
-  const base = Number(value || 0);
-  if (!Number.isFinite(base) || base <= 0) return 0;
-  const cleanUnit = safeStr(unit).toLowerCase();
-  const raw = cleanUnit === "hours" ? base * 60 : base;
-  return toBoundedInt(raw, 0, 5, 240);
 }
 
 export default function AdminAssignAdminScreen() {
@@ -44,12 +52,12 @@ export default function AdminAssignAdminScreen() {
   const [partnerId, setPartnerId] = useState("");
   const [primaryCounty, setPrimaryCounty] = useState("");
   const [neighboringCounties, setNeighboringCounties] = useState([]);
+  const [selectedBranchIds, setSelectedBranchIds] = useState([]);
+  const [branchSearch, setBranchSearch] = useState("");
   const [countySearch, setCountySearch] = useState("");
   const [countyOpen, setCountyOpen] = useState(false);
   const [town, setTown] = useState("");
   const [maxActiveRequests, setMaxActiveRequests] = useState("");
-  const [responseTimeoutValue, setResponseTimeoutValue] = useState("");
-  const [responseTimeoutUnit, setResponseTimeoutUnit] = useState("minutes");
   const [availability, setAvailability] = useState("active");
 
   const [busy, setBusy] = useState(false);
@@ -103,35 +111,64 @@ export default function AdminAssignAdminScreen() {
     [neighboringCounties, primaryCounty]
   );
 
-  const countryOptions = useMemo(() => {
-    const partnerCountries = new Set(
-      partners.flatMap((partner) =>
-        (Array.isArray(partner?.homeCountries) ? partner.homeCountries : [])
-          .map((value) => safeStr(value).toLowerCase())
-          .filter(Boolean)
-      )
-    );
-    return EAST_AFRICA_RESIDENCE_COUNTRIES.filter((value) =>
-      partnerCountries.has(safeStr(value).toLowerCase())
-    );
-  }, [partners]);
-
-  const selectedCountryLower = safeStr(country).toLowerCase();
-  const filteredPartners = useMemo(() => {
-    if (!selectedCountryLower) return partners;
-    return partners.filter((partner) =>
-      (Array.isArray(partner?.homeCountries) ? partner.homeCountries : []).some(
-        (value) => safeStr(value).toLowerCase() === selectedCountryLower
-      )
-    );
-  }, [partners, selectedCountryLower]);
-
   const selectedPartner = useMemo(
-    () => filteredPartners.find((partner) => partner.id === partnerId) || null,
-    [filteredPartners, partnerId]
+    () => partners.find((partner) => partner.id === partnerId) || null,
+    [partners, partnerId]
   );
 
-  const isKenyaScope = selectedCountryLower === "kenya";
+  const partnerCountryOptions = useMemo(
+    () =>
+      selectedPartner?.isActive === false
+        ? []
+        : normalizeCountryOptions(selectedPartner?.homeCountries || []),
+    [selectedPartner]
+  );
+  const partnerBranchOptions = useMemo(() => {
+    const rows = Array.isArray(selectedPartner?.branches) ? selectedPartner.branches : [];
+    return rows
+      .filter((branch) => branch?.active !== false && branch?.isActive !== false)
+      .map((branch) => ({
+        branchId: safeStr(branch?.branchId || branch?.id),
+        branchName: safeStr(branch?.branchName || branch?.name),
+        country: safeStr(branch?.country, 120),
+        primaryCounty: safeStr(branch?.primaryCounty || branch?.county),
+        neighboringCounties: normalizeCountyList(branch?.neighboringCounties || []),
+        coverageCounties: normalizeCountyList(branch?.coverageCounties || []),
+      }))
+      .filter((branch) => branch.branchId && branch.branchName);
+  }, [selectedPartner]);
+  const selectedBranches = useMemo(() => {
+    const selected = new Set(selectedBranchIds.map((value) => safeStr(value).toLowerCase()).filter(Boolean));
+    return partnerBranchOptions.filter((branch) => selected.has(branch.branchId.toLowerCase()));
+  }, [partnerBranchOptions, selectedBranchIds]);
+  const derivedBranchCoverage = useMemo(
+    () => deriveOperationalBranchCoverage(selectedBranches, { activeOnly: true }),
+    [selectedBranches]
+  );
+  const hasBranchSelection = selectedBranches.length > 0;
+  const autoPrimaryCounty = useMemo(() => {
+    const first = selectedBranches.find((branch) => safeStr(branch?.primaryCounty))?.primaryCounty;
+    if (first) return first;
+    return normalizeCountyList(derivedBranchCoverage?.coverageCounties || [])[0] || "";
+  }, [derivedBranchCoverage?.coverageCounties, selectedBranches]);
+  const autoNeighboringCounties = useMemo(
+    () =>
+      normalizeCountyList(derivedBranchCoverage?.coverageCounties || []).filter(
+        (county) => county !== autoPrimaryCounty
+      ),
+    [autoPrimaryCounty, derivedBranchCoverage?.coverageCounties]
+  );
+  const autoCountries = useMemo(
+    () => normalizeCountryOptions(selectedBranches.map((branch) => branch?.country)),
+    [selectedBranches]
+  );
+  const effectiveCountries = useMemo(() => {
+    if (hasBranchSelection && autoCountries.length) return autoCountries;
+    return normalizeCountryOptions([country]);
+  }, [autoCountries, country, hasBranchSelection]);
+  const isKenyaScope = effectiveCountries.some(
+    (countryName) => safeStr(countryName).toLowerCase() === "kenya"
+  );
 
   const partnerCountyOptions = useMemo(
     () =>
@@ -143,7 +180,9 @@ export default function AdminAssignAdminScreen() {
 
   const countyFieldsEnabled =
     isKenyaScope && Boolean(partnerId) && Boolean(selectedPartner) && partnerCountyOptions.length > 0;
-  const neighboringFieldsEnabled = countyFieldsEnabled && Boolean(primaryCounty) && partnerCountyOptions.length > 1;
+  const neighboringFieldsEnabled =
+    countyFieldsEnabled && Boolean(primaryCounty) && partnerCountyOptions.length > 1;
+  const manualCountyFieldsEnabled = countyFieldsEnabled && !hasBranchSelection;
 
   const filteredCounties = useMemo(() => {
     const needle = safeStr(countySearch).toLowerCase();
@@ -157,15 +196,42 @@ export default function AdminAssignAdminScreen() {
       .filter((county) => partnerCountyOptions.includes(county))
       .slice(0, 8);
   }, [partnerCountyOptions, primaryCounty, selectedNeighboringCounties]);
+  const filteredBranchOptions = useMemo(() => {
+    const needle = safeStr(branchSearch).toLowerCase();
+    if (!needle) return partnerBranchOptions;
+    return partnerBranchOptions.filter((branch) =>
+      [
+        branch.branchName,
+        branch.country,
+        branch.primaryCounty,
+        ...(branch.neighboringCounties || []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(needle)
+    );
+  }, [branchSearch, partnerBranchOptions]);
 
   useEffect(() => {
     if (!partnerId) {
+      setSelectedBranchIds([]);
+      setBranchSearch("");
       setPrimaryCounty("");
       setNeighboringCounties([]);
       setCountySearch("");
       setCountyOpen(false);
       return;
     }
+
+    const validBranchIds = new Set(
+      partnerBranchOptions.map((branch) => safeStr(branch?.branchId).toLowerCase()).filter(Boolean)
+    );
+    setSelectedBranchIds((current) =>
+      normalizeSingleAssignedBranchIds(
+        current.filter((branchId) => validBranchIds.has(safeStr(branchId).toLowerCase()))
+      )
+    );
 
     const allowed = new Set(partnerCountyOptions);
     setPrimaryCounty((current) => (current && allowed.has(current) ? current : ""));
@@ -177,18 +243,35 @@ export default function AdminAssignAdminScreen() {
       setCountySearch("");
       setCountyOpen(false);
     }
-  }, [partnerCountyOptions, partnerId]);
+  }, [partnerBranchOptions, partnerCountyOptions, partnerId]);
 
   useEffect(() => {
     if (!partnerId) return;
-    const stillVisible = filteredPartners.some((partner) => partner.id === partnerId);
+    const stillVisible = partners.some((partner) => partner.id === partnerId);
     if (stillVisible) return;
     setPartnerId("");
+    setSelectedBranchIds([]);
+    setBranchSearch("");
     setPrimaryCounty("");
     setNeighboringCounties([]);
     setCountySearch("");
     setCountyOpen(false);
-  }, [filteredPartners, partnerId]);
+  }, [partnerId, partners]);
+
+  useEffect(() => {
+    if (!selectedPartner) {
+      if (country) setCountry("");
+      return;
+    }
+    if (hasBranchSelection) return;
+    if (!country) return;
+    const supported = partnerCountryOptions.some(
+      (countryName) => safeStr(countryName).toLowerCase() === safeStr(country).toLowerCase()
+    );
+    if (!supported) {
+      setCountry("");
+    }
+  }, [country, hasBranchSelection, partnerCountryOptions, selectedPartner]);
 
   useEffect(() => {
     if (isKenyaScope) return;
@@ -197,6 +280,12 @@ export default function AdminAssignAdminScreen() {
     setCountySearch("");
     setCountyOpen(false);
   }, [isKenyaScope]);
+
+  useEffect(() => {
+    if (!hasBranchSelection) return;
+    setCountyOpen(false);
+    setCountySearch("");
+  }, [hasBranchSelection]);
 
   const toggleCounty = (countyName) => {
     const normalized = normalizeCountyList([...selectedNeighboringCounties, countyName])
@@ -211,6 +300,17 @@ export default function AdminAssignAdminScreen() {
     setNeighboringCounties(normalized);
   };
 
+  const toggleBranch = (branchId) => {
+    const safeId = safeStr(branchId);
+    if (!safeId) return;
+    const key = safeId.toLowerCase();
+    setSelectedBranchIds((current) => {
+      const list = Array.isArray(current) ? current : [];
+      const has = list.some((value) => safeStr(value).toLowerCase() === key);
+      return has ? [] : normalizeSingleAssignedBranchIds([safeId]);
+    });
+  };
+
   const askConfirmAssign = () => {
     setErr("");
     const safeEmail = safeStr(email).toLowerCase();
@@ -218,26 +318,25 @@ export default function AdminAssignAdminScreen() {
       setErr("Enter a valid admin email.");
       return;
     }
-    if (!safeStr(country)) {
-      setErr("Select a stationed country.");
-      return;
-    }
     if (!safeStr(partnerId)) {
       setErr("Select a partner.");
       return;
     }
-    if (isKenyaScope && !safeStr(primaryCounty)) {
-      setErr("Select a primary county.");
+    if (!hasBranchSelection) {
+      setErr("Select one branch. Assigned admins are bound to a single branch.");
+      return;
+    }
+    if (!autoCountries.length && !safeStr(country)) {
+      setErr("Selected branches are missing physical country. Set fallback stationed country.");
+      return;
+    }
+    if (isKenyaScope && hasBranchSelection && !safeStr(autoPrimaryCounty)) {
+      setErr("Selected branches do not provide Kenya county coverage.");
       return;
     }
     const maxActive = toBoundedInt(maxActiveRequests, 0, 1, 120);
     if (maxActive <= 0) {
       setErr("Enter max active requests.");
-      return;
-    }
-    const timeoutMinutes = timeoutToMinutes(responseTimeoutValue, responseTimeoutUnit);
-    if (timeoutMinutes <= 0) {
-      setErr("Enter response timeout.");
       return;
     }
     setConfirmOpen(true);
@@ -247,8 +346,9 @@ export default function AdminAssignAdminScreen() {
     const safeEmail = safeStr(email).toLowerCase();
     if (!safeEmail) return;
     const maxActive = toBoundedInt(maxActiveRequests, 0, 1, 120);
-    const timeoutMinutes = timeoutToMinutes(responseTimeoutValue, responseTimeoutUnit);
-    if (maxActive <= 0 || timeoutMinutes <= 0) return;
+    if (maxActive <= 0) return;
+    const stationedCountry = safeStr(autoCountries[0] || country);
+    const boundBranchIds = normalizeSingleAssignedBranchIds(selectedBranchIds);
 
     setBusy(true);
     setErr("");
@@ -256,15 +356,13 @@ export default function AdminAssignAdminScreen() {
       await setAssignedAdminByEmail({
         email: safeEmail,
         action: "upsert",
-        stationedCountry: country,
-        country,
+        stationedCountry,
+        country: stationedCountry,
         partnerId,
-        primaryCounty,
-        neighboringCounties: selectedNeighboringCounties,
+        selectedBranchIds: boundBranchIds,
         town,
         availability,
         maxActiveRequests: maxActive,
-        responseTimeoutMinutes: timeoutMinutes,
       });
       navigate("/app/admin", { replace: true });
     } catch (error) {
@@ -325,28 +423,49 @@ export default function AdminAssignAdminScreen() {
 
             <div className="grid gap-3">
               <div className="grid gap-1.5">
-                <div className={label}>Stationed Country</div>
+                <div className={label}>Partner</div>
                 <select
                   className={input}
-                  value={country}
-                  onChange={(event) => setCountry(event.target.value)}
+                  value={partnerId}
+                  onChange={(event) => {
+                    setPartnerId(event.target.value);
+                    setCountry("");
+                    setSelectedBranchIds([]);
+                    setBranchSearch("");
+                    setPrimaryCounty("");
+                    setNeighboringCounties([]);
+                    setCountySearch("");
+                    setCountyOpen(false);
+                  }}
                 >
-                  <option value="">Select stationed country</option>
-                  {countryOptions.map((countryName) => (
-                    <option key={countryName} value={countryName}>
-                      {countryName}
+                  <option value="">Select partner</option>
+                  {partners.map((partner) => (
+                    <option key={partner.id} value={partner.id}>
+                      {partner.displayName}
                     </option>
                   ))}
                 </select>
-                {countryOptions.length === 0 ? (
+                {partners.length === 0 ? (
                   <div className="text-xs text-amber-700 dark:text-amber-200">
-                    No partner home countries are configured yet. Update SACC Partnerships first.
+                    No active partners yet. Create one first in SACC Partnerships.
                   </div>
-                ) : (
+                ) : !partnerId ? (
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    This stations the admin in one partner home country for routing.
+                    Select partner first, then operational branch coverage.
                   </div>
-                )}
+                ) : !selectedPartner ? (
+                  <div className="text-xs text-amber-700 dark:text-amber-200">
+                    The selected partner is unavailable. Pick an active partner.
+                  </div>
+                ) : partnerCountryOptions.length === 0 ? (
+                  <div className="text-xs text-amber-700 dark:text-amber-200">
+                    This partner has no home-country coverage yet. Add home countries in SACC Partnerships first.
+                  </div>
+                ) : isKenyaScope && partnerCountyOptions.length === 0 ? (
+                  <div className="text-xs text-amber-700 dark:text-amber-200">
+                    This partner has no county coverage yet. Add counties in SACC Partnerships first.
+                  </div>
+                ) : null}
               </div>
 
               <div className="grid gap-1.5">
@@ -360,52 +479,121 @@ export default function AdminAssignAdminScreen() {
               </div>
 
               <div className="grid gap-1.5">
-                <div className={label}>Partner</div>
+                <div className={label}>Assigned Branch (Routing + Finance)</div>
+                <input
+                  className={input}
+                  value={branchSearch}
+                  onChange={(event) => setBranchSearch(event.target.value)}
+                  placeholder={!selectedPartner ? "Select partner first" : "Search branches"}
+                  disabled={!selectedPartner}
+                />
+                <div className="max-h-56 overflow-y-auto rounded-2xl border border-zinc-200 bg-white/80 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/70">
+                  {!selectedPartner ? (
+                    <div className="text-sm text-zinc-500 dark:text-zinc-400">
+                      Select a partner to choose branch routing coverage.
+                    </div>
+                  ) : partnerBranchOptions.length === 0 ? (
+                    <div className="text-sm text-amber-700 dark:text-amber-200">
+                      This partner has no operational branches yet. Configure branches in SACC Partnerships.
+                    </div>
+                  ) : filteredBranchOptions.length === 0 ? (
+                    <div className="text-sm text-zinc-500 dark:text-zinc-400">
+                      No branches match your search.
+                    </div>
+                  ) : (
+                    <div className="grid gap-2">
+                      {filteredBranchOptions.map((branch) => {
+                        const checked = selectedBranchIds.some(
+                          (value) => safeStr(value).toLowerCase() === safeStr(branch.branchId).toLowerCase()
+                        );
+                        const coverageLabel = normalizeCountyList([
+                          branch.primaryCounty,
+                          ...(branch.neighboringCounties || []),
+                        ]).join(", ");
+                        const countryLabel = safeStr(branch?.country);
+                        return (
+                          <button
+                            key={branch.branchId}
+                            type="button"
+                            onClick={() => toggleBranch(branch.branchId)}
+                            className={[
+                              "rounded-xl border px-3 py-2 text-left transition",
+                              checked
+                                ? "border-emerald-200 bg-emerald-50/80 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+                                : "border-zinc-200 bg-white/80 text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900/75 dark:text-zinc-100",
+                            ].join(" ")}
+                          >
+                            <div className="text-sm font-semibold">{branch.branchName}</div>
+                            <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                              {countryLabel
+                                ? `${countryLabel}${coverageLabel ? ` • ${coverageLabel}` : ""}`
+                                : coverageLabel || "No county coverage configured on this branch"}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                {hasBranchSelection ? (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                    Auto coverage attached from branch:
+                    {" "}
+                    {autoCountries.length ? `Country ${autoCountries.join(", ")}.` : "Country not set on branch."}{" "}
+                    {autoPrimaryCounty || "No primary county"}.
+                    {autoNeighboringCounties.length
+                      ? ` Nearby: ${autoNeighboringCounties.join(", ")}`
+                      : " No neighboring counties configured."}
+                  </div>
+                ) : (
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Select one branch. Assigned admins remain bound to this branch for routing and payouts.
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-1.5">
+                <div className={label}>Stationed Country (Legacy Fallback)</div>
                 <select
                   className={input}
-                  value={partnerId}
-                  onChange={(event) => {
-                    setPartnerId(event.target.value);
-                    setPrimaryCounty("");
-                    setNeighboringCounties([]);
-                    setCountySearch("");
-                    setCountyOpen(false);
-                  }}
+                  value={country}
+                  onChange={(event) => setCountry(event.target.value)}
+                  disabled={!selectedPartner || (hasBranchSelection && autoCountries.length > 0)}
                 >
-                  <option value="">Select partner</option>
-                  {filteredPartners.map((partner) => (
-                    <option key={partner.id} value={partner.id}>
-                      {partner.displayName}
+                  <option value="">
+                    {!selectedPartner
+                      ? "Select partner first"
+                      : hasBranchSelection && autoCountries.length > 0
+                      ? "Auto from selected branches"
+                      : "Select stationed country"}
+                  </option>
+                  {partnerCountryOptions.map((countryName) => (
+                    <option key={countryName} value={countryName}>
+                      {countryName}
                     </option>
                   ))}
                 </select>
-                {partners.length === 0 ? (
-                  <div className="text-xs text-amber-700 dark:text-amber-200">
-                    No active partners yet. Create one first in SACC Partnerships.
-                  </div>
-                ) : !country ? (
+                {!selectedPartner ? (
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Select a stationed country first to narrow partners by home-country coverage.
+                    Select a partner first to choose fallback stationed country.
                   </div>
-                ) : filteredPartners.length === 0 ? (
-                  <div className="text-xs text-amber-700 dark:text-amber-200">
-                    No active partners support {country} in their home-country coverage yet.
-                  </div>
-                ) : !partnerId ? (
+                ) : hasBranchSelection && autoCountries.length > 0 ? (
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    {isKenyaScope
-                      ? "Select a partner first. Primary and neighboring counties unlock from that partner's county coverage."
-                      : "Select a partner to bind this admin to the chosen home-country scope."}
+                    Branch selection drives country coverage automatically.
                   </div>
-                ) : !selectedPartner ? (
+                ) : hasBranchSelection ? (
                   <div className="text-xs text-amber-700 dark:text-amber-200">
-                    The selected partner is unavailable. Pick an active partner.
+                    Selected branches are missing country. Set fallback stationed country for now.
                   </div>
-                ) : isKenyaScope && partnerCountyOptions.length === 0 ? (
+                ) : partnerCountryOptions.length === 0 ? (
                   <div className="text-xs text-amber-700 dark:text-amber-200">
-                    This partner has no county coverage yet. Add counties in SACC Partnerships first.
+                    This partner has no home-country coverage configured yet.
                   </div>
-                ) : null}
+                ) : (
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Used only when branch coverage is not selected.
+                  </div>
+                )}
               </div>
 
               {isKenyaScope ? (
@@ -415,7 +603,7 @@ export default function AdminAssignAdminScreen() {
                     <select
                       className={input}
                       value={primaryCounty}
-                      disabled={!countyFieldsEnabled}
+                      disabled={!manualCountyFieldsEnabled}
                       onChange={(event) => {
                         const nextPrimary = event.target.value;
                         setPrimaryCounty(nextPrimary);
@@ -425,7 +613,11 @@ export default function AdminAssignAdminScreen() {
                       }}
                     >
                       <option value="">
-                        {countyFieldsEnabled ? "Select primary county" : "Select partner first"}
+                        {!countyFieldsEnabled
+                          ? "Select partner first"
+                          : hasBranchSelection
+                          ? "Auto from branches"
+                          : "Select primary county"}
                       </option>
                       {partnerCountyOptions.map((countyName) => (
                         <option key={countyName} value={countyName}>
@@ -440,14 +632,18 @@ export default function AdminAssignAdminScreen() {
                     <button
                       type="button"
                       onClick={() => {
-                        if (!neighboringFieldsEnabled) return;
+                        if (!manualCountyFieldsEnabled || !neighboringFieldsEnabled) return;
                         setCountyOpen((value) => !value);
                       }}
-                      disabled={!neighboringFieldsEnabled}
+                      disabled={!manualCountyFieldsEnabled || !neighboringFieldsEnabled}
                       className={`${input} inline-flex items-center justify-between text-left`}
                     >
                       <span className="truncate">
-                        {!countyFieldsEnabled
+                        {!manualCountyFieldsEnabled
+                          ? hasBranchSelection
+                            ? "Auto from selected branches"
+                            : "Select partner first"
+                          : !countyFieldsEnabled
                           ? "Select partner first"
                           : !primaryCounty
                           ? "Select primary county first"
@@ -520,9 +716,9 @@ export default function AdminAssignAdminScreen() {
                     ) : null}
                   </div>
                 </>
-              ) : country ? (
+              ) : effectiveCountries.length ? (
                 <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/70 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/45 dark:text-zinc-300">
-                  County subdivision routing remains Kenya-only for now. This admin will route by stationed country and partner match.
+                  County subdivision routing remains Kenya-only for now. This admin will route by country coverage and partner match.
                 </div>
               ) : null}
 
@@ -546,28 +742,6 @@ export default function AdminAssignAdminScreen() {
                   value={maxActiveRequests}
                   onChange={(event) => setMaxActiveRequests(event.target.value)}
                 />
-              </div>
-
-              <div className="grid gap-1.5">
-                <div className={label}>Response Timeout</div>
-                <div className="grid grid-cols-[1fr_120px] gap-2">
-                  <input
-                    type="number"
-                    min={1}
-                    max={240}
-                    className={input}
-                    value={responseTimeoutValue}
-                    onChange={(event) => setResponseTimeoutValue(event.target.value)}
-                  />
-                  <select
-                    className={input}
-                    value={responseTimeoutUnit}
-                    onChange={(event) => setResponseTimeoutUnit(event.target.value)}
-                  >
-                    <option value="minutes">Minutes</option>
-                    <option value="hours">Hours</option>
-                  </select>
-                </div>
               </div>
 
               <div className="grid gap-1.5">
@@ -617,8 +791,11 @@ export default function AdminAssignAdminScreen() {
                 {safeStr(email).toLowerCase()}
               </div>
               <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
-                    {country ? `Stationed country: ${country}` : "Stationed country not selected"}
-                {isKenyaScope && primaryCounty ? ` | County: ${primaryCounty}` : ""}
+                {country ? `Stationed country: ${country}` : "Stationed country not selected"}
+                {isKenyaScope && (hasBranchSelection ? autoPrimaryCounty : primaryCounty)
+                  ? ` | County: ${hasBranchSelection ? autoPrimaryCounty : primaryCounty}`
+                  : ""}
+                {hasBranchSelection ? ` | Branches: ${selectedBranches.length}` : ""}
               </div>
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <button

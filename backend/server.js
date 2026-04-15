@@ -15,7 +15,17 @@ const REQUEST_TIMEOUT_MS = Math.max(3000, toPositiveInt(process.env.REQUEST_TIME
 const FRONTEND_BASE_URL = trimTrailingSlash(
   process.env.FRONTEND_BASE_URL || process.env.APP_BASE_URL
 );
-const PAYSTACK_SECRET = safeStr(process.env.PAYSTACK_SECRET);
+const MPESA_SECRET = safeStr(
+  process.env.MPESA_SECRET || process.env.MPESA_SECRET_KEY || process.env.MPESA_SECRET_KEY_TEST
+);
+const PAYSTACK_SECRET = safeStr(
+  process.env.PAYSTACK_SECRET || process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_SECRET_KEY_TEST
+);
+const PAYMENT_PROVIDER_KEYS = new Set(["mpesa", "paystack"]);
+const DEFAULT_PAYMENT_PROVIDER = normalizeProviderKey(
+  process.env.PAYMENT_PROVIDER_DEFAULT || "mpesa",
+  "mpesa"
+);
 const PAYMENT_DEBUG =
   safeStr(process.env.PAYMENT_DEBUG).toLowerCase() === "true" || NODE_ENV !== "production";
 const CORS_ALLOWED_ORIGINS = parseAllowedOrigins(
@@ -65,6 +75,31 @@ function normalizeAmount(value) {
 
 function normalizeCurrency(value) {
   return safeStr(value || "KES", 8).toUpperCase() || "KES";
+}
+
+function normalizeProviderKey(value, fallback = "mpesa") {
+  const raw = safeStr(value, 40).toLowerCase();
+  if (PAYMENT_PROVIDER_KEYS.has(raw)) return raw;
+  const safeFallback = safeStr(fallback, 40).toLowerCase();
+  return PAYMENT_PROVIDER_KEYS.has(safeFallback) ? safeFallback : "mpesa";
+}
+
+function resolveProviderTransport(providerKey = "") {
+  const provider = normalizeProviderKey(providerKey, DEFAULT_PAYMENT_PROVIDER);
+  const envKey = `PAYMENT_PROVIDER_TRANSPORT_${provider.toUpperCase()}`;
+  const configured = safeStr(process.env?.[envKey], 40).toLowerCase();
+  if (configured) return configured;
+  if (provider === "paystack") return "paystack";
+  // MPESA default can proxy to paystack transport until dedicated adapter is enabled.
+  return "paystack";
+}
+
+function getProviderSecret(providerKey = "") {
+  const provider = normalizeProviderKey(providerKey, DEFAULT_PAYMENT_PROVIDER);
+  if (provider === "paystack") {
+    return PAYSTACK_SECRET;
+  }
+  return MPESA_SECRET || PAYSTACK_SECRET;
 }
 
 function toAmountMinor(value) {
@@ -167,9 +202,10 @@ function paymentDebugLog(label, payload) {
   console.log(`[payment-debug] ${label}`, payload);
 }
 
-async function paystackRequest({ method = "GET", endpointPath, data } = {}) {
-  if (!PAYSTACK_SECRET) {
-    const error = new Error("PAYSTACK_SECRET is missing. Add it to backend/.env.");
+async function paystackRequest({ method = "GET", endpointPath, data, secretKey = "" } = {}) {
+  const resolvedSecret = safeStr(secretKey);
+  if (!resolvedSecret) {
+    const error = new Error("Paystack provider secret is missing. Add it to backend/.env.");
     error.statusCode = 500;
     throw error;
   }
@@ -186,7 +222,7 @@ async function paystackRequest({ method = "GET", endpointPath, data } = {}) {
       data,
       timeout: REQUEST_TIMEOUT_MS,
       headers: {
-        Authorization: `Bearer ${PAYSTACK_SECRET}`,
+        Authorization: `Bearer ${resolvedSecret}`,
         "Content-Type": "application/json",
       },
     });
@@ -211,6 +247,41 @@ async function paystackRequest({ method = "GET", endpointPath, data } = {}) {
   }
 }
 
+async function callProviderRequest({
+  provider = DEFAULT_PAYMENT_PROVIDER,
+  transport = "",
+  method = "GET",
+  operation = "verify",
+  reference = "",
+  data = null,
+} = {}) {
+  const providerKey = normalizeProviderKey(provider, DEFAULT_PAYMENT_PROVIDER);
+  const adapter = safeStr(transport, 40).toLowerCase() || resolveProviderTransport(providerKey);
+  const secretKey = getProviderSecret(providerKey);
+
+  if (adapter === "paystack") {
+    if (operation === "initialize") {
+      return paystackRequest({
+        method,
+        endpointPath: "/transaction/initialize",
+        data,
+        secretKey,
+      });
+    }
+    if (operation === "verify") {
+      return paystackRequest({
+        method,
+        endpointPath: `/transaction/verify/${encodeURIComponent(reference)}`,
+        secretKey,
+      });
+    }
+  }
+
+  const error = new Error(`Provider adapter '${adapter || "unknown"}' is not supported yet.`);
+  error.statusCode = 501;
+  throw error;
+}
+
 const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "128kb" }));
@@ -232,23 +303,18 @@ app.use((req, _res, next) => {
   next();
 });
 
-app.get("/health", (_req, res) => {
-  res.json({
-    ok: true,
-    service: APP_NAME,
-    env: NODE_ENV,
-    host: HOST,
-    port: PORT,
-    paystackConfigured: Boolean(PAYSTACK_SECRET),
-    frontendBaseUrl: FRONTEND_BASE_URL || null,
-    healthUrls: getLanHealthUrls(),
-    now: new Date().toISOString(),
-  });
-});
-
-app.post("/paystack/initialize", async (req, res, next) => {
+async function handleInitializeProvider(req, res, next, { forcedProvider = "" } = {}) {
   try {
     paymentDebugLog("initialize_req_body", req.body || null);
+    const provider = normalizeProviderKey(
+      forcedProvider ||
+        req.body?.provider ||
+        req.query?.provider ||
+        req.headers?.["x-payment-provider"] ||
+        DEFAULT_PAYMENT_PROVIDER,
+      DEFAULT_PAYMENT_PROVIDER
+    );
+    const adapter = resolveProviderTransport(provider);
     const email = normalizeEmail(req.body?.email);
     const amount = normalizeAmount(req.body?.amount);
     const currency = normalizeCurrency(req.body?.currency || req.body?.metadata?.currency || "KES");
@@ -271,25 +337,33 @@ app.post("/paystack/initialize", async (req, res, next) => {
       amount: toAmountMinor(amount),
       currency,
       reference,
-      metadata,
+      metadata: {
+        ...metadata,
+        provider,
+      },
     };
     if (callbackUrl) {
       payload.callback_url = callbackUrl;
     }
     paymentDebugLog("initialize_provider_payload", {
+      provider,
+      adapter,
       callbackUrl,
       payload,
     });
 
-    const result = await paystackRequest({
+    const result = await callProviderRequest({
+      provider,
+      transport: adapter,
       method: "POST",
-      endpointPath: "/transaction/initialize",
+      operation: "initialize",
       data: payload,
     });
 
     return res.json({
       ok: result?.status === true,
-      provider: "paystack",
+      provider,
+      adapter,
       message: safeStr(result?.message, 200) || "Checkout initialized.",
       callbackUrl: callbackUrl || null,
       data: asPlainObject(result?.data),
@@ -297,25 +371,37 @@ app.post("/paystack/initialize", async (req, res, next) => {
   } catch (error) {
     return next(error);
   }
-});
+}
 
-app.get("/paystack/verify/:reference", async (req, res, next) => {
+async function handleVerifyProvider(req, res, next, { forcedProvider = "" } = {}) {
   try {
+    const provider = normalizeProviderKey(
+      forcedProvider ||
+        req.query?.provider ||
+        req.headers?.["x-payment-provider"] ||
+        DEFAULT_PAYMENT_PROVIDER,
+      DEFAULT_PAYMENT_PROVIDER
+    );
+    const adapter = resolveProviderTransport(provider);
     const reference = normalizeReference(req.params?.reference);
     if (!reference) {
       return res.status(400).json({ ok: false, message: "A payment reference is required." });
     }
 
-    const result = await paystackRequest({
+    const result = await callProviderRequest({
+      provider,
+      transport: adapter,
       method: "GET",
-      endpointPath: `/transaction/verify/${encodeURIComponent(reference)}`,
+      operation: "verify",
+      reference,
     });
     const data = asPlainObject(result?.data);
     const status = safeStr(data?.status, 80).toLowerCase();
 
     return res.json({
       ok: status === "success",
-      provider: "paystack",
+      provider,
+      adapter,
       message: safeStr(result?.message, 200) || "Verification complete.",
       status,
       reference: safeStr(data?.reference || reference, 120),
@@ -324,6 +410,50 @@ app.get("/paystack/verify/:reference", async (req, res, next) => {
   } catch (error) {
     return next(error);
   }
+}
+
+app.get("/health", (_req, res) => {
+  res.json({
+    ok: true,
+    service: APP_NAME,
+    env: NODE_ENV,
+    host: HOST,
+    port: PORT,
+    providerDefaults: {
+      activeProvider: DEFAULT_PAYMENT_PROVIDER,
+      activeAdapter: resolveProviderTransport(DEFAULT_PAYMENT_PROVIDER),
+    },
+    providers: {
+      mpesa: {
+        configured: Boolean(getProviderSecret("mpesa")),
+        adapter: resolveProviderTransport("mpesa"),
+      },
+      paystack: {
+        configured: Boolean(getProviderSecret("paystack")),
+        adapter: resolveProviderTransport("paystack"),
+      },
+    },
+    frontendBaseUrl: FRONTEND_BASE_URL || null,
+    healthUrls: getLanHealthUrls(),
+    now: new Date().toISOString(),
+  });
+});
+
+app.post("/payments/initialize", async (req, res, next) => {
+  await handleInitializeProvider(req, res, next);
+});
+
+app.get("/payments/verify/:reference", async (req, res, next) => {
+  await handleVerifyProvider(req, res, next);
+});
+
+// Backward-compatible aliases for older Paystack-only clients.
+app.post("/paystack/initialize", async (req, res, next) => {
+  await handleInitializeProvider(req, res, next, { forcedProvider: "paystack" });
+});
+
+app.get("/paystack/verify/:reference", async (req, res, next) => {
+  await handleVerifyProvider(req, res, next, { forcedProvider: "paystack" });
 });
 
 app.use((req, res) => {
@@ -357,7 +487,11 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`[${new Date().toISOString()}] ${APP_NAME} listening`);
   console.log(`Host: ${HOST}`);
   console.log(`Port: ${PORT}`);
-  console.log(`Paystack configured: ${PAYSTACK_SECRET ? "yes" : "no"}`);
+  console.log(
+    `Default provider: ${DEFAULT_PAYMENT_PROVIDER} (adapter: ${resolveProviderTransport(DEFAULT_PAYMENT_PROVIDER)})`
+  );
+  console.log(`M-Pesa secret configured: ${getProviderSecret("mpesa") ? "yes" : "no"}`);
+  console.log(`Paystack secret configured: ${getProviderSecret("paystack") ? "yes" : "no"}`);
   console.log(`Frontend base URL: ${FRONTEND_BASE_URL || "not set"}`);
   console.log("Health URLs:");
   for (const url of getLanHealthUrls()) {

@@ -3,8 +3,11 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { sendEmailVerification, signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import { getUserState } from "../services/userservice";
-import { resolveLandingPathFromUserState } from "../journey/journeyLanding";
 import { useAuthSession } from "../auth/AuthSessionContext";
+import {
+  BIOMETRIC_SETUP_PATH,
+  resolvePostAuthLandingPath,
+} from "../utils/postAuthLanding";
 
 const RESEND_COOLDOWN_SECONDS = 30;
 
@@ -99,7 +102,13 @@ export default function VerifyEmailScreen() {
     async (verifiedUser) => {
       try {
         const state = await getUserState(verifiedUser.uid, verifiedUser.email || "");
-        navigate(requestedPath || resolveLandingPathFromUserState(state || {}), {
+        const resolvedLanding = await resolvePostAuthLandingPath({
+          uid: verifiedUser.uid,
+          userState: state || {},
+        });
+        const mustUseResolvedLanding =
+          resolvedLanding === "/setup" || resolvedLanding === BIOMETRIC_SETUP_PATH;
+        navigate(mustUseResolvedLanding ? resolvedLanding : requestedPath || resolvedLanding, {
           replace: true,
         });
       } catch (error) {

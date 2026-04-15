@@ -10,10 +10,16 @@ import {
 } from "../constants/kenyaCounties";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import {
+  normalizeSingleAssignedBranchIds,
+} from "../services/assignedAdminBranchBinding";
+import {
   listAssignedAdmins,
   setAssignedAdminByEmail,
 } from "../services/assignedadminservice";
-import { listPartners } from "../services/partnershipService";
+import {
+  deriveOperationalBranchCoverage,
+  listPartners,
+} from "../services/partnershipService";
 import { smartBack } from "../utils/navBack";
 
 function safeStr(value) {
@@ -24,26 +30,6 @@ function toBoundedInt(value, fallback, min, max) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.round(n)));
-}
-
-function timeoutToUnit(minutes) {
-  const raw = Number(minutes);
-  if (!Number.isFinite(raw) || raw <= 0) {
-    return { value: "", unit: "minutes" };
-  }
-  const n = toBoundedInt(raw, 0, 5, 240);
-  if (n >= 60 && n % 60 === 0) {
-    return { value: n / 60, unit: "hours" };
-  }
-  return { value: n, unit: "minutes" };
-}
-
-function timeoutToMinutes(value, unit) {
-  const base = Number(value || 0);
-  if (!Number.isFinite(base) || base <= 0) return 0;
-  const cleanUnit = safeStr(unit).toLowerCase();
-  const raw = cleanUnit === "hours" ? base * 60 : base;
-  return toBoundedInt(raw, 0, 5, 240);
 }
 
 function normalizeCountryOptions(values = []) {
@@ -61,10 +47,15 @@ function normalizeCountryOptions(values = []) {
 
 function makeDraft(row) {
   const scope = row?.adminScope || {};
-  const timeout = timeoutToUnit(scope?.responseTimeoutMinutes);
   const maxActiveRaw = Number(scope?.maxActiveRequests);
+  const selectedBranchIds = normalizeSingleAssignedBranchIds(
+    Array.isArray(scope?.assignedBranchIds)
+      ? scope.assignedBranchIds.map((value) => safeStr(value)).filter(Boolean)
+      : [safeStr(scope?.assignedBranchId)]
+  );
   return {
     partnerId: safeStr(scope?.partnerId),
+    selectedBranchIds,
     availability: safeStr(scope?.availability || "active").toLowerCase() || "active",
     stationedCountry: safeStr(scope?.stationedCountry || scope?.country),
     town: safeStr(scope?.town),
@@ -75,13 +66,12 @@ function makeDraft(row) {
           (county) => county !== safeStr(scope?.primaryCounty || scope?.counties?.[0])
         )
     ),
+    branchSearch: "",
     countySearch: "",
     maxActiveRequests:
       Number.isFinite(maxActiveRaw) && maxActiveRaw > 0
         ? toBoundedInt(maxActiveRaw, 0, 1, 120)
         : "",
-    responseTimeoutValue: timeout.value,
-    responseTimeoutUnit: timeout.unit,
   };
 }
 
@@ -258,10 +248,37 @@ export default function AdminManageAdminsScreen() {
     const draft = draftByUid?.[uid] || makeDraft(row);
     const stationedCountry = safeStr(draft?.stationedCountry || draft?.country);
     const isKenyaScope = stationedCountry.toLowerCase() === "kenya";
-    const primaryCounty = safeStr(draft?.primaryCounty);
-    const neighboringCounties = normalizeCountyList(draft?.neighboringCounties || []).filter(
-      (county) => county !== primaryCounty
+    const selectedPartner =
+      partners.find((partner) => safeStr(partner?.id) === safeStr(draft?.partnerId)) || null;
+    const partnerBranchOptions = (Array.isArray(selectedPartner?.branches) ? selectedPartner.branches : [])
+      .filter((branch) => branch?.active !== false && branch?.isActive !== false)
+      .map((branch) => ({
+        branchId: safeStr(branch?.branchId || branch?.id),
+        primaryCounty: safeStr(branch?.primaryCounty || branch?.county),
+      }))
+      .filter((branch) => branch.branchId);
+    const requestedBranchIds = normalizeSingleAssignedBranchIds(
+      Array.isArray(draft?.selectedBranchIds)
+        ? draft.selectedBranchIds.map((value) => safeStr(value)).filter(Boolean)
+        : draft?.selectedBranchIds
     );
+    const selectedBranchRows = partnerBranchOptions.filter((branch) =>
+      requestedBranchIds.some(
+        (value) => safeStr(value).toLowerCase() === safeStr(branch.branchId).toLowerCase()
+      )
+    );
+    const branchCoverage = deriveOperationalBranchCoverage(selectedBranchRows, { activeOnly: true });
+    const hasBranchSelection = selectedBranchRows.length > 0;
+    if (!hasBranchSelection) {
+      setErr("Select one branch. Assigned admins are bound to a single branch.");
+      return;
+    }
+    const branchPrimaryCounty = safeStr(
+      selectedBranchRows.find((branch) => safeStr(branch?.primaryCounty))?.primaryCounty ||
+      normalizeCountyList(branchCoverage?.coverageCounties || [])[0] ||
+      ""
+    );
+    const primaryCounty = branchPrimaryCounty;
     if (!email) {
       setErr("Missing admin email.");
       return;
@@ -275,20 +292,12 @@ export default function AdminManageAdminsScreen() {
       return;
     }
     if (isKenyaScope && !primaryCounty) {
-      setErr("Select a primary county.");
+      setErr("Selected branches do not provide county coverage.");
       return;
     }
     const maxActive = toBoundedInt(draft?.maxActiveRequests, 0, 1, 120);
     if (maxActive <= 0) {
       setErr("Enter max requests.");
-      return;
-    }
-    const timeoutMinutes = timeoutToMinutes(
-      draft?.responseTimeoutValue,
-      draft?.responseTimeoutUnit
-    );
-    if (timeoutMinutes <= 0) {
-      setErr("Enter response timeout.");
       return;
     }
 
@@ -301,12 +310,10 @@ export default function AdminManageAdminsScreen() {
         action: "upsert",
         partnerId: safeStr(draft?.partnerId),
         stationedCountry,
-        primaryCounty,
-        neighboringCounties,
+        selectedBranchIds: requestedBranchIds,
         town: safeStr(draft?.town),
         availability: safeStr(draft?.availability || "active").toLowerCase() || "active",
         maxActiveRequests: maxActive,
-        responseTimeoutMinutes: timeoutMinutes,
       });
       setMsg(`Updated admin: ${email}`);
       await loadRows();
@@ -396,6 +403,45 @@ export default function AdminManageAdminsScreen() {
                     partners.find((partner) => partner.id === safeStr(draft?.partnerId)) || null;
                   const stationedCountry = safeStr(draft?.stationedCountry || draft?.country);
                   const isKenyaScope = stationedCountry.toLowerCase() === "kenya";
+                  const partnerBranchOptions = (Array.isArray(selectedPartner?.branches)
+                    ? selectedPartner.branches
+                    : []
+                  )
+                    .filter((branch) => branch?.active !== false && branch?.isActive !== false)
+                    .map((branch) => ({
+                      branchId: safeStr(branch?.branchId || branch?.id),
+                      branchName: safeStr(branch?.branchName || branch?.name),
+                      primaryCounty: safeStr(branch?.primaryCounty || branch?.county),
+                      neighboringCounties: normalizeCountyList(branch?.neighboringCounties || []),
+                      coverageCounties: normalizeCountyList(branch?.coverageCounties || []),
+                    }))
+                    .filter((branch) => branch.branchId && branch.branchName);
+                  const filteredBranchOptions = partnerBranchOptions.filter((branch) =>
+                    [
+                      branch.branchName,
+                      branch.primaryCounty,
+                      ...(branch.neighboringCounties || []),
+                    ]
+                      .filter(Boolean)
+                      .join(" ")
+                      .toLowerCase()
+                      .includes(safeStr(draft?.branchSearch).toLowerCase())
+                  );
+                  const selectedBranchRows = partnerBranchOptions.filter((branch) =>
+                    (draft?.selectedBranchIds || []).some(
+                      (value) => safeStr(value).toLowerCase() === safeStr(branch.branchId).toLowerCase()
+                    )
+                  );
+                  const branchCoverage = deriveOperationalBranchCoverage(selectedBranchRows, { activeOnly: true });
+                  const hasBranchSelection = selectedBranchRows.length > 0;
+                  const autoPrimaryCounty = safeStr(
+                    selectedBranchRows.find((branch) => safeStr(branch?.primaryCounty))?.primaryCounty ||
+                    normalizeCountyList(branchCoverage?.coverageCounties || [])[0] ||
+                    ""
+                  );
+                  const autoNeighboringCounties = normalizeCountyList(branchCoverage?.coverageCounties || []).filter(
+                    (county) => county !== autoPrimaryCounty
+                  );
                   const partnerStationedCountryOptions = selectedPartner?.isActive === false
                     ? []
                     : normalizeCountryOptions(selectedPartner?.homeCountries || []);
@@ -405,8 +451,9 @@ export default function AdminManageAdminsScreen() {
                       : normalizeCountyList(selectedPartner?.supportedCounties || []);
                   const countyFieldsEnabled =
                     Boolean(selectedPartner?.id) && isKenyaScope && partnerCountyOptions.length > 0;
+                  const manualCountyFieldsEnabled = countyFieldsEnabled && !hasBranchSelection;
                   const neighboringFieldsEnabled =
-                    countyFieldsEnabled &&
+                    manualCountyFieldsEnabled &&
                     Boolean(safeStr(draft?.primaryCounty)) &&
                     partnerCountyOptions.length > 1;
                   const filteredCounties = partnerCountyOptions.filter((county) =>
@@ -478,6 +525,8 @@ export default function AdminManageAdminsScreen() {
                                 onChange={(event) => {
                                   setDraft(uid, {
                                     partnerId: event.target.value,
+                                    selectedBranchIds: [],
+                                    branchSearch: "",
                                     stationedCountry: "",
                                     primaryCounty: "",
                                     neighboringCounties: [],
@@ -511,6 +560,85 @@ export default function AdminManageAdminsScreen() {
                                   This partner has no county coverage yet. Add counties in SACC Partnerships first.
                                 </div>
                               ) : null}
+                            </div>
+
+                            <div className="grid gap-1.5">
+                              <div className={label}>Assigned Branch (Routing + Finance)</div>
+                              <input
+                                className={input}
+                                value={draft?.branchSearch || ""}
+                                onChange={(event) => setDraft(uid, { branchSearch: event.target.value })}
+                                placeholder={!selectedPartner ? "Select partner first" : "Search branches"}
+                                disabled={!selectedPartner}
+                              />
+                              <div className="max-h-48 overflow-y-auto rounded-2xl border border-zinc-200 bg-white/80 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/70">
+                                {!selectedPartner ? (
+                                  <div className="text-sm text-zinc-500 dark:text-zinc-400">
+                                    Select a partner to choose branch coverage.
+                                  </div>
+                                ) : partnerBranchOptions.length === 0 ? (
+                                  <div className="text-sm text-amber-700 dark:text-amber-200">
+                                    This partner has no operational branches yet. Configure branches in SACC Partnerships.
+                                  </div>
+                                ) : filteredBranchOptions.length === 0 ? (
+                                  <div className="text-sm text-zinc-500 dark:text-zinc-400">
+                                    No branches match your search.
+                                  </div>
+                                ) : (
+                                  <div className="grid gap-2">
+                                    {filteredBranchOptions.map((branch) => {
+                                      const selected = (draft?.selectedBranchIds || []).some(
+                                        (value) => safeStr(value).toLowerCase() === safeStr(branch.branchId).toLowerCase()
+                                      );
+                                      const coverage = normalizeCountyList([
+                                        branch.primaryCounty,
+                                        ...(branch.neighboringCounties || []),
+                                      ]);
+                                      return (
+                                        <button
+                                          key={`${uid}-branch-${branch.branchId}`}
+                                          type="button"
+                                          onClick={() => {
+                                            const nextSelected = selected
+                                              ? []
+                                              : normalizeSingleAssignedBranchIds([branch.branchId]);
+                                            setDraft(uid, {
+                                              selectedBranchIds: nextSelected,
+                                              countySearch: "",
+                                            });
+                                            setCountyOpenByUid((prev) => ({ ...(prev || {}), [uid]: false }));
+                                          }}
+                                          className={[
+                                            "rounded-xl border px-3 py-2 text-left transition",
+                                            selected
+                                              ? "border-emerald-200 bg-emerald-50/80 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+                                              : "border-zinc-200 bg-white/80 text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900/75 dark:text-zinc-100",
+                                          ].join(" ")}
+                                        >
+                                          <div className="text-sm font-semibold">{branch.branchName}</div>
+                                          <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                            {coverage.length ? coverage.join(", ") : "No county coverage configured"}
+                                          </div>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                              {hasBranchSelection ? (
+                                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                                  Auto coverage attached from branch:
+                                  {" "}
+                                  {autoPrimaryCounty || "No primary county"}.
+                                  {autoNeighboringCounties.length
+                                    ? ` Nearby: ${autoNeighboringCounties.join(", ")}`
+                                    : " No neighboring counties configured."}
+                                </div>
+                              ) : (
+                                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                                  Select one branch. Assigned admins remain bound to this branch for routing and payouts.
+                                </div>
+                              )}
                             </div>
 
                             <div className="grid gap-1.5">
@@ -572,7 +700,7 @@ export default function AdminManageAdminsScreen() {
                                   <select
                                     className={input}
                                     value={draft?.primaryCounty || ""}
-                                    disabled={!countyFieldsEnabled}
+                                    disabled={!manualCountyFieldsEnabled}
                                     onChange={(event) =>
                                       setDraft(uid, {
                                         primaryCounty: event.target.value,
@@ -583,9 +711,11 @@ export default function AdminManageAdminsScreen() {
                                     }
                                   >
                                     <option value="">
-                                      {countyFieldsEnabled
-                                        ? "Select primary county"
-                                        : "Select partner first"}
+                                      {!countyFieldsEnabled
+                                        ? "Select partner first"
+                                        : hasBranchSelection
+                                        ? "Auto from branches"
+                                        : "Select primary county"}
                                     </option>
                                     {partnerCountyOptions.map((countyName) => (
                                       <option key={`${uid}-primary-${countyName}`} value={countyName}>
@@ -600,14 +730,18 @@ export default function AdminManageAdminsScreen() {
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      if (!neighboringFieldsEnabled) return;
+                                      if (!manualCountyFieldsEnabled || !neighboringFieldsEnabled) return;
                                       toggleCountyDropdown(uid);
                                     }}
-                                    disabled={!neighboringFieldsEnabled}
+                                    disabled={!manualCountyFieldsEnabled || !neighboringFieldsEnabled}
                                     className={`${input} inline-flex items-center justify-between text-left`}
                                   >
                                     <span className="truncate">
-                                      {!countyFieldsEnabled
+                                      {!manualCountyFieldsEnabled
+                                        ? hasBranchSelection
+                                          ? "Auto from selected branches"
+                                          : "Select partner first"
+                                        : !countyFieldsEnabled
                                         ? "Select partner first"
                                         : !safeStr(draft?.primaryCounty)
                                         ? "Select primary county first"
@@ -695,28 +829,6 @@ export default function AdminManageAdminsScreen() {
                                 value={draft?.maxActiveRequests ?? ""}
                                 onChange={(event) => setDraft(uid, { maxActiveRequests: event.target.value })}
                               />
-                            </div>
-
-                            <div className="grid gap-1.5">
-                              <div className={label}>Response Timeout</div>
-                              <div className="grid grid-cols-[1fr_120px] gap-2">
-                                <input
-                                  type="number"
-                                  min={1}
-                                  max={240}
-                                  className={input}
-                                  value={draft?.responseTimeoutValue ?? ""}
-                                  onChange={(event) => setDraft(uid, { responseTimeoutValue: event.target.value })}
-                                />
-                                <select
-                                  className={input}
-                                  value={draft?.responseTimeoutUnit || "minutes"}
-                                  onChange={(event) => setDraft(uid, { responseTimeoutUnit: event.target.value })}
-                                >
-                                  <option value="minutes">Minutes</option>
-                                  <option value="hours">Hours</option>
-                                </select>
-                              </div>
                             </div>
 
                             <button

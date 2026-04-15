@@ -5,6 +5,7 @@ const logger = require("firebase-functions/logger");
 const crypto = require("node:crypto");
 const admin = require("firebase-admin");
 const buildFinanceFoundation = require("./finance-foundation");
+const buildRequestCommandFoundation = require("./request-command-foundation");
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -23,6 +24,19 @@ const DEFAULT_ADMIN_RESPONSE_TIMEOUT_MINUTES = 20;
 const DEFAULT_ROUTING_SWEEP_LIMIT = 500;
 const PARTNERS_COLLECTION = "partners";
 const PARTNER_COVERAGE_COLLECTION = "partnerCoverage";
+const REQUEST_DEFINITION_COLLECTION = "requestDefinitions";
+const REQUEST_DEFINITION_ENGAGEMENT_COLLECTION = "analytics_requestDefinitionEngagement";
+const DOCUMENTS_COLLECTION = "documents";
+const DOCUMENT_LINKS_COLLECTION = "documentLinks";
+const USER_BUCKET_UPLOADED = "uploaded";
+const USER_BUCKET_RECEIVED = "received";
+const REQUEST_BUCKET_RECEIVED_FROM_USER = "received_from_user";
+const REQUEST_BUCKET_SENT_TO_USER = "sent_to_user";
+const REQUEST_BUCKET_INTERNAL = "internal";
+const PARTNER_FILTER_MODES = {
+  HOME_COUNTRY: "home_country",
+  DESTINATION_COUNTRY: "destination_country",
+};
 const SUPER_ADMIN_ROLE_VARIANTS = [
   "superAdmin",
   "superadmin",
@@ -81,6 +95,7 @@ const INVALID_TOKEN_CODES = new Set([
   "messaging/registration-token-not-registered",
   "messaging/invalid-registration-token",
 ]);
+const REQUEST_DEFINITION_ENGAGEMENT_EVENT_TYPES = new Set(["tap", "open", "submission"]);
 
 function safeStr(value) {
   return String(value || "").trim();
@@ -130,6 +145,17 @@ function normalizeCountyLower(value) {
   return lower(value);
 }
 
+function normalizeCountryLower(value) {
+  return lower(value);
+}
+
+function normalizePartnerFilterMode(value) {
+  const mode = lower(value);
+  return mode === PARTNER_FILTER_MODES.HOME_COUNTRY
+    ? PARTNER_FILTER_MODES.HOME_COUNTRY
+    : PARTNER_FILTER_MODES.DESTINATION_COUNTRY;
+}
+
 function normalizeAvailability(value) {
   const v = lower(value);
   return Object.prototype.hasOwnProperty.call(ADMIN_AVAILABILITY_WEIGHTS, v) ? v : "active";
@@ -147,6 +173,134 @@ function normalizeStringList(values, { max = 120, lowercase = false } = {}) {
     out.push(normalized);
   });
   return out;
+}
+
+function normalizePartnerIdList(values = []) {
+  const arr = Array.isArray(values) ? values : [values];
+  const seen = new Set();
+  const out = [];
+  arr.forEach((value) => {
+    const safeId = safeStr(value);
+    const key = lower(safeId);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(safeId);
+  });
+  return out.slice(0, 500);
+}
+
+function toMaybeNum(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function toFiniteDistance(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : Number.POSITIVE_INFINITY;
+}
+
+function normalizeLatLng(rawLat, rawLng) {
+  const lat = toMaybeNum(rawLat);
+  const lng = toMaybeNum(rawLng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+function resolveRequestCoordinates(requestData = {}) {
+  const geo = requestData?.geo && typeof requestData.geo === "object" ? requestData.geo : {};
+  const geolocation =
+    requestData?.geolocation && typeof requestData.geolocation === "object"
+      ? requestData.geolocation
+      : {};
+  const location = requestData?.location && typeof requestData.location === "object" ? requestData.location : {};
+  return (
+    normalizeLatLng(requestData?.latitude, requestData?.longitude) ||
+    normalizeLatLng(requestData?.lat, requestData?.lng) ||
+    normalizeLatLng(requestData?.lat, requestData?.lon) ||
+    normalizeLatLng(geo?.latitude, geo?.longitude) ||
+    normalizeLatLng(geo?.lat, geo?.lng) ||
+    normalizeLatLng(geolocation?.latitude, geolocation?.longitude) ||
+    normalizeLatLng(geolocation?.lat, geolocation?.lng) ||
+    normalizeLatLng(location?.latitude, location?.longitude) ||
+    normalizeLatLng(location?.lat, location?.lng) ||
+    null
+  );
+}
+
+function resolveScopeCoordinates(scope = {}) {
+  const safeScope = scope && typeof scope === "object" ? scope : {};
+  return (
+    normalizeLatLng(safeScope?.latitude, safeScope?.longitude) ||
+    normalizeLatLng(safeScope?.lat, safeScope?.lng) ||
+    normalizeLatLng(safeScope?.lat, safeScope?.lon) ||
+    normalizeLatLng(safeScope?.geo?.latitude, safeScope?.geo?.longitude) ||
+    normalizeLatLng(safeScope?.geo?.lat, safeScope?.geo?.lng) ||
+    normalizeLatLng(safeScope?.location?.latitude, safeScope?.location?.longitude) ||
+    normalizeLatLng(safeScope?.location?.lat, safeScope?.location?.lng) ||
+    null
+  );
+}
+
+function haversineDistanceKm(pointA, pointB) {
+  if (!pointA || !pointB) return Number.POSITIVE_INFINITY;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const earthKm = 6371;
+  const dLat = toRad(pointB.lat - pointA.lat);
+  const dLng = toRad(pointB.lng - pointA.lng);
+  const lat1 = toRad(pointA.lat);
+  const lat2 = toRad(pointB.lat);
+  const h =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
+  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  return Math.max(0, earthKm * c);
+}
+
+function normalizePartnerBranches(rawBranches = []) {
+  const rows = Array.isArray(rawBranches) ? rawBranches : [];
+  const seen = new Set();
+  const out = [];
+  rows.forEach((row, index) => {
+    const source = row && typeof row === "object" ? row : {};
+    const branchId = safeStr(source?.branchId || source?.id || `branch_${index + 1}`);
+    const key = lower(branchId);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+
+    const primaryCountyLower = normalizeCountyLower(source?.primaryCounty || source?.county);
+    const neighboringCountiesLower = normalizeStringList(
+      source?.neighboringCountiesLower || source?.neighboringCounties || source?.neighboring,
+      { lowercase: true, max: 120 }
+    ).filter((countyLower) => countyLower !== primaryCountyLower);
+    const coverageCountiesLower = mergeUniqueLowerLists(
+      primaryCountyLower ? [primaryCountyLower] : [],
+      neighboringCountiesLower,
+      source?.coverageCountiesLower,
+      source?.coverageCounties
+    );
+    const coordinates =
+      normalizeLatLng(source?.latitude, source?.longitude) ||
+      normalizeLatLng(source?.lat, source?.lng) ||
+      normalizeLatLng(source?.lat, source?.lon) ||
+      normalizeLatLng(source?.geo?.latitude, source?.geo?.longitude) ||
+      normalizeLatLng(source?.geo?.lat, source?.geo?.lng) ||
+      normalizeLatLng(source?.location?.latitude, source?.location?.longitude) ||
+      normalizeLatLng(source?.location?.lat, source?.location?.lng) ||
+      null;
+
+    out.push({
+      branchId,
+      branchName: safeStr(source?.branchName || source?.name),
+      active: source?.active !== false && source?.isActive !== false,
+      countryLower: normalizeCountryLower(source?.country),
+      primaryCountyLower,
+      neighboringCountiesLower,
+      coverageCountiesLower,
+      coordinates,
+    });
+  });
+  return out.slice(0, 80);
 }
 
 function normalizeManagerModuleKey(value) {
@@ -251,11 +405,42 @@ function normalizePartnerDoc(partnerId, partnerData = {}, coverageData = {}) {
       partnerData?.supportedCounties,
     { lowercase: true, max: 120 }
   );
-  const neighboringCountiesLower = [];
+  const branches = normalizePartnerBranches(
+    Array.isArray(coverageData?.branches) && coverageData.branches.length
+      ? coverageData.branches
+      : partnerData?.branches
+  );
+  const branchPrimaryCountiesLower = mergeUniqueLowerLists(
+    ...branches.map((branch) =>
+      branch?.active !== false && safeStr(branch?.primaryCountyLower)
+        ? [safeStr(branch.primaryCountyLower)]
+        : []
+    )
+  );
+  const branchNeighboringCountiesLower = mergeUniqueLowerLists(
+    ...branches.map((branch) =>
+      branch?.active !== false ? branch?.neighboringCountiesLower || [] : []
+    )
+  );
+  const branchCoverageCountiesLower = mergeUniqueLowerLists(
+    ...branches.map((branch) => (branch?.active !== false ? branch?.coverageCountiesLower || [] : []))
+  );
+  const neighboringCountiesLower = normalizeStringList(
+    coverageData?.neighboringCountiesLower ||
+      coverageData?.neighboringCounties ||
+      partnerData?.neighboringCounties ||
+      branchNeighboringCountiesLower,
+    { lowercase: true, max: 120 }
+  );
+  const homeCountriesLower = normalizeStringList(
+    coverageData?.homeCountriesLower || coverageData?.homeCountries || partnerData?.homeCountries,
+    { lowercase: true, max: 120 }
+  );
   const coverageCountiesLower = mergeUniqueLowerLists(
     coverageData?.coverageCountiesLower,
     coverageData?.coverageCounties,
     partnerData?.coverageCounties,
+    branchCoverageCountiesLower,
     supportedCountiesLower
   );
 
@@ -265,8 +450,13 @@ function normalizePartnerDoc(partnerId, partnerData = {}, coverageData = {}) {
     status,
     isActive: status === "active",
     supportedTracks,
+    homeCountriesLower,
     supportedCountriesLower,
     supportedCountiesLower,
+    branchPrimaryCountiesLower,
+    branchNeighboringCountiesLower,
+    branchCoverageCountiesLower,
+    branches,
     neighboringCountiesLower,
     coverageCountiesLower,
   };
@@ -313,22 +503,61 @@ async function fetchPartnerById(partnerId) {
   );
 }
 
-function evaluatePartnerRequestCompatibility(partner, { trackType = "", country = "", county = "" } = {}) {
+function evaluatePartnerRequestCompatibility(
+  partner,
+  {
+    trackType = "",
+    country = "",
+    county = "",
+    countryOfResidence = "",
+    filterMode = PARTNER_FILTER_MODES.DESTINATION_COUNTRY,
+    eligiblePartnerIds = [],
+  } = {}
+) {
   const safePartner = partner && typeof partner === "object" ? partner : {};
   const safeTrack = lower(trackType);
   const safeCountry = lower(country);
+  const safeResidenceCountry = lower(countryOfResidence);
   const safeCounty = normalizeCountyLower(county);
+  const safeFilterMode = normalizePartnerFilterMode(filterMode);
+  const eligiblePartnerSet = new Set(
+    normalizePartnerIdList(eligiblePartnerIds).map((partnerId) => lower(partnerId))
+  );
+  const requestTypeAllowed =
+    eligiblePartnerSet.size === 0 || eligiblePartnerSet.has(lower(safePartner?.id));
   const trackOk = Boolean(safeTrack) && safePartner.supportedTracks?.includes(safeTrack);
+  const homeCountryOk =
+    !safeResidenceCountry || safePartner.homeCountriesLower?.includes(safeResidenceCountry);
   const countryOk =
-    Boolean(safeCountry) && safePartner.supportedCountriesLower?.includes(safeCountry);
+    safeFilterMode === PARTNER_FILTER_MODES.HOME_COUNTRY
+      ? true
+      : Boolean(safeCountry) && safePartner.supportedCountriesLower?.includes(safeCountry);
+  const branchPrimaryLower = Array.isArray(safePartner?.branchPrimaryCountiesLower)
+    ? safePartner.branchPrimaryCountiesLower
+    : [];
+  const branchNeighborLower = Array.isArray(safePartner?.branchNeighboringCountiesLower)
+    ? safePartner.branchNeighboringCountiesLower
+    : [];
+  const partnerCountyCoverage = mergeUniqueLowerLists(
+    safePartner?.supportedCountiesLower || [],
+    safePartner?.coverageCountiesLower || [],
+    safePartner?.branchCoverageCountiesLower || []
+  );
   const countyDirect =
-    Boolean(safeCounty) && safePartner.supportedCountiesLower?.includes(safeCounty);
-  const countyNeighbor = false;
-  const countyOk = Boolean(safeCounty) && safePartner.supportedCountiesLower?.includes(safeCounty);
+    Boolean(safeCounty) &&
+    (branchPrimaryLower.includes(safeCounty) ||
+      (!branchPrimaryLower.length && partnerCountyCoverage.includes(safeCounty)));
+  const countyNeighbor =
+    Boolean(safeCounty) &&
+    (branchNeighborLower.includes(safeCounty) ||
+      (!branchPrimaryLower.length && !countyDirect && partnerCountyCoverage.includes(safeCounty)));
+  const countyOk = !safeCounty || countyDirect || countyNeighbor;
 
   const reasons = [];
   if (safePartner.isActive === false) reasons.push("partner_inactive");
+  if (!requestTypeAllowed) reasons.push("request_type_not_allowed");
   if (!trackOk) reasons.push("track_not_supported");
+  if (!homeCountryOk) reasons.push("home_country_not_supported");
   if (!countryOk) reasons.push("country_not_supported");
   if (!countyOk) reasons.push("county_not_supported");
 
@@ -337,20 +566,53 @@ function evaluatePartnerRequestCompatibility(partner, { trackType = "", country 
     partnerName: safeStr(safePartner?.displayName),
     eligible: reasons.length === 0,
     reasons,
-    countyMatchType: countyDirect ? "direct" : "",
+    countyMatchType: countyDirect ? "direct" : countyNeighbor ? "neighboring" : "",
+    matches: {
+      requestTypeAllowed,
+      homeCountry: homeCountryOk,
+      country: countryOk,
+      county: countyOk,
+      countyDirect,
+      countyNeighbor,
+      hasCounty: Boolean(safeCounty),
+    },
   };
 }
 
 function preferredAgentReasonLabel(reason) {
   const safeReason = lower(reason);
   if (safeReason === "partner_inactive") return "Selected agent is inactive.";
+  if (safeReason === "request_type_not_allowed") {
+    return "Selected agent is not eligible for this request type.";
+  }
   if (safeReason === "track_not_supported") return "Selected agent does not support this track.";
+  if (safeReason === "home_country_not_supported") {
+    return "Selected agent does not support your home country.";
+  }
   if (safeReason === "country_not_supported") return "Selected agent does not support this country.";
   if (safeReason === "county_not_supported") return "Selected agent does not support this county.";
   if (safeReason === "partner_not_found") return "Selected agent was not found.";
   if (safeReason === "admin_unavailable") return "Assigned admin is unavailable.";
   if (safeReason === "admin_at_capacity") return "Assigned admin is at max capacity.";
   return "Selected agent is not valid for this request.";
+}
+
+function normalizeRequestDefinitionEngagementEventType(value) {
+  const eventType = lower(value);
+  if (eventType === "submit" || eventType === "submitted") return "submission";
+  return REQUEST_DEFINITION_ENGAGEMENT_EVENT_TYPES.has(eventType) ? eventType : "open";
+}
+
+function requestDefinitionEngagementFieldForEventType(eventType) {
+  if (eventType === "tap") return "tapCount";
+  if (eventType === "submission") return "submissionCount";
+  return "openCount";
+}
+
+function requestDefinitionEngagementScoreDelta(eventType) {
+  if (eventType === "tap") return 3;
+  if (eventType === "submission") return 4;
+  return 2;
 }
 
 function toDataStrings(obj) {
@@ -411,11 +673,283 @@ function requestLabel(req) {
 }
 
 function chatPreview(msg) {
+  const messageKind = chatMessageKind(msg);
+  const text = safeStr(msg?.text);
+  if ((messageKind === "message" || messageKind === "bundle") && text) return text.slice(0, 120);
+  if (messageKind === "photo") return "Sent a photo";
+  return "Sent a document";
+}
+
+function chatMessageKind(msg = {}) {
+  const explicit = lower(msg?.messageKind || msg?.kind);
+  if (explicit === "message" || explicit === "document" || explicit === "photo") return explicit;
+
   const type = lower(msg?.type || "text");
   const text = safeStr(msg?.text);
-  if (type === "text" && text) return text.slice(0, 120);
-  if (type === "bundle" && text) return text.slice(0, 120);
-  return "Sent a document";
+  if (type === "text") return "message";
+  if (type === "image" || type === "photo") return "photo";
+  if (type === "document" || type === "pdf") return "document";
+
+  const attachmentMeta =
+    msg?.attachmentMeta && typeof msg.attachmentMeta === "object"
+      ? msg.attachmentMeta
+      : msg?.pdfMeta && typeof msg.pdfMeta === "object"
+      ? msg.pdfMeta
+      : null;
+  const attachmentKind = lower(attachmentMeta?.attachmentKind || attachmentMeta?.kind);
+  if (attachmentKind === "photo" || attachmentKind === "image") return "photo";
+  if (attachmentMeta) return "document";
+
+  if (type === "bundle") {
+    if (text) return "bundle";
+    return "document";
+  }
+
+  return "message";
+}
+
+function chatNotificationTitleByKind(kind) {
+  if (kind === "photo") return "New photo";
+  if (kind === "document") return "New document";
+  return "New message";
+}
+
+function chatNotificationTypeByKind(kind, role = "user", fromRole = "") {
+  const safeRole = lower(role);
+  const sender = lower(fromRole);
+  if (safeRole === "staff") {
+    if (kind === "photo") return "STAFF_NEW_PHOTO";
+    if (kind === "document") return "STAFF_NEW_DOCUMENT";
+    return "STAFF_NEW_MESSAGE";
+  }
+
+  if (safeRole === "admin") {
+    if (sender === "user") {
+      if (kind === "photo") return "ADMIN_NEW_PHOTO_FROM_USER";
+      if (kind === "document") return "ADMIN_NEW_DOCUMENT_FROM_USER";
+      return "ADMIN_NEW_MESSAGE_FROM_USER";
+    }
+    if (sender === "staff") {
+      if (kind === "photo") return "ADMIN_NEW_PHOTO_FROM_STAFF";
+      if (kind === "document") return "ADMIN_NEW_DOCUMENT_FROM_STAFF";
+      return "ADMIN_NEW_MESSAGE_FROM_STAFF";
+    }
+    if (kind === "photo") return "ADMIN_NEW_PHOTO";
+    if (kind === "document") return "ADMIN_NEW_DOCUMENT";
+    return "ADMIN_NEW_MESSAGE";
+  }
+
+  if (kind === "photo") return "NEW_PHOTO";
+  if (kind === "document") return "NEW_DOCUMENT";
+  return "NEW_MESSAGE";
+}
+
+function idPart(value, max = 80) {
+  const clean = safeStr(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "_")
+    .slice(0, max);
+  return clean || "x";
+}
+
+function buildMirrorId(parts = []) {
+  return (Array.isArray(parts) ? parts : [])
+    .map((part) => idPart(part))
+    .filter(Boolean)
+    .join("__")
+    .slice(0, 220);
+}
+
+function normalizeDocumentActorRole(role = "") {
+  const safeRole = lower(role);
+  if (safeRole === "admin" || safeRole === "staff" || safeRole === "user") return safeRole;
+  return "user";
+}
+
+function normalizeChatAttachmentForMirror(message = {}) {
+  const source =
+    message?.attachmentMeta && typeof message.attachmentMeta === "object"
+      ? message.attachmentMeta
+      : message?.pdfMeta && typeof message.pdfMeta === "object"
+      ? message.pdfMeta
+      : null;
+  if (!source) return null;
+
+  const name = safeStr(source?.name || source?.fileName || source?.filename).slice(0, 180);
+  if (!name) return null;
+
+  const contentType =
+    safeStr(source?.mime || source?.type || source?.contentType || "application/octet-stream").slice(0, 80) ||
+    "application/octet-stream";
+  const rawKind = lower(source?.attachmentKind || source?.kind);
+  const type = lower(message?.type);
+  const isPhoto =
+    rawKind === "photo" ||
+    rawKind === "image" ||
+    type === "photo" ||
+    type === "image" ||
+    contentType.startsWith("image/");
+
+  return {
+    name,
+    contentType,
+    note: safeStr(source?.note).slice(0, 1200),
+    sizeBytes: Math.max(0, Math.floor(toNum(source?.size || source?.sizeBytes, 0))),
+    attachmentKind: isPhoto ? "photo" : "document",
+  };
+}
+
+function resolveChatUserBucketForMirror({ requestUid, fromUid, toRole, toUid } = {}) {
+  const owner = safeStr(requestUid);
+  const sender = safeStr(fromUid);
+  const receiver = safeStr(toUid);
+
+  const userIsSender = owner && sender && owner === sender;
+  const userIsReceiver = (owner && receiver && owner === receiver) || lower(toRole) === "user";
+
+  if (userIsSender) return USER_BUCKET_UPLOADED;
+  if (userIsReceiver) return USER_BUCKET_RECEIVED;
+  return USER_BUCKET_RECEIVED;
+}
+
+function resolveChatRequestBucketForMirror({ fromRole, toRole } = {}) {
+  const from = lower(fromRole);
+  const to = lower(toRole);
+  if (from === "user") return REQUEST_BUCKET_RECEIVED_FROM_USER;
+  if (to === "user") return REQUEST_BUCKET_SENT_TO_USER;
+  return REQUEST_BUCKET_INTERNAL;
+}
+
+function isUserVisibleChatDocumentForMirror({ requestUid, fromUid, toUid, toRole } = {}) {
+  const owner = safeStr(requestUid);
+  if (!owner) return false;
+  if (safeStr(fromUid) === owner) return true;
+  if (safeStr(toUid) === owner) return true;
+  return lower(toRole) === "user";
+}
+
+async function mirrorPublishedChatAttachment({
+  requestId = "",
+  messageId = "",
+  requestData = {},
+  messageData = {},
+} = {}) {
+  const rid = safeStr(requestId);
+  const mid = safeStr(messageId);
+  const requestUid = safeStr(requestData?.uid);
+  const attachment = normalizeChatAttachmentForMirror(messageData);
+  if (!rid || !mid || !requestUid || !attachment) {
+    return { ok: false, skipped: true, reason: "not_eligible" };
+  }
+
+  const fromRole = lower(messageData?.fromRole);
+  const fromUid = safeStr(messageData?.fromUid);
+  const toRole = lower(messageData?.toRole);
+  const toUid = safeStr(messageData?.toUid);
+  const canonicalKind = attachment.attachmentKind === "photo" ? "chat_photo" : "chat_document";
+
+  const userBucket = resolveChatUserBucketForMirror({
+    requestUid,
+    fromUid,
+    toRole,
+    toUid,
+  });
+  const requestBucket = resolveChatRequestBucketForMirror({ fromRole, toRole });
+  const userVisible = isUserVisibleChatDocumentForMirror({
+    requestUid,
+    fromUid,
+    toUid,
+    toRole,
+  });
+
+  const docId = buildMirrorId(["request", rid, canonicalKind, mid]);
+  const linkId = buildMirrorId(["request", rid, canonicalKind, mid, "link"]);
+  const docRef = db.collection(DOCUMENTS_COLLECTION).doc(docId);
+  const linkRef = db.collection(DOCUMENT_LINKS_COLLECTION).doc(linkId);
+  const [existingDoc, existingLink] = await Promise.all([docRef.get(), linkRef.get()]);
+  if (existingDoc.exists && existingLink.exists) {
+    return { ok: true, skipped: true, docId, linkId };
+  }
+
+  const now = Date.now();
+  const batch = db.batch();
+
+  batch.set(
+    docRef,
+    {
+      userUid: requestUid,
+      requestId: rid,
+      scope: "request",
+      stage: "working",
+      state: "meta_only",
+      sourceChannel: "chat_message",
+      createdByUid: safeStr(messageData?.approvedBy || fromUid || requestUid),
+      createdByRole: normalizeDocumentActorRole(fromRole),
+      visibility: {
+        user: userVisible,
+        staff: true,
+        admin: true,
+      },
+      display: {
+        name: attachment.name,
+        contentType: attachment.contentType,
+        sizeBytes: attachment.sizeBytes,
+        note: attachment.note,
+      },
+      storage: {
+        kind: "meta",
+        externalUrl: "",
+      },
+      classification: {
+        kind: canonicalKind,
+      },
+      legacyCollection: "serviceRequests.messages",
+      legacyId: mid,
+      legacyRequestPath: `serviceRequests/${rid}/messages/${mid}`,
+      createdAt: FieldValue.serverTimestamp(),
+      createdAtMs: now,
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedAtMs: now,
+    },
+    { merge: true }
+  );
+
+  batch.set(
+    linkRef,
+    {
+      userUid: requestUid,
+      requestId: rid,
+      contextType: "request_chat",
+      contextId: mid,
+      userBucket,
+      requestBucket,
+      visibleToUser: userVisible,
+      visibleToStaff: true,
+      visibleToAdmin: true,
+      preview: {
+        name: attachment.name,
+        contentType: attachment.contentType,
+        sizeBytes: attachment.sizeBytes,
+        state: "meta_only",
+        stage: "working",
+        storageKind: "meta",
+        externalUrl: "",
+        sourceChannel: "chat_message",
+      },
+      sourceChannel: "chat_message",
+      kind: canonicalKind,
+      note: attachment.note,
+      documentId: docId,
+      createdAt: FieldValue.serverTimestamp(),
+      createdAtMs: now,
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedAtMs: now,
+    },
+    { merge: true }
+  );
+
+  await batch.commit();
+  return { ok: true, skipped: false, docId, linkId };
 }
 
 function buildStatusNotificationText(req, status) {
@@ -446,6 +980,94 @@ function buildStatusNotificationText(req, status) {
     title: "Request update",
     body: `Your request status is now: ${s || "updated"}${suffix}.`,
   };
+}
+
+function resolveUserRequestNotificationType(status) {
+  const safeStatus = lower(status);
+  if (safeStatus === "rejected") return "REQUEST_DENIED";
+  if (safeStatus === "closed" || safeStatus === "accepted") return "REQUEST_ACCEPTED";
+  if (safeStatus === "contacted" || safeStatus === "in_progress") return "REQUEST_IN_PROGRESS";
+  return "REQUEST_UPDATED";
+}
+
+function resolvePushSubscriptionEndAtMs(row = {}) {
+  const endAtMs = toNum(row?.endAtMs, 0);
+  if (endAtMs > 0) return endAtMs;
+  const endDate = safeStr(row?.endDate);
+  if (!endDate) return 0;
+  const parsed = Date.parse(`${endDate}T23:59:59.999Z`);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function notifySuperAdminsPushSubscriptionExpiringSoon({
+  partnerId = "",
+  partnerName = "",
+  endAtMs = 0,
+  endDate = "",
+} = {}) {
+  const safePartnerId = safeStr(partnerId);
+  const safeEndAtMs = toNum(endAtMs, 0);
+  if (!safePartnerId || safeEndAtMs <= 0) return 0;
+
+  const safeEndDate = safeStr(endDate) || new Date(safeEndAtMs).toISOString().slice(0, 10);
+  const safePartnerName = safeStr(partnerName || safePartnerId);
+  const title = "Push subscription expiring in 5 days";
+  const body = `${safePartnerName} push subscription expires on ${safeEndDate}.`;
+  const route = "/app/admin/sacc/push-campaigns";
+
+  const superRows = await listSuperAdminCandidates();
+  if (!superRows.length) return 0;
+
+  const results = await Promise.all(
+    superRows.slice(0, 40).map(async (row) => {
+      const uid = safeStr(row?.uid);
+      if (!uid) return 0;
+      const notificationId = `push_sub_expiry_${safePartnerId}_${safeEndDate}_${uid}`;
+      const existing = await db
+        .collection("users")
+        .doc(uid)
+        .collection("notifications")
+        .doc(notificationId)
+        .get();
+      if (existing.exists) return 0;
+
+      await Promise.all([
+        sendPushToRecipient({
+          uid,
+          role: "admin",
+          title,
+          body,
+          data: {
+            type: "SUPER_ADMIN_PUSH_SUBSCRIPTION_EXPIRING_5_DAYS",
+            partnerId: safePartnerId,
+            partnerName: safePartnerName,
+            endDate: safeEndDate,
+            endAtMs: String(safeEndAtMs),
+            route,
+            targetRole: "admin",
+          },
+        }),
+        writeScopedNotificationDoc({
+          uid,
+          scope: "users",
+          notificationId,
+          payload: {
+            type: "SUPER_ADMIN_PUSH_SUBSCRIPTION_EXPIRING_5_DAYS",
+            title,
+            body,
+            route,
+            partnerId: safePartnerId,
+            partnerName: safePartnerName,
+            subscriptionEndDate: safeEndDate,
+            subscriptionEndAtMs: safeEndAtMs,
+          },
+        }),
+      ]);
+      return 1;
+    })
+  );
+
+  return results.reduce((sum, count) => sum + toNum(count, 0), 0);
 }
 
 async function listActiveTokenDocs(pathParts) {
@@ -756,6 +1378,11 @@ function normalizeAdminScope(rawScope) {
     countiesLower,
     countiesFallback
   );
+  const assignedBranchIds = normalizePartnerIdList(
+    scope?.assignedBranchIds ||
+      scope?.assignedBranches?.map((row) => safeStr(row?.branchId || row?.id))
+  );
+  const scopedCoordinates = resolveScopeCoordinates(scope);
   return {
     active: scope?.active !== false,
     availability: normalizeAvailability(scope?.availability),
@@ -775,8 +1402,209 @@ function normalizeAdminScope(rawScope) {
     primaryCountyLower,
     neighboringCountiesLower,
     countiesLower: mergedCountiesLower,
+    assignedBranchIds,
+    assignedBranchId: safeStr(assignedBranchIds[0]),
+    coverageSource: safeStr(scope?.coverageSource || scope?.derivedCoverage?.source || "legacy_manual"),
     town: safeStr(scope?.town),
+    coordinates: scopedCoordinates,
   };
+}
+
+function normalizeSimpleStringList(values = []) {
+  const arr = Array.isArray(values) ? values : [];
+  const seen = new Set();
+  const out = [];
+  arr.forEach((value) => {
+    const clean = safeStr(value);
+    const key = lower(clean);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(clean);
+  });
+  return out;
+}
+
+function getScopeCountryCoverage(scope) {
+  const safeScope = scope && typeof scope === "object" ? scope : {};
+  return normalizeSimpleStringList([
+    ...(Array.isArray(safeScope?.countries) ? safeScope.countries : []),
+    ...(Array.isArray(safeScope?.derivedCoverage?.countries)
+      ? safeScope.derivedCoverage.countries
+      : []),
+    safeScope?.stationedCountry,
+    safeScope?.country,
+  ]);
+}
+
+function getScopeCountryCoverageLower(scope) {
+  return getScopeCountryCoverage(scope).map((value) => normalizeCountryLower(value));
+}
+
+function getStationedCountryLower(scope) {
+  const safeScope = scope && typeof scope === "object" ? scope : {};
+  return normalizeCountryLower(
+    safeScope?.stationedCountryLower ||
+      safeScope?.stationedCountry ||
+      safeScope?.countryLower ||
+      safeScope?.country
+  );
+}
+
+async function writeScopedNotificationDoc({
+  uid = "",
+  scope = "user",
+  notificationId = "",
+  payload = {},
+} = {}) {
+  const targetUid = safeStr(uid);
+  const docId = safeStr(notificationId);
+  if (!targetUid || !docId) return;
+  const safeScope = lower(scope) === "staff" ? "staff" : "users";
+  const source = payload && typeof payload === "object" ? payload : {};
+  await db
+    .collection(safeScope)
+    .doc(targetUid)
+    .collection("notifications")
+    .doc(docId)
+    .set(
+      {
+        ...source,
+        requestId: safeStr(source?.requestId) || null,
+        paymentId: safeStr(source?.paymentId) || null,
+        refundId: safeStr(source?.refundId) || null,
+        createdAt: FieldValue.serverTimestamp(),
+        createdAtMs: toNum(source?.createdAtMs, Date.now()),
+        readAt: null,
+      },
+      { merge: true }
+    );
+}
+
+function getRequestCountryValue(requestData = {}) {
+  const safeRequest = requestData && typeof requestData === "object" ? requestData : {};
+  const routingMeta =
+    safeRequest?.routingMeta && typeof safeRequest.routingMeta === "object"
+      ? safeRequest.routingMeta
+      : {};
+  const mode = normalizePartnerFilterMode(
+    safeRequest?.partnerFilterMode || routingMeta?.partnerFilterMode
+  );
+  const candidates = [
+    safeRequest?.countryOfResidence,
+    routingMeta?.countryOfResidence,
+    safeRequest?.residenceCountry,
+    routingMeta?.residenceCountry,
+    safeRequest?.locationCountry,
+    safeRequest?.country,
+    routingMeta?.country,
+  ];
+  if (mode === PARTNER_FILTER_MODES.HOME_COUNTRY) {
+    candidates.push(safeRequest?.country, routingMeta?.country);
+  }
+  return normalizeSimpleStringList(candidates)[0] || "";
+}
+
+function getRequestCountryLower(requestData = {}) {
+  return normalizeCountryLower(getRequestCountryValue(requestData));
+}
+
+function getRequestCountyValue(requestData = {}) {
+  const safeRequest = requestData && typeof requestData === "object" ? requestData : {};
+  const routingMeta =
+    safeRequest?.routingMeta && typeof safeRequest.routingMeta === "object"
+      ? safeRequest.routingMeta
+      : {};
+  const geo = safeRequest?.geo && typeof safeRequest.geo === "object" ? safeRequest.geo : {};
+  const geolocation =
+    safeRequest?.geolocation && typeof safeRequest.geolocation === "object"
+      ? safeRequest.geolocation
+      : {};
+  const location = safeRequest?.location && typeof safeRequest.location === "object" ? safeRequest.location : {};
+  return (
+    normalizeSimpleStringList([
+      safeRequest?.county,
+      routingMeta?.county,
+      safeRequest?.countyName,
+      safeRequest?.locationCounty,
+      location?.county,
+      location?.countyName,
+      geolocation?.county,
+      geolocation?.region,
+      geolocation?.state,
+      geo?.county,
+      geo?.region,
+      geo?.state,
+    ])[0] || ""
+  );
+}
+
+function getRequestCountyLower(requestData = {}) {
+  return normalizeCountyLower(
+    safeStr(requestData?.countyLower) ||
+      safeStr(requestData?.routingMeta?.countyLower) ||
+      getRequestCountyValue(requestData)
+  );
+}
+
+function adminScopeRequiresCountyCoverage(scope, requestCountryLower = "") {
+  const safeScope = scope && typeof scope === "object" ? scope : {};
+  const scopeCountriesLower = getScopeCountryCoverageLower(safeScope);
+  const explicitStationedLower = getStationedCountryLower(safeScope);
+  const targetCountryLower = normalizeCountryLower(requestCountryLower);
+  const hasKenyaCoverage =
+    scopeCountriesLower.includes("kenya") ||
+    (!scopeCountriesLower.length && explicitStationedLower === "kenya");
+  if (targetCountryLower) {
+    return targetCountryLower === "kenya" && hasKenyaCoverage;
+  }
+  return hasKenyaCoverage || (!scopeCountriesLower.length && (safeScope?.countiesLower || []).length > 0);
+}
+
+function determineCountyTier(scope, countyLower, requiresCountyCoverage) {
+  if (!requiresCountyCoverage) {
+    return { countyTier: 3, countyMatchType: "country" };
+  }
+  const safeCounty = normalizeCountyLower(countyLower);
+  if (!safeCounty) {
+    return { countyTier: 3, countyMatchType: "distance" };
+  }
+  if (safeStr(scope?.primaryCountyLower) === safeCounty) {
+    return { countyTier: 1, countyMatchType: "direct" };
+  }
+  if (
+    Array.isArray(scope?.neighboringCountiesLower) &&
+    scope.neighboringCountiesLower.includes(safeCounty)
+  ) {
+    return { countyTier: 2, countyMatchType: "neighboring" };
+  }
+  if (Array.isArray(scope?.countiesLower) && scope.countiesLower.includes(safeCounty)) {
+    return { countyTier: 2, countyMatchType: "neighboring" };
+  }
+  return { countyTier: 3, countyMatchType: "distance" };
+}
+
+function isDistanceFallbackCandidate(compatibility) {
+  const reasons = Array.isArray(compatibility?.reasons) ? compatibility.reasons : [];
+  if (!reasons.length) return Boolean(compatibility?.eligible);
+  return reasons.every((reason) => safeStr(reason) === "county_not_supported");
+}
+
+function compareAdminCandidatesForRouting(left, right) {
+  const leftTier = toNum(left?.countyTier, 3);
+  const rightTier = toNum(right?.countyTier, 3);
+  if (leftTier !== rightTier) return leftTier - rightTier;
+
+  const leftDistance = toFiniteDistance(left?.distanceKm);
+  const rightDistance = toFiniteDistance(right?.distanceKm);
+  if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+
+  const scoreGap = Number(right?.score || 0) - Number(left?.score || 0);
+  if (scoreGap !== 0) return scoreGap;
+
+  const loadGap = Number(left?.activeLoad || 0) - Number(right?.activeLoad || 0);
+  if (loadGap !== 0) return loadGap;
+
+  return safeStr(left?.email || left?.uid).localeCompare(safeStr(right?.email || right?.uid));
 }
 
 function enrichAdminCandidate(candidate, loadMap = {}) {
@@ -819,17 +1647,7 @@ function buildEligibleAdminOptions(candidates, loadMap = {}) {
   return (Array.isArray(candidates) ? candidates : [])
     .map((candidate) => enrichAdminCandidate(candidate, loadMap))
     .filter((candidate) => candidate.eligible)
-    .sort((a, b) => {
-      const directGap =
-        Number(safeStr(b?.countyMatchType) === "direct") -
-        Number(safeStr(a?.countyMatchType) === "direct");
-      if (directGap !== 0) return directGap;
-
-      const loadGap = Number(a?.activeLoad || 0) - Number(b?.activeLoad || 0);
-      if (loadGap !== 0) return loadGap;
-
-      return safeStr(a?.email || a?.uid).localeCompare(safeStr(b?.email || b?.uid));
-    });
+    .sort(compareAdminCandidatesForRouting);
 }
 
 function pickAdminCandidate(candidates, loadMap = {}) {
@@ -840,9 +1658,11 @@ async function listAssignedAdminCandidatesForRequest(
   requestData,
   { partnerId = "", excludeUids = [] } = {}
 ) {
-  const safeCountyLower = normalizeCountyLower(requestData?.countyLower || requestData?.county);
+  const safeCountyLower = getRequestCountyLower(requestData);
+  const requestCountryLower = getRequestCountryLower(requestData);
+  const requestCoordinates = resolveRequestCoordinates(requestData);
   const safePartnerId = safeStr(partnerId);
-  if (!safeCountyLower || !safePartnerId) return [];
+  if (!safePartnerId || !requestCountryLower) return [];
 
   const excluded = new Set((excludeUids || []).map((x) => safeStr(x)).filter(Boolean));
   const snap = await db
@@ -858,7 +1678,17 @@ async function listAssignedAdminCandidatesForRequest(
     const scope = normalizeAdminScope(data?.adminScope);
     if (!scope.active) return;
     if (safeStr(scope?.partnerId) !== safePartnerId) return;
-    if (!scope.countiesLower.includes(safeCountyLower)) return;
+    const stationedCountryLower = getStationedCountryLower(scope);
+    const scopeCountriesLower = getScopeCountryCoverageLower(scope);
+    const countryOriginMatch = scopeCountriesLower.length
+      ? scopeCountriesLower.includes(requestCountryLower)
+      : Boolean(stationedCountryLower) && stationedCountryLower === requestCountryLower;
+    if (!countryOriginMatch) return;
+
+    const requiresCountyCoverage = adminScopeRequiresCountyCoverage(scope, requestCountryLower);
+    const countyTierPayload = determineCountyTier(scope, safeCountyLower, requiresCountyCoverage);
+    const distanceKm = haversineDistanceKm(requestCoordinates, scope?.coordinates);
+
     rows.push({
       uid,
       email: safeStr(data?.email),
@@ -869,8 +1699,15 @@ async function listAssignedAdminCandidatesForRequest(
       town: scope.town,
       partnerId: safePartnerId,
       partnerName: safeStr(scope?.partnerName),
-      countyMatchType:
-        safeStr(scope?.primaryCountyLower) === safeCountyLower ? "direct" : "neighboring",
+      assignedBranchIds: Array.isArray(scope?.assignedBranchIds) ? scope.assignedBranchIds : [],
+      assignedBranchId: safeStr(scope?.assignedBranchId || scope?.assignedBranchIds?.[0]),
+      coverageSource: safeStr(scope?.coverageSource || "legacy_manual"),
+      countries: getScopeCountryCoverage(scope),
+      stationedCountry: safeStr(scope?.stationedCountry || scope?.country),
+      countryOriginMatch,
+      countyTier: countyTierPayload.countyTier,
+      countyMatchType: countyTierPayload.countyMatchType,
+      distanceKm,
     });
   });
 
@@ -949,14 +1786,40 @@ async function resolveSuperAdminFallback({ excludeUids = [] } = {}) {
   };
 }
 
+function comparePartnerRoutingOptions(left, right) {
+  const leftAdmin = left?.bestAdmin || {};
+  const rightAdmin = right?.bestAdmin || {};
+  const tierGap = toNum(leftAdmin?.countyTier, 3) - toNum(rightAdmin?.countyTier, 3);
+  if (tierGap !== 0) return tierGap;
+
+  const distanceGap =
+    toFiniteDistance(leftAdmin?.distanceKm) - toFiniteDistance(rightAdmin?.distanceKm);
+  if (distanceGap !== 0) return distanceGap;
+
+  const scoreGap = Number(rightAdmin?.score || 0) - Number(leftAdmin?.score || 0);
+  if (scoreGap !== 0) return scoreGap;
+
+  const loadGap = Number(leftAdmin?.activeLoad || 0) - Number(rightAdmin?.activeLoad || 0);
+  if (loadGap !== 0) return loadGap;
+
+  return safeStr(left?.partner?.displayName).localeCompare(safeStr(right?.partner?.displayName));
+}
+
 async function buildRoutingSnapshot(
   requestData,
   { excludeAdminUids = [], includeAdminOptions = false } = {}
 ) {
   const trackType = lower(requestData?.track);
-  const country = safeStr(requestData?.country);
-  const county = safeStr(requestData?.county);
+  const country = safeStr(requestData?.country || requestData?.routingMeta?.country);
+  const county = getRequestCountyValue(requestData);
+  const countryOfResidence = getRequestCountryValue(requestData);
+  const filterMode = normalizePartnerFilterMode(
+    requestData?.partnerFilterMode || requestData?.routingMeta?.partnerFilterMode
+  );
   const preferredAgentId = safeStr(requestData?.preferredAgentId);
+  const eligiblePartnerIds = normalizePartnerIdList(
+    requestData?.eligiblePartnerIds || requestData?.routingMeta?.eligiblePartnerIds || []
+  );
   const partnerRows = await listPartners({ activeOnly: false, max: 250 });
   const evaluations = partnerRows.map((partner) => ({
     partner,
@@ -964,10 +1827,23 @@ async function buildRoutingSnapshot(
       trackType,
       country,
       county,
+      countryOfResidence,
+      filterMode,
+      eligiblePartnerIds,
     }),
   }));
 
-  const eligiblePartners = evaluations.filter((row) => row.compatibility?.eligible);
+  const strictEligiblePartners = evaluations.filter((row) => row.compatibility?.eligible);
+  const countyFallbackPartners = evaluations
+    .filter((row) => isDistanceFallbackCandidate(row?.compatibility))
+    .map((row) => ({
+      ...row,
+      compatibility: {
+        ...(row?.compatibility || {}),
+        eligible: true,
+        countyMatchType: "distance",
+      },
+    }));
   const preferredRow = preferredAgentId
     ? evaluations.find((row) => safeStr(row?.partner?.id) === preferredAgentId)
     : null;
@@ -975,25 +1851,55 @@ async function buildRoutingSnapshot(
   let preferredAgentValid = false;
   let preferredAgentReason = safeStr(requestData?.preferredAgentInvalidReason);
   let partnerDecisionSource = "auto";
-  let candidatePartners = eligiblePartners;
+  let candidatePartners = strictEligiblePartners;
+  let usedCountyFallback = false;
 
   if (preferredAgentId) {
     if (!preferredRow) {
       preferredAgentReason = preferredAgentReason || "partner_not_found";
       partnerDecisionSource = "preferred_agent_invalid";
+      candidatePartners = [];
     } else if (preferredRow.compatibility?.eligible) {
       preferredAgentValid = true;
       candidatePartners = [preferredRow];
       partnerDecisionSource = "preferred_agent";
+    } else if (isDistanceFallbackCandidate(preferredRow.compatibility)) {
+      preferredAgentValid = true;
+      preferredAgentReason = "";
+      candidatePartners = [
+        {
+          ...preferredRow,
+          compatibility: {
+            ...(preferredRow?.compatibility || {}),
+            eligible: true,
+            countyMatchType: "distance",
+          },
+        },
+      ];
+      partnerDecisionSource = "preferred_agent_distance_fallback";
+      usedCountyFallback = true;
     } else {
       preferredAgentReason =
         preferredAgentReason || safeStr(preferredRow.compatibility?.reasons?.[0]);
       partnerDecisionSource = "preferred_agent_invalid";
+      candidatePartners = [];
     }
+  } else if (!candidatePartners.length && countyFallbackPartners.length) {
+    candidatePartners = countyFallbackPartners;
+    partnerDecisionSource = "county_distance_fallback";
+    usedCountyFallback = true;
   }
 
   const activeLoadMap = await buildActiveLoadMap();
-  const partnerSourceRows = includeAdminOptions ? eligiblePartners : candidatePartners;
+  const partnerSourceRows = includeAdminOptions
+    ? [
+        ...strictEligiblePartners,
+        ...(usedCountyFallback ? candidatePartners : []),
+      ].filter((row, index, arr) => {
+        const key = safeStr(row?.partner?.id);
+        return arr.findIndex((candidate) => safeStr(candidate?.partner?.id) === key) === index;
+      })
+    : candidatePartners;
   const partnerOptions = [];
   for (const row of partnerSourceRows) {
     const adminCandidates = await listAssignedAdminCandidatesForRequest(requestData, {
@@ -1001,16 +1907,14 @@ async function buildRoutingSnapshot(
       excludeUids: excludeAdminUids,
     });
     const eligibleAdminOptions = buildEligibleAdminOptions(adminCandidates, activeLoadMap);
-    const bestAdmin = pickAdminCandidate(adminCandidates, activeLoadMap);
-    const countyWeight = row.compatibility?.countyMatchType === "direct" ? 1.08 : 1;
-    const preferredWeight = preferredAgentValid ? 1.12 : 1;
+    const bestAdmin = eligibleAdminOptions[0] || null;
 
     partnerOptions.push({
       partner: row.partner,
       compatibility: row.compatibility,
       adminOptions: includeAdminOptions ? eligibleAdminOptions : [],
       bestAdmin,
-      pairScore: bestAdmin ? Number(bestAdmin.score || 0) * countyWeight * preferredWeight : 0,
+      pairScore: bestAdmin ? Number(bestAdmin.score || 0) : 0,
     });
   }
 
@@ -1018,11 +1922,13 @@ async function buildRoutingSnapshot(
   const viableOptions = partnerOptions
     .filter((row) => autoCandidatePartnerIds.has(safeStr(row?.partner?.id)))
     .filter((row) => row.bestAdmin)
-    .sort((a, b) => Number(b.pairScore || 0) - Number(a.pairScore || 0));
+    .sort(comparePartnerRoutingOptions);
   const bestOption = viableOptions[0] || null;
 
   let unresolvedReason = "";
-  if (!eligiblePartners.length) {
+  if (preferredAgentId && !candidatePartners.length) {
+    unresolvedReason = preferredAgentReason || "preferred_agent_invalid";
+  } else if (!strictEligiblePartners.length && !candidatePartners.length) {
     unresolvedReason = preferredAgentReason || "no_eligible_partner";
   } else if (!viableOptions.length) {
     unresolvedReason = "no_eligible_assigned_admin";
@@ -1045,12 +1951,22 @@ async function buildRoutingSnapshot(
         : partnerDecisionSource,
     routingStatus: bestOption ? "assigned" : "unresolved",
     unresolvedReason,
-    eligiblePartnerCount: eligiblePartners.length,
+    eligiblePartnerCount: strictEligiblePartners.length,
     eligibleAdminCount: viableOptions.length,
+    usedCountyFallback,
+    requestDefinitionId: safeStr(requestData?.requestDefinitionId || requestData?.routingMeta?.requestDefinitionId),
+    requestDefinitionKey: safeStr(
+      requestData?.requestDefinitionKey || requestData?.routingMeta?.requestDefinitionKey
+    ),
+    eligiblePartnerIds,
     eligiblePartners: partnerOptions.map((row) => ({
       id: safeStr(row?.partner?.id),
       displayName: safeStr(row?.partner?.displayName),
       countyMatchType: safeStr(row?.compatibility?.countyMatchType),
+      countyTier: toNum(row?.bestAdmin?.countyTier, 0),
+      distanceKm: Number.isFinite(Number(row?.bestAdmin?.distanceKm))
+        ? Number(row?.bestAdmin?.distanceKm)
+        : null,
       adminCount: Array.isArray(row?.adminOptions) ? row.adminOptions.length : 0,
       admins: Array.isArray(row?.adminOptions) ? row.adminOptions : [],
       isPreferred: safeStr(row?.partner?.id) === preferredAgentId,
@@ -1080,10 +1996,18 @@ async function resolveExplicitAdminCandidate(targetAdminUid, requestData = {}) {
     throw new Error("Target admin is missing a partner binding.");
   }
 
-  const countyLower = normalizeCountyLower(requestData?.countyLower || requestData?.county);
-  if (isAssigned && countyLower && !scope.countiesLower.includes(countyLower)) {
-    throw new Error("Target admin does not cover this county.");
-  }
+  const countyLower = getRequestCountyLower(requestData);
+  const requestCountryLower = getRequestCountryLower(requestData);
+  const stationedCountryLower = getStationedCountryLower(scope);
+  const scopeCountriesLower = getScopeCountryCoverageLower(scope);
+  const hasCountryCoverage = Boolean(scopeCountriesLower.length || stationedCountryLower);
+  const countryOriginMatch = scopeCountriesLower.length
+    ? scopeCountriesLower.includes(requestCountryLower)
+    : Boolean(stationedCountryLower) && stationedCountryLower === requestCountryLower;
+  const requiresCountyCoverage = adminScopeRequiresCountyCoverage(scope, requestCountryLower);
+  const countyTierPayload = determineCountyTier(scope, countyLower, requiresCountyCoverage);
+  const requestCoordinates = resolveRequestCoordinates(requestData);
+  const distanceKm = haversineDistanceKm(requestCoordinates, scope?.coordinates);
 
   const candidateBase = {
     uid,
@@ -1095,12 +2019,26 @@ async function resolveExplicitAdminCandidate(targetAdminUid, requestData = {}) {
     town: scope.town,
     partnerId: safeStr(scope?.partnerId),
     partnerName: safeStr(scope?.partnerName),
-    countyMatchType:
-      safeStr(scope?.primaryCountyLower) === countyLower ? "direct" : countyLower ? "neighboring" : "",
+    assignedBranchIds: Array.isArray(scope?.assignedBranchIds) ? scope.assignedBranchIds : [],
+    assignedBranchId: safeStr(scope?.assignedBranchId || scope?.assignedBranchIds?.[0]),
+    coverageSource: safeStr(scope?.coverageSource || "legacy_manual"),
+    countries: getScopeCountryCoverage(scope),
+    stationedCountry: safeStr(scope?.stationedCountry || scope?.country),
+    countryOriginMatch,
+    countyTier: countyTierPayload.countyTier,
+    countyMatchType: countyTierPayload.countyMatchType,
+    distanceKm,
   };
 
   if (!isAssigned) {
     return candidateBase;
+  }
+
+  if (!hasCountryCoverage) {
+    throw new Error("Target admin is missing country coverage.");
+  }
+  if (!countryOriginMatch) {
+    throw new Error("Target admin does not cover the request origin country.");
   }
 
   const partner = await fetchPartnerById(scope.partnerId);
@@ -1110,10 +2048,14 @@ async function resolveExplicitAdminCandidate(targetAdminUid, requestData = {}) {
 
   const compatibility = evaluatePartnerRequestCompatibility(partner, {
     trackType: requestData?.track,
-    country: requestData?.country,
-    county: requestData?.county,
+    country: requestData?.country || requestData?.routingMeta?.country,
+    county: getRequestCountyValue(requestData),
+    countryOfResidence: getRequestCountryValue(requestData),
+    filterMode: requestData?.partnerFilterMode || requestData?.routingMeta?.partnerFilterMode,
+    eligiblePartnerIds:
+      requestData?.eligiblePartnerIds || requestData?.routingMeta?.eligiblePartnerIds || [],
   });
-  if (!compatibility?.eligible) {
+  if (!compatibility?.eligible && !isDistanceFallbackCandidate(compatibility)) {
     throw new Error(
       preferredAgentReasonLabel(safeStr(compatibility?.reasons?.[0])) ||
         "Target admin's partner is incompatible with this request."
@@ -1150,7 +2092,10 @@ async function resolveRoutingCandidate({ requestData, excludeAdminUids = [] } = 
         ...routingSnapshot.bestOption.bestAdmin,
         partnerId: safeStr(routingSnapshot.bestOption?.partner?.id),
         partnerName: safeStr(routingSnapshot.bestOption?.partner?.displayName),
-        countyMatchType: safeStr(routingSnapshot.bestOption?.compatibility?.countyMatchType),
+        countyMatchType:
+          safeStr(routingSnapshot.bestOption?.bestAdmin?.countyMatchType) ||
+          safeStr(routingSnapshot.bestOption?.compatibility?.countyMatchType),
+        countyTier: toNum(routingSnapshot.bestOption?.bestAdmin?.countyTier, 0),
       },
       routingSnapshot,
       escalationReason: "",
@@ -1169,6 +2114,7 @@ async function notifyAdminRoutedRequest({ requestId, adminUid, reason }) {
   const safeRid = safeStr(requestId);
   const safeAdminUid = safeStr(adminUid);
   if (!safeRid || !safeAdminUid) return;
+  const route = `/app/admin/request/${encodeURIComponent(safeRid)}`;
 
   const body =
     reason === "timeout_reassignment"
@@ -1184,17 +2130,52 @@ async function notifyAdminRoutedRequest({ requestId, adminUid, reason }) {
       data: {
         type: "NEW_REQUEST",
         requestId: safeRid,
-        route: `/app/admin/request/${encodeURIComponent(safeRid)}`,
+        route,
       },
     }),
     writeUserNotificationDoc(safeAdminUid, `admin_route_${safeRid}_${Date.now()}`, {
-      type: "admin_routed_request",
+      type: "NEW_REQUEST",
       title: "New routed request",
       body,
       requestId: safeRid,
       status: "new",
+      route,
     }),
   ]);
+
+  const superRows = await listSuperAdminCandidates({ excludeUids: [safeAdminUid] });
+  await Promise.allSettled(
+    superRows.slice(0, 40).map(async (row) => {
+      const uid = safeStr(row?.uid);
+      if (!uid) return;
+
+      await sendPushToRecipient({
+        uid,
+        role: "admin",
+        title: "New routed request",
+        body,
+        data: {
+          type: "SUPER_ADMIN_NEW_REQUEST",
+          requestId: safeRid,
+          route,
+        },
+      });
+
+      await writeScopedNotificationDoc({
+        uid,
+        scope: "users",
+        notificationId: `super_admin_route_${safeRid}_${uid}`,
+        payload: {
+          type: "SUPER_ADMIN_NEW_REQUEST",
+          title: "New routed request",
+          body,
+          requestId: safeRid,
+          status: "new",
+          route,
+        },
+      });
+    })
+  );
 }
 
 async function routeRequestToAdmin({
@@ -1224,6 +2205,12 @@ async function routeRequestToAdmin({
     safeStr(candidate?.role) === "assignedAdmin" ? safeStr(candidate?.partnerId) : "";
   const assignedPartnerName =
     safeStr(candidate?.role) === "assignedAdmin" ? safeStr(candidate?.partnerName) : "";
+  const assignedBranchIds =
+    safeStr(candidate?.role) === "assignedAdmin"
+      ? normalizePartnerIdList(candidate?.assignedBranchIds || candidate?.assignedBranchId || [])
+      : [];
+  const assignedBranchId = safeStr(candidate?.assignedBranchId || assignedBranchIds[0]);
+  const coverageSource = safeStr(candidate?.coverageSource || "legacy_manual");
   const routingStatus = safeStr(
     snapshot?.routingStatus || (assignedAdminId ? "assigned" : "unresolved")
   );
@@ -1236,6 +2223,8 @@ async function routeRequestToAdmin({
     routedAtMs: nowMs,
     availabilityAtRouting: normalizeAvailability(candidate?.availability),
     assignedPartnerId: assignedPartnerId || null,
+    assignedBranchIds: assignedBranchIds.length ? assignedBranchIds : null,
+    coverageSource,
   };
   const reassignmentHistory = buildReassignmentHistory(requestData, historyEntry);
   const escalationCount =
@@ -1259,6 +2248,9 @@ async function routeRequestToAdmin({
         assignedAdminId,
         assignedPartnerId,
         assignedPartnerName,
+        assignedBranchIds,
+        assignedBranchId,
+        coverageSource,
         routingStatus,
         routedAt: FieldValue.serverTimestamp(),
         routedAtMs: nowMs,
@@ -1278,6 +2270,9 @@ async function routeRequestToAdmin({
           assignedAdminId,
           assignedPartnerId,
           assignedPartnerName,
+          assignedBranchIds,
+          assignedBranchId,
+          coverageSource,
           preferredAgentId: safeStr(requestData?.preferredAgentId),
           preferredAgentName: safeStr(requestData?.preferredAgentName),
           preferredAgentStatus: safeStr(requestData?.preferredAgentStatus),
@@ -1296,6 +2291,26 @@ async function routeRequestToAdmin({
           unresolvedReason,
           partnerDecisionSource: safeStr(snapshot?.partnerDecisionSource),
           countyMatchType: safeStr(candidate?.countyMatchType || ""),
+          countyTier: toNum(candidate?.countyTier, 0),
+          distanceKm: Number.isFinite(Number(candidate?.distanceKm))
+            ? Number(candidate?.distanceKm)
+            : null,
+          requestDefinitionId: safeStr(
+            snapshot?.requestDefinitionId ||
+              requestData?.requestDefinitionId ||
+              requestData?.routingMeta?.requestDefinitionId
+          ),
+          requestDefinitionKey: safeStr(
+            snapshot?.requestDefinitionKey ||
+              requestData?.requestDefinitionKey ||
+              requestData?.routingMeta?.requestDefinitionKey
+          ),
+          eligiblePartnerIds: normalizePartnerIdList(
+            snapshot?.eligiblePartnerIds ||
+              requestData?.eligiblePartnerIds ||
+              requestData?.routingMeta?.eligiblePartnerIds ||
+              []
+          ),
           eligiblePartnerCount: toNum(snapshot?.eligiblePartnerCount, 0),
           eligibleAdminCount: toNum(snapshot?.eligibleAdminCount, 0),
           escalationCount,
@@ -1383,13 +2398,16 @@ async function notifyRequestOwnerStatus({
   requestId,
   reqAfter,
   status,
-  pushType = "request_status",
+  pushType = "",
   eventId = "",
 }) {
   const ownerUid = safeStr(reqAfter?.uid);
   if (!ownerUid) return;
 
   const text = buildStatusNotificationText(reqAfter, status);
+  const notificationType = resolveUserRequestNotificationType(status);
+  const pushSignal = safeStr(pushType) || lower(notificationType) || "request_status";
+  const notificationKey = safeStr(pushSignal || notificationType || "request_status");
   await Promise.all([
     sendPushToRecipient({
       uid: ownerUid,
@@ -1397,7 +2415,7 @@ async function notifyRequestOwnerStatus({
       title: text.title,
       body: text.body,
       data: {
-        type: pushType,
+        type: pushSignal,
         requestId,
         status: safeStr(status),
         targetRole: "user",
@@ -1405,13 +2423,13 @@ async function notifyRequestOwnerStatus({
     }),
     writeUserNotificationDoc(
       ownerUid,
-      `status_${requestId}_${pushType}_${safeStr(status)}_${safeStr(eventId) || "evt"}`,
+      `status_${requestId}_${notificationKey}_${safeStr(status)}_${safeStr(eventId) || "evt"}`,
       {
-      type: "request_status",
-      title: text.title,
-      body: text.body,
-      requestId,
-      status,
+        type: notificationType,
+        title: text.title,
+        body: text.body,
+        requestId,
+        status,
       }
     ),
   ]);
@@ -2107,6 +3125,91 @@ exports.superAdminOverrideRouteRequest = functions.https.onCall(async (data, con
   return { ok: Boolean(result?.ok), mode: "manual", result };
 });
 
+exports.recordRequestDefinitionEngagement = functions.https.onCall(async (data, context) => {
+  const callerUid = safeStr(context?.auth?.uid);
+  if (!callerUid) {
+    throw new functions.https.HttpsError("unauthenticated", "Login required");
+  }
+
+  const definitionId = safeStr(data?.definitionId);
+  const definitionKey = safeStr(data?.definitionKey);
+  if (!definitionId && !definitionKey) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "definitionId or definitionKey is required"
+    );
+  }
+
+  let definitionRef = null;
+  let definitionSnap = null;
+
+  if (definitionId) {
+    definitionRef = db.collection(REQUEST_DEFINITION_COLLECTION).doc(definitionId);
+    definitionSnap = await definitionRef.get();
+  }
+
+  if ((!definitionSnap || !definitionSnap.exists) && definitionKey) {
+    const querySnap = await db
+      .collection(REQUEST_DEFINITION_COLLECTION)
+      .where("definitionKey", "==", definitionKey)
+      .limit(1)
+      .get();
+    if (!querySnap.empty) {
+      definitionSnap = querySnap.docs[0];
+      definitionRef = definitionSnap.ref;
+    }
+  }
+
+  if (!definitionRef || !definitionSnap || !definitionSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "Request definition not found");
+  }
+
+  const eventType = normalizeRequestDefinitionEngagementEventType(data?.eventType);
+  const engagementField = requestDefinitionEngagementFieldForEventType(eventType);
+  const scoreDelta = requestDefinitionEngagementScoreDelta(eventType);
+  const now = Date.now();
+  const eventId = `${safeStr(definitionRef.id)}_${eventType}_${callerUid}_${now}`;
+  const resolvedKey = safeStr(definitionSnap.data()?.definitionKey || definitionKey);
+
+  await Promise.all([
+    definitionRef.set(
+      {
+        engagement: {
+          [engagementField]: FieldValue.increment(1),
+          lastEventType: eventType,
+          lastEventAt: FieldValue.serverTimestamp(),
+          lastEventAtMs: now,
+        },
+        engagementScore: FieldValue.increment(scoreDelta),
+        updatedAt: FieldValue.serverTimestamp(),
+        updatedAtMs: now,
+      },
+      { merge: true }
+    ),
+    db.collection(REQUEST_DEFINITION_ENGAGEMENT_COLLECTION).doc(eventId).set(
+      {
+        eventId,
+        definitionId: safeStr(definitionRef.id),
+        definitionKey: resolvedKey,
+        eventType,
+        scoreDelta,
+        actorUid: callerUid,
+        createdAt: FieldValue.serverTimestamp(),
+        createdAtMs: now,
+      },
+      { merge: true }
+    ),
+  ]);
+
+  return {
+    ok: true,
+    definitionId: safeStr(definitionRef.id),
+    definitionKey: resolvedKey,
+    eventType,
+    scoreDelta,
+  };
+});
+
 exports.onServiceRequestAutoRoute = onDocumentCreated(
   {
     region: REGION,
@@ -2224,6 +3327,106 @@ exports.sweepUnresponsiveAdminRoutes = onSchedule(
    Push / in-app notification triggers (v2)
 ====================================================== */
 
+exports.onPendingMessagePush = onDocumentCreated(
+  {
+    region: REGION,
+    document: "serviceRequests/{requestId}/pendingMessages/{pendingId}",
+  },
+  async (event) => {
+    const requestId = safeStr(event?.params?.requestId);
+    const pendingId = safeStr(event?.params?.pendingId);
+    const snap = event.data;
+    if (!snap?.exists) return;
+
+    if (!(await claimEventLock(event.id, "pending_msg_push"))) return;
+
+    const msg = snap.data() || {};
+    const fromRole = lower(msg?.fromRole);
+    const fromUid = safeStr(msg?.fromUid);
+    if (fromRole !== "user" && fromRole !== "staff") return;
+
+    const req = await getRequestDoc(requestId);
+    if (!req) return;
+
+    const adminUid = safeStr(req?.ownerLockedAdminUid || req?.currentAdminUid || req?.assignedAdminId);
+    const messageKind = chatMessageKind(msg);
+    const title = chatNotificationTitleByKind(messageKind);
+    const adminType = chatNotificationTypeByKind(messageKind, "admin", fromRole);
+    const senderLabel = fromRole === "staff" ? "staff" : "user";
+    const body = `New ${messageKind} from ${senderLabel}.`;
+    const route = `/app/admin/request/${encodeURIComponent(requestId)}?openChat=1`;
+
+    if (adminUid && adminUid !== fromUid) {
+      await sendPushToRecipient({
+        uid: adminUid,
+        role: "admin",
+        title,
+        body,
+        data: {
+          type: "chat_pending",
+          requestId,
+          pendingId,
+          messageKind,
+          fromRole,
+        },
+      });
+      await writeScopedNotificationDoc({
+        uid: adminUid,
+        scope: "users",
+        notificationId: `pending_chat_${requestId}_${pendingId}`,
+        payload: {
+          type: adminType,
+          title,
+          body,
+          requestId,
+          pendingId,
+          actorRole: fromRole,
+          actorUid: fromUid,
+          route,
+        },
+      });
+    }
+
+    const superRows = await listSuperAdminCandidates({
+      excludeUids: [fromUid, adminUid].filter(Boolean),
+    });
+    await Promise.all(
+      superRows.slice(0, 40).map(async (row) => {
+        const uid = safeStr(row?.uid);
+        if (!uid || uid === fromUid) return;
+        await sendPushToRecipient({
+          uid,
+          role: "admin",
+          title,
+          body,
+          data: {
+            type: "chat_pending_super_admin",
+            requestId,
+            pendingId,
+            messageKind,
+            fromRole,
+          },
+        });
+        await writeScopedNotificationDoc({
+          uid,
+          scope: "users",
+          notificationId: `pending_chat_super_${requestId}_${pendingId}_${uid}`,
+          payload: {
+            type: `SUPER_${adminType}`,
+            title,
+            body,
+            requestId,
+            pendingId,
+            actorRole: fromRole,
+            actorUid: fromUid,
+            route,
+          },
+        });
+      })
+    );
+  }
+);
+
 exports.onPublishedMessagePush = onDocumentCreated(
   {
     region: REGION,
@@ -2241,8 +3444,26 @@ exports.onPublishedMessagePush = onDocumentCreated(
     const req = await getRequestDoc(requestId);
     if (!req) return;
 
+    try {
+      await mirrorPublishedChatAttachment({
+        requestId,
+        messageId: mid,
+        requestData: req,
+        messageData: msg,
+      });
+    } catch (error) {
+      logger.warn("chat attachment mirror failed", {
+        requestId,
+        mid,
+        message: safeStr(error?.message || String(error)).slice(0, 220),
+      });
+    }
+
     const fromRole = lower(msg.fromRole);
     const fromUid = safeStr(msg.fromUid);
+    const messageKind = chatMessageKind(msg);
+    const title = chatNotificationTitleByKind(messageKind);
+    const body = chatPreview(msg);
 
     let recipientUid = "";
     let targetRole = "";
@@ -2255,38 +3476,125 @@ exports.onPublishedMessagePush = onDocumentCreated(
       targetRole = "staff";
     }
 
-    if (!recipientUid) {
+    const canNotifyRecipient = Boolean(recipientUid) && recipientUid !== fromUid;
+    if (!canNotifyRecipient) {
       logger.info("Published message push skipped (no recipient)", { requestId, mid, fromRole });
-      return;
+    } else {
+      await sendPushToRecipient({
+        uid: recipientUid,
+        role: targetRole,
+        title,
+        body,
+        data: {
+          type: "chat",
+          requestId,
+          mid,
+          messageKind,
+          fromRole: fromRole || "unknown",
+          targetRole,
+        },
+      });
+
+      await writeScopedNotificationDoc({
+        uid: recipientUid,
+        scope: targetRole === "staff" ? "staff" : "users",
+        notificationId: `chat_${requestId}_${mid}_${targetRole}`,
+        payload: {
+          type: chatNotificationTypeByKind(messageKind, targetRole, fromRole),
+          title,
+          body,
+          requestId,
+          messageId: mid,
+          actorRole: fromRole,
+          actorUid: fromUid,
+          route:
+            targetRole === "staff"
+              ? `/staff/request/${encodeURIComponent(requestId)}?openChat=1`
+              : `/app/request/${encodeURIComponent(requestId)}?openChat=1`,
+        },
+      });
     }
-    if (recipientUid === fromUid) return;
 
-    const body = chatPreview(msg);
+    const sourcePendingId = safeStr(msg?.sourcePendingId);
 
-    await sendPushToRecipient({
-      uid: recipientUid,
-      role: targetRole,
-      title: "New message",
-      body,
-      data: {
-        type: "chat",
-        requestId,
-        mid,
-        fromRole: fromRole || "unknown",
-        targetRole,
-      },
-    });
+    // Assigned admin + super admins receive granular chat notifications from user/staff.
+    // For moderated chats (sourcePendingId exists), admin/super were already notified on pending creation.
+    if ((fromRole === "user" || fromRole === "staff") && !sourcePendingId) {
+      const adminUid = safeStr(req?.ownerLockedAdminUid || req?.currentAdminUid || req?.assignedAdminId);
+      const senderLabel = fromRole === "user" ? "user" : "staff";
+      const adminType = chatNotificationTypeByKind(messageKind, "admin", fromRole);
+      const adminRoute = `/app/admin/request/${encodeURIComponent(requestId)}?openChat=1`;
+      const adminBody = `New ${messageKind} from ${senderLabel}.`;
 
-    // In-app notification is written to users/{uid}/notifications for both user and staff recipients.
-    await writeUserNotificationDoc(recipientUid, `chat_${requestId}_${mid}`, {
-      type: "chat_message",
-      title: "New message",
-      body,
-      requestId,
-      messageId: mid,
-      actorRole: fromRole,
-      actorUid: fromUid,
-    });
+      if (adminUid && adminUid !== fromUid) {
+        await sendPushToRecipient({
+          uid: adminUid,
+          role: "admin",
+          title,
+          body: adminBody,
+          data: {
+            type: "chat_admin",
+            requestId,
+            mid,
+            messageKind,
+            fromRole,
+          },
+        });
+        await writeScopedNotificationDoc({
+          uid: adminUid,
+          scope: "users",
+          notificationId: `chat_admin_${requestId}_${mid}`,
+          payload: {
+            type: adminType,
+            title,
+            body: adminBody,
+            requestId,
+            messageId: mid,
+            actorRole: fromRole,
+            actorUid: fromUid,
+            route: adminRoute,
+          },
+        });
+      }
+
+      const superRows = await listSuperAdminCandidates({
+        excludeUids: [fromUid, adminUid].filter(Boolean),
+      });
+      await Promise.all(
+        superRows.slice(0, 40).map(async (row) => {
+          const superUid = safeStr(row?.uid);
+          if (!superUid || superUid === fromUid) return;
+          await sendPushToRecipient({
+            uid: superUid,
+            role: "admin",
+            title,
+            body: adminBody,
+            data: {
+              type: "chat_super_admin",
+              requestId,
+              mid,
+              messageKind,
+              fromRole,
+            },
+          });
+          await writeScopedNotificationDoc({
+            uid: superUid,
+            scope: "users",
+            notificationId: `chat_super_${requestId}_${mid}_${superUid}`,
+            payload: {
+              type: `SUPER_${adminType}`,
+              title,
+              body: adminBody,
+              requestId,
+              messageId: mid,
+              actorRole: fromRole,
+              actorUid: fromUid,
+              route: adminRoute,
+            },
+          });
+        })
+      );
+    }
   }
 );
 
@@ -2332,42 +3640,271 @@ exports.onRequestStatusPush = onDocumentUpdated(
         requestId,
         reqAfter: after,
         status: afterStatus,
-        pushType: "request_status",
         eventId: event.id,
       });
     }
 
     if (shouldSendStartedWorkPush) {
       const ownerUid = safeStr(after.uid);
-      if (!ownerUid) return;
-
       const label = requestLabel(after);
       const body = label
         ? `We've started working on your request (${label}).`
         : "We've started working on your request.";
 
-      await Promise.all([
-        sendPushToRecipient({
-          uid: ownerUid,
-          role: "user",
-          title: "We started your request",
-          body,
-          data: {
-            type: "request_in_progress",
+      if (ownerUid) {
+        await Promise.all([
+          sendPushToRecipient({
+            uid: ownerUid,
+            role: "user",
+            title: "We started your request",
+            body,
+            data: {
+              type: "request_in_progress",
+              requestId,
+              status: "in_progress",
+              targetRole: "user",
+            },
+          }),
+          writeUserNotificationDoc(ownerUid, `inprogress_${requestId}_${safeStr(event.id)}`, {
+            type: "REQUEST_IN_PROGRESS",
+            title: "Update on your request",
+            body,
             requestId,
             status: "in_progress",
-            targetRole: "user",
+          }),
+        ]);
+      }
+
+      const adminUid = safeStr(after?.ownerLockedAdminUid || after?.currentAdminUid || after?.assignedAdminId);
+      const adminTitle = "Request in progress";
+      const adminBody = label
+        ? `Request moved to in-progress (${label}).`
+        : "A request moved to in-progress.";
+      const adminRoute = `/app/admin/request/${encodeURIComponent(requestId)}`;
+
+      if (adminUid) {
+        await sendPushToRecipient({
+          uid: adminUid,
+          role: "admin",
+          title: adminTitle,
+          body: adminBody,
+          data: {
+            type: "REQUEST_PUT_IN_PROGRESS",
+            requestId,
+            status: "in_progress",
+            targetRole: "admin",
           },
-        }),
-        writeUserNotificationDoc(ownerUid, `inprogress_${requestId}_${safeStr(event.id)}`, {
-          type: "request_status",
-          title: "Update on your request",
+        });
+        await writeScopedNotificationDoc({
+          uid: adminUid,
+          scope: "users",
+          notificationId: `req_inprogress_admin_${requestId}_${safeStr(event.id)}`,
+          payload: {
+            type: "REQUEST_PUT_IN_PROGRESS",
+            title: adminTitle,
+            body: adminBody,
+            requestId,
+            status: "in_progress",
+            route: adminRoute,
+          },
+        });
+      }
+
+      const superRows = await listSuperAdminCandidates({
+        excludeUids: adminUid ? [adminUid] : [],
+      });
+      await Promise.all(
+        superRows.slice(0, 40).map(async (row) => {
+          const superUid = safeStr(row?.uid);
+          if (!superUid) return;
+          await sendPushToRecipient({
+            uid: superUid,
+            role: "admin",
+            title: adminTitle,
+            body: adminBody,
+            data: {
+              type: "SUPER_ADMIN_REQUEST_PUT_IN_PROGRESS",
+              requestId,
+              status: "in_progress",
+              targetRole: "admin",
+            },
+          });
+          await writeScopedNotificationDoc({
+            uid: superUid,
+            scope: "users",
+            notificationId: `req_inprogress_super_${requestId}_${safeStr(event.id)}_${superUid}`,
+            payload: {
+              type: "SUPER_ADMIN_REQUEST_PUT_IN_PROGRESS",
+              title: adminTitle,
+              body: adminBody,
+              requestId,
+              status: "in_progress",
+              route: adminRoute,
+            },
+          });
+        })
+      );
+    }
+  }
+);
+
+exports.onRequestProgressUpdatePush = onDocumentCreated(
+  {
+    region: REGION,
+    document: "serviceRequests/{requestId}/progressUpdates/{updateId}",
+  },
+  async (event) => {
+    const requestId = safeStr(event?.params?.requestId);
+    const updateId = safeStr(event?.params?.updateId);
+    const snap = event.data;
+    if (!requestId || !updateId || !snap?.exists) return;
+
+    if (!(await claimEventLock(event.id, "request_progress_update_push"))) return;
+
+    const progress = snap.data() || {};
+    if (progress?.visibleToUser === false) return;
+
+    const req = await getRequestDoc(requestId);
+    const ownerUid = safeStr(req?.uid);
+    if (!ownerUid) return;
+
+    const title = "Progress updated";
+    const body =
+      safeStr(progress?.content) || "There is a new progress update on your request.";
+    const route = `/app/request/${encodeURIComponent(requestId)}`;
+
+    await Promise.all([
+      sendPushToRecipient({
+        uid: ownerUid,
+        role: "user",
+        title,
+        body,
+        data: {
+          type: "PROGRESS_UPDATED",
+          requestId,
+          updateId,
+          targetRole: "user",
+        },
+      }),
+      writeScopedNotificationDoc({
+        uid: ownerUid,
+        scope: "users",
+        notificationId: `progress_update_${requestId}_${updateId}`,
+        payload: {
+          type: "PROGRESS_UPDATED",
+          title,
           body,
           requestId,
-          status: "in_progress",
-        }),
-      ]);
+          route,
+          actorRole: safeStr(progress?.staffId ? "staff" : progress?.createdBy ? "admin" : ""),
+          actorUid: safeStr(progress?.staffId || progress?.createdBy),
+        },
+      }),
+    ]);
+  }
+);
+
+exports.onPartnerPushSubscriptionExpiringSoonPush = onDocumentUpdated(
+  {
+    region: REGION,
+    document: "partnerPushSubscriptions/{partnerId}",
+  },
+  async (event) => {
+    const partnerId = safeStr(event?.params?.partnerId);
+    const afterSnap = event.data?.after;
+    if (!partnerId || !afterSnap?.exists) return;
+
+    if (!(await claimEventLock(event.id, "push_subscription_expiry_notice"))) return;
+
+    const before = event.data?.before?.exists ? event.data.before.data() || {} : {};
+    const after = afterSnap.data() || {};
+
+    const nowMs = Date.now();
+    const notifyWindowMs = 5 * 24 * 60 * 60 * 1000;
+
+    const afterEndAtMs = resolvePushSubscriptionEndAtMs(after);
+    const beforeEndAtMs = resolvePushSubscriptionEndAtMs(before);
+    const afterStatus = lower(after?.status);
+    const beforeStatus = lower(before?.status);
+
+    const shouldNotifyNow =
+      afterStatus === "active" &&
+      afterEndAtMs > nowMs &&
+      afterEndAtMs - nowMs <= notifyWindowMs;
+
+    if (!shouldNotifyNow) return;
+
+    const wasAlreadyInWindow =
+      beforeStatus === "active" &&
+      beforeEndAtMs > nowMs &&
+      beforeEndAtMs - nowMs <= notifyWindowMs;
+
+    if (wasAlreadyInWindow && beforeEndAtMs === afterEndAtMs) return;
+
+    await notifySuperAdminsPushSubscriptionExpiringSoon({
+      partnerId,
+      partnerName: safeStr(after?.partnerName || partnerId),
+      endAtMs: afterEndAtMs,
+      endDate: safeStr(after?.endDate),
+    });
+  }
+);
+
+exports.sweepPartnerPushSubscriptionExpiringSoonPush = onSchedule(
+  {
+    region: REGION,
+    schedule: "every 12 hours",
+    timeZone: "UTC",
+  },
+  async (event) => {
+    if (!(await claimEventLock(event.id, "push_subscription_expiry_sweep"))) return;
+
+    const nowMs = Date.now();
+    const notifyWindowMs = 5 * 24 * 60 * 60 * 1000;
+    const maxRows = 500;
+    let scanned = 0;
+    let eligible = 0;
+    let notified = 0;
+
+    let snap = null;
+    try {
+      snap = await db
+        .collection("partnerPushSubscriptions")
+        .where("status", "==", "active")
+        .where("endAtMs", ">", nowMs)
+        .where("endAtMs", "<=", nowMs + notifyWindowMs)
+        .limit(maxRows)
+        .get();
+    } catch (error) {
+      logger.warn("push subscription expiry sweep fallback query", {
+        message: safeStr(error?.message || String(error), 220),
+      });
+      snap = await db
+        .collection("partnerPushSubscriptions")
+        .where("status", "==", "active")
+        .limit(maxRows)
+        .get();
     }
+
+    for (const docSnap of snap.docs) {
+      scanned += 1;
+      const row = docSnap.data() || {};
+      const endAtMs = resolvePushSubscriptionEndAtMs(row);
+      if (endAtMs <= nowMs || endAtMs > nowMs + notifyWindowMs) continue;
+      eligible += 1;
+      notified += await notifySuperAdminsPushSubscriptionExpiringSoon({
+        partnerId: safeStr(row?.partnerId || docSnap.id),
+        partnerName: safeStr(row?.partnerName || row?.displayName || docSnap.id),
+        endAtMs,
+        endDate: safeStr(row?.endDate),
+      });
+    }
+
+    logger.info("push subscription expiry sweep completed", {
+      scanned,
+      eligible,
+      notified,
+    });
   }
 );
 
@@ -2684,8 +4221,26 @@ exports.onSelfHelpLinkClick = onDocumentCreated(
 
 Object.assign(
   exports,
+  buildRequestCommandFoundation({
+    functions,
+    admin,
+    db,
+    FieldValue,
+    safeStr,
+    lower,
+    toNum,
+    normalizeRole,
+    getUserDocByUid,
+    autoRouteRequest,
+    writeUserNotificationDoc,
+  })
+);
+
+Object.assign(
+  exports,
   buildFinanceFoundation({
     functions,
+    onDocumentUpdated,
     onSchedule,
     logger,
     db,
@@ -2702,5 +4257,6 @@ Object.assign(
     claimEventLock,
     autoRouteRequest,
     writeManagerAuditLog,
+    writeScopedNotificationDoc,
   })
 );

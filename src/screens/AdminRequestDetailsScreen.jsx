@@ -49,6 +49,7 @@ import {
   REFUND_STATUSES,
   refundStatusUi,
 } from "../services/paymentservice";
+import { subscribeFinanceSettings } from "../services/financeservice";
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 import { subscribeRequestProgressUpdates } from "../services/requestcontinuityservice";
 
@@ -107,6 +108,15 @@ function cleanMoneyInput(value, { allowZero = false } = {}) {
   const rounded = Math.round(num);
   if (allowZero) return Math.max(0, rounded);
   return rounded > 0 ? rounded : 0;
+}
+
+function cleanPercentInput(value, { allowZero = false } = {}) {
+  const num = Number(String(value || "").replace(/[^0-9.]+/g, ""));
+  if (!Number.isFinite(num)) return 0;
+  const rounded = Math.round(num);
+  if (allowZero) return Math.max(0, Math.min(100, rounded));
+  if (rounded < 1) return 0;
+  return Math.min(100, rounded);
 }
 
 function formatMoney(amount, currency = "KES") {
@@ -210,6 +220,7 @@ export default function AdminRequestDetailsScreen() {
   const [roleCtx, setRoleCtx] = useState(null);
   const [routingOptions, setRoutingOptions] = useState(null);
   const [overridePartnerId, setOverridePartnerId] = useState("");
+  const [overridePartnerSeeded, setOverridePartnerSeeded] = useState(false);
   const [overrideTargetAdminUid, setOverrideTargetAdminUid] = useState("");
   const [overrideBusy, setOverrideBusy] = useState(false);
   const [overrideErr, setOverrideErr] = useState("");
@@ -227,6 +238,7 @@ export default function AdminRequestDetailsScreen() {
   const [refundApproveEtaById, setRefundApproveEtaById] = useState({});
   const [refundRejectReasonById, setRefundRejectReasonById] = useState({});
   const [refundDecisionBusyId, setRefundDecisionBusyId] = useState("");
+  const [globalDiscountEnabled, setGlobalDiscountEnabled] = useState(false);
   const [progressUpdates, setProgressUpdates] = useState([]);
   const [progressUpdatesErr, setProgressUpdatesErr] = useState("");
   const [openSections, setOpenSections] = useState(createAdminSectionState);
@@ -288,6 +300,14 @@ export default function AdminRequestDetailsScreen() {
   }, [requestId]);
 
   useEffect(() => {
+    setOverridePartnerSeeded(false);
+    setOverridePartnerId("");
+    setOverrideTargetAdminUid("");
+    setOverrideErr("");
+    setOverrideMsg("");
+  }, [requestId]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
@@ -321,6 +341,15 @@ export default function AdminRequestDetailsScreen() {
       cancelled = true;
     };
   }, [roleCtx?.isSuperAdmin, req]);
+
+  useEffect(() => {
+    if (!roleCtx?.isSuperAdmin || !req || overridePartnerSeeded) return;
+    const preferredPartnerId = safeStr(req?.preferredAgentId);
+    if (preferredPartnerId) {
+      setOverridePartnerId(preferredPartnerId);
+    }
+    setOverridePartnerSeeded(true);
+  }, [overridePartnerSeeded, roleCtx?.isSuperAdmin, req]);
 
   useEffect(() => {
     if (!overridePartnerId) return;
@@ -368,6 +397,20 @@ export default function AdminRequestDetailsScreen() {
 
     return () => unsub();
   }, [requestId]);
+
+  useEffect(() => {
+    const unsub = subscribeFinanceSettings({
+      onData: (settings) => {
+        setGlobalDiscountEnabled(settings?.pricingControls?.globalDiscountEnabled === true);
+      },
+      onError: () => {
+        // Keep existing UI defaults if finance settings read fails.
+      },
+    });
+    return () => {
+      if (typeof unsub === "function") unsub();
+    };
+  }, []);
 
   useEffect(() => {
     if (!requestId) return;
@@ -584,12 +627,18 @@ export default function AdminRequestDetailsScreen() {
 
   const runSuperAdminOverride = async () => {
     if (!req?.id) return;
+    if (!safeStr(overridePartnerId)) {
+      setOverrideErr("Select a partner first.");
+      setOverrideMsg("");
+      return;
+    }
     setOverrideErr("");
     setOverrideMsg("");
     setOverrideBusy(true);
     try {
       const result = await superAdminOverrideRouteRequest({
         requestId: req.id,
+        selectedPartnerId: String(overridePartnerId || "").trim(),
         targetAdminUid: String(overrideTargetAdminUid || "").trim(),
         reason: "super_admin_manual_override_from_request_details",
       });
@@ -662,6 +711,12 @@ export default function AdminRequestDetailsScreen() {
   const getPaymentApprovalDraft = (payment) => {
     const id = safeStr(payment?.id);
     const current = paymentApprovalDraftById?.[id] || {};
+    const defaultRequestDiscount = cleanPercentInput(
+      payment?.breakdown?.requestDiscountPercentage ??
+        payment?.financialSnapshot?.requestDiscountPercentage ??
+        0,
+      { allowZero: true }
+    );
     return {
       paymentLabel:
         current.paymentLabel != null ? String(current.paymentLabel) : safeStr(payment?.paymentLabel),
@@ -680,6 +735,20 @@ export default function AdminRequestDetailsScreen() {
               Number(payment?.breakdown?.serviceFee || payment?.financialSnapshot?.serviceFee || 0) ||
                 ""
             ),
+      platformCutEnabled:
+        current.platformCutEnabled != null
+          ? Boolean(current.platformCutEnabled)
+          : payment?.breakdown?.platformCutEnabled !== false,
+      requestDiscountEnabled:
+        current.requestDiscountEnabled != null
+          ? Boolean(current.requestDiscountEnabled)
+          : defaultRequestDiscount > 0,
+      requestDiscountPercentage:
+        current.requestDiscountPercentage != null
+          ? String(current.requestDiscountPercentage)
+          : defaultRequestDiscount > 0
+            ? String(defaultRequestDiscount)
+            : "",
       note: current.note != null ? String(current.note) : safeStr(payment?.note),
     };
   };
@@ -703,6 +772,11 @@ export default function AdminRequestDetailsScreen() {
     const paymentLabel = safeStr(draft.paymentLabel, 180);
     const officialAmount = cleanMoneyInput(draft.officialAmount);
     const serviceFee = cleanMoneyInput(draft.serviceFee, { allowZero: true });
+    const platformCutEnabled = Boolean(draft.platformCutEnabled);
+    const requestDiscountEnabled = globalDiscountEnabled ? false : Boolean(draft.requestDiscountEnabled);
+    const requestDiscountPercentage = requestDiscountEnabled
+      ? cleanPercentInput(draft.requestDiscountPercentage, { allowZero: false })
+      : 0;
     const note = safeStr(draft.note, 2000);
 
     if (!paymentLabel) {
@@ -717,6 +791,10 @@ export default function AdminRequestDetailsScreen() {
       alert("Applicant note is required.");
       return;
     }
+    if (requestDiscountEnabled && requestDiscountPercentage <= 0) {
+      alert("Enter a valid discount percentage between 1 and 100.");
+      return;
+    }
 
     setPaymentDecisionBusyId(id);
     try {
@@ -726,6 +804,8 @@ export default function AdminRequestDetailsScreen() {
         paymentLabel,
         officialAmount,
         serviceFee,
+        platformCutEnabled,
+        requestDiscountPercentage,
         note,
       });
     } catch (error) {
@@ -888,15 +968,22 @@ export default function AdminRequestDetailsScreen() {
   const validPartners = Array.isArray(routingOptions?.eligiblePartners)
     ? routingOptions.eligiblePartners
     : [];
+  const partnerSelected = Boolean(safeStr(overridePartnerId));
+  const selectedPartnerInOptions = validPartners.some(
+    (partner) => safeStr(partner?.id) === safeStr(overridePartnerId)
+  );
   const validAdmins = (
-    overridePartnerId
+    partnerSelected
       ? validPartners.find((partner) => partner.id === overridePartnerId)?.admins || []
-      : validPartners.flatMap((partner) => (Array.isArray(partner?.admins) ? partner.admins : []))
+      : []
   ).filter((row, index, arr) => {
     const uid = safeStr(row?.uid);
     if (!uid) return false;
     return arr.findIndex((item) => safeStr(item?.uid) === uid) === index;
   });
+  const missingSelectedPartnerLabel = safeStr(
+    req?.preferredAgentName || req?.preferredAgentId || overridePartnerId
+  );
   const currentAssignedPartnerName = safeStr(req?.assignedPartnerName || req?.routingMeta?.assignedPartnerName);
   const currentRoutingStatus = safeStr(req?.routingStatus || req?.routingMeta?.routingStatus || "awaiting_route");
   const unresolvedRoutingReason = safeStr(
@@ -1088,7 +1175,12 @@ export default function AdminRequestDetailsScreen() {
                   disabled={overrideBusy}
                   className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
                 >
-                  <option value="">All valid partners</option>
+                  <option value="">Select partner</option>
+                  {partnerSelected && !selectedPartnerInOptions ? (
+                    <option value={overridePartnerId}>
+                      {missingSelectedPartnerLabel || "Previously selected partner"} (not currently eligible)
+                    </option>
+                  ) : null}
                   {validPartners.map((partner) => (
                     <option key={partner.id} value={partner.id}>
                       {partner.displayName}
@@ -1100,10 +1192,12 @@ export default function AdminRequestDetailsScreen() {
                 <select
                   value={overrideTargetAdminUid}
                   onChange={(e) => setOverrideTargetAdminUid(e.target.value)}
-                  disabled={overrideBusy}
+                  disabled={overrideBusy || !partnerSelected}
                   className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
                 >
-                  <option value="">Auto best route</option>
+                  <option value="">
+                    {partnerSelected ? "Auto best route" : "Select a partner first"}
+                  </option>
                   {validAdmins.map((row) => (
                     <option key={row.uid} value={row.uid}>
                       {`${String(row?.email || "No email")} - ${String(
@@ -1115,7 +1209,7 @@ export default function AdminRequestDetailsScreen() {
                 <button
                   type="button"
                   onClick={runSuperAdminOverride}
-                  disabled={overrideBusy}
+                  disabled={overrideBusy || !partnerSelected}
                   className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
                 >
                   {overrideBusy ?"Applying..." : "Apply override"}
@@ -1123,7 +1217,7 @@ export default function AdminRequestDetailsScreen() {
                 </div>
               </div>
               <div className="mt-2 text-[11px] text-zinc-600 dark:text-zinc-300">
-                Partner list and admin list are filtered to request-compatible routes only.
+                Select a partner first. Admin options and auto-routing are constrained to that partner only.
               </div>
               {overrideErr ?(
                 <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs text-rose-700">
@@ -1219,12 +1313,15 @@ export default function AdminRequestDetailsScreen() {
                             <div>
                               Service fee: {formatMoney(payment.breakdown.serviceFee, payment.currency)}
                             </div>
+                            {Number(payment?.breakdown?.discountAmount || 0) > 0 ? (
+                              <div>
+                                Discount:{" "}
+                                {formatMoney(payment.breakdown.discountAmount, payment.currency)}
+                              </div>
+                            ) : null}
                             <div>
-                              Platform cut:{" "}
+                              Platform addition:{" "}
                               {formatMoney(payment.breakdown.platformCutAmount, payment.currency)}
-                            </div>
-                            <div>
-                              Tax: {formatMoney(payment.breakdown.taxAmount, payment.currency)}
                             </div>
                             <div>
                               Estimated partner payout:{" "}
@@ -1288,6 +1385,63 @@ export default function AdminRequestDetailsScreen() {
                             disabled={isBusy}
                           />
                         </div>
+                        <label className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-200">
+                          <input
+                            type="checkbox"
+                            checked={approvalDraft.platformCutEnabled === true}
+                            onChange={(e) =>
+                              updatePaymentApprovalDraft(payment.id, {
+                                platformCutEnabled: e.target.checked,
+                              })
+                            }
+                            disabled={isBusy}
+                            className="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-400"
+                          />
+                          Apply platform cut for this request
+                        </label>
+                        <label className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-200">
+                          <input
+                            type="checkbox"
+                            checked={
+                              globalDiscountEnabled
+                                ? false
+                                : approvalDraft.requestDiscountEnabled === true
+                            }
+                            onChange={(e) =>
+                              updatePaymentApprovalDraft(payment.id, {
+                                requestDiscountEnabled: e.target.checked,
+                              })
+                            }
+                            disabled={isBusy || globalDiscountEnabled}
+                            className="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-400"
+                          />
+                          Apply per-request discount
+                        </label>
+                        <input
+                          value={approvalDraft.requestDiscountPercentage}
+                          onChange={(e) =>
+                            updatePaymentApprovalDraft(payment.id, {
+                              requestDiscountPercentage: e.target.value,
+                            })
+                          }
+                          placeholder={
+                            globalDiscountEnabled
+                              ? "Global discount is active"
+                              : "Discount % (1-100)"
+                          }
+                          inputMode="numeric"
+                          className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                          disabled={
+                            isBusy ||
+                            globalDiscountEnabled ||
+                            approvalDraft.requestDiscountEnabled !== true
+                          }
+                        />
+                        {globalDiscountEnabled ? (
+                          <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                            Global discount is enabled, so per-request discount is ignored.
+                          </div>
+                        ) : null}
                         <textarea
                           value={approvalDraft.note}
                           onChange={(e) =>

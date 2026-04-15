@@ -5,6 +5,10 @@ import {
   setStoredValue,
   setStoredValueDurable,
 } from "../resume/resumeStorage";
+import {
+  deleteSelfHelpDocumentMirror,
+  mirrorSelfHelpDocumentRecord,
+} from "../services/documentEngineService";
 
 const SCHEMA_VERSION = 3;
 const HISTORY_LIMIT = 14;
@@ -1129,12 +1133,18 @@ export async function saveSelfHelpDocumentRecord(uid, payload) {
   const current = await readState(uid);
   const nextState = buildDocumentSaveState(current, payload);
   const saved = await writeStateDurable(uid, nextState);
+  const mirroredRecord = {
+    ...payload,
+    addedAt: payload?.addedAt || Date.now(),
+    updatedAt: Date.now(),
+  };
   await Promise.all([
     syncStateToCloud(uid, saved),
-    syncDocumentRecordToCloud(uid, {
-      ...payload,
-      addedAt: payload?.addedAt || Date.now(),
-      updatedAt: Date.now(),
+    syncDocumentRecordToCloud(uid, mirroredRecord),
+    mirrorSelfHelpDocumentRecord({
+      uid,
+      record: mirroredRecord,
+      actorUid: uid,
     }),
   ]);
   return saved;
@@ -1149,6 +1159,10 @@ export async function deleteSelfHelpDocumentRecord(uid, payload) {
     ...current,
     documents: current.documents.filter((item) => item.id !== id),
   });
-  await Promise.all([syncStateToCloud(uid, saved), deleteDocumentRecordFromCloud(uid, id)]);
+  await Promise.all([
+    syncStateToCloud(uid, saved),
+    deleteDocumentRecordFromCloud(uid, id),
+    deleteSelfHelpDocumentMirror({ uid, recordId: id }),
+  ]);
   return saved;
 }
