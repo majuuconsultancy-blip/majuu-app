@@ -1,3 +1,5 @@
+import { compressImageFile } from "./imageCompressionService";
+
 function safeStr(value, max = 240) {
   return String(value || "").trim().slice(0, max);
 }
@@ -26,60 +28,6 @@ function inferAttachmentSource(mode = "") {
   return "document_upload";
 }
 
-async function compressImageFile(file, { maxDimension = 1600, quality = 0.82 } = {}) {
-  const sourceFile = file instanceof File ? file : null;
-  if (!sourceFile || typeof window === "undefined") {
-    return {
-      mime: safeStr(file?.type, 120) || "image/jpeg",
-      optimizedBytes: safeNum(file?.size, 0),
-      width: 0,
-      height: 0,
-    };
-  }
-
-  const objectUrl = URL.createObjectURL(sourceFile);
-  try {
-    const img = await new Promise((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => resolve(image);
-      image.onerror = () => reject(new Error("Failed to read image."));
-      image.src = objectUrl;
-    });
-
-    const naturalWidth = Math.max(1, safeNum(img?.naturalWidth || img?.width, 1));
-    const naturalHeight = Math.max(1, safeNum(img?.naturalHeight || img?.height, 1));
-    const scale = Math.min(1, maxDimension / Math.max(naturalWidth, naturalHeight));
-    const targetWidth = Math.max(1, Math.round(naturalWidth * scale));
-    const targetHeight = Math.max(1, Math.round(naturalHeight * scale));
-
-    const canvas = document.createElement("canvas");
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      return {
-        mime: safeStr(file?.type, 120) || "image/jpeg",
-        optimizedBytes: safeNum(file?.size, 0),
-        width: naturalWidth,
-        height: naturalHeight,
-      };
-    }
-
-    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-    const outputMime = "image/jpeg";
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, outputMime, quality));
-    const optimizedBytes = safeNum(blob?.size, safeNum(file?.size, 0));
-    return {
-      mime: outputMime,
-      optimizedBytes,
-      width: targetWidth,
-      height: targetHeight,
-    };
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-}
-
 export async function prepareChatAttachmentFromFile({
   file = null,
   mode = "",
@@ -103,6 +51,7 @@ export async function prepareChatAttachmentFromFile({
     originalBytes: safeNum(file.size, 0),
     width: 0,
     height: 0,
+    uploadBlob: file,
   };
 
   if (modeKey === "scan") {
@@ -111,14 +60,15 @@ export async function prepareChatAttachmentFromFile({
     const scanBaseName = baseName.replace(/\.[a-z0-9]+$/i, "") || "scan_capture";
     return {
       ...baseMeta,
-      name: `${scanBaseName}.pdf`,
-      mime: "application/pdf",
+      name: `${scanBaseName}.jpg`,
+      mime: safeStr(compressed?.mime, 120) || "image/jpeg",
       size: optimizedBytes,
       optimizedBytes,
-      attachmentKind: "document",
+      attachmentKind: "image",
       source: "camera_scan",
       width: safeNum(compressed?.width, 0),
       height: safeNum(compressed?.height, 0),
+      uploadBlob: compressed?.blob || file,
       note:
         safeNum(baseMeta.originalBytes, 0) > optimizedBytes
           ? "scan_capture_optimized"
@@ -143,6 +93,7 @@ export async function prepareChatAttachmentFromFile({
       size: safeNum(compressed?.optimizedBytes, baseMeta.size),
       width: safeNum(compressed?.width, 0),
       height: safeNum(compressed?.height, 0),
+      uploadBlob: compressed?.blob || file,
       note:
         safeNum(baseMeta.originalBytes, 0) > safeNum(compressed?.optimizedBytes, 0)
           ? "optimized_image"
@@ -153,6 +104,7 @@ export async function prepareChatAttachmentFromFile({
   return {
     ...baseMeta,
     mime: baseMeta.mime || "application/octet-stream",
+    uploadBlob: file,
   };
 }
 
@@ -172,7 +124,7 @@ export const CHAT_ATTACHMENT_OPTIONS = Object.freeze({
   },
   scan: {
     key: "scan",
-    label: "Scan to PDF",
+    label: "Scan Document",
     accept: "image/*",
     capture: "environment",
   },

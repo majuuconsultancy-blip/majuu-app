@@ -350,7 +350,6 @@ function normalizePublication(value = {}) {
       documentIntensity: safeString(compareData?.documentIntensity, 140),
       bestFor: safeString(compareData?.bestFor || bestForTags.join(", "), 700),
     },
-    mediaPool: normalizeMediaUrls(source.mediaPool),
     extras: {
       additionalNotes: safeString(extras.additionalNotes, 2200),
       internalNotes: safeString(extras.internalNotes, 2200),
@@ -415,35 +414,6 @@ function resolveTrackDiscoveryNode(countryRow, trackType) {
     toTrackNode(row.trackDiscovery, trackType) ||
     null
   );
-}
-
-function extractAdminMediaPool(countryRow, trackType) {
-  const row = countryRow && typeof countryRow === "object" ? countryRow : null;
-  if (!row) return [];
-
-  const trackNode = resolveTrackDiscoveryNode(row, trackType);
-  const genericPools = [
-    trackNode?.mediaPool,
-    trackNode?.images,
-    toTrackNode(row.discoveryMediaPool, trackType),
-    toTrackNode(row.mediaPool, trackType),
-    toTrackNode(row.trackMediaPool, trackType),
-    row.mediaPool,
-    row.images,
-  ];
-
-  for (const candidate of genericPools) {
-    const normalized = normalizeMediaUrls(candidate);
-    if (normalized.length) return normalized;
-  }
-
-  return [];
-}
-
-function getFeaturedImage(featuredEntry) {
-  const url = safeString(featuredEntry?.imageUrl, 1400);
-  if (!/^https?:\/\//i.test(url)) return "";
-  return url;
 }
 
 function resolveCountryCode({ countryName = "", countryRow = null } = {}) {
@@ -669,16 +639,16 @@ export function buildDiscoveryCountryView({
   const normalizedPublication = normalizePublication(publication);
   const hasPublication =
     publication && typeof publication === "object" && !Array.isArray(publication);
-  const adminPool = extractAdminMediaPool(countryRow, safeTrackType);
-  const featuredImage = getFeaturedImage(featuredEntry);
+  const countryImage = (() => {
+    const url = safeString(countryRow?.imageUrl, 1400);
+    return /^https?:\/\//i.test(url) ? url : "";
+  })();
   const countryPool = getCountryOverridePool(canonicalCountry);
   const trackPool = getTrackMediaFallback(safeTrackType);
 
   const mediaPool = normalizeMediaUrls(
     [
-      ...normalizedPublication.mediaPool,
-      ...adminPool,
-      featuredImage,
+      countryImage,
       ...countryPool,
       ...trackPool,
     ].filter(Boolean),

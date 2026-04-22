@@ -42,6 +42,8 @@ import { db, auth } from "../firebase";
 import { createStaffNotification, createUserNotification } from "./notificationDocs";
 import { mirrorPublishedChatAttachment, mirrorPublishedChatPdf } from "./documentEngineService";
 import { sendMessageCommand } from "./requestcommandservice";
+import { uploadBinaryFile } from "./fileUploadService";
+import { buildChatAttachmentStoragePath } from "./storageContract";
 
 /* -------------------- Paths -------------------- */
 const reqRef = (requestId) => doc(db, "serviceRequests", String(requestId));
@@ -87,6 +89,24 @@ function normalizeAttachmentKind(kind, mime = "") {
   return "document";
 }
 
+function isHttpUrl(url = "") {
+  const value = safeStr(url, 1200);
+  return value.startsWith("http://") || value.startsWith("https://");
+}
+
+function resolveAttachmentUrl(meta = {}) {
+  const candidates = [
+    meta?.externalUrl,
+    meta?.url,
+    meta?.downloadUrl,
+    meta?.fileUrl,
+  ];
+  for (const candidate of candidates) {
+    if (isHttpUrl(candidate)) return safeStr(candidate, 1200);
+  }
+  return "";
+}
+
 function normalizeAttachmentMeta(meta) {
   if (!meta) return null;
   const name = safeStr(meta.name || meta.fileName || meta.filename);
@@ -96,6 +116,17 @@ function normalizeAttachmentMeta(meta) {
   const attachmentKind = normalizeAttachmentKind(meta.attachmentKind || meta.kind, mime);
 
   if (!name) throw new Error("attachmentMeta.name required");
+
+  const externalUrl = resolveAttachmentUrl(meta);
+  const uploadBlob =
+    meta?.uploadBlob instanceof Blob
+      ? meta.uploadBlob
+      : meta?.blob instanceof Blob
+      ? meta.blob
+      : meta?.file instanceof Blob
+      ? meta.file
+      : null;
+
   return {
     name,
     mime: mime || (attachmentKind === "document" ? "application/octet-stream" : "image/jpeg"),
@@ -105,6 +136,17 @@ function normalizeAttachmentMeta(meta) {
     source: safeStr(meta.source || "").toLowerCase(),
     optimizedBytes: Number(meta.optimizedBytes || 0) || 0,
     originalBytes: Number(meta.originalBytes || 0) || 0,
+    externalUrl,
+    url: externalUrl,
+    downloadUrl: externalUrl,
+    fileUrl: externalUrl,
+    storageKind: safeStr(meta.storageKind || "", 40).toLowerCase(),
+    storageBucket: safeStr(meta.storageBucket || meta.bucket || "", 220),
+    storagePath: safeStr(meta.storagePath || meta.path || "", 520),
+    storageGeneration: safeStr(meta.storageGeneration || meta.generation || "", 120),
+    storageChecksum: safeStr(meta.storageChecksum || meta.checksum || "", 120),
+    storageProvider: safeStr(meta.storageProvider || meta.provider || "", 40).toLowerCase(),
+    uploadBlob,
   };
 }
 
@@ -115,6 +157,77 @@ function normalizeLegacyPdfMeta(pdfMeta) {
     ...normalized,
     attachmentKind: normalized.attachmentKind || "document",
     mime: normalized.mime || "application/pdf",
+  };
+}
+
+function toCommandAttachmentMeta(meta = null) {
+  if (!meta || typeof meta !== "object") return null;
+  const normalized = normalizeAttachmentMeta(meta);
+  if (!normalized) return null;
+  const cleanUrl = resolveAttachmentUrl(normalized);
+  return {
+    name: normalized.name,
+    mime: normalized.mime,
+    size: normalized.size,
+    note: normalized.note,
+    attachmentKind: normalized.attachmentKind,
+    source: normalized.source,
+    optimizedBytes: normalized.optimizedBytes,
+    originalBytes: normalized.originalBytes,
+    externalUrl: cleanUrl,
+    storageKind: normalized.storageKind,
+    storageBucket: normalized.storageBucket,
+    storagePath: normalized.storagePath,
+    storageGeneration: normalized.storageGeneration,
+    storageChecksum: normalized.storageChecksum,
+    storageProvider: normalized.storageProvider,
+  };
+}
+
+async function ensureAttachmentStored({
+  requestId,
+  fromRole,
+  attachmentMeta,
+} = {}) {
+  const meta = normalizeAttachmentMeta(attachmentMeta);
+  if (!meta) return null;
+  const existingUrl = resolveAttachmentUrl(meta);
+  if (existingUrl) return meta;
+  if (!(meta.uploadBlob instanceof Blob)) return meta;
+
+  const storagePath = buildChatAttachmentStoragePath({
+    requestId,
+    fromRole,
+    attachmentKind: meta.attachmentKind,
+    fileName: meta.name,
+    contentType: meta.mime,
+  });
+  const upload = await uploadBinaryFile({
+    file: meta.uploadBlob,
+    storagePath,
+    contentType: meta.mime,
+    customMetadata: {
+      requestId: safeStr(requestId, 140),
+      source: "chat",
+      fromRole: safeStr(fromRole, 40),
+      attachmentKind: safeStr(meta.attachmentKind, 40),
+    },
+  });
+  return {
+    ...meta,
+    size: Number(upload?.sizeBytes || meta.size || 0) || 0,
+    mime: safeStr(upload?.contentType, 120) || meta.mime,
+    externalUrl: "",
+    url: "",
+    downloadUrl: "",
+    fileUrl: "",
+    storageKind: safeStr(upload?.storageKind || "bucket", 40).toLowerCase(),
+    storageBucket: safeStr(upload?.bucket, 220),
+    storagePath: safeStr(upload?.path, 520),
+    storageGeneration: safeStr(upload?.generation, 120),
+    storageChecksum: safeStr(upload?.checksum, 120),
+    storageProvider: safeStr(upload?.provider, 40).toLowerCase(),
+    uploadBlob: null,
   };
 }
 
@@ -241,10 +354,15 @@ export async function sendPendingAttachment({
   const rid = safeStr(requestId);
   const fr = normalizeRole(fromRole);
   const tr = normalizeRole(toRole);
-  const meta = normalizeAttachmentMeta(attachmentMeta);
+  if (!rid) throw new Error("requestId required");
+  const baseMeta = normalizeAttachmentMeta(attachmentMeta);
+  const meta = await ensureAttachmentStored({
+    requestId: rid,
+    fromRole: fr,
+    attachmentMeta: baseMeta,
+  });
   const msgType = mapAttachmentType(meta, typeHint);
 
-  if (!rid) throw new Error("requestId required");
   if (!meta) throw new Error("attachmentMeta required");
   if (fr === "admin") throw new Error("Admin should publish directly, not pending");
   if (tr === "admin") throw new Error("toRole cannot be admin");
@@ -253,8 +371,8 @@ export async function sendPendingAttachment({
     requestId: rid,
     toRole: tr,
     type: msgType,
-    attachmentMeta: meta,
-    pdfMeta: meta,
+    attachmentMeta: toCommandAttachmentMeta(meta),
+    pdfMeta: toCommandAttachmentMeta(meta),
     actorRole: fr === "staff" ? "staff" : "user",
   });
   if (!result?.ok) {
@@ -310,9 +428,14 @@ export async function sendPendingBundle({
   const tr = normalizeRole(toRole);
 
   const msg = safeStr(text);
-  const meta = normalizeAttachmentMeta(attachmentMeta || pdfMeta);
-
   if (!rid) throw new Error("requestId required");
+  const normalizedSourceMeta = normalizeAttachmentMeta(attachmentMeta || pdfMeta);
+  const meta = await ensureAttachmentStored({
+    requestId: rid,
+    fromRole: fr,
+    attachmentMeta: normalizedSourceMeta,
+  });
+
   if (fr === "admin") throw new Error("Admin should publish directly, not pending");
   if (tr === "admin") throw new Error("toRole cannot be admin");
   if (!msg && !meta) throw new Error("Bundle is empty (needs text and/or attachment)");
@@ -322,8 +445,8 @@ export async function sendPendingBundle({
     toRole: tr,
     type: "bundle",
     text: msg,
-    attachmentMeta: meta,
-    pdfMeta: meta,
+    attachmentMeta: toCommandAttachmentMeta(meta),
+    pdfMeta: toCommandAttachmentMeta(meta),
     actorRole: fr === "staff" ? "staff" : "user",
   });
   if (!result?.ok) {
@@ -496,7 +619,7 @@ export async function adminApprovePending({
       sourceChannel: "chat_approved_message",
     });
   }
-  // Notification fan-out is handled by Cloud Functions on message publish.
+  // Notification fan-out is written through the notification docs service.
   return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
 }
 
@@ -664,10 +787,15 @@ export async function adminSendAttachmentDirect({
   mustUser();
   const rid = safeStr(requestId);
   const tr = normalizeRole(toRole);
-  const meta = normalizeAttachmentMeta(attachmentMeta);
+  if (!rid) throw new Error("requestId required");
+  const inputMeta = normalizeAttachmentMeta(attachmentMeta);
+  const meta = await ensureAttachmentStored({
+    requestId: rid,
+    fromRole: "admin",
+    attachmentMeta: inputMeta,
+  });
   const msgType = mapAttachmentType(meta, typeHint);
 
-  if (!rid) throw new Error("requestId required");
   if (!meta) throw new Error("attachmentMeta required");
   if (tr === "admin") throw new Error("toRole cannot be admin");
 
@@ -675,8 +803,8 @@ export async function adminSendAttachmentDirect({
     requestId: rid,
     toRole: tr,
     type: msgType,
-    attachmentMeta: meta,
-    pdfMeta: meta,
+    attachmentMeta: toCommandAttachmentMeta(meta),
+    pdfMeta: toCommandAttachmentMeta(meta),
     actorRole: "admin",
   });
   if (!commandResult?.ok) throw new Error("Failed to send message.");
@@ -710,9 +838,14 @@ export async function adminSendBundleDirect({
   const tr = normalizeRole(toRole);
 
   const msg = safeStr(text);
-  const meta = normalizeAttachmentMeta(pdfMeta);
-
   if (!rid) throw new Error("requestId required");
+  const sourceMeta = normalizeAttachmentMeta(pdfMeta);
+  const meta = await ensureAttachmentStored({
+    requestId: rid,
+    fromRole: "admin",
+    attachmentMeta: sourceMeta,
+  });
+
   if (tr === "admin") throw new Error("toRole cannot be admin");
   if (!msg && !meta) throw new Error("Bundle is empty (needs text and/or pdf)");
 
@@ -721,8 +854,8 @@ export async function adminSendBundleDirect({
     toRole: tr,
     type: "bundle",
     text: msg,
-    attachmentMeta: meta,
-    pdfMeta: meta,
+    attachmentMeta: toCommandAttachmentMeta(meta),
+    pdfMeta: toCommandAttachmentMeta(meta),
     actorRole: "admin",
   });
   if (!commandResult?.ok) throw new Error("Failed to send message.");

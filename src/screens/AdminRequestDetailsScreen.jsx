@@ -52,6 +52,10 @@ import {
 import { subscribeFinanceSettings } from "../services/financeservice";
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 import { subscribeRequestProgressUpdates } from "../services/requestcontinuityservice";
+import {
+  splitRequestDocumentsForLegacyViews,
+  subscribeRequestDocumentContext,
+} from "../services/documentEngineService";
 
 /* ---------- UI helpers ---------- */
 function pill(status) {
@@ -241,10 +245,25 @@ export default function AdminRequestDetailsScreen() {
   const [globalDiscountEnabled, setGlobalDiscountEnabled] = useState(false);
   const [progressUpdates, setProgressUpdates] = useState([]);
   const [progressUpdatesErr, setProgressUpdatesErr] = useState("");
+  const [canonicalDocRows, setCanonicalDocRows] = useState([]);
+  const [canonicalDocErr, setCanonicalDocErr] = useState("");
+  const [canonicalDocRequestId, setCanonicalDocRequestId] = useState("");
   const [openSections, setOpenSections] = useState(createAdminSectionState);
   const unreadRequestState = useNotifsV2Store(
     (s) => s.unreadByRequest?.[String(requestId || "").trim()] || EMPTY_REQUEST_UNREAD_STATE
   );
+  const resolvedRequestId = safeStr(requestId);
+  const hasCanonicalDocContext = canonicalDocRequestId === resolvedRequestId;
+  const canonicalDocSplit = useMemo(
+    () =>
+      splitRequestDocumentsForLegacyViews(hasCanonicalDocContext ? canonicalDocRows : []),
+    [canonicalDocRows, hasCanonicalDocContext]
+  );
+  const canonicalAttachments = canonicalDocSplit.attachments;
+  const canonicalDocErrForRequest = hasCanonicalDocContext ? canonicalDocErr : "";
+  const canonicalAttachmentsLoading =
+    Boolean(resolvedRequestId) && !hasCanonicalDocContext && !canonicalDocErrForRequest;
+  const canonicalAttachmentsError = canonicalDocErrForRequest;
 
   const status = String(req?.status || "new").toLowerCase();
   const statusPill = useMemo(() => pill(status), [status]);
@@ -487,6 +506,27 @@ export default function AdminRequestDetailsScreen() {
 
     return () => unsub?.();
   }, [requestId]);
+
+  useEffect(() => {
+    if (!resolvedRequestId) return undefined;
+
+    const unsub = subscribeRequestDocumentContext({
+      requestId: resolvedRequestId,
+      viewerRole: "admin",
+      onData: (rows) => {
+        setCanonicalDocRequestId(resolvedRequestId);
+        setCanonicalDocRows(Array.isArray(rows) ? rows : []);
+        setCanonicalDocErr("");
+      },
+      onError: (error) => {
+        console.error("admin request details canonical docs error:", error);
+        setCanonicalDocRequestId(resolvedRequestId);
+        setCanonicalDocErr(error?.message || "Failed to load unified request documents.");
+      },
+    });
+
+    return () => unsub?.();
+  }, [resolvedRequestId]);
 
   // ✅ live drafts list (adminFileDrafts)
   useEffect(() => {
@@ -1713,6 +1753,9 @@ export default function AdminRequestDetailsScreen() {
               requestId={requestId}
               title="Document fields"
               viewerRole="admin"
+              attachments={canonicalAttachments}
+              attachmentsLoading={canonicalAttachmentsLoading}
+              attachmentsError={canonicalAttachmentsError}
             />
             <RequestExtraDetailsSection
               request={req}

@@ -6,11 +6,9 @@ import {
   orderBy,
   query,
 } from "firebase/firestore";
-import { getFunctions, httpsCallable } from "firebase/functions";
 
 import { db } from "../firebase";
-
-const functions = getFunctions(undefined, "us-central1");
+import { invokeFinanceAction } from "./apiService";
 
 export const FINANCE_SETTINGS_COLLECTION = "financeSettings";
 export const FINANCE_SETTINGS_DOC = "global";
@@ -109,8 +107,7 @@ function normalizeProviderCatalog(input = {}) {
 }
 
 function callFinance(name, payload = {}) {
-  const callable = httpsCallable(functions, name);
-  return callable(payload).then((result) => result?.data ?? null);
+  return invokeFinanceAction(name, payload);
 }
 
 export function defaultFinanceSettings() {

@@ -13,6 +13,7 @@ import {
   enableIndexedDbPersistence,
   CACHE_SIZE_UNLIMITED,
 } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCcWaFmHj10rbJXDmOD-IBCzX6pGQAbtUQ",
@@ -56,6 +57,8 @@ export const authPersistenceReady = (async () => {
 export const db = initializeFirestore(app, {
   cacheSizeBytes: CACHE_SIZE_UNLIMITED,
 });
+
+export const storage = getStorage(app);
 
 // ✅ Offline-friendly Firestore persistence (IndexedDB)
 enableIndexedDbPersistence(db).catch((err) => {

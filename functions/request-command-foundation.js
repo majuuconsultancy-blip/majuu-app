@@ -1286,6 +1286,31 @@ module.exports = function buildRequestCommandFoundation({
       if (attachmentKindRaw === "photo") attachmentKind = "photo";
       else if (attachmentKindRaw === "image") attachmentKind = "image";
       else if (mime.startsWith("image/")) attachmentKind = "image";
+      const resolveExternalUrl = (input) => {
+        const candidates = [
+          input?.externalUrl,
+          input?.url,
+          input?.downloadUrl,
+          input?.fileUrl,
+        ];
+        for (const candidate of candidates) {
+          const clean = safeStr(candidate, 1200);
+          if (clean.startsWith("http://") || clean.startsWith("https://")) return clean;
+        }
+        return "";
+      };
+      const externalUrl = resolveExternalUrl(value);
+      const storageBucket = safeStr(value?.storageBucket || value?.bucket || value?.storage?.bucket, 220);
+      const storagePath = safeStr(value?.storagePath || value?.path || value?.storage?.path, 520);
+      const rawStorageKind = safeStr(value?.storageKind || value?.storage?.kind, 30).toLowerCase();
+      const storageKind =
+        rawStorageKind === "bucket" || rawStorageKind === "external" || rawStorageKind === "meta"
+          ? rawStorageKind
+          : storagePath || storageBucket
+          ? "bucket"
+          : externalUrl
+          ? "external"
+          : "";
       return {
         name,
         mime: mime || (attachmentKind === "document" ? "application/octet-stream" : "image/jpeg"),
@@ -1295,6 +1320,21 @@ module.exports = function buildRequestCommandFoundation({
         source: safeStr(value?.source, 40).toLowerCase(),
         optimizedBytes: Math.max(0, toNum(value?.optimizedBytes, 0)),
         originalBytes: Math.max(0, toNum(value?.originalBytes, 0)),
+        externalUrl,
+        url: externalUrl,
+        downloadUrl: externalUrl,
+        fileUrl: externalUrl,
+        storageKind,
+        storageBucket,
+        storagePath,
+        storageGeneration: safeStr(
+          value?.storageGeneration || value?.generation || value?.storage?.generation,
+          120
+        ),
+        storageChecksum: safeStr(
+          value?.storageChecksum || value?.checksum || value?.storage?.checksum,
+          120
+        ),
       };
     };
 

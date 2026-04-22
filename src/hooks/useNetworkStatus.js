@@ -3,60 +3,124 @@ import { Network } from "@capacitor/network";
 
 /**
  * Robust network status hook.
- * Uses Capacitor Network (native) + Browser Fallback + Ping Check.
+ * Uses Capacitor Network + browser fallback + lightweight probes.
  */
 export function useNetworkStatus() {
-  const [online, setOnline] = useState(navigator.onLine);
+  const [online, setOnline] = useState(() => {
+    if (typeof navigator === "undefined") return true;
+    return navigator.onLine;
+  });
 
-  const checkConnectivity = useCallback(async () => {
+  const probe = useCallback(async (url, options = {}) => {
     try {
-      const status = await Network.getStatus();
-      if (!status.connected) return false;
-
-      // If OS says connected, verify with a tiny ping to ensure no "zombie" connection (DNS/Captive portal issues)
-      // We use a cache-busting fetch to the favicon or a tiny resource
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
-      
-      const response = await fetch("/favicon.ico", { 
-        method: "HEAD", 
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const response = await fetch(url, {
         cache: "no-store",
-        signal: controller.signal 
+        signal: controller.signal,
+        ...options,
       });
       clearTimeout(timeoutId);
-      return response.ok;
-    } catch (e) {
+
+      // `no-cors` responses are opaque with status 0; resolved fetch still means network path exists.
+      return response.ok || response.type === "opaque";
+    } catch {
       return false;
     }
   }, []);
 
-  useEffect(() => {
-    // 1. Initial State Sync
-    Network.getStatus().then(async (status) => {
-      if (status.connected) {
-        // Double check if we actually have internet
-        const actuallyOnline = await checkConnectivity();
-        setOnline(actuallyOnline);
-      } else {
-        setOnline(false);
-      }
-    });
+  const checkConnectivity = useCallback(async () => {
+    const browserOnline = typeof navigator === "undefined" ? true : navigator.onLine;
 
-    // 2. Native Listener
-    const listener = Network.addListener("networkStatusChange", async (status) => {
-      if (status.connected) {
-        // Transitioning UP -> Verify it's real
-        const actuallyOnline = await checkConnectivity();
-        setOnline(actuallyOnline);
-      } else {
-        setOnline(false);
+    let nativeConnected = browserOnline;
+    try {
+      const status = await Network.getStatus();
+      if (typeof status?.connected === "boolean") {
+        nativeConnected = status.connected;
       }
-    });
+    } catch {
+      // Capacitor plugin may be unavailable in some web contexts; browser fallback handles this.
+    }
 
-    // 3. Browser Fallback (safeguard)
-    const onUp = async () => {
+    if (!browserOnline && !nativeConnected) {
+      return false;
+    }
+
+    // 1) Same-origin probe (works for normal app hosting)
+    const localOk = await probe(`/vite.svg?t=${Date.now()}`, { method: "GET" });
+    if (localOk) return true;
+
+    // 2) External tiny endpoint (helps detect captive or stale local caches)
+    const externalOk = await probe(`https://www.gstatic.com/generate_204?t=${Date.now()}`, {
+      method: "GET",
+      mode: "no-cors",
+    });
+    if (externalOk) return true;
+
+    // Be permissive if platform/network APIs indicate connectivity.
+    return browserOnline || nativeConnected;
+  }, [probe]);
+
+  const syncOnlineFromStatus = useCallback(
+    async (status) => {
+      const platformConnected =
+        typeof status?.connected === "boolean"
+          ? status.connected
+          : typeof navigator === "undefined"
+          ? true
+          : navigator.onLine;
+
+      if (!platformConnected) {
+        setOnline(false);
+        return;
+      }
+
       const actuallyOnline = await checkConnectivity();
       setOnline(actuallyOnline);
+    },
+    [checkConnectivity]
+  );
+
+  useEffect(() => {
+    let disposed = false;
+    let listenerHandle = null;
+
+    const syncInitial = async () => {
+      try {
+        const status = await Network.getStatus();
+        if (!disposed) {
+          await syncOnlineFromStatus(status);
+        }
+      } catch {
+        if (disposed) return;
+        const fallbackOnline = typeof navigator === "undefined" ? true : navigator.onLine;
+        if (!fallbackOnline) {
+          setOnline(false);
+          return;
+        }
+        const actuallyOnline = await checkConnectivity();
+        if (!disposed) setOnline(actuallyOnline);
+      }
+    };
+
+    void syncInitial();
+
+    const attachListener = async () => {
+      try {
+        listenerHandle = await Network.addListener("networkStatusChange", (status) => {
+          void syncOnlineFromStatus(status);
+        });
+      } catch {
+        listenerHandle = null;
+      }
+    };
+
+    void attachListener();
+
+    // Browser fallback listeners
+    const onUp = async () => {
+      const actuallyOnline = await checkConnectivity();
+      if (!disposed) setOnline(actuallyOnline);
     };
     const onDown = () => setOnline(false);
 
@@ -64,11 +128,12 @@ export function useNetworkStatus() {
     window.addEventListener("offline", onDown);
 
     return () => {
-      listener.remove();
+      disposed = true;
+      if (listenerHandle?.remove) listenerHandle.remove();
       window.removeEventListener("online", onUp);
       window.removeEventListener("offline", onDown);
     };
-  }, [checkConnectivity]);
+  }, [checkConnectivity, syncOnlineFromStatus]);
 
   return { online, checkConnectivity };
-}
+}

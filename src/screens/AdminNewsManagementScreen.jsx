@@ -4,7 +4,6 @@ import {
   Compass,
   Eye,
   EyeOff,
-  FileImage,
   ListChecks,
   Newspaper,
   Pencil,
@@ -97,20 +96,6 @@ function sourceTone(sourceType) {
     return "border-sky-200 bg-sky-50/80 text-sky-700 dark:border-sky-900/40 dark:bg-sky-950/25 dark:text-sky-200";
   }
   return "border-zinc-200 bg-zinc-50/80 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300";
-}
-
-function cleanMediaPoolForSave(values = []) {
-  const seen = new Set();
-  const out = [];
-  (Array.isArray(values) ? values : []).forEach((item) => {
-    const url = safeString(item, 1400);
-    if (!/^https?:\/\//i.test(url)) return;
-    const key = url.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push(url);
-  });
-  return out.slice(0, 20);
 }
 
 function parseTagInput(value, { maxItems = 12, maxLength = 84 } = {}) {
@@ -795,30 +780,6 @@ function DiscoveryPublicationTab() {
     }));
   };
 
-  const updateMediaRow = (index, nextValue) => {
-    setDraft((current) => {
-      const rows = [...(Array.isArray(current?.mediaPool) ? current.mediaPool : [])];
-      rows[index] = nextValue;
-      return { ...current, mediaPool: rows };
-    });
-  };
-
-  const addMediaRow = () => {
-    setDraft((current) => ({
-      ...current,
-      mediaPool: [...(Array.isArray(current?.mediaPool) ? current.mediaPool : []), ""],
-    }));
-  };
-
-  const removeMediaRow = (index) => {
-    setDraft((current) => ({
-      ...current,
-      mediaPool: (Array.isArray(current?.mediaPool) ? current.mediaPool : []).filter(
-        (_, itemIndex) => itemIndex !== index
-      ),
-    }));
-  };
-
   const openCountryEditor = (country) => {
     const existing = byCountryKey.get(toCountryLookupKey(country)) || null;
     setSelectedCountry(country);
@@ -856,7 +817,6 @@ function DiscoveryPublicationTab() {
         ...draft,
         trackType: activeTrack,
         country: resolvedCountry,
-        mediaPool: cleanMediaPoolForSave(draft?.mediaPool),
       });
       setMsg(`Discovery publication saved for ${resolvedCountry}.`);
       closeCountryEditor();
@@ -877,7 +837,6 @@ function DiscoveryPublicationTab() {
   const sectionTabs = [
     { key: "overview", label: "Overview", icon: Sparkles },
     { key: "compare", label: "Compare Data", icon: ListChecks },
-    { key: "media", label: "Media", icon: FileImage },
     { key: "extras", label: "Extras", icon: Compass },
   ];
 
@@ -1390,70 +1349,6 @@ function DiscoveryPublicationTab() {
                   placeholder="Who benefits most from this destination in this track"
                 />
               </label>
-            </div>
-          ) : null}
-
-          {sectionTab === "media" ? (
-            <div className="mt-4 grid gap-3">
-              <div className="rounded-2xl border border-zinc-200 bg-white/75 p-3 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-300">
-                Media Pool supports many URLs. The user Discovery screen will auto-pick and shuffle visuals from this pool.
-              </div>
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={addMediaRow}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/85 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200"
-                >
-                  <AppIcon icon={Plus} size={ICON_SM} />
-                  Add Image URL
-                </button>
-              </div>
-              {!draft?.mediaPool?.length ? (
-                <div className="rounded-2xl border border-dashed border-zinc-200 bg-white/75 px-4 py-5 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/45 dark:text-zinc-300">
-                  No image URLs added yet.
-                </div>
-              ) : (
-                <div className="grid gap-2">
-                  {draft.mediaPool.map((url, index) => {
-                    const safeUrl = safeString(url, 1400);
-                    const showPreview = /^https?:\/\//i.test(safeUrl);
-                    return (
-                      <div
-                        key={`media-row-${index}`}
-                        className="grid gap-2 rounded-2xl border border-zinc-200 bg-white/85 p-3 dark:border-zinc-700 dark:bg-zinc-900/70"
-                      >
-                        <div className="flex items-center gap-2">
-                          <input
-                            className={inputClass}
-                            value={url}
-                            onChange={(event) => updateMediaRow(index, event.target.value)}
-                            placeholder="https://..."
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeMediaRow(index)}
-                            className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50/85 text-rose-700 transition hover:bg-rose-100 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200"
-                            aria-label={`Remove media row ${index + 1}`}
-                          >
-                            <AppIcon icon={Trash2} size={ICON_SM} />
-                          </button>
-                        </div>
-                        {showPreview ? (
-                          <div className="h-[7rem] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800">
-                            <img
-                              src={safeUrl}
-                              alt=""
-                              loading="lazy"
-                              decoding="async"
-                              className="h-full w-full object-cover"
-                            />
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
           ) : null}
 

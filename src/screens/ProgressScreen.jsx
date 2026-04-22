@@ -29,8 +29,10 @@ import { useNotifsV2Store } from "../services/notifsV2Store";
 import { clearActiveProcess, getUserState } from "../services/userservice";
 import { getMyApplications } from "../services/progressservice";
 import { deleteOwnRequestDeep } from "../services/requestcommandservice";
+import { subscribeRequestProgressUpdates } from "../services/requestcontinuityservice";
 import { getResumeTarget } from "../resume/resumeEngine";
 import { clearDummyPaymentDraft, clearDummyPaymentState } from "../utils/dummyPayment";
+import { getRequestWorkProgress } from "../utils/requestWorkProgress";
 import {
   buildFullPackageHubPath,
   toFullPackageItemKey,
@@ -225,6 +227,55 @@ function formatCreatedAt(createdAt) {
   })}`;
 }
 
+function toMillis(value) {
+  if (value == null) return 0;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value?.toMillis === "function") {
+    try {
+      return Number(value.toMillis()) || 0;
+    } catch {
+      return 0;
+    }
+  }
+  if (typeof value?.seconds === "number") return Number(value.seconds) * 1000;
+  if (value instanceof Date) return value.getTime();
+  const parsed = Date.parse(String(value || ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function clampPercent(value, fallback = 0) {
+  const next = Math.round(Number(value));
+  if (!Number.isFinite(next)) return fallback;
+  return Math.max(0, Math.min(100, next));
+}
+
+function requestSortMs(request) {
+  return Math.max(
+    toMillis(request?.updatedAtMs),
+    toMillis(request?.updatedAt),
+    toMillis(request?.createdAtMs),
+    toMillis(request?.createdAt),
+    toMillis(request?.staffProgressUpdatedAtMs),
+    toMillis(request?.staffProgressUpdatedAt)
+  );
+}
+
+function toRequestDisplayName(request) {
+  const serviceName = safeString(request?.serviceName, 160);
+  if (serviceName) return serviceName;
+
+  const requestType = safeString(request?.requestType, 120).toLowerCase();
+  if (requestType === "full") return "Full Package";
+  if (requestType) {
+    return requestType
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+  return "Request";
+}
+
 function pinKey(uid) {
   return `pinned_requests_${String(uid || "")}`;
 }
@@ -303,14 +354,6 @@ function workflowDraftTitle(draft) {
   const flowFamily = safeString(draft?.flowFamily, 80).toLowerCase();
   if (flowFamily === "full_package") return "Full Package";
   return safeString(draft?.serviceName, 160) || "Unfinished request";
-}
-
-function workflowDraftSubtitle(draft) {
-  const flowFamily = safeString(draft?.flowFamily, 80).toLowerCase();
-  if (flowFamily === "full_package") {
-    return `Setup Â· ${formatTrackCountry(draft?.track, draft?.country)}`;
-  }
-  return formatTrackCountry(draft?.track, draft?.country);
 }
 
 function matchesSelfHelpSearch(item, query) {
@@ -606,7 +649,11 @@ export default function ProgressScreen() {
 
   const unreadNotifCount = useNotifsV2Store((store) => Number(store.unreadNotifCount || 0) || 0);
   const unreadByRequest = useNotifsV2Store((store) => store.unreadByRequest || {});
+  const notifications = useNotifsV2Store((store) =>
+    Array.isArray(store.notifications) ? store.notifications : []
+  );
   const { countryMap } = useCountryDirectory();
+  const [latestRequestProgressRows, setLatestRequestProgressRows] = useState([]);
 
   useEffect(() => {
     pinnedIdsRef.current = pinnedIds;
@@ -786,7 +833,6 @@ export default function ProgressScreen() {
     };
   }, [navigate]);
 
-  const hasActive = Boolean(state?.hasActiveProcess);
   const activeTrack = safeString(state?.activeTrack, 20).toLowerCase();
   const activeCountry = safeString(state?.activeCountry, 80);
   const activeHelpType = safeString(state?.activeHelpType, 20).toLowerCase();
@@ -813,6 +859,123 @@ export default function ProgressScreen() {
     const rest = requests.filter((row) => !pinSet.has(String(row.id)));
     return [...pinned, ...rest];
   }, [pinnedIds, requests]);
+
+  const latestRequest = useMemo(() => {
+    const rows = Array.isArray(requests) ? [...requests] : [];
+    rows.sort((left, right) => requestSortMs(right) - requestSortMs(left));
+    return rows[0] || null;
+  }, [requests]);
+
+  const latestRequestId = useMemo(
+    () => safeString(latestRequest?.id, 180),
+    [latestRequest?.id]
+  );
+
+  useEffect(() => {
+    setLatestRequestProgressRows([]);
+    if (!latestRequestId) return undefined;
+
+    return subscribeRequestProgressUpdates({
+      requestId: latestRequestId,
+      viewerRole: "user",
+      onData: (rows) => {
+        const ordered = [...(Array.isArray(rows) ? rows : [])].sort(
+          (left, right) => Number(right?.createdAtMs || 0) - Number(left?.createdAtMs || 0)
+        );
+        setLatestRequestProgressRows(ordered);
+      },
+      onError: (error) => {
+        console.error("progress latest request updates failed:", error);
+        setLatestRequestProgressRows([]);
+      },
+    });
+  }, [latestRequestId]);
+
+  const latestRequestState = useMemo(
+    () => (latestRequest ? getUserRequestState(latestRequest) : ""),
+    [latestRequest]
+  );
+
+  const latestRequestStatusLabel = useMemo(() => {
+    if (!latestRequestState) return "Submitted";
+    if (latestRequestState === "completed") return "Completed";
+    if (latestRequestState === "rejected") return "Needs correction";
+    if (latestRequestState === "in_progress") return "In progress";
+    return "Submitted";
+  }, [latestRequestState]);
+
+  const latestRequestSummary = useMemo(() => {
+    if (!latestRequest) {
+      return { percent: 0, badgeLabel: "0%", helperText: "", updatedLabel: "" };
+    }
+
+    const workProgress = getRequestWorkProgress(latestRequest);
+    const updates = Array.isArray(latestRequestProgressRows)
+      ? latestRequestProgressRows.filter((row) => row && row.visibleToUser !== false)
+      : [];
+    const latestUpdate = updates[0] || null;
+    const updatesWithPercent = updates.filter((row) =>
+      Number.isFinite(Number(row?.progressPercent))
+    );
+    const latestPercentUpdate = updatesWithPercent[0] || null;
+
+    let percent = null;
+    if (latestPercentUpdate) {
+      percent = clampPercent(latestPercentUpdate.progressPercent, 0);
+    } else if (Number.isFinite(Number(workProgress?.progressPercent))) {
+      percent = clampPercent(workProgress.progressPercent, 0);
+    }
+
+    if (percent == null) {
+      if (latestRequestState === "completed") percent = 100;
+      else if (latestRequestState === "rejected") percent = 35;
+      else if (latestRequestState === "in_progress" || workProgress?.isStarted) percent = 40;
+      else percent = 10;
+    }
+
+    const helperText =
+      safeString(latestUpdate?.content, 220) ||
+      (latestRequestState === "completed"
+        ? "Request completed successfully."
+        : latestRequestState === "rejected"
+        ? "Staff requested changes before the next step."
+        : latestRequestState === "in_progress" || workProgress?.isStarted
+        ? "Documents received and under review."
+        : "Request received and waiting for staff review.");
+
+    const updatedMs = Math.max(
+      Number(latestUpdate?.createdAtMs || 0) || 0,
+      requestSortMs(latestRequest)
+    );
+    const updatedLabel = formatRelativeTime(updatedMs) || formatCreatedAt(updatedMs);
+
+    return {
+      percent,
+      badgeLabel: percent >= 100 ? "Complete" : `${percent}%`,
+      helperText,
+      updatedLabel,
+    };
+  }, [latestRequest, latestRequestProgressRows, latestRequestState]);
+
+  const latestNotificationSummary = useMemo(() => {
+    const unreadFirst = notifications.find((item) => !item?.readAt) || null;
+    const row = unreadFirst || notifications[0] || null;
+    if (!row) return null;
+
+    const type = safeString(row?.type, 80).toUpperCase();
+    const title = safeString(row?.title, 140) || "New update";
+    const body = safeString(row?.body, 220) || "Review your latest notification.";
+    const isMessage = type.includes("MESSAGE");
+    const isPayment = type.includes("PAYMENT") || Boolean(row?.paymentId);
+
+    if (!isMessage && !isPayment) return null;
+
+    return {
+      title,
+      body,
+      cta: "View",
+    };
+  }, [notifications]);
 
   useEffect(() => {
     setVisibleCount(REQUESTS_INITIAL_RENDER);
@@ -914,6 +1077,18 @@ export default function ProgressScreen() {
     }
 
     navigate("/dashboard", { replace: true });
+  };
+
+  const continueCurrentProcess = () => {
+    if (activeHelpType === "self" && continueSelfHelpTarget) {
+      goToContinueSelfHelp();
+      return;
+    }
+    if (latestRequestId) {
+      navigate(`/app/request/${latestRequestId}`);
+      return;
+    }
+    void goContinue();
   };
 
   const continueWorkflowDraft = async (draft) => {
@@ -1135,81 +1310,90 @@ export default function ProgressScreen() {
             <button
               type="button"
               onClick={() => navigate("/app/notifications")}
-              className="flex w-full items-center justify-between gap-3 rounded-3xl border border-zinc-200/70 bg-white/70 p-4 text-left shadow-sm transition hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/45 dark:hover:bg-zinc-900/60"
+              className="flex w-full items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 p-3 text-left shadow-md transition hover:opacity-95 dark:from-emerald-600 dark:to-teal-700"
             >
               <div className="flex min-w-0 items-center gap-3">
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/80 text-emerald-700 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-emerald-200">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-white">
                   <AppIcon size={ICON_MD} icon={Bell} />
                 </span>
 
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                    Notifications
+                  <div className="truncate text-sm font-semibold text-white">
+                    {latestNotificationSummary?.title || "Notifications"}
                   </div>
-                  <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    {unreadNotifCount ? "Tap to view new updates" : "Tap to view history"}
+                  <div className="mt-1 truncate text-xs text-white/85">
+                    {latestNotificationSummary?.body ||
+                      (unreadNotifCount
+                        ? "You have new updates to review."
+                        : "You are all caught up.")}
                   </div>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
                 {unreadNotifCount ? (
-                  <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-rose-600 px-2 text-[11px] font-semibold text-white">
+                  <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-white/20 px-2 text-[11px] font-semibold text-white">
                     {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
                   </span>
                 ) : (
-                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                    All caught up
+                  <span className="text-xs font-semibold text-white/85">
+                    {latestNotificationSummary?.cta || "View"}
                   </span>
                 )}
-                <AppIcon size={ICON_SM} icon={ChevronRight} className="text-zinc-400 dark:text-zinc-500" />
+                <AppIcon size={ICON_SM} icon={ChevronRight} className="text-white/90" />
               </div>
             </button>
           </div>
 
           <div className="mt-4 flex justify-center">
-            <div className={`${cardBase} w-full max-w-sm`}>
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                  Current process
-                </h2>
-                <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                  {hasActive ? "Live" : "Idle"}
-                </span>
-              </div>
-
-              {hasActive ? (
-                <div className="mt-3 grid gap-3">
-                  <div className="grid gap-1.5 text-sm">
-                    <div className="flex items-baseline gap-2 text-left">
-                      <span className="text-zinc-500 dark:text-zinc-400">Track</span>
-                      <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                        {activeTrack || "-"}
-                      </span>
-                    </div>
-                    <div className="flex items-baseline gap-2 text-left">
-                      <span className="text-zinc-500 dark:text-zinc-400">Country</span>
-                      <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                        {activeCountry || "-"}
-                      </span>
-                    </div>
-                    <div className="flex items-baseline gap-2 text-left">
-                      <span className="text-zinc-500 dark:text-zinc-400">Mode</span>
-                      <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                        {activeHelpType === "we" ? "We-Help" : "Self-Help"}
-                      </span>
+            <div className="relative w-full max-w-sm overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 p-4 shadow-md">
+              <div className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+              {latestRequest ? (
+                <div className="relative z-10 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-extrabold text-white">{toRequestDisplayName(latestRequest)}</h2>
+                      <p className="mt-0.5 text-xs font-medium text-white/85">
+                        {latestRequestStatusLabel}
+                        {latestRequestSummary.updatedLabel ? ` • Updated ${latestRequestSummary.updatedLabel}` : ""}
+                      </p>
                     </div>
                   </div>
 
-                  <button type="button" onClick={goContinue} className={primaryBtn}>
-                    {activeHelpType === "self" ? "Continue SelfHelp" : "Continue"}
-                  </button>
+                  <div className="rounded-xl border border-white/30 bg-white/20 p-3 backdrop-blur">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-white">Completeness</span>
+                      <span className="text-xs font-bold text-white">{latestRequestSummary.badgeLabel}</span>
+                    </div>
+                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/20">
+                      <div
+                        className="h-full rounded-full bg-white transition-all duration-300"
+                        style={{ width: `${latestRequestSummary.percent}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 text-xs text-white/80">{latestRequestSummary.helperText}</div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={continueCurrentProcess}
+                      className="inline-flex items-center gap-1 rounded-lg bg-white px-4 py-1.5 text-xs font-bold text-teal-700 transition hover:opacity-90"
+                    >
+                      Continue
+                      <AppIcon size={ICON_SM} icon={ChevronRight} />
+                    </button>
+                  </div>
                 </div>
               ) : (
-                <div className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
+                <div className="relative z-10 text-sm text-white">
                   No active process yet. Choose a track to begin.
                   <div className="mt-3">
-                    <button type="button" onClick={() => navigate("/dashboard")} className={ghostBtn}>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/dashboard")}
+                      className="rounded-lg bg-white px-4 py-2 text-xs font-semibold text-emerald-700"
+                    >
                       Choose track
                     </button>
                   </div>
@@ -1320,11 +1504,14 @@ export default function ProgressScreen() {
 
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                                  {workflowDraftTitle(draft)}
+                                <div className="flex items-center gap-2">
+                                  <span className="h-2.5 w-2.5 rounded-full bg-zinc-400 dark:bg-zinc-500" />
+                                  <div className="truncate font-semibold text-zinc-900 dark:text-zinc-100">
+                                    {formatTrackCountry(draft?.track, draft?.country)}
+                                  </div>
                                 </div>
                                 <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                                  {workflowDraftSubtitle(draft)}
+                                  Draft: {workflowDraftTitle(draft)}
                                 </div>
                                 {updatedLabel ? (
                                   <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
@@ -1781,3 +1968,4 @@ export default function ProgressScreen() {
     </div>
   );
 }
+

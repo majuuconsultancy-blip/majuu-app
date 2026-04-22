@@ -1,8 +1,6 @@
-import { getFunctions, httpsCallable } from "firebase/functions";
 import { collection, doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
-
-const functions = getFunctions(undefined, "us-central1");
+import { invokeRequestAction, invokeRequestCommand } from "./apiService";
 
 function safeStr(value, max = 600) {
   return String(value || "").trim().slice(0, max);
@@ -14,25 +12,32 @@ function safeRoleHint(role = "") {
   return "";
 }
 
-function formatCommandCallableError(error, callableName = "") {
+function formatCommandBackendError(error, callableName = "") {
   const code = safeStr(error?.code, 160).toLowerCase();
   const message = safeStr(error?.message).toLowerCase();
+  const status = Number(error?.status || 0) || 0;
   const isInfraError =
-    code.includes("functions/internal") ||
-    code.includes("functions/unavailable") ||
-    code.includes("functions/unimplemented") ||
-    code.includes("functions/deadline-exceeded") ||
-    code.includes("functions/not-found") ||
-    (code.includes("internal") && !message.includes("permission")) ||
+    Boolean(error?.isInfrastructureUnavailable) ||
+    code.startsWith("api/") ||
+    status === 0 ||
+    status === 404 ||
+    status === 429 ||
+    status === 500 ||
+    status === 501 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    (message.includes("backend") && message.includes("not available")) ||
     message === "internal";
 
   const label = safeStr(callableName, 80) || "Request command";
   const wrapped = new Error(
     isInfraError
-      ? `${label} is not available right now. Deploy Cloud Functions and retry (Firebase Blaze plan is required).`
+      ? `${label} backend is not available right now.`
       : safeStr(error?.message, 600) || "Request command failed. Please try again."
   );
-  wrapped.code = code;
+  wrapped.code = code || (status ? `api/${status}` : "api/request-failed");
+  wrapped.status = status || null;
   wrapped.isInfrastructureUnavailable = isInfraError;
   return wrapped;
 }
@@ -40,15 +45,20 @@ function formatCommandCallableError(error, callableName = "") {
 function isInfrastructureUnavailable(error) {
   const code = safeStr(error?.code, 160).toLowerCase();
   const message = safeStr(error?.message).toLowerCase();
+  const status = Number(error?.status || 0) || 0;
   return (
     Boolean(error?.isInfrastructureUnavailable) ||
+    code.startsWith("api/") ||
+    status === 0 ||
+    status === 404 ||
+    status === 429 ||
+    status === 500 ||
+    status === 501 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
     code === "internal" ||
-    code.includes("functions/internal") ||
-    code.includes("functions/unavailable") ||
-    code.includes("functions/unimplemented") ||
-    code.includes("functions/deadline-exceeded") ||
-    code.includes("functions/not-found") ||
-    message.includes("deploy cloud functions")
+    message.includes("backend is not available")
   );
 }
 
@@ -122,25 +132,21 @@ export async function executeRequestCommand({
   payload = {},
   actorRole = "",
 } = {}) {
-  const callable = httpsCallable(functions, "executeRequestCommand");
   const envelope = buildCommandEnvelope({ command, requestId, payload, actorRole });
   try {
-    const result = await callable(envelope);
-    return result?.data ?? null;
+    return await invokeRequestCommand(envelope);
   } catch (error) {
     if (safeStr(envelope?.command, 80) === "createRequest" && isInfrastructureUnavailable(error)) {
       return createRequestCommandFallback(envelope);
     }
-    throw formatCommandCallableError(error, "executeRequestCommand");
+    throw formatCommandBackendError(error, "executeRequestCommand");
   }
 }
 
 function callNamedCommand(name, payload = {}) {
-  const callable = httpsCallable(functions, name);
-  return callable(payload)
-    .then((result) => result?.data ?? null)
+  return invokeRequestAction(name, payload)
     .catch((error) => {
-      throw formatCommandCallableError(error, name);
+      throw formatCommandBackendError(error, name);
     });
 }
 

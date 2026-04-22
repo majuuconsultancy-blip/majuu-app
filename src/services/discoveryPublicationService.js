@@ -96,21 +96,6 @@ function normalizeNullableNumber(value, { min = 0, max = 100 } = {}) {
   return Math.max(min, Math.min(max, Math.round(raw)));
 }
 
-function normalizeUrlList(value, maxItems = 20) {
-  if (!Array.isArray(value)) return [];
-  const out = [];
-  const seen = new Set();
-  value.forEach((item) => {
-    const url = safeString(item, 1400);
-    if (!/^https?:\/\//i.test(url)) return;
-    const key = url.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push(url);
-  });
-  return out.slice(0, maxItems);
-}
-
 function normalizeTagList(value, { maxItems = 12, maxLength = 80 } = {}) {
   const rows = Array.isArray(value)
     ? value
@@ -257,7 +242,6 @@ function normalizeDiscoveryPublicationPayload(input = {}) {
     countryKey,
     overview: normalizeOverview(input.overview),
     compareData: normalizeCompareData(input.compareData),
-    mediaPool: normalizeUrlList(input.mediaPool),
     extras: normalizeExtras(input.extras),
     isPublished: normalizeBool(input.isPublished, true),
   };
@@ -281,7 +265,6 @@ export function normalizeDiscoveryPublicationRecord(id, raw = {}) {
     countryKey: safeCountryKey,
     overview: normalizeOverview(source.overview || EMPTY_OVERVIEW),
     compareData: normalizeCompareData(source.compareData || EMPTY_COMPARE_DATA),
-    mediaPool: normalizeUrlList(source.mediaPool),
     extras: normalizeExtras(source.extras || EMPTY_EXTRAS),
     isPublished: normalizeBool(source.isPublished, true),
     createdAt: source.createdAt || null,
@@ -344,7 +327,6 @@ export function createEmptyDiscoveryPublicationDraft({ trackType = "study", coun
       visaAcceptanceRate: "",
       easeScore: "",
     },
-    mediaPool: [],
     extras: { ...EMPTY_EXTRAS },
     isPublished: true,
   };
@@ -400,7 +382,6 @@ export function draftFromDiscoveryPublication(publication) {
         ? [...safe.compareData.tripStyleTags]
         : [],
     },
-    mediaPool: Array.isArray(safe.mediaPool) ? [...safe.mediaPool] : [],
     extras: { ...safe.extras },
     isPublished: Boolean(safe.isPublished),
   };

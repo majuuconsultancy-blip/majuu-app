@@ -313,7 +313,6 @@ export default function LoginScreen() {
         uid: user.uid,
         email: user.email,
         displayName: user.displayName || "",
-        photoURL: user.photoURL || "",
         provider: (user.providerData?.[0]?.providerId || "").toString(),
         lastLoginAt: Date.now(),
       });

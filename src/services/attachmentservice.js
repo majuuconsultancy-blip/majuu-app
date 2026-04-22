@@ -1,10 +1,8 @@
-// attachmentservice.js (FULL COPY-PASTE)
-// - Keeps your existing behavior for createPendingAttachment (PDF placeholder doc)
-// - Adds LINK + META attachment helpers (no Storage required yet)
-
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, serverTimestamp, updateDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { mirrorLegacyRequestAttachment } from "./documentEngineService";
+import { uploadBinaryFile } from "./fileUploadService";
+import { buildRequestAttachmentStoragePath } from "./storageContract";
 
 const MAX_PDF_MB = 10;
 const MAX_BYTES = MAX_PDF_MB * 1024 * 1024;
@@ -17,11 +15,6 @@ function safeNum(n, min = 0, max = Number.MAX_SAFE_INTEGER) {
   const v = Number(n);
   if (!Number.isFinite(v)) return min;
   return Math.max(min, Math.min(max, v));
-}
-
-function isHttpUrl(url) {
-  const u = safeStr(url, 1200);
-  return u.startsWith("http://") || u.startsWith("https://");
 }
 
 function isPdfFile(file) {
@@ -42,18 +35,35 @@ function requireRequestId(requestId) {
   return id;
 }
 
-/**
- * ✅ Existing: creates a placeholder attachment doc for a PDF upload
- * - Backwards compatible: NO CHANGES in behavior
- * - Stored at: serviceRequests/{requestId}/attachments/{attId}
- */
+async function mirrorAttachment({
+  requestId,
+  requestUid,
+  attachmentId,
+  attachment,
+  sourceChannel,
+} = {}) {
+  try {
+    await mirrorLegacyRequestAttachment({
+      requestId,
+      requestUid,
+      attachmentId,
+      attachment,
+      actorUid: requestUid,
+      actorRole: "user",
+      sourceChannel,
+    });
+  } catch (error) {
+    console.warn("document engine mirror failed for attachment:", error?.message || error);
+  }
+}
+
 export async function createPendingAttachment({ requestId, file }) {
   const user = requireUser();
   const rid = requireRequestId(requestId);
 
   if (!file) throw new Error("Missing file");
 
-  // Support "wrapped" files so we can preserve request-definition document metadata.
+  // Support wrapped files so we can preserve request-definition document metadata.
   const wrapper = file && typeof file === "object" && file?.file ? file : null;
   const actualFile = wrapper?.file || file;
 
@@ -93,18 +103,78 @@ export async function createPendingAttachment({ requestId, file }) {
   if (kind) payload.kind = kind;
 
   const docRef = await addDoc(ref, payload);
+  await mirrorAttachment({
+    requestId: rid,
+    requestUid: user.uid,
+    attachmentId: docRef.id,
+    attachment: payload,
+    sourceChannel: "request_modal_pending",
+  });
+
   try {
-    await mirrorLegacyRequestAttachment({
+    const storagePath = buildRequestAttachmentStoragePath({
+      requestId: rid,
+      attachmentId: docRef.id,
+      fileName: name,
+      contentType,
+    });
+    const uploadResult = await uploadBinaryFile({
+      file: actualFile,
+      storagePath,
+      contentType,
+      customMetadata: {
+        requestId: rid,
+        attachmentId: docRef.id,
+        ownerUid: user.uid,
+        source: "request_upload",
+      },
+    });
+
+    const finalizedPayload = {
+      ...payload,
+      status: "uploaded",
+      size: safeNum(uploadResult?.sizeBytes, 0, MAX_BYTES + 1) || size,
+      contentType: safeStr(uploadResult?.contentType, 80) || contentType,
+      storageKind: safeStr(uploadResult?.storageKind || "bucket", 30).toLowerCase(),
+      storageBucket: safeStr(uploadResult?.bucket, 200),
+      storagePath: safeStr(uploadResult?.path, 500),
+      storageGeneration: safeStr(uploadResult?.generation, 120),
+      storageChecksum: safeStr(uploadResult?.checksum, 120),
+      storageProvider: safeStr(uploadResult?.provider, 40).toLowerCase(),
+      uploadedAt: serverTimestamp(),
+      uploadedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await updateDoc(docRef, finalizedPayload);
+    await mirrorAttachment({
       requestId: rid,
       requestUid: user.uid,
       attachmentId: docRef.id,
-      attachment: payload,
-      actorUid: user.uid,
-      actorRole: "user",
-      sourceChannel: "request_modal",
+      attachment: finalizedPayload,
+      sourceChannel: "request_modal_uploaded",
     });
   } catch (error) {
-    console.warn("document engine mirror failed for attachment:", error?.message || error);
+    const failedPayload = {
+      status: "failed",
+      errorMessage: safeStr(error?.message || "Upload failed", 280),
+      updatedAt: serverTimestamp(),
+      failedAt: serverTimestamp(),
+      failedAtMs: Date.now(),
+    };
+    try {
+      await updateDoc(docRef, failedPayload);
+      await mirrorAttachment({
+        requestId: rid,
+        requestUid: user.uid,
+        attachmentId: docRef.id,
+        attachment: { ...payload, ...failedPayload },
+        sourceChannel: "request_modal_failed",
+      });
+    } catch (innerError) {
+      console.warn("failed attachment state update failed:", innerError?.message || innerError);
+    }
+    throw error;
   }
 
   return docRef.id;
@@ -117,199 +187,9 @@ export async function createPendingAttachment({ requestId, file }) {
  * to reflect what the user selected.
  */
 export async function createPendingAttachmentFromMeta({ requestId, fileMeta } = {}) {
-  const user = requireUser();
-  const rid = requireRequestId(requestId);
-  const meta = fileMeta && typeof fileMeta === "object" ? fileMeta : {};
-
-  const name = safeStr(meta?.name || "document.pdf", 120) || "document.pdf";
-  const contentType = safeStr(meta?.type || meta?.contentType || "application/pdf", 80)
-    || "application/pdf";
-  const size = safeNum(meta?.size, 0, MAX_BYTES + 1);
-  const fieldId = safeStr(meta?.fieldId, 80);
-  const fieldLabel = safeStr(meta?.fieldLabel || meta?.label, 140);
-  const kind = safeStr(meta?.kind, 60);
-
-  if (!isPdfFile({ name, type: contentType })) {
-    throw new Error("Only PDF files are allowed");
-  }
-  if (size > MAX_BYTES) {
-    throw new Error(`PDF must be under ${MAX_PDF_MB}MB`);
-  }
-
-  const ref = collection(db, "serviceRequests", rid, "attachments");
-  const payload = {
-    uid: user.uid,
-    name,
-    size,
-    contentType,
-    status: "pending_upload",
-    source: "meta_restore",
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  };
-
-  if (fieldId) payload.fieldId = fieldId;
-  if (fieldLabel) {
-    payload.fieldLabel = fieldLabel;
-    payload.label = fieldLabel;
-  }
-  if (kind) payload.kind = kind;
-
-  const docRef = await addDoc(ref, payload);
-  try {
-    await mirrorLegacyRequestAttachment({
-      requestId: rid,
-      requestUid: user.uid,
-      attachmentId: docRef.id,
-      attachment: payload,
-      actorUid: user.uid,
-      actorRole: "user",
-      sourceChannel: "request_modal_meta_restore",
-    });
-  } catch (error) {
-    console.warn("document engine mirror failed for meta attachment:", error?.message || error);
-  }
-
-  return docRef.id;
-}
-
-/**
- * ✅ NEW: create a LINK attachment (no file upload)
- * Useful when the "document" is a Drive link / Dropbox link / website link.
- *
- * Fields supported by your AdminRequestDocumentsScreen:
- * - url OR downloadUrl OR fileUrl
- * - name/filename
- * - contentType/type
- * - label, metaNote, kind (optional)
- */
-export async function createLinkAttachment({
-  requestId,
-  name,
-  url,
-  label = "",
-  metaNote = "",
-  kind = "link",
-} = {}) {
-  const user = requireUser();
-  const rid = requireRequestId(requestId);
-
-  const cleanName = safeStr(name || "Document link", 120) || "Document link";
-  const cleanUrl = safeStr(url || "", 1000);
-
-  if (!isHttpUrl(cleanUrl)) {
-    throw new Error("Valid URL required (must start with http/https)");
-  }
-
-  const ref = collection(db, "serviceRequests", rid, "attachments");
-
-  const docRef = await addDoc(ref, {
-    uid: user.uid,
-
-    name: cleanName,
-    url: cleanUrl, // ✅ AdminRequestDocumentsScreen already reads this
-    size: 0,
-    contentType: "link",
-
-    // optional metadata
-    label: safeStr(label, 60),
-    metaNote: safeStr(metaNote, 800),
-    kind: safeStr(kind, 60) || "link",
-
-    status: "uploaded", // since it’s already a link
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  try {
-    await mirrorLegacyRequestAttachment({
-      requestId: rid,
-      requestUid: user.uid,
-      attachmentId: docRef.id,
-      attachment: {
-        name: cleanName,
-        url: cleanUrl,
-        size: 0,
-        contentType: "link",
-        status: "uploaded",
-        label: safeStr(label, 60),
-        metaNote: safeStr(metaNote, 800),
-        kind: safeStr(kind, 60) || "link",
-      },
-      actorUid: user.uid,
-      actorRole: "user",
-      sourceChannel: "request_link_attachment",
-    });
-  } catch (error) {
-    console.warn("document engine mirror failed for link attachment:", error?.message || error);
-  }
-
-  return docRef.id;
-}
-
-/**
- * ✅ NEW: “Meta/dummy attachment” (checklist-style)
- * Example: applicant "uploads" Passport but you only store metadata (no PDF).
- * You can optionally include a link too.
- */
-export async function createMetaAttachment({
-  requestId,
-  label,
-  metaNote = "",
-  url = "",
-  kind = "user_dummy_upload",
-} = {}) {
-  const user = requireUser();
-  const rid = requireRequestId(requestId);
-
-  const cleanLabel = safeStr(label || "", 60);
-  if (!cleanLabel) throw new Error("label is required");
-
-  const cleanUrl = safeStr(url || "", 1000);
-  if (cleanUrl && !isHttpUrl(cleanUrl)) {
-    throw new Error("If url is provided, it must start with http/https");
-  }
-
-  const ref = collection(db, "serviceRequests", rid, "attachments");
-
-  const docRef = await addDoc(ref, {
-    uid: user.uid,
-
-    name: cleanLabel,
-    label: cleanLabel,
-    metaNote: safeStr(metaNote, 800),
-    kind: safeStr(kind, 60) || "user_dummy_upload",
-
-    url: cleanUrl || "",
-
-    size: 0,
-    contentType: cleanUrl ? "link" : "meta",
-    status: "pending_upload", // still “pending” because no real file was uploaded
-
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  try {
-    await mirrorLegacyRequestAttachment({
-      requestId: rid,
-      requestUid: user.uid,
-      attachmentId: docRef.id,
-      attachment: {
-        name: cleanLabel,
-        size: 0,
-        contentType: cleanUrl ? "link" : "meta",
-        status: "pending_upload",
-        label: cleanLabel,
-        metaNote: safeStr(metaNote, 800),
-        kind: safeStr(kind, 60) || "user_dummy_upload",
-        url: cleanUrl || "",
-      },
-      actorUid: user.uid,
-      actorRole: "user",
-      sourceChannel: "request_meta_attachment",
-    });
-  } catch (error) {
-    console.warn("document engine mirror failed for meta-only attachment:", error?.message || error);
-  }
-
-  return docRef.id;
+  void requestId;
+  void fileMeta;
+  throw new Error(
+    "Metadata-only attachment restore is disabled. Please reselect the original file so we can upload a real document."
+  );
 }

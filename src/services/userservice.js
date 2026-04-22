@@ -4,6 +4,7 @@ import { normalizeCountyLower, normalizeCountyName } from "../constants/kenyaCou
 import { createDefaultUserOnboarding, createEmptyJourney } from "../journey/journeyModel";
 import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
 import { buildTrackEventKey, logAnalyticsEvent } from "./analyticsService";
+import { normalizeProfilePhotoRecord } from "./profilePhotoService";
 import {
   createDefaultUserProfile,
   getDefaultLanguageForCountry,
@@ -116,6 +117,7 @@ function normalizeUserStateRecord(state) {
     ...safeState,
     countryOfResidence:
       String(safeState?.countryOfResidence || "").trim() || profile.homeCountry || "",
+    profilePhoto: normalizeProfilePhotoRecord(safeState?.profilePhoto),
     profile,
   };
 }

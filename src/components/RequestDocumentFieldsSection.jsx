@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
-import { db } from "../firebase";
 import {
   buildRequestDefinitionKey,
   fetchRequestDefinitionByKey,
 } from "../services/requestDefinitionService";
 import DocumentExtractPanel from "./DocumentExtractPanel";
 import DocumentProofreadPanel from "./DocumentProofreadPanel";
-import { normalizeTextDeep } from "../utils/textNormalizer";
+import FileAccessLink from "./FileAccessLink";
+import { canResolveFileAccess } from "../services/fileAccessService";
 
 function safeStr(value, max = 600) {
   return String(value ?? "").trim().slice(0, max);
@@ -39,21 +38,6 @@ function attachmentStatusLabel(status) {
     .replace(/^./, (char) => char.toUpperCase());
 }
 
-function normalizeFileMeta(input) {
-  if (!input || typeof input !== "object") return null;
-  const name = safeStr(input?.name, 160);
-  if (!name) return null;
-  return {
-    name,
-    size: toNum(input?.size, 0),
-    type: safeStr(input?.type || input?.contentType, 80),
-    lastModified: toNum(input?.lastModified, 0),
-    fieldId: safeStr(input?.fieldId, 80),
-    fieldLabel: safeStr(input?.fieldLabel || input?.label, 160),
-    kind: safeStr(input?.kind, 80),
-  };
-}
-
 function normalizeDocumentAnswer(raw) {
   const entry = raw && typeof raw === "object" ? raw : {};
   const type = safeStr(entry?.type, 30).toLowerCase();
@@ -61,16 +45,12 @@ function normalizeDocumentAnswer(raw) {
 
   const id = safeStr(entry?.id, 80);
   const label = safeStr(entry?.label, 160) || id || "Document";
-  const fileMetas = Array.isArray(entry?.fileMetas)
-    ? entry.fileMetas.map(normalizeFileMeta).filter(Boolean)
-    : [];
 
   return {
     id,
     label,
     required: Boolean(entry?.required),
     sortOrder: toNum(entry?.sortOrder, 0),
-    fileMetas,
   };
 }
 
@@ -87,6 +67,10 @@ function normalizeAttachment(raw, fallbackId = "") {
     contentType,
     status: safeStr(entry?.status, 60),
     url: safeStr(entry?.url || entry?.downloadUrl || entry?.fileUrl, 1200),
+    storageKind: safeStr(entry?.storageKind, 40).toLowerCase(),
+    storageBucket: safeStr(entry?.storageBucket || entry?.bucket, 220),
+    storagePath: safeStr(entry?.storagePath || entry?.path, 520),
+    storageProvider: safeStr(entry?.storageProvider || entry?.provider, 40).toLowerCase(),
     fieldId: safeStr(entry?.fieldId, 80),
     fieldLabel: safeStr(entry?.fieldLabel || entry?.label, 160),
     label: safeStr(entry?.label, 160),
@@ -144,7 +128,7 @@ function matchesField(item, fieldId, label) {
   return false;
 }
 
-function mergeItems({ attachments, fileMetas }) {
+function mergeItems({ attachments }) {
   const merged = [];
   const seen = new Set();
 
@@ -160,27 +144,13 @@ function mergeItems({ attachments, fileMetas }) {
       status: attachmentStatusLabel(attachment.status),
       statusTone: attachment.status ? "attachment" : "neutral",
       url: attachment.url,
+      storageKind: attachment.storageKind,
+      storageBucket: attachment.storageBucket,
+      storagePath: attachment.storagePath,
+      storageProvider: attachment.storageProvider,
       metaNote: attachment.metaNote,
       source: "attachment",
       attachment,
-    });
-  });
-
-  (Array.isArray(fileMetas) ? fileMetas : []).forEach((meta, index) => {
-    const signature = buildSignature(meta);
-    const duplicate = merged.some((row) => buildSignature(row) === signature);
-    if (duplicate) return;
-    merged.push({
-      id: `meta-${index}-${signature}`,
-      name: meta.name,
-      size: meta.size,
-      type: meta.type || "application/pdf",
-      status: "Metadata only",
-      statusTone: "meta",
-      url: "",
-      metaNote: "",
-      source: "meta",
-      attachment: null,
     });
   });
 
@@ -205,7 +175,6 @@ export default function RequestDocumentFieldsSection({
   attachments = null,
   attachmentsLoading = false,
   attachmentsError = "",
-  showLegacySection = true,
 } = {}) {
   const extra =
     request?.extraFieldAnswers &&
@@ -223,11 +192,6 @@ export default function RequestDocumentFieldsSection({
   const [definitionState, setDefinitionState] = useState(() => ({
     key: "",
     row: null,
-  }));
-  const [attachmentState, setAttachmentState] = useState(() => ({
-    requestId: "",
-    items: [],
-    error: "",
   }));
 
   useEffect(() => {
@@ -256,67 +220,22 @@ export default function RequestDocumentFieldsSection({
 
   const resolvedRequestId = safeStr(requestId || request?.id, 120);
 
-  useEffect(() => {
-    if (Array.isArray(attachments) || !resolvedRequestId) return undefined;
-
-    const qy = query(
-      collection(db, "serviceRequests", resolvedRequestId, "attachments"),
-      orderBy("createdAt", "desc")
-    );
-
-    const unsub = onSnapshot(
-      qy,
-      (snap) => {
-        setAttachmentState({
-          requestId: resolvedRequestId,
-          items: snap.docs.map((item) =>
-            normalizeAttachment(normalizeTextDeep({ id: item.id, ...item.data() }))
-          ),
-          error: "",
-        });
-      },
-      (error) => {
-        console.error("request documents snapshot error:", error);
-        setAttachmentState({
-          requestId: resolvedRequestId,
-          items: [],
-          error: error?.message || "Failed to load document fields.",
-        });
-      }
-    );
-
-    return () => unsub();
-  }, [attachments, resolvedRequestId]);
-
   const effectiveDefinition =
     definitionKey && definitionState.key === definitionKey ? definitionState.row : null;
   const effectiveDefinitionLoading =
     Boolean(definitionKey) && definitionState.key !== definitionKey;
 
   const normalizedAttachments = useMemo(() => {
-    if (Array.isArray(attachments)) {
-      return attachments
-        .map((item, index) => normalizeAttachment(normalizeTextDeep(item), `attachment-${index}`))
-        .filter(Boolean);
-    }
-    if (attachmentState.requestId !== resolvedRequestId) return [];
-    return Array.isArray(attachmentState.items) ? attachmentState.items.filter(Boolean) : [];
-  }, [attachments, attachmentState.items, attachmentState.requestId, resolvedRequestId]);
+    if (!Array.isArray(attachments)) return [];
+    return attachments
+      .map((item, index) => normalizeAttachment(item, `attachment-${index}`))
+      .filter(Boolean);
+  }, [attachments]);
 
-  const effectiveLoading = Array.isArray(attachments)
-    ? Boolean(attachmentsLoading)
-    : resolvedRequestId
-    ? attachmentState.requestId !== resolvedRequestId && !attachmentState.error
-    : false;
-  const effectiveError = Array.isArray(attachments)
-    ? safeStr(attachmentsError, 300)
-    : resolvedRequestId
-    ? attachmentState.requestId === resolvedRequestId
-      ? attachmentState.error
-      : ""
-    : "";
+  const effectiveLoading = Boolean(attachmentsLoading);
+  const effectiveError = safeStr(attachmentsError, 300);
 
-  const { groups, legacyItems, totalActiveAttachments } = useMemo(() => {
+  const { groups, totalActiveAttachments } = useMemo(() => {
     const answerById = new Map();
     documentAnswers.forEach((answer) => {
       if (!answer?.id) return;
@@ -358,7 +277,6 @@ export default function RequestDocumentFieldsSection({
         sortOrder: toNum(field?.sortOrder, answer?.sortOrder ?? 0),
         items: mergeItems({
           attachments: attachForField(fieldId, label),
-          fileMetas: answer?.fileMetas || [],
         }),
       });
       seenGroupIds.add(fieldId);
@@ -374,7 +292,6 @@ export default function RequestDocumentFieldsSection({
           sortOrder: toNum(answer.sortOrder, 0),
           items: mergeItems({
             attachments: attachForField(answer.id, answer.label),
-            fileMetas: answer.fileMetas || [],
           }),
         });
         if (answer.id) seenGroupIds.add(answer.id);
@@ -397,37 +314,31 @@ export default function RequestDocumentFieldsSection({
           label: groupLabel,
           required: false,
           sortOrder: Number.MAX_SAFE_INTEGER,
-          items: mergeItems({ attachments: [attachment], fileMetas: [] }),
+          items: mergeItems({ attachments: [attachment] }),
         });
       });
 
-    const legacyMetaFiles = (Array.isArray(request?.requestUploadMeta?.files)
-      ? request.requestUploadMeta.files
-      : [])
-      .map(normalizeFileMeta)
-      .filter(Boolean)
-      .filter((item) => !isExtraFieldAttachment(item));
-
-    const legacyAttachments = normalizedAttachments
+    const otherAttachments = normalizedAttachments
       .filter((attachment) => !matchedAttachmentIds.has(attachment.id))
       .filter((attachment) => !isExtraFieldAttachment(attachment));
+    if (otherAttachments.length > 0) {
+      nextGroups.push({
+        id: "other_documents",
+        label: "Other documents",
+        required: false,
+        sortOrder: Number.MAX_SAFE_INTEGER,
+        items: mergeItems({ attachments: otherAttachments }),
+      });
+    }
 
     return {
       groups: nextGroups.sort(sortByOrderThenLabel),
-      legacyItems: mergeItems({
-        attachments: legacyAttachments,
-        fileMetas: legacyMetaFiles,
-      }),
       totalActiveAttachments: normalizedAttachments.length,
     };
-  }, [effectiveDefinition, documentAnswers, normalizedAttachments, request]);
+  }, [effectiveDefinition, documentAnswers, normalizedAttachments]);
 
   const shouldRender =
-    groups.length > 0 ||
-    (showLegacySection && legacyItems.length > 0) ||
-    effectiveLoading ||
-    Boolean(effectiveError) ||
-    effectiveDefinitionLoading;
+    groups.length > 0 || effectiveLoading || Boolean(effectiveError) || effectiveDefinitionLoading;
 
   if (!shouldRender) return null;
 
@@ -435,9 +346,7 @@ export default function RequestDocumentFieldsSection({
     className ||
     "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4";
   const canUseReviewTools = viewerRole === "admin" || viewerRole === "staff";
-  const visibleAttachmentCount = showLegacySection
-    ? totalActiveAttachments
-    : groups.reduce((sum, group) => sum + (Array.isArray(group?.items) ? group.items.length : 0), 0);
+  const visibleAttachmentCount = totalActiveAttachments;
 
   return (
     <div className={wrapperCls}>
@@ -508,8 +417,6 @@ export default function RequestDocumentFieldsSection({
                     const toneCls =
                       item.statusTone === "attachment"
                         ? "border-emerald-200 bg-emerald-50/70 text-emerald-800"
-                        : item.statusTone === "meta"
-                        ? "border-amber-200 bg-amber-50/70 text-amber-900"
                         : "border-zinc-200 bg-zinc-50/80 text-zinc-700";
 
                     return (
@@ -536,15 +443,13 @@ export default function RequestDocumentFieldsSection({
                             <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${toneCls}`}>
                               {item.status}
                             </span>
-                            {item.url ? (
-                              <a
-                                href={item.url}
-                                target="_blank"
-                                rel="noreferrer"
+                            {canResolveFileAccess(item) ? (
+                              <FileAccessLink
+                                file={item}
                                 className="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
                               >
                                 Open
-                              </a>
+                              </FileAccessLink>
                             ) : null}
                           </div>
                         </div>
@@ -571,67 +476,7 @@ export default function RequestDocumentFieldsSection({
             </div>
           );
         })}
-
-        {showLegacySection && legacyItems.length > 0 ? (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-amber-950 break-words">
-                  Legacy uploaded documents
-                </div>
-                <div className="mt-1 text-xs text-amber-900/80">
-                  Preserved from the retired request-level upload flow.
-                </div>
-              </div>
-              <span className="shrink-0 rounded-full border border-amber-300 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
-                {legacyItems.length} file{legacyItems.length === 1 ? "" : "s"}
-              </span>
-            </div>
-
-            <div className="mt-3 grid gap-2">
-              {legacyItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-xl border border-amber-200 bg-white/80 px-3 py-3"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-zinc-900 break-words">
-                        {item.name}
-                      </div>
-                      <div className="mt-1 text-xs text-zinc-600">
-                        {bytesToLabel(item.size)} · {renderTypeLabel(item.type)}
-                      </div>
-                      {item.metaNote ? (
-                        <div className="mt-2 text-xs text-zinc-700 whitespace-pre-wrap">
-                          {item.metaNote}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className="flex shrink-0 flex-col items-end gap-2">
-                      <span className="rounded-full border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
-                        {item.status}
-                      </span>
-                      {item.url ? (
-                        <a
-                          href={item.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center rounded-xl border border-amber-300 bg-amber-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-amber-700"
-                        >
-                          Open
-                        </a>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {effectiveLoading && groups.length === 0 && (!showLegacySection || legacyItems.length === 0) ? (
+        {effectiveLoading && groups.length === 0 ? (
           <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-3 py-3 text-sm text-zinc-600 dark:text-zinc-300">
             Loading document fields...
           </div>

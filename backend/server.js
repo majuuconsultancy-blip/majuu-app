@@ -144,7 +144,9 @@ function appendQueryParam(url, key, value) {
 function buildCallbackUrl({ metadata, reference }) {
   const data = normalizeMetadata(metadata);
   const baseUrl = trimTrailingSlash(data.appBaseUrl || FRONTEND_BASE_URL);
-  const callbackPath = safeStr(data.callbackPath || "/payment/callback", 240) || "/payment/callback";
+  const callbackPath =
+    safeStr(data.callbackPath || data.frontendCallbackPath || "/api/mpesa-callback", 240) ||
+    "/api/mpesa-callback";
   if (!baseUrl) return "";
 
   let url = null;

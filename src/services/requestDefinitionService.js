@@ -1,7 +1,9 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
+  increment,
   limit,
   onSnapshot,
   query,
@@ -10,7 +12,6 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-import { getFunctions, httpsCallable } from "firebase/functions";
 
 import {
   APP_DESTINATION_COUNTRIES,
@@ -32,7 +33,7 @@ export const REQUEST_DEFINITION_COUNTRY_SOURCES = [
   "profile_country_of_residence",
 ];
 export const REQUEST_DEFINITION_PROFILE_COUNTRY_SCOPE = "Profile Country";
-const functions = getFunctions(undefined, "us-central1");
+const REQUEST_DEFINITION_ENGAGEMENT_COLLECTION = "analytics_requestDefinitionEngagement";
 
 function safeString(value, max = 400) {
   return String(value || "").trim().slice(0, max);
@@ -81,6 +82,24 @@ function createLocalId(prefix) {
   const stamp = Date.now().toString(36);
   const tail = Math.random().toString(36).slice(2, 8);
   return `${head}_${stamp}_${tail}`;
+}
+
+function normalizeRequestDefinitionEngagementEventType(value) {
+  const eventType = safeString(value, 40).toLowerCase();
+  if (eventType === "submit" || eventType === "submitted") return "submission";
+  return ["open", "tap", "submission"].includes(eventType) ? eventType : "open";
+}
+
+function requestDefinitionEngagementFieldForEventType(eventType) {
+  if (eventType === "tap") return "tapCount";
+  if (eventType === "submission") return "submissionCount";
+  return "openCount";
+}
+
+function requestDefinitionEngagementScoreDelta(eventType) {
+  if (eventType === "tap") return 3;
+  if (eventType === "submission") return 4;
+  return 2;
 }
 
 function toTimestampMs(value) {
@@ -469,12 +488,97 @@ export async function recordRequestDefinitionEngagement({
   definitionKey = "",
   eventType = "open",
 } = {}) {
-  const callable = httpsCallable(functions, "recordRequestDefinitionEngagement");
-  return callable({
-    definitionId: safeString(definitionId, 140),
-    definitionKey: safeString(definitionKey, 200),
-    eventType: safeString(eventType, 40),
-  }).then((result) => result?.data ?? null);
+  const callerUid = safeString(auth.currentUser?.uid, 120);
+  if (!callerUid) {
+    throw new Error("Login required");
+  }
+
+  const safeDefinitionId = safeString(definitionId, 140);
+  const safeDefinitionKey = safeString(definitionKey, 200);
+  if (!safeDefinitionId && !safeDefinitionKey) {
+    throw new Error("definitionId or definitionKey is required");
+  }
+
+  let definitionRef = null;
+  let definitionData = null;
+
+  if (safeDefinitionId) {
+    const definitionSnap = await getDoc(doc(db, REQUEST_DEFINITION_COLLECTION, safeDefinitionId));
+    if (definitionSnap.exists()) {
+      definitionRef = definitionSnap.ref;
+      definitionData = definitionSnap.data() || {};
+    }
+  }
+
+  if (!definitionRef && safeDefinitionKey) {
+    const querySnap = await getDocs(
+      query(
+        collection(db, REQUEST_DEFINITION_COLLECTION),
+        where("definitionKey", "==", safeDefinitionKey),
+        limit(1)
+      )
+    );
+    if (!querySnap.empty) {
+      const definitionSnap = querySnap.docs[0];
+      definitionRef = definitionSnap.ref;
+      definitionData = definitionSnap.data() || {};
+    }
+  }
+
+  if (!definitionRef) {
+    throw new Error("Request definition not found");
+  }
+
+  const normalizedEventType = normalizeRequestDefinitionEngagementEventType(eventType);
+  const engagementField =
+    requestDefinitionEngagementFieldForEventType(normalizedEventType);
+  const scoreDelta = requestDefinitionEngagementScoreDelta(normalizedEventType);
+  const now = Date.now();
+  const resolvedDefinitionId = safeString(definitionRef.id, 140);
+  const resolvedDefinitionKey = safeString(
+    definitionData?.definitionKey || safeDefinitionKey,
+    200
+  );
+  const eventId = `${resolvedDefinitionId}_${normalizedEventType}_${callerUid}_${now}`;
+
+  await Promise.all([
+    setDoc(
+      definitionRef,
+      {
+        engagement: {
+          [engagementField]: increment(1),
+          lastEventType: normalizedEventType,
+          lastEventAt: serverTimestamp(),
+          lastEventAtMs: now,
+        },
+        engagementScore: increment(scoreDelta),
+        updatedAt: serverTimestamp(),
+        updatedAtMs: now,
+      },
+      { merge: true }
+    ),
+    setDoc(
+      doc(db, REQUEST_DEFINITION_ENGAGEMENT_COLLECTION, eventId),
+      {
+        eventId,
+        definitionId: resolvedDefinitionId,
+        definitionKey: resolvedDefinitionKey,
+        eventType: normalizedEventType,
+        scoreDelta,
+        actorUid: callerUid,
+        createdAt: serverTimestamp(),
+        createdAtMs: now,
+      },
+      { merge: true }
+    ),
+  ]);
+
+  return {
+    ok: true,
+    definitionId: resolvedDefinitionId,
+    definitionKey: resolvedDefinitionKey,
+    eventType: normalizedEventType,
+  };
 }
 
 async function requireRequestManagementActor() {

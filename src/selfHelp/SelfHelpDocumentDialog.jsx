@@ -39,8 +39,18 @@ function buildInitialState(record, defaultStepId, defaultCategoryId) {
     fileName: safeString(record?.fileName, 180),
     fileType: safeString(record?.fileType, 80),
     fileSize: Number(record?.fileSize || 0) || 0,
-    localRef: safeString(record?.localRef, 320),
+    externalUrl: safeString(
+      record?.externalUrl || record?.url || record?.downloadUrl || record?.fileUrl,
+      1200
+    ),
+    storageKind: safeString(record?.storageKind, 30).toLowerCase(),
+    storageBucket: safeString(record?.storageBucket || record?.bucket, 160),
+    storagePath: safeString(record?.storagePath || record?.path, 400),
+    storageGeneration: safeString(record?.storageGeneration || record?.generation, 80),
+    storageChecksum: safeString(record?.storageChecksum || record?.checksum, 120),
+    storageProvider: safeString(record?.storageProvider || record?.provider, 40).toLowerCase(),
     notes: safeString(record?.notes, 1200),
+    uploadFile: null,
   };
 }
 
@@ -133,7 +143,7 @@ export default function SelfHelpDocumentDialog({
                 {values.id ? "Edit document record" : "Add document record"}
               </h2>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                Save lightweight metadata now so the journey stays organized before full storage is finalized.
+                Upload the real file so your document stays available across request, profile, and admin views.
               </p>
             </div>
 
@@ -188,11 +198,11 @@ export default function SelfHelpDocumentDialog({
                 </label>
 
                 <label className="grid gap-1.5">
-                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">File metadata</span>
+                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">File upload</span>
                   <div className="rounded-2xl border border-zinc-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-zinc-950/40">
                     <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-200">
                       <AppIcon size={ICON_SM} icon={Upload} />
-                      Pick file metadata
+                      Pick file
                       <input
                         type="file"
                         className="hidden"
@@ -204,10 +214,21 @@ export default function SelfHelpDocumentDialog({
                             fileName: safeString(file.name, 180),
                             fileType: safeString(file.type, 80),
                             fileSize: Number(file.size || 0) || 0,
+                            uploadFile: file,
                           }));
                         }}
                       />
                     </label>
+
+                    {values.uploadFile ? (
+                      <div className="mt-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                        Ready to upload: {values.uploadFile.name}
+                      </div>
+                    ) : values.storagePath ? (
+                      <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                        Existing stored file will be kept unless you pick a replacement.
+                      </div>
+                    ) : null}
 
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <input
@@ -228,18 +249,6 @@ export default function SelfHelpDocumentDialog({
                       />
                     </div>
                   </div>
-                </label>
-
-                <label className="grid gap-1.5">
-                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Local reference</span>
-                  <input
-                    value={values.localRef}
-                    onChange={(event) =>
-                      setValues((current) => ({ ...current, localRef: safeString(event.target.value, 320) }))
-                    }
-                    placeholder="Optional folder, drive note, or reference"
-                    className="w-full rounded-2xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-900 outline-none ring-emerald-200 focus:ring-4 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100"
-                  />
                 </label>
 
                 <label className="grid gap-1.5">
@@ -264,7 +273,7 @@ export default function SelfHelpDocumentDialog({
                 onClick={() => onSubmit?.(values)}
                 className="rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
               >
-                {saving ? "Saving..." : "Save document record"}
+                {saving ? "Saving..." : "Save document"}
               </button>
               <button
                 type="button"

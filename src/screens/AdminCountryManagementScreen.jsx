@@ -48,7 +48,14 @@ function matchesCountrySearch(country, search) {
     (track) => APP_TRACK_META[track]?.label || track
   );
 
-  return [country?.name, country?.code, country?.currency, country?.accentColor, ...trackLabels]
+  return [
+    country?.name,
+    country?.code,
+    country?.currency,
+    country?.accentColor,
+    country?.imageUrl,
+    ...trackLabels,
+  ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase()
@@ -298,7 +305,7 @@ export default function AdminCountryManagementScreen() {
                       {editingId ? "Edit Country" : "Create Country"}
                     </div>
                     <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                      Configure name, code, currency, supported tracks, and active state.
+                      Configure name, code, image URL, currency, supported tracks, and active state.
                     </div>
                   </div>
 
@@ -362,6 +369,17 @@ export default function AdminCountryManagementScreen() {
                       value={draft.flag}
                       onChange={(event) => updateDraft({ flag: event.target.value })}
                       placeholder="e.g. 🇰🇪 or https://..."
+                      className={input}
+                    />
+                  </label>
+
+                  <label className="block lg:col-span-2">
+                    <div className={label}>Image URL (Optional)</div>
+                    <input
+                      type="url"
+                      value={draft.imageUrl || ""}
+                      onChange={(event) => updateDraft({ imageUrl: event.target.value })}
+                      placeholder="https://..."
                       className={input}
                     />
                   </label>
@@ -570,6 +588,7 @@ export default function AdminCountryManagementScreen() {
 
                           <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
                             <MetaPill>Currency: {country.currency || "—"}</MetaPill>
+                            <MetaPill>Image: {country.imageUrl ? "Configured" : "Not set"}</MetaPill>
                             <MetaPill>
                               Tracks: {trackLabels.length ? trackLabels.join(", ") : "None"}
                             </MetaPill>

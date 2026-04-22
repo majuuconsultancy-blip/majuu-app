@@ -26,4 +26,32 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  {
+    files: ['src/**/*.{js,jsx}'],
+    ignores: [
+      'src/firebase.js',
+      'src/services/fileUploadService.js',
+      'src/services/fileAccessService.js',
+      'src/services/storageProvider.js',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'firebase/storage',
+              message:
+                'Use src/services/fileUploadService.js as the only upload gateway.',
+            },
+            {
+              name: '@supabase/supabase-js',
+              message:
+                'Use src/services/storageProvider.js and src/services/fileUploadService.js.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 ])

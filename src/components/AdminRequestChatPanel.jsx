@@ -26,6 +26,8 @@ import { normalizeTextDeep } from "../utils/textNormalizer";
 import { getSystemChatMessageLabel, isSystemChatMessage } from "../utils/chatSystemMessages";
 import { safeText } from "../utils/safeText";
 import { buildParticipantSummary } from "../services/chatParticipantService";
+import FileAccessImage from "./FileAccessImage";
+import FileAccessLink from "./FileAccessLink";
 
 /* ---------------- helpers ---------------- */
 function safeStr(x) {
@@ -859,31 +861,12 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     setSending(true);
     try {
       if (pdf && t) {
-        try {
-          await adminSendBundleDirect({
-            requestId: rid,
-            toRole: sendTo,
-            text: t,
-            pdfMeta: pdf,
-          });
-        } catch (bundleErr) {
-          const code = String(bundleErr?.code || "").toLowerCase();
-          const msg = String(bundleErr?.message || "").toLowerCase();
-          const fallback =
-            code.includes("permission-denied") ||
-            msg.includes("permission") ||
-            msg.includes("invalid type") ||
-            msg.includes("bundle");
-          if (!fallback) throw bundleErr;
-
-          await adminSendTextDirect({ requestId: rid, toRole: sendTo, text: t });
-          await adminSendAttachmentDirect({
-            requestId: rid,
-            toRole: sendTo,
-            attachmentMeta: pdf,
-            typeHint: pdf?.attachmentKind || "document",
-          });
-        }
+        await adminSendBundleDirect({
+          requestId: rid,
+          toRole: sendTo,
+          text: t,
+          pdfMeta: pdf,
+        });
       } else if (pdf) {
         await adminSendAttachmentDirect({
           requestId: rid,
@@ -1039,6 +1022,15 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
               const attachmentKind = String(attachment?.attachmentKind || "").toLowerCase();
               const attachmentLabel =
                 attachmentKind === "photo" || attachmentKind === "image" ? "Photo" : "Document";
+              const isImageAttachment =
+                attachmentKind === "photo" ||
+                attachmentKind === "image" ||
+                String(attachment?.mime || attachment?.contentType || "").toLowerCase().startsWith("image/");
+              const isAttachmentOnly =
+                String(m?.type || "").toLowerCase() === "document" ||
+                String(m?.type || "").toLowerCase() === "pdf" ||
+                String(m?.type || "").toLowerCase() === "image" ||
+                String(m?.type || "").toLowerCase() === "photo";
 
               return (
                 <div key={item.id} className={`chat-bubble-in flex ${isLeft ?"justify-start" : "justify-end"}`}>
@@ -1056,11 +1048,49 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                             } rounded-xl p-2`}
                           >
                             <div className="text-xs font-semibold opacity-90">{attachmentLabel}</div>
+                            {isImageAttachment ?(
+                              <FileAccessImage
+                                file={attachment}
+                                alt={safeText(attachment?.name) || "attachment"}
+                                className="mt-1.5 max-h-52 w-full rounded-lg object-cover"
+                              />
+                            ) : null}
                             <div className="text-xs opacity-90">
                               {safeText(attachment?.name) || "attachment"}
                               {attachment?.size ?` - ${attachment.size} bytes` : ""}
                             </div>
+                            {attachment?.name ?(
+                              <FileAccessLink
+                                file={attachment}
+                                className="mt-1 inline-flex text-[11px] font-semibold underline underline-offset-2"
+                              >
+                                Open attachment
+                              </FileAccessLink>
+                            ) : null}
                           </div>
+                        ) : null}
+                      </div>
+                    ) : isAttachmentOnly ?(
+                      <div className="mt-1 grid gap-1.5">
+                        <div className="text-xs font-semibold opacity-90">{attachmentLabel}</div>
+                        {isImageAttachment ?(
+                          <FileAccessImage
+                            file={attachment}
+                            alt={safeText(attachment?.name) || "attachment"}
+                            className="max-h-56 w-full rounded-lg object-cover"
+                          />
+                        ) : null}
+                        <div className="text-xs opacity-90">
+                          {safeText(attachment?.name) || "attachment"}
+                          {attachment?.size ?` - ${attachment.size} bytes` : ""}
+                        </div>
+                        {attachment?.name ?(
+                          <FileAccessLink
+                            file={attachment}
+                            className="inline-flex text-[11px] font-semibold underline underline-offset-2"
+                          >
+                            Open attachment
+                          </FileAccessLink>
                         ) : null}
                       </div>
                     ) : (

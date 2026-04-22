@@ -4,6 +4,8 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebase";
 import { useI18n } from "../lib/i18n";
 import { getUserState, updateUserProfile } from "../services/userservice";
+import FileAccessImage from "../components/FileAccessImage";
+import { uploadUserProfilePhoto } from "../services/profilePhotoService";
 import { smartBack } from "../utils/navBack";
 import { KENYA_COUNTY_OPTIONS, normalizeCountyName } from "../constants/kenyaCounties";
 import { EAST_AFRICA_RESIDENCE_COUNTRIES } from "../constants/eastAfricaProfile";
@@ -64,6 +66,9 @@ export default function EditProfileScreen() {
   const [phone, setPhone] = useState("");
   const [county, setCounty] = useState("");
   const [town, setTown] = useState("");
+  const [profilePhoto, setProfilePhoto] = useState(null);
+  const [nextProfilePhotoFile, setNextProfilePhotoFile] = useState(null);
+  const [localPreviewUrl, setLocalPreviewUrl] = useState("");
   const languageTouchedRef = useRef(false);
 
   // originals (for "changed" detection + reset)
@@ -86,9 +91,10 @@ export default function EditProfileScreen() {
       String(language || "") !== String(o.language || "") ||
       String(phone || "").trim() !== String(o.phone || "").trim() ||
       String(county || "").trim() !== String(o.county || "").trim() ||
-      String(town || "").trim() !== String(o.town || "").trim()
+      String(town || "").trim() !== String(o.town || "").trim() ||
+      nextProfilePhotoFile instanceof File
     );
-  }, [name, residence, language, phone, county, town]);
+  }, [name, residence, language, phone, county, town, nextProfilePhotoFile]);
 
   useEffect(() => {
     if (!residence) return;
@@ -97,6 +103,16 @@ export default function EditProfileScreen() {
       setLanguage(suggestedLanguage);
     }
   }, [language, residence]);
+
+  useEffect(() => {
+    if (!(nextProfilePhotoFile instanceof File)) {
+      setLocalPreviewUrl("");
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(nextProfilePhotoFile);
+    setLocalPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [nextProfilePhotoFile]);
 
   // ✅ Soft auth init (reduces “random logout feeling” on resume)
   useEffect(() => {
@@ -129,6 +145,7 @@ export default function EditProfileScreen() {
         const p = s?.phone || "";
         const cty = s?.county || "";
         const twn = s?.town || "";
+        const photo = s?.profilePhoto || null;
 
         setName(n);
         setResidence(r);
@@ -136,6 +153,7 @@ export default function EditProfileScreen() {
         setPhone(p);
         setCounty(cty);
         setTown(twn);
+        setProfilePhoto(photo);
         languageTouchedRef.current = Boolean(normalizeProfileLanguage(s?.profile?.language, ""));
 
         originalRef.current = {
@@ -168,6 +186,7 @@ export default function EditProfileScreen() {
     setPhone(o.phone || "");
     setCounty(o.county || "");
     setTown(o.town || "");
+    setNextProfilePhotoFile(null);
     setErr("");
   };
 
@@ -205,6 +224,12 @@ export default function EditProfileScreen() {
         county: normalizeCountyName(county),
         town: String(town || "").trim(),
       });
+
+      if (nextProfilePhotoFile instanceof File) {
+        const uploadedPhoto = await uploadUserProfilePhoto(uid, nextProfilePhotoFile);
+        setProfilePhoto(uploadedPhoto);
+        setNextProfilePhotoFile(null);
+      }
 
       // update local originals
       originalRef.current = {
@@ -246,6 +271,11 @@ export default function EditProfileScreen() {
 
   const glass =
     "border border-white/40 bg-white/55 dark:bg-zinc-900/60 backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.10)] dark:border-zinc-800/70 dark:bg-zinc-900/55";
+  const avatarFallback = (
+    <div className="flex h-full w-full items-center justify-center text-2xl font-semibold text-zinc-700 dark:text-zinc-200">
+      {(name || email || "U").trim().slice(0, 1).toUpperCase() || "U"}
+    </div>
+  );
 
   return (
     <div className={`min-h-screen ${topBg}`}>
@@ -284,6 +314,50 @@ export default function EditProfileScreen() {
 
           {/* Form */}
           <div className="mt-5 grid gap-4">
+            <div className="rounded-2xl border border-white/40 bg-white/55 dark:bg-zinc-900/60 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
+              <div className="text-[11px] font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
+                Profile photo
+              </div>
+              <div className="mt-3 flex items-center gap-4">
+                <div className="h-20 w-20 overflow-hidden rounded-full border border-zinc-200/80 bg-white/75 dark:border-zinc-700 dark:bg-zinc-950/40">
+                  {localPreviewUrl ? (
+                    <img src={localPreviewUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <FileAccessImage
+                      file={profilePhoto}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      fallback={avatarFallback}
+                    />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-zinc-200/80 bg-white/75 px-3 py-2.5 text-sm font-semibold text-zinc-900 transition hover:bg-white dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-100 dark:hover:bg-zinc-900">
+                    Choose image
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (!(file instanceof File)) return;
+                        setNextProfilePhotoFile(file);
+                      }}
+                    />
+                  </label>
+                  <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    JPG, PNG, or WEBP. We compress and store the latest image in your private bucket.
+                  </div>
+                  {nextProfilePhotoFile ? (
+                    <div className="mt-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                      Ready to upload: {nextProfilePhotoFile.name}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
             <div className="rounded-2xl border border-white/40 bg-white/55 dark:bg-zinc-900/60 p-3 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-zinc-950/30">
               <div className="text-[11px] font-semibold tracking-normal text-zinc-500 dark:text-zinc-400">
                 Full name

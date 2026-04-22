@@ -7,6 +7,8 @@ import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { auth } from "../firebase";
 import { subscribeUserDocumentHub } from "../services/documentEngineService";
+import { canResolveFileAccess } from "../services/fileAccessService";
+import FileAccessLink from "../components/FileAccessLink";
 
 function safeStr(value, max = 320) {
   return String(value || "").trim().slice(0, max);
@@ -18,11 +20,6 @@ function bytesToLabel(bytes) {
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${Math.round(b / 1024)} KB`;
   return `${Math.round((b / 1024 / 1024) * 10) / 10} MB`;
-}
-
-function canOpen(url) {
-  const clean = safeStr(url, 1200);
-  return clean.startsWith("http://") || clean.startsWith("https://");
 }
 
 function prettyContextLabel(row) {
@@ -180,8 +177,14 @@ export default function ProfileDocumentsScreen() {
               <div className="grid gap-2">
                 {activeRows.map((row) => {
                   const name = safeStr(row?.preview?.name, 180) || "Document";
-                  const url = safeStr(row?.preview?.externalUrl, 1200);
-                  const openable = canOpen(url);
+                  const fileRef = {
+                    ...row?.preview,
+                    storageKind: row?.preview?.storageKind,
+                    storageBucket: row?.preview?.storageBucket,
+                    storagePath: row?.preview?.storagePath,
+                    storageProvider: row?.preview?.storageProvider,
+                  };
+                  const openable = canResolveFileAccess(fileRef);
                   const context = prettyContextLabel(row);
                   const requestId = safeStr(row?.requestId, 120);
                   const size = bytesToLabel(row?.preview?.sizeBytes);
@@ -212,14 +215,12 @@ export default function ProfileDocumentsScreen() {
                         </div>
 
                         {openable ? (
-                          <a
-                            href={url}
-                            target="_blank"
-                            rel="noreferrer"
+                          <FileAccessLink
+                            file={fileRef}
                             className="shrink-0 rounded-xl border border-emerald-200 bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
                           >
                             Open
-                          </a>
+                          </FileAccessLink>
                         ) : (
                           <span className="shrink-0 rounded-xl border border-zinc-200 bg-zinc-100 px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
                             Metadata

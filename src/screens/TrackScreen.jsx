@@ -41,7 +41,6 @@ import { setSnapshot } from "../resume/resumeEngine";
 import { logAnalyticsEvent, trackManagedCountryTap } from "../services/analyticsService";
 import {
   createPendingAttachment,
-  createPendingAttachmentFromMeta,
 } from "../services/attachmentservice";
 import {
   activatePreparedUnlockRequest,
@@ -92,24 +91,6 @@ const TRACKS = {
     subtitle: "Browse destinations first, then open the right request path.",
     Icon: Plane,
   },
-};
-
-const FEATURED_COUNTRY_IMAGES = {
-  Canada: "https://images.unsplash.com/photo-1503614472-8c93d56e92ce?auto=format&fit=crop&w=1200&q=70",
-  Australia:
-    "https://images.unsplash.com/photo-1523482580672-f109ba8cb9be?auto=format&fit=crop&w=1200&q=70",
-  UK: "https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?auto=format&fit=crop&w=1200&q=70",
-  Germany:
-    "https://images.unsplash.com/photo-1467269204594-9661b134dd2b?auto=format&fit=crop&w=1200&q=70",
-  USA: "https://images.unsplash.com/photo-1499092346589-b9b6be3e94b2?auto=format&fit=crop&w=1200&q=70",
-};
-
-const FEATURED_COUNTRY_CODES = {
-  Canada: "CA",
-  Australia: "AU",
-  UK: "UK",
-  Germany: "DE",
-  USA: "US",
 };
 
 const COUNTRY_FILTERS = [
@@ -471,19 +452,22 @@ export default function TrackScreen({ track }) {
     return featuredCountries.map((entry) => {
       const rawCountry = safeString(entry?.country, 120);
       const country = normalizeDestinationCountry(rawCountry) || rawCountry;
-      const adminImage = safeString(entry?.imageUrl, 1200);
+      const lookupKey = safeString(country, 120).toLowerCase();
+      const countryLookup = countryMap?.get?.(lookupKey) || null;
+      const countryImage = safeString(countryLookup?.imageUrl, 1200);
+      const countryCode = safeString(countryLookup?.code, 8).toUpperCase();
       return {
         ...entry,
         country,
         label: safeString(entry?.label, 120) || country,
-        imageUrl: adminImage || FEATURED_COUNTRY_IMAGES[country] || "",
+        imageUrl: countryImage,
         flagOverride:
           safeString(entry?.flagOverride, 32) ||
-          FEATURED_COUNTRY_CODES[country] ||
+          countryCode ||
           country.slice(0, 2).toUpperCase(),
       };
     });
-  }, [featuredCountries]);
+  }, [countryMap, featuredCountries]);
 
   const pulseCountries = useMemo(() => {
     const merged = [
@@ -845,7 +829,7 @@ export default function TrackScreen({ track }) {
   const trackMeta = APP_TRACK_META[safeTrack] || APP_TRACK_META.study;
   const topBg = "bg-gradient-to-b from-emerald-50/35 via-white to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950";
   const countryCard =
-    "relative group w-full overflow-hidden text-left rounded-3xl border border-zinc-200/70 bg-white/80 p-4 shadow-sm backdrop-blur transition will-change-transform hover:border-emerald-200/70 hover:shadow-[0_14px_40px_rgba(15,23,42,0.08)] dark:border-zinc-800 dark:bg-zinc-900/55 dark:hover:border-emerald-900/45";
+    "relative group flex w-full items-center gap-4 overflow-hidden rounded-2xl border border-emerald-100/80 bg-white/92 px-4 py-3 text-left shadow-[0_8px_28px_rgba(5,150,105,0.08)] transition will-change-transform hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50/45 hover:shadow-[0_14px_34px_rgba(5,150,105,0.14)] dark:border-emerald-900/35 dark:bg-zinc-900/65 dark:hover:border-emerald-800/50 dark:hover:bg-emerald-950/20";
   const sectionTitle = "text-[1.25rem] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100";
   const sectionSubtitle = "mt-1 text-sm text-zinc-600 dark:text-zinc-300";
 
@@ -1280,8 +1264,10 @@ export default function TrackScreen({ track }) {
       }
     } else {
       const metaFiles = Array.isArray(requestUploadMeta?.files) ? requestUploadMeta.files : [];
-      for (const fileMeta of metaFiles) {
-        await createPendingAttachmentFromMeta({ requestId, fileMeta });
+      if (metaFiles.length > 0) {
+        throw new Error(
+          "We now require real file uploads. Please reselect your documents and submit again."
+        );
       }
     }
 
@@ -1653,7 +1639,7 @@ export default function TrackScreen({ track }) {
           <section className="order-5">
             <div className="flex items-end justify-between gap-3">
               <div>
-                <h2 className={sectionTitle}>{t("country_selection")}</h2>
+                <h2 className={sectionTitle}>Select a Country</h2>
                 <p className={sectionSubtitle}>Search, filter, and choose a destination</p>
               </div>
               <span className="rounded-full border border-zinc-200/80 bg-white/90 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/65 dark:text-zinc-300">
@@ -1723,6 +1709,8 @@ export default function TrackScreen({ track }) {
                     country,
                   });
                   const accentColor = resolveAccentColor(country);
+                  const countryLookup = countryMap?.get?.(safeString(country, 120).toLowerCase()) || null;
+                  const countryImageUrl = safeString(countryLookup?.imageUrl, 1400);
                   return (
                     <Motion.button
                       key={country}
@@ -1734,31 +1722,42 @@ export default function TrackScreen({ track }) {
                       className={countryCard}
                       style={buildCountryAccentSurfaceStyle(accentColor, { strong: highlighted })}
                     >
-                      <span
-                        className="pointer-events-none absolute inset-y-0 left-0 w-1.5 rounded-l-3xl"
-                        style={buildCountryAccentRailStyle(accentColor)}
-                      />
-                      <div className="relative flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                            {country}
+                      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full ring-1 ring-emerald-100/90 dark:ring-emerald-900/45">
+                        {countryImageUrl ? (
+                          <img
+                            src={countryImageUrl}
+                            alt=""
+                            loading="lazy"
+                            decoding="async"
+                            className="h-full w-full object-cover object-center"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center bg-emerald-100 text-sm font-semibold text-emerald-800 dark:bg-emerald-900/35 dark:text-emerald-200">
+                            {safeString(country, 2).toUpperCase()}
                           </div>
-                          {highlighted ? (
-                            <div className="mt-2">
-                              <span
-                                className="rounded-full border px-2.5 py-1 text-[10px] font-semibold"
-                                style={buildCountryAccentBadgeStyle(accentColor)}
-                              >
-                                Continue journey
-                              </span>
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/70 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100">
-                          <AppIcon size={ICON_MD} icon={ChevronRight} />
-                        </span>
+                        )}
                       </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-base font-semibold text-zinc-900 dark:text-zinc-100">
+                          {country}
+                        </div>
+                        <div className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-300">
+                          {trackMeta?.label ? `${trackMeta.label} / Visa` : "Study / Work / Visa"}
+                        </div>
+                        {highlighted ? (
+                          <div className="mt-1.5">
+                            <span
+                              className="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                              style={buildCountryAccentBadgeStyle(accentColor)}
+                            >
+                              Continue journey
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+                      <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 transition group-hover:bg-emerald-600 group-hover:text-white dark:border-emerald-800/60 dark:bg-emerald-950/35 dark:text-emerald-200 dark:group-hover:bg-emerald-500 dark:group-hover:text-white">
+                        <AppIcon size={ICON_MD} icon={ChevronRight} />
+                      </span>
                     </Motion.button>
                   );
                 })}
@@ -1769,8 +1768,13 @@ export default function TrackScreen({ track }) {
           <section className="order-6">
             <div className="flex items-end justify-between gap-3">
               <div>
-                <h2 className={sectionTitle}>{t("simple_requests")}</h2>
-                <p className={sectionSubtitle}>Direct requests resolved from your profile country</p>
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/35 dark:text-emerald-200">
+                    <AppIcon size={ICON_SM} icon={Sparkles} />
+                  </span>
+                  <h2 className={sectionTitle}>Quick Tasks</h2>
+                </div>
+                <p className={sectionSubtitle}>Fast actions based on your profile country</p>
               </div>
             </div>
 
@@ -1791,7 +1795,7 @@ export default function TrackScreen({ track }) {
                 No direct request types are configured yet for {profileCountry || "this profile"}.
               </div>
             ) : (
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 {simpleDefinitions.map((definition) => {
                   const icon = getSimpleRequestIcon(definition);
                   const serviceName = safeString(definition?.title, 140);
@@ -1802,45 +1806,24 @@ export default function TrackScreen({ track }) {
                       type="button"
                       onClick={() => void launchSimpleRequest(definition)}
                       disabled={saving}
-                      className="relative overflow-hidden rounded-[24px] border border-zinc-200/80 bg-white/84 p-4 text-left shadow-sm transition hover:-translate-y-[1px] hover:shadow-[0_14px_40px_rgba(15,23,42,0.08)] active:scale-[0.99] disabled:opacity-65 dark:border-zinc-700 dark:bg-zinc-900/62"
+                      className="group relative flex items-center gap-4 overflow-hidden rounded-2xl border border-emerald-100/80 bg-white/92 p-4 text-left shadow-[0_8px_28px_rgba(5,150,105,0.08)] transition hover:bg-emerald-50/45 hover:shadow-[0_14px_34px_rgba(5,150,105,0.14)] active:scale-[0.99] disabled:opacity-65 dark:border-emerald-900/35 dark:bg-zinc-900/65 dark:hover:bg-emerald-950/20"
                       style={buildCountryAccentSurfaceStyle(profileAccentColor, { strong: true })}
                     >
-                      <span
-                        className="pointer-events-none absolute inset-y-0 left-0 w-1.5 rounded-l-[24px]"
-                        style={buildCountryAccentRailStyle(profileAccentColor)}
-                      />
-
-                      <div className="relative">
-                        <div className="flex items-start justify-between gap-3">
-                          <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white/90 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100">
-                            <AppIcon size={ICON_MD} icon={icon} />
-                          </span>
-                          <div className="flex flex-wrap items-center gap-2">
-                            {definition.tag ? (
-                              <span
-                                className="rounded-full border px-2.5 py-1 text-[11px] font-semibold"
-                                style={buildCountryAccentBadgeStyle(profileAccentColor)}
-                              >
-                                {definition.tag}
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        <div className="mt-3 text-base font-semibold text-zinc-900 dark:text-zinc-100">
+                      <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-700 transition duration-300 group-hover:scale-105 group-hover:bg-emerald-600 group-hover:text-white dark:border-emerald-800/60 dark:bg-emerald-950/35 dark:text-emerald-200">
+                        <AppIcon size={ICON_MD} icon={icon} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                           {definition.title}
-                        </div>
-                        <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                        </span>
+                        <span className="mt-0.5 block truncate text-xs text-zinc-600 dark:text-zinc-300">
                           {definition.summary || `Uses ${profileCountry} from your profile automatically.`}
-                        </div>
-
-                        <div className="mt-4 flex items-center justify-between gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                          <span>{isLaunching ? t("opening") : t("start_request")}</span>
-                          <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-white/90 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100">
-                            <AppIcon size={ICON_SM} icon={ChevronRight} />
-                          </span>
-                        </div>
-                      </div>
+                        </span>
+                      </span>
+                      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 transition group-hover:bg-emerald-600 group-hover:text-white dark:border-emerald-800/60 dark:bg-emerald-950/35 dark:text-emerald-200">
+                        <AppIcon size={ICON_SM} icon={ChevronRight} />
+                      </span>
+                      <span className="sr-only">{isLaunching ? t("opening") : t("start_request")}</span>
                     </button>
                   );
                 })}

@@ -52,7 +52,6 @@ import {
 import { getMissingProfileFields } from "../utils/profileGuard";
 import {
   createPendingAttachment,
-  createPendingAttachmentFromMeta,
 } from "../services/attachmentservice";
 import {
   findRequestCatalogEntry,
@@ -655,8 +654,10 @@ export default function StudyWeHelp() {
         }
       } else {
         const metaFiles = Array.isArray(requestUploadMeta?.files) ? requestUploadMeta.files : [];
-        for (const fileMeta of metaFiles) {
-          await createPendingAttachmentFromMeta({ requestId, fileMeta });
+        if (metaFiles.length > 0) {
+          throw new Error(
+            "We now require real file uploads. Please reselect your documents and submit again."
+          );
         }
       }
 

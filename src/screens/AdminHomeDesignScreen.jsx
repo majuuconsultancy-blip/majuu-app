@@ -147,15 +147,6 @@ function FeaturedCountryEditor({
           />
         </label>
 
-        <label className="grid gap-1.5">
-          <span className={labelClassName}>Image URL</span>
-          <input
-            className={inputClassName}
-            value={entry.imageUrl}
-            onChange={(event) => onChange({ imageUrl: event.target.value })}
-            placeholder="Optional hero image URL"
-          />
-        </label>
       </div>
 
       <label className="mt-3 grid gap-1.5">
@@ -609,8 +600,7 @@ export default function AdminHomeDesignScreen() {
                   <div className="mt-4 grid gap-3">
                     {!draft.featuredCountries?.length ? (
                       <div className="rounded-2xl border border-dashed border-zinc-200 bg-white/70 px-4 py-5 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-300">
-                        Add featured countries with optional visuals and metadata like approval rate
-                        or visa timeline.
+                        Add featured countries with metadata like approval rate or visa timeline.
                       </div>
                     ) : (
                       draft.featuredCountries.map((entry, index) => (

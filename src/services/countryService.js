@@ -150,6 +150,7 @@ function normalizeCountryRecord(docId, raw = {}) {
   const name = safeString(source?.name, 120);
   const code = normalizeCountryCode(source?.code);
   const flag = safeString(source?.flag, 32);
+  const imageUrl = safeString(source?.imageUrl, 1400);
   const currency = normalizeCurrencyCode(source?.currency);
   const accentColor = normalizeAccentColor(
     source?.accentColor,
@@ -163,6 +164,7 @@ function normalizeCountryRecord(docId, raw = {}) {
     name,
     code,
     flag,
+    imageUrl,
     currency,
     accentColor,
     isActive,
@@ -186,6 +188,7 @@ export function createEmptyCountryDraft({
   name = "",
   code = "",
   flag = "",
+  imageUrl = "",
   currency = "KES",
   accentColor = "",
   isActive = true,
@@ -198,6 +201,7 @@ export function createEmptyCountryDraft({
     name: safeName,
     code: safeCode,
     flag: safeFlag,
+    imageUrl: safeString(imageUrl, 1400),
     currency: normalizeCurrencyCode(currency) || "KES",
     accentColor: normalizeAccentColor(
       accentColor,
@@ -214,6 +218,7 @@ export function draftFromCountry(country) {
     name: safe?.name,
     code: safe?.code,
     flag: safe?.flag,
+    imageUrl: safe?.imageUrl,
     currency: safe?.currency,
     accentColor: safe?.accentColor,
     isActive: safe?.isActive,
@@ -226,6 +231,7 @@ function toCountryPayload(input = {}) {
   const code = normalizeCountryCode(input?.code);
   const currency = normalizeCurrencyCode(input?.currency);
   const flag = safeString(input?.flag, 32);
+  const imageUrl = safeString(input?.imageUrl, 1400);
   const accentColor = normalizeAccentColor(
     input?.accentColor,
     suggestCountryAccentColor({ name, code, flag })
@@ -242,6 +248,7 @@ function toCountryPayload(input = {}) {
     name,
     code,
     flag,
+    imageUrl,
     currency,
     accentColor,
     isActive,

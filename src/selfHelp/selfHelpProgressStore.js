@@ -64,6 +64,18 @@ function safeNumber(value) {
   return Number(value || 0) || 0;
 }
 
+function isHttpUrl(value) {
+  const clean = safeString(value, 1200);
+  return clean.startsWith("http://") || clean.startsWith("https://");
+}
+
+function normalizeStorageKind(value, externalUrl = "", storagePath = "") {
+  const clean = safeString(value, 30).toLowerCase();
+  if (clean === "bucket" || clean === "external") return clean;
+  if (safeString(storagePath, 400)) return "bucket";
+  return externalUrl ? "external" : "";
+}
+
 function sanitizeLabels(labels) {
   if (!Array.isArray(labels)) return [];
   return Array.from(
@@ -182,8 +194,28 @@ function sanitizeDocumentRecord(value) {
   const addedAt = safeNumber(value.addedAt || value.updatedAt || Date.now());
   const stepId = safeString(value.stepId, 80);
   const fileName = safeString(value.fileName, 180);
+  const externalUrl = [
+    value.externalUrl,
+    value.url,
+    value.downloadUrl,
+    value.fileUrl,
+    value?.storage?.externalUrl,
+  ]
+    .map((entry) => safeString(entry, 1200))
+    .find((entry) => isHttpUrl(entry));
+  const storageBucket = safeString(
+    value.storageBucket || value.bucket || value?.storage?.bucket,
+    160
+  );
+  const storagePath = safeString(value.storagePath || value.path || value?.storage?.path, 400);
+  const storageKind = normalizeStorageKind(
+    value.storageKind || value?.storage?.kind,
+    externalUrl,
+    storagePath
+  );
 
   if (!track || !country || !category) return null;
+  if (!storagePath && !externalUrl) return null;
 
   return {
     id:
@@ -198,7 +230,22 @@ function sanitizeDocumentRecord(value) {
     fileName,
     fileType: safeString(value.fileType, 80),
     fileSize: safeNumber(value.fileSize),
-    localRef: safeString(value.localRef, 320),
+    externalUrl,
+    storageKind: storageKind || "bucket",
+    storageBucket,
+    storagePath,
+    storageGeneration: safeString(
+      value.storageGeneration || value.generation || value?.storage?.generation,
+      80
+    ),
+    storageChecksum: safeString(
+      value.storageChecksum || value.checksum || value?.storage?.checksum,
+      120
+    ),
+    storageProvider: safeString(
+      value.storageProvider || value.provider || value?.storage?.provider,
+      40
+    ).toLowerCase(),
     notes: safeString(value.notes, 1200),
     addedAt,
     updatedAt: safeNumber(value.updatedAt || addedAt),

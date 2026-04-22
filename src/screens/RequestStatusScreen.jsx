@@ -53,10 +53,6 @@ import {
   splitRequestDocumentsForLegacyViews,
   subscribeRequestDocumentContext,
 } from "../services/documentEngineService";
-import {
-  getDocumentEngineReadMode,
-  subscribeDocumentEngineModeState,
-} from "../services/documentEngineFlags";
 
 /* ---------------- Minimal icons ---------------- */
 function IconReceipt(props) {
@@ -172,23 +168,6 @@ function safeStr(value, max = 240) {
   return String(value || "").trim().slice(0, max);
 }
 
-function mergeDocumentRows(primaryRows = [], fallbackRows = []) {
-  const rows = [...(Array.isArray(primaryRows) ? primaryRows : []), ...(Array.isArray(fallbackRows) ? fallbackRows : [])];
-  const seen = new Set();
-  const out = [];
-
-  rows.forEach((row) => {
-    const idKey = safeStr(row?.id, 220);
-    const signature = `${safeStr(row?.name, 180).toLowerCase()}|${Number(row?.size || row?.sizeBytes || 0) || 0}|${safeStr(row?.url, 1200)}`;
-    const key = idKey || signature;
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    out.push(row);
-  });
-
-  return out;
-}
-
 function startCase(value) {
   const text = safeStr(value, 120).toLowerCase();
   if (!text) return "";
@@ -242,23 +221,6 @@ function statusUI(request) {
     label: s,
     badge: "bg-zinc-100 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800",
   };
-}
-
-function attachmentStatusLabel(status) {
-  const s = String(status || "pending_upload").toLowerCase();
-  if (s === "pending_upload") return "Received";
-  if (s === "uploaded") return "Uploaded";
-  if (s === "approved") return "Approved";
-  if (s === "rejected") return "Rejected";
-  return s;
-}
-
-function bytesToLabel(bytes) {
-  const b = Number(bytes || 0);
-  if (b <= 0) return "0 KB";
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${Math.round(b / 1024)} KB`;
-  return `${Math.round((b / 1024 / 1024) * 10) / 10} MB`;
 }
 
 function toMillis(value) {
@@ -410,11 +372,6 @@ export default function RequestStatusScreen() {
   const [req, setReq] = useState(null);
   const [err, setErr] = useState("");
 
-  const [fileErr, setFileErr] = useState("");
-  const [attachments, setAttachments] = useState([]);
-
-  const [adminFilesErr, setAdminFilesErr] = useState("");
-  const [adminFiles, setAdminFiles] = useState([]);
   const [canonicalRequestDocs, setCanonicalRequestDocs] = useState([]);
   const [canonicalDocsErr, setCanonicalDocsErr] = useState("");
   const [fullPackageItems, setFullPackageItems] = useState([]);
@@ -450,7 +407,6 @@ export default function RequestStatusScreen() {
     const id = String(requestId || "").trim();
     return id.length > 0 ?id : null;
   }, [requestId]);
-  const [docsReadMode, setDocsReadMode] = useState(getDocumentEngineReadMode());
 
   const isFullRequest =
     Boolean(req?.isFullPackage) || String(req?.requestType || "").toLowerCase() === "full";
@@ -471,30 +427,12 @@ export default function RequestStatusScreen() {
   }, []);
 
   useEffect(() => {
-    const unsub = subscribeDocumentEngineModeState({
-      onData: (state) => {
-        setDocsReadMode(state?.effectiveMode || "merge");
-      },
-      onError: (error) => {
-        console.error("document engine mode subscription error:", error);
-      },
-    });
-    return () => unsub?.();
-  }, []);
-
-  useEffect(() => {
     let unsubDoc = null;
-    let unsubAtt = null;
-    let unsubAdminFiles = null;
 
     const unsubAuth = onAuthStateChanged(auth, (user) => {
       if (unsubDoc) unsubDoc();
-      if (unsubAtt) unsubAtt();
-      if (unsubAdminFiles) unsubAdminFiles();
 
       unsubDoc = null;
-      unsubAtt = null;
-      unsubAdminFiles = null;
 
       if (!user) {
         navigate("/login", { replace: true });
@@ -551,46 +489,16 @@ export default function RequestStatusScreen() {
           setLoading(false);
         }
       );
-
-      const attRef = collection(db, "serviceRequests", validRequestId, "attachments");
-      const attQ = query(attRef, orderBy("createdAt", "desc"));
-      unsubAtt = onSnapshot(
-        attQ,
-        (snap) => {
-          setAttachments(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
-          setFileErr("");
-        },
-        (e) => {
-          console.error("attachments snapshot error:", e);
-          setFileErr(e?.message || "Failed to load submitted documents.");
-        }
-      );
-
-      const afRef = collection(db, "serviceRequests", validRequestId, "adminFiles");
-      const afQ = query(afRef, orderBy("createdAt", "desc"));
-      unsubAdminFiles = onSnapshot(
-        afQ,
-        (snap) => {
-          setAdminFiles(snap.docs.map((d) => normalizeTextDeep({ id: d.id, ...d.data() })));
-          setAdminFilesErr("");
-        },
-        (e) => {
-          console.error("adminFiles snapshot error:", e);
-          setAdminFilesErr(e?.message || "Failed to load documents from MAJUU.");
-        }
-      );
     });
 
     return () => {
       if (unsubDoc) unsubDoc();
-      if (unsubAtt) unsubAtt();
-      if (unsubAdminFiles) unsubAdminFiles();
       unsubAuth();
     };
   }, [navigate, validRequestId]);
 
   useEffect(() => {
-    if (!validRequestId || docsReadMode === "legacy") return undefined;
+    if (!validRequestId) return undefined;
     const unsub = subscribeRequestDocumentContext({
       requestId: validRequestId,
       viewerRole: "user",
@@ -605,7 +513,7 @@ export default function RequestStatusScreen() {
     });
 
     return () => unsub?.();
-  }, [validRequestId, docsReadMode]);
+  }, [validRequestId]);
 
   useEffect(() => {
     if (!validRequestId) return;
@@ -790,34 +698,16 @@ export default function RequestStatusScreen() {
     () => splitRequestDocumentsForLegacyViews(canonicalRequestDocs),
     [canonicalRequestDocs]
   );
-  const effectiveAttachments = useMemo(
-    () => {
-      if (docsReadMode === "legacy") return attachments;
-      if (docsReadMode === "canonical") return canonicalSplit.attachments;
-      return mergeDocumentRows(canonicalSplit.attachments, attachments);
-    },
-    [docsReadMode, canonicalSplit.attachments, attachments]
-  );
-  const effectiveAdminFiles = useMemo(
-    () => {
-      if (docsReadMode === "legacy") return adminFiles;
-      if (docsReadMode === "canonical") return canonicalSplit.adminFiles;
-      return mergeDocumentRows(canonicalSplit.adminFiles, adminFiles);
-    },
-    [docsReadMode, canonicalSplit.adminFiles, adminFiles]
-  );
+  const effectiveAttachments = canonicalSplit.attachments;
+  const effectiveAdminFiles = canonicalSplit.adminFiles;
   const effectiveFileErr = useMemo(() => {
     if (effectiveAttachments.length > 0) return "";
-    if (docsReadMode === "legacy") return fileErr;
-    if (docsReadMode === "canonical") return canonicalDocsErr || fileErr;
-    return fileErr || canonicalDocsErr;
-  }, [docsReadMode, effectiveAttachments.length, fileErr, canonicalDocsErr]);
+    return canonicalDocsErr;
+  }, [effectiveAttachments.length, canonicalDocsErr]);
   const effectiveAdminFilesErr = useMemo(() => {
     if (effectiveAdminFiles.length > 0) return "";
-    if (docsReadMode === "legacy") return adminFilesErr;
-    if (docsReadMode === "canonical") return canonicalDocsErr || adminFilesErr;
-    return adminFilesErr || canonicalDocsErr;
-  }, [docsReadMode, effectiveAdminFiles.length, adminFilesErr, canonicalDocsErr]);
+    return canonicalDocsErr;
+  }, [effectiveAdminFiles.length, canonicalDocsErr]);
 
   // ✅ keep your original base styles, just slightly upgraded
   const cardBase =
@@ -879,7 +769,6 @@ export default function RequestStatusScreen() {
   const canBackToFullPackage = isFull && Boolean(fullPackageHubPath);
   const canStartNew = !isFull && st === "closed";
   const canTryAgain = st === "rejected";
-  const showLegacySubmittedDocuments = Boolean(req?.legacySubmittedDocumentsVisible);
 
   const goToFullPackageHub = ({ autoOpen = false, retryItemKey = "", item = "" } = {}) => {
     if (!fullPackageHubPath) return;
@@ -1730,52 +1619,6 @@ export default function RequestStatusScreen() {
                   showHeader={false}
                   className="p-0 border-0 bg-transparent shadow-none"
                 />
-                {showLegacySubmittedDocuments ? (
-                  <>
-                    {effectiveFileErr ?(
-                      <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-700">
-                        {effectiveFileErr}
-                      </div>
-                    ) : null}
-
-                    <div className="divide-y divide-zinc-200/75 dark:divide-zinc-800/75">
-                      {effectiveAttachments.length === 0 ?(
-                        <div className="py-4 text-sm text-zinc-600 dark:text-zinc-300">
-                          No documents submitted yet.
-                        </div>
-                      ) : (
-                        effectiveAttachments.map((a, idx) => (
-                          <motion.div
-                            key={a.id}
-                            initial={{ opacity: 0, y: 6 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: Math.min(0.2, idx * 0.03), duration: 0.18 }}
-                            className="py-3 transition active:scale-[0.995]"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 break-words">
-                                  {a.name || "PDF"}
-                                </div>
-                                <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                                  Status:{" "}
-                                  <span className="font-semibold text-zinc-800">
-                                    {attachmentStatusLabel(a.status)}
-                                  </span>{" "}
-                                  · {bytesToLabel(a.size)}
-                                </div>
-                              </div>
-
-                              <span className="shrink-0 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-                                {String(a.status || "pending_upload").toLowerCase()}
-                              </span>
-                            </div>
-                          </motion.div>
-                        ))
-                      )}
-                    </div>
-                  </>
-                ) : null}
               </CollapsibleSection>
             </motion.div>
           </motion.div>

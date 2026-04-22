@@ -766,6 +766,27 @@ function normalizeDocumentActorRole(role = "") {
   return "user";
 }
 
+function resolveAttachmentExternalUrlForMirror(input = {}) {
+  const candidates = [
+    input?.externalUrl,
+    input?.url,
+    input?.downloadUrl,
+    input?.fileUrl,
+  ];
+  for (const candidate of candidates) {
+    const clean = safeStr(candidate);
+    if (clean.startsWith("http://") || clean.startsWith("https://")) return clean.slice(0, 1200);
+  }
+  return "";
+}
+
+function normalizeMirrorStorageKind({ explicit = "", externalUrl = "", storageBucket = "", storagePath = "" } = {}) {
+  const clean = lower(explicit);
+  if (clean === "bucket" || clean === "external" || clean === "meta") return clean;
+  if (safeStr(storagePath) || safeStr(storageBucket)) return "bucket";
+  return externalUrl ? "external" : "meta";
+}
+
 function normalizeChatAttachmentForMirror(message = {}) {
   const source =
     message?.attachmentMeta && typeof message.attachmentMeta === "object"
@@ -789,6 +810,15 @@ function normalizeChatAttachmentForMirror(message = {}) {
     type === "photo" ||
     type === "image" ||
     contentType.startsWith("image/");
+  const externalUrl = resolveAttachmentExternalUrlForMirror(source);
+  const storageBucket = safeStr(source?.storageBucket || source?.bucket || source?.storage?.bucket).slice(0, 160);
+  const storagePath = safeStr(source?.storagePath || source?.path || source?.storage?.path).slice(0, 400);
+  const storageKind = normalizeMirrorStorageKind({
+    explicit: source?.storageKind || source?.storage?.kind,
+    externalUrl,
+    storageBucket,
+    storagePath,
+  });
 
   return {
     name,
@@ -796,6 +826,16 @@ function normalizeChatAttachmentForMirror(message = {}) {
     note: safeStr(source?.note).slice(0, 1200),
     sizeBytes: Math.max(0, Math.floor(toNum(source?.size || source?.sizeBytes, 0))),
     attachmentKind: isPhoto ? "photo" : "document",
+    externalUrl,
+    storageKind,
+    storageBucket,
+    storagePath,
+    storageChecksum: safeStr(
+      source?.storageChecksum || source?.checksum || source?.storage?.checksum
+    ).slice(0, 120),
+    storageGeneration: safeStr(
+      source?.storageGeneration || source?.generation || source?.storage?.generation
+    ).slice(0, 80),
   };
 }
 
@@ -847,6 +887,8 @@ async function mirrorPublishedChatAttachment({
   const toRole = lower(messageData?.toRole);
   const toUid = safeStr(messageData?.toUid);
   const canonicalKind = attachment.attachmentKind === "photo" ? "chat_photo" : "chat_document";
+  const hasAccessLocator = Boolean(attachment.externalUrl || attachment.storagePath);
+  const state = hasAccessLocator ? "available" : "meta_only";
 
   const userBucket = resolveChatUserBucketForMirror({
     requestUid,
@@ -881,7 +923,7 @@ async function mirrorPublishedChatAttachment({
       requestId: rid,
       scope: "request",
       stage: "working",
-      state: "meta_only",
+      state,
       sourceChannel: "chat_message",
       createdByUid: safeStr(messageData?.approvedBy || fromUid || requestUid),
       createdByRole: normalizeDocumentActorRole(fromRole),
@@ -897,8 +939,12 @@ async function mirrorPublishedChatAttachment({
         note: attachment.note,
       },
       storage: {
-        kind: "meta",
-        externalUrl: "",
+        kind: attachment.storageKind,
+        externalUrl: attachment.externalUrl,
+        bucket: attachment.storageBucket,
+        path: attachment.storagePath,
+        checksum: attachment.storageChecksum,
+        generation: attachment.storageGeneration,
       },
       classification: {
         kind: canonicalKind,
@@ -930,10 +976,12 @@ async function mirrorPublishedChatAttachment({
         name: attachment.name,
         contentType: attachment.contentType,
         sizeBytes: attachment.sizeBytes,
-        state: "meta_only",
+        state,
         stage: "working",
-        storageKind: "meta",
-        externalUrl: "",
+        storageKind: attachment.storageKind,
+        externalUrl: attachment.externalUrl,
+        storageBucket: attachment.storageBucket,
+        storagePath: attachment.storagePath,
         sourceChannel: "chat_message",
       },
       sourceChannel: "chat_message",

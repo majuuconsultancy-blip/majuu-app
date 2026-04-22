@@ -5,7 +5,7 @@
 // - ✅ Slightly more “finished product” polish: spacing, helper text, subtle states
 // - ✅ No backend logic changes (your Firebase flow kept)
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   createUserWithEmailAndPassword,
@@ -226,18 +226,17 @@ export default function SignupScreen() {
       uid: user.uid,
       email: user.email,
       displayName: user.displayName || "",
-      photoURL: user.photoURL || "",
       provider: (user.providerData?.[0]?.providerId || "").toString(),
       lastLoginAt: Date.now(),
     });
     return state;
   }
 
-  async function applyManagerInviteIfPresent() {
+  const applyManagerInviteIfPresent = useCallback(async () => {
     const token = String(managerInviteToken || "").trim();
     if (!token) return null;
     return redeemManagerInvite(token);
-  }
+  }, [managerInviteToken]);
 
   // ✅ Handle redirect result from Google sign-in
   useEffect(() => {
@@ -271,6 +270,7 @@ export default function SignupScreen() {
           setError(friendlyAuthError(err));
         }
       });
+  }, [applyManagerInviteIfPresent, navigate]);
   // ✅ Automatically clear/set message based on hook status
   useEffect(() => {
     if (online) {
@@ -609,5 +609,6 @@ export default function SignupScreen() {
     </div>
   );
 }
+
 
 

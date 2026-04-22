@@ -1,47 +1,16 @@
-import { getFunctions, httpsCallable } from "firebase/functions";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+
+import { db } from "../firebase";
 
 function safeStr(value) {
   return String(value || "").trim();
 }
-
-const functions = getFunctions(undefined, "us-central1");
 
 function normalizeScope(scope) {
   const safeScope = safeStr(scope).toLowerCase();
   if (safeScope === "staff") return "staff";
   if (safeScope === "admin" || safeScope === "assignedadmin") return "admin";
   return "user";
-}
-
-function formatNotificationCallableError(error, callableName = "") {
-  const code = safeStr(error?.code).toLowerCase();
-  const message = safeStr(error?.message).toLowerCase();
-  const isInfraError =
-    code.includes("functions/internal") ||
-    code.includes("functions/unavailable") ||
-    code.includes("functions/unimplemented") ||
-    code.includes("functions/deadline-exceeded") ||
-    (code.includes("internal") && !message.includes("permission")) ||
-    message === "internal";
-
-  const label = safeStr(callableName) || "Notification service";
-  const wrapped = new Error(
-    isInfraError
-      ? `${label} is not available right now. Deploy Cloud Functions and retry (Firebase Blaze plan is required).`
-      : safeStr(error?.message) || "Notification request failed. Please try again."
-  );
-  wrapped.code = code;
-  wrapped.isInfrastructureUnavailable = isInfraError;
-  return wrapped;
-}
-
-function callNotificationFunction(name, payload = {}) {
-  const callable = httpsCallable(functions, name);
-  return callable(payload)
-    .then((result) => result?.data ?? null)
-    .catch((error) => {
-      throw formatNotificationCallableError(error, name);
-    });
 }
 
 function formatAmount(amount, currency = "KES") {
@@ -301,6 +270,25 @@ function buildNotificationCopy(type, requestId, scope, extras = {}) {
   }
 }
 
+function buildNotificationDocRef({ scope, uid, notificationId }) {
+  const safeUid = safeStr(uid);
+  const safeId =
+    safeStr(notificationId) ||
+    `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  if (normalizeScope(scope) === "staff") {
+    return {
+      id: safeId,
+      ref: doc(db, "staff", safeUid, "notifications", safeId),
+    };
+  }
+
+  return {
+    id: safeId,
+    ref: doc(db, "users", safeUid, "notifications", safeId),
+  };
+}
+
 async function createNotificationDoc({
   scope,
   uid,
@@ -318,7 +306,6 @@ async function createNotificationDoc({
   const safeExtras = extras && typeof extras === "object" ? extras : {};
   const copy = buildNotificationCopy(notifType, rid, normalizedScope, safeExtras);
   const route = safeStr(safeExtras.route || copy.route);
-  const fixedId = safeStr(notificationId || safeExtras.notificationId);
   const payload = {
     ...safeExtras,
     title: safeStr(safeExtras.title || copy.title),
@@ -333,16 +320,31 @@ async function createNotificationDoc({
   delete payload.role;
   delete payload.type;
 
-  const result = await callNotificationFunction("createScopedNotification", {
+  const { id, ref } = buildNotificationDocRef({
     scope: normalizedScope,
     uid: targetUid,
-    type: notifType,
-    requestId: rid || null,
-    notificationId: fixedId || undefined,
-    extras: payload,
+    notificationId: notificationId || safeExtras.notificationId,
   });
+  const now = Date.now();
 
-  const id = safeStr(result?.notificationId || fixedId || `notif_${Date.now()}`);
+  await setDoc(
+    ref,
+    {
+      id,
+      type: notifType,
+      role: normalizedScope,
+      uid: targetUid,
+      requestId: rid || null,
+      readAt: null,
+      readAtMs: 0,
+      createdAt: serverTimestamp(),
+      createdAtMs: now,
+      updatedAt: serverTimestamp(),
+      updatedAtMs: now,
+      ...payload,
+    },
+    { merge: true }
+  );
 
   return {
     id,
@@ -356,7 +358,7 @@ async function createNotificationDoc({
     body: safeStr(payload.body || copy.body),
     route,
     readAt: null,
-    createdAtMs: Date.now(),
+    createdAtMs: now,
   };
 }
 

@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   limit,
   query,
@@ -8,7 +9,6 @@ import {
   setDoc,
   where,
 } from "firebase/firestore";
-import { getFunctions, httpsCallable } from "firebase/functions";
 import { auth, db } from "../firebase";
 import {
   getCurrentUserRoleContext,
@@ -19,8 +19,6 @@ import {
   MANAGER_MODULE_CATALOG,
   normalizeManagerModules,
 } from "./managerModules";
-
-const functions = getFunctions(undefined, "us-central1");
 
 const MANAGER_AUDIT_COLLECTION = "managerAuditLogs";
 const MANAGER_INVITES_COLLECTION = "managerInvites";
@@ -47,39 +45,34 @@ function toTimestampMs(value) {
   return seconds * 1000 + extra;
 }
 
-function formatManagerCallableError(error, callableName = "") {
-  const code = safeString(error?.code, 160).toLowerCase();
-  const message = safeString(error?.message, 600).toLowerCase();
-  const isInfraError =
-    code.includes("functions/internal") ||
-    code.includes("functions/unavailable") ||
-    code.includes("functions/unimplemented") ||
-    code.includes("functions/deadline-exceeded") ||
-    (code.includes("internal") && !message.includes("permission")) ||
-    message === "internal";
-
-  const label = safeString(callableName, 80) || "Manager service";
-  const wrapped = new Error(
-    isInfraError
-      ? `${label} is not available right now. Deploy Cloud Functions and retry (Firebase Blaze plan is required).`
-      : safeString(error?.message, 600) || "Manager service request failed. Please try again."
-  );
-  wrapped.code = code;
-  wrapped.isInfrastructureUnavailable = isInfraError;
-  return wrapped;
+function clampNumber(value, min, max) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return min;
+  return Math.max(min, Math.min(max, num));
 }
 
-function isCallableInfraUnavailable(error) {
-  return Boolean(error?.isInfrastructureUnavailable);
-}
+function randomTokenSegment(length = 20) {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const size = Math.max(8, Math.min(64, Number(length) || 20));
+  let output = "";
 
-function callManagerFunction(name, payload = {}) {
-  const callable = httpsCallable(functions, name);
-  return callable(payload)
-    .then((result) => result?.data ?? null)
-    .catch((error) => {
-      throw formatManagerCallableError(error, name);
+  if (globalThis.crypto?.getRandomValues) {
+    const buffer = new Uint8Array(size);
+    globalThis.crypto.getRandomValues(buffer);
+    buffer.forEach((value) => {
+      output += chars[value % chars.length];
     });
+    return output;
+  }
+
+  for (let index = 0; index < size; index += 1) {
+    output += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return output;
+}
+
+function generateManagerInviteToken() {
+  return `mgr_${Date.now().toString(36)}_${randomTokenSegment(18)}`;
 }
 
 function managerDocToRow(docSnap) {
@@ -395,6 +388,202 @@ async function revokeManagerByEmailDirect(input = {}) {
   };
 }
 
+async function createManagerInviteDirect(input = {}) {
+  const superAdmin = await requireSuperAdmin();
+  const email = normalizeEmail(input?.email);
+  if (!email || !email.includes("@")) {
+    throw new Error("Valid manager email is required.");
+  }
+
+  const assignedModules = normalizeManagerModules(input?.assignedModules);
+  if (!assignedModules.length) {
+    throw new Error("Select at least one manager module.");
+  }
+
+  const now = Date.now();
+  const expiresInHours = clampNumber(input?.expiresInHours || 24, 1, 168);
+  const expiresAtMs = now + expiresInHours * 60 * 60 * 1000;
+  const inviteToken = generateManagerInviteToken();
+  const inviteLink = buildManagerInviteLink(inviteToken, { email });
+
+  await setDoc(
+    doc(db, MANAGER_INVITES_COLLECTION, inviteToken),
+    {
+      id: inviteToken,
+      inviteToken,
+      email,
+      emailLower: email,
+      name: safeString(input?.name, 120),
+      stationedCountry: safeString(input?.stationedCountry, 120),
+      stationedCountryLower: safeString(input?.stationedCountry, 120).toLowerCase(),
+      cityTown: safeString(input?.cityTown, 120),
+      managerRole: safeString(input?.managerRole, 120),
+      assignedModules,
+      notes: safeString(input?.notes, 2000),
+      status: "pending",
+      singleUse: true,
+      expiresAtMs,
+      createdByUid: safeString(superAdmin?.uid, 180),
+      createdByEmail: normalizeEmail(superAdmin?.email),
+      createdAt: serverTimestamp(),
+      createdAtMs: now,
+      updatedAt: serverTimestamp(),
+      updatedAtMs: now,
+    },
+    { merge: true }
+  );
+
+  await writeManagerAuditEntry({
+    managerUid: "",
+    managerEmail: email,
+    action: "manager_invite_created",
+    moduleKey: assignedModules[0] || "",
+    details: `Invite created for ${email}`,
+    metadata: {
+      inviteId: inviteToken,
+      assignedModules,
+      expiresAtMs,
+    },
+    actorUid: safeString(superAdmin?.uid, 180),
+    actorEmail: normalizeEmail(superAdmin?.email),
+    actorRole: "superadmin",
+  });
+
+  return {
+    ok: true,
+    inviteId: inviteToken,
+    inviteToken,
+    inviteLink,
+    email,
+    assignedModules,
+    expiresAtMs,
+    localFallback: true,
+  };
+}
+
+async function redeemManagerInviteDirect(inviteToken = "") {
+  const callerUid = safeString(auth.currentUser?.uid, 180);
+  if (!callerUid) {
+    throw new Error("Login required");
+  }
+
+  const safeInviteToken = safeString(inviteToken, 220);
+  if (!safeInviteToken) {
+    throw new Error("inviteToken is required");
+  }
+
+  const inviteRef = doc(db, MANAGER_INVITES_COLLECTION, safeInviteToken);
+  const inviteSnap = await getDoc(inviteRef);
+  if (!inviteSnap.exists()) {
+    throw new Error("Manager invite was not found");
+  }
+
+  const invite = inviteSnap.data() || {};
+  const inviteStatus = safeString(invite?.status, 40).toLowerCase() || "pending";
+  if (inviteStatus !== "pending") {
+    throw new Error("Invite has already been used");
+  }
+
+  const now = Date.now();
+  const expiresAtMs = Number(invite?.expiresAtMs || 0) || 0;
+  if (expiresAtMs > 0 && now > expiresAtMs) {
+    await setDoc(
+      inviteRef,
+      {
+        status: "expired",
+        updatedAt: serverTimestamp(),
+        updatedAtMs: now,
+      },
+      { merge: true }
+    );
+    throw new Error("Invite has expired");
+  }
+
+  const inviteEmail = normalizeEmail(invite?.email || invite?.emailLower);
+  const callerEmail = normalizeEmail(auth.currentUser?.email);
+  if (!callerEmail || !inviteEmail || callerEmail !== inviteEmail) {
+    throw new Error("Invite email does not match signed-in account");
+  }
+
+  const userSnap = await getDoc(doc(db, "users", callerUid));
+  const userDoc = userSnap.exists() ? userSnap.data() || {} : {};
+  const managerScope = buildManagerScopePayload(
+    {
+      name: safeString(invite?.name || userDoc?.name, 120),
+      stationedCountry: safeString(invite?.stationedCountry, 120),
+      cityTown: safeString(invite?.cityTown, 120),
+      managerRole: safeString(invite?.managerRole, 120),
+      assignedModules: normalizeManagerModules(invite?.assignedModules),
+      notes: safeString(invite?.notes, 2000),
+      status: "active",
+      inviteToken: safeInviteToken,
+      inviteId: safeInviteToken,
+      inviteCreatedAtMs: Number(invite?.createdAtMs || now) || now,
+      inviteExpiresAtMs: expiresAtMs,
+      lastLoginAtMs: now,
+      updatedAtMs: now,
+    },
+    userDoc?.managerScope
+  );
+
+  if (!managerScope.assignedModules.length) {
+    throw new Error("Invite has no modules assigned");
+  }
+
+  await Promise.all([
+    setDoc(
+      doc(db, "users", callerUid),
+      {
+        email: inviteEmail,
+        emailLower: inviteEmail,
+        role: "manager",
+        managerScope,
+        managerUpdatedBy: `invite:${safeInviteToken}`,
+        managerUpdatedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        updatedAtMs: now,
+      },
+      { merge: true }
+    ),
+    setDoc(
+      inviteRef,
+      {
+        status: "accepted",
+        acceptedByUid: callerUid,
+        acceptedByEmail: callerEmail,
+        acceptedAt: serverTimestamp(),
+        acceptedAtMs: now,
+        updatedAt: serverTimestamp(),
+        updatedAtMs: now,
+      },
+      { merge: true }
+    ),
+    writeManagerAuditEntry({
+      managerUid: callerUid,
+      managerEmail: inviteEmail,
+      action: "manager_invite_redeemed",
+      moduleKey: managerScope.assignedModules[0] || "",
+      details: `Manager invite redeemed by ${inviteEmail}`,
+      metadata: {
+        inviteId: safeInviteToken,
+        assignedModules: managerScope.assignedModules,
+      },
+      actorUid: callerUid,
+      actorEmail: inviteEmail,
+      actorRole: "manager",
+    }),
+  ]);
+
+  return {
+    ok: true,
+    uid: callerUid,
+    email: inviteEmail,
+    inviteToken: safeInviteToken,
+    assignedModules: managerScope.assignedModules,
+    localFallback: true,
+  };
+}
+
 export function getManagerModuleOptions() {
   return MANAGER_MODULE_CATALOG;
 }
@@ -426,7 +615,7 @@ export async function createManagerInvite(input = {}) {
     expiresInHours: Number(input?.expiresInHours || 24) || 24,
     appBaseUrl,
   };
-  const result = await callManagerFunction("createManagerInvite", payload);
+  const result = await createManagerInviteDirect(payload);
   return {
     ...(result || {}),
     inviteLink:
@@ -436,9 +625,7 @@ export async function createManagerInvite(input = {}) {
 }
 
 export async function redeemManagerInvite(inviteToken = "") {
-  return callManagerFunction("redeemManagerInvite", {
-    inviteToken: safeString(inviteToken, 220),
-  });
+  return redeemManagerInviteDirect(safeString(inviteToken, 220));
 }
 
 export async function upsertManagerAssignmentByEmail(input = {}) {
@@ -453,14 +640,7 @@ export async function upsertManagerAssignmentByEmail(input = {}) {
     status: safeString(input?.status, 40) || "active",
   };
 
-  try {
-    return await callManagerFunction("upsertManagerAssignmentByEmail", payload);
-  } catch (error) {
-    if (isCallableInfraUnavailable(error)) {
-      return upsertManagerAssignmentByEmailDirect(payload);
-    }
-    throw error;
-  }
+  return upsertManagerAssignmentByEmailDirect(payload);
 }
 
 export async function assignManagerByEmailDirect(input = {}) {
@@ -472,14 +652,7 @@ export async function assignManagerByEmailDirect(input = {}) {
 
 export async function revokeManagerByEmail(input = {}) {
   const payload = { email: normalizeEmail(input?.email) };
-  try {
-    return await callManagerFunction("revokeManagerByEmail", payload);
-  } catch (error) {
-    if (isCallableInfraUnavailable(error)) {
-      return revokeManagerByEmailDirect(payload);
-    }
-    throw error;
-  }
+  return revokeManagerByEmailDirect(payload);
 }
 
 export async function listAssignedManagers({ max = 250, dedupeEmail = true } = {}) {

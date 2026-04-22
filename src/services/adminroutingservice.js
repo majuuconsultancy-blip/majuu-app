@@ -1,4 +1,3 @@
-import { getFunctions, httpsCallable } from "firebase/functions";
 import {
   collection,
   doc,
@@ -23,7 +22,6 @@ import {
   preferredAgentReasonLabel,
 } from "./partnershipService";
 
-const functions = getFunctions(undefined, "us-central1");
 const ASSIGNED_ADMIN_ROLE_VARIANTS = [
   "assignedAdmin",
   "assignedadmin",
@@ -807,45 +805,6 @@ async function applyRouteToRequest({
   };
 }
 
-function _shouldUseLocalFallback(error) {
-  const code = safeStr(error?.code).toLowerCase();
-  const msg = safeStr(error?.message).toLowerCase();
-  return (
-    code.includes("functions/internal") ||
-    code.includes("functions/unavailable") ||
-    code.includes("functions/unimplemented") ||
-    code.includes("functions/deadline-exceeded") ||
-    code.includes("functions/not-found") ||
-    code.includes("internal") ||
-    msg.includes("internal") ||
-    msg.includes("unavailable") ||
-    msg.includes("not found")
-  );
-}
-
-function formatRoutingCallableError(error, callableName = "") {
-  const code = safeStr(error?.code).toLowerCase();
-  const message = safeStr(error?.message).toLowerCase();
-  const isInfraError =
-    code.includes("functions/internal") ||
-    code.includes("functions/unavailable") ||
-    code.includes("functions/unimplemented") ||
-    code.includes("functions/deadline-exceeded") ||
-    code.includes("functions/not-found") ||
-    (code.includes("internal") && !message.includes("permission")) ||
-    message === "internal";
-
-  const label = safeStr(callableName, 80) || "Routing service";
-  const wrapped = new Error(
-    isInfraError
-      ? `${label} is not available right now. Deploy Cloud Functions and retry (Firebase Blaze plan is required).`
-      : safeStr(error?.message, 600) || "Routing request failed. Please try again."
-  );
-  wrapped.code = code;
-  wrapped.isInfrastructureUnavailable = isInfraError;
-  return wrapped;
-}
-
 async function _superAdminOverrideRouteRequestLocal({
   requestId,
   selectedPartnerId = "",
@@ -981,14 +940,7 @@ export async function superAdminOverrideRouteRequest({
     targetAdminUid: safeStr(targetAdminUid),
     reason: safeStr(reason) || "super_admin_manual_override",
   };
-
-  try {
-    const callable = httpsCallable(functions, "superAdminOverrideRouteRequest");
-    const resp = await callable(payload);
-    return resp?.data || { ok: true };
-  } catch (error) {
-    throw formatRoutingCallableError(error, "superAdminOverrideRouteRequest");
-  }
+  return _superAdminOverrideRouteRequestLocal(payload);
 }
 
 export async function routeUnroutedNewRequests({
@@ -1004,14 +956,7 @@ export async function routeUnroutedNewRequests({
     max: clamp(toNum(max, 120), 1, 300),
     reason: safeStr(reason) || "super_admin_manual_bulk_route",
   };
-
-  try {
-    const callable = httpsCallable(functions, "routeUnroutedNewRequests");
-    const resp = await callable(payload);
-    return resp?.data || { ok: true };
-  } catch (error) {
-    throw formatRoutingCallableError(error, "routeUnroutedNewRequests");
-  }
+  return _routeUnroutedNewRequestsLocal(payload, roleCtx);
 }
 
 async function _routeUnroutedNewRequestsLocal(

@@ -10,16 +10,18 @@ import {
   where,
 } from "firebase/firestore";
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
-import { getFunctions, httpsCallable } from "firebase/functions";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
 import { auth, db } from "../firebase";
 import DemoProviderCheckoutModal from "../components/DemoPaystackCheckoutModal";
+import {
+  initiatePayment,
+  invokeFinanceAction,
+  verifyPayment,
+} from "./apiService";
 import { resolveFullPackageCoverageState } from "./fullpackageservice";
 import { getRequestStartedAtMs } from "../utils/requestWorkProgress";
-
-const functions = getFunctions(undefined, "us-central1");
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
 const IS_NATIVE_ANDROID =
   Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
@@ -125,6 +127,16 @@ function resolveFrontendAppBaseUrl(value) {
   return trimTrailingSlash(value);
 }
 
+function resolvePaymentCallbackApiPath() {
+  const configured = cleanStr(import.meta.env.VITE_PAYMENT_CALLBACK_API_PATH, 240);
+  return configured || "/api/mpesa-callback";
+}
+
+function resolveFrontendPaymentCallbackPath() {
+  const configured = cleanStr(import.meta.env.VITE_PAYMENT_FRONTEND_CALLBACK_PATH, 240);
+  return configured || "/payment/callback";
+}
+
 function cleanAmount(value) {
   const source = typeof value === "string" ? value.replace(/[^0-9.]+/g, "") : value;
   const num = Number(source || 0);
@@ -164,10 +176,6 @@ function toMillis(value) {
   if (value instanceof Date) return value.getTime();
   const parsed = Date.parse(String(value || ""));
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function paymentCallable(name) {
-  return httpsCallable(functions, name);
 }
 
 function isCheckoutPayableStatus(status = "") {
@@ -246,7 +254,8 @@ function buildHostedPaymentMetadata({
   const extra = metadata && typeof metadata === "object" ? metadata : {};
   return compactMetadata({
     source: "majuu_web",
-    callbackPath: "/payment/callback",
+    callbackPath: resolvePaymentCallbackApiPath(),
+    frontendCallbackPath: resolveFrontendPaymentCallbackPath(),
     flowType,
     paymentType,
     requestId,
@@ -289,7 +298,11 @@ function buildDemoCallbackUrl({ reference, metadata } = {}) {
   const baseUrl = resolveFrontendAppBaseUrl(
     data.appBaseUrl || (typeof window !== "undefined" ? window.location.origin : "")
   );
-  const callbackPath = cleanStr(data.callbackPath || "/payment/callback", 240) || "/payment/callback";
+  const callbackPath =
+    cleanStr(
+      data.frontendCallbackPath || data.callbackPath || resolveFrontendPaymentCallbackPath(),
+      240
+    ) || resolveFrontendPaymentCallbackPath();
   if (!baseUrl) return "";
 
   const params = new URLSearchParams();
@@ -688,13 +701,24 @@ async function initializeHostedCheckout({
   }
 
   let payload = null;
+  const safeMetadata = metadata && typeof metadata === "object" ? metadata : {};
+  const backendMetadata = {
+    ...safeMetadata,
+    callbackPath:
+      cleanStr(
+        safeMetadata.frontendCallbackPath ||
+          safeMetadata.callbackPath ||
+          resolveFrontendPaymentCallbackPath(),
+        240
+      ) || resolveFrontendPaymentCallbackPath(),
+  };
   const initBody = {
     email: payerEmail,
     amount: payableAmount,
     currency: payCurrency,
     reference: txReference,
     provider: ACTIVE_PAYMENT_PROVIDER,
-    metadata: metadata && typeof metadata === "object" ? metadata : {},
+    metadata: backendMetadata,
   };
   paymentDebugLog("initialize_checkout_payload", initBody);
   if (isDemoPaymentMode()) {
@@ -1100,18 +1124,64 @@ function extractFinanceErrorMessage(error, fallback = "Something went wrong. Ple
   return message || detailMessage || fallback;
 }
 
+function shouldUsePaymentApiFallback(error) {
+  const code = cleanStr(error?.code, 120).toLowerCase();
+  const message = cleanStr(error?.message, 500).toLowerCase();
+  const status = Number(error?.status || 0) || 0;
+  return (
+    Boolean(error?.isInfrastructureUnavailable) ||
+    code.startsWith("api/") ||
+    status === 0 ||
+    status === 404 ||
+    status === 429 ||
+    status === 500 ||
+    status === 501 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    message.includes("backend is not available")
+  );
+}
+
 async function callFinance(name, payload = {}) {
+  const action = cleanStr(name, 120);
+  const safePayload = payload && typeof payload === "object" ? payload : {};
   try {
-    const callable = paymentCallable(name);
-    const result = await callable(payload);
-    return result?.data ?? null;
+    if (
+      action === "createUnlockCheckoutSession" ||
+      action === "createFullPackageUnlockCheckoutSession" ||
+      action === "createPaymentCheckoutSession"
+    ) {
+      return await initiatePayment({
+        action,
+        provider: ACTIVE_PAYMENT_PROVIDER,
+        ...safePayload,
+        callbackPath:
+          cleanStr(safePayload?.callbackPath, 240) || resolvePaymentCallbackApiPath(),
+        frontendCallbackPath:
+          cleanStr(safePayload?.frontendCallbackPath, 240) ||
+          resolveFrontendPaymentCallbackPath(),
+      });
+    }
+
+    if (action === "reconcilePaymentReference") {
+      return await verifyPayment({
+        action,
+        provider: ACTIVE_PAYMENT_PROVIDER,
+        ...safePayload,
+      });
+    }
+
+    return await invokeFinanceAction(action, safePayload);
   } catch (error) {
-    console.error(`Finance callable failed: ${name}`, error);
+    console.error(`Finance API request failed: ${action}`, error);
     const nextError = new Error(
       extractFinanceErrorMessage(error, "Payment checkout could not start right now. Please try again.")
     );
-    nextError.code = cleanStr(error?.code, 120) || "functions/internal";
+    nextError.code = cleanStr(error?.code, 120) || "api/request-failed";
+    nextError.status = Number(error?.status || 0) || null;
     nextError.details = error?.details ?? null;
+    nextError.isInfrastructureUnavailable = Boolean(error?.isInfrastructureUnavailable);
     nextError.cause = error;
     throw nextError;
   }
@@ -1261,22 +1331,32 @@ export function isUnlockPaymentAutoRefundEligible({
 
 export async function createUnlockCheckoutSession(payload = {}) {
   if (!isDemoPaymentMode()) {
-    const result = await callFinance("createUnlockCheckoutSession", {
-      ...payload,
-      appBaseUrl: resolveFrontendAppBaseUrl(payload?.appBaseUrl),
-      idempotencyKey:
-        cleanStr(payload?.idempotencyKey, 180) || buildIdempotencyKey("UNLOCK"),
-      phoneNumber: cleanStr(payload?.phoneNumber || payload?.phone, 40),
-    });
-    const authorizationUrl = cleanStr(
-      result?.authorizationUrl || result?.redirectUrl,
-      1000
-    );
-    return {
-      ...(result || {}),
-      authorizationUrl,
-      redirectUrl: authorizationUrl,
-    };
+    try {
+      const result = await callFinance("createUnlockCheckoutSession", {
+        ...payload,
+        appBaseUrl: resolveFrontendAppBaseUrl(payload?.appBaseUrl),
+        idempotencyKey:
+          cleanStr(payload?.idempotencyKey, 180) || buildIdempotencyKey("UNLOCK"),
+        phoneNumber: cleanStr(payload?.phoneNumber || payload?.phone, 40),
+      });
+      const authorizationUrl = cleanStr(
+        result?.authorizationUrl || result?.redirectUrl,
+        1000
+      );
+      return {
+        ...(result || {}),
+        authorizationUrl,
+        redirectUrl: authorizationUrl,
+      };
+    } catch (error) {
+      if (!shouldUsePaymentApiFallback(error)) {
+        throw error;
+      }
+      paymentDebugLog("unlock_checkout_api_fallback", {
+        message: error?.message || String(error),
+        status: Number(error?.status || 0) || null,
+      });
+    }
   }
 
   const context = await loadRequestCheckoutContext(payload?.requestId);
@@ -1355,13 +1435,23 @@ export async function createUnlockCheckoutSession(payload = {}) {
 
 export async function createFullPackageUnlockCheckoutSession(payload = {}) {
   if (!isDemoPaymentMode()) {
-    return callFinance("createFullPackageUnlockCheckoutSession", {
-      ...payload,
-      appBaseUrl: resolveFrontendAppBaseUrl(payload?.appBaseUrl),
-      idempotencyKey:
-        cleanStr(payload?.idempotencyKey, 180) || buildIdempotencyKey("FULLPKG"),
-      phoneNumber: cleanStr(payload?.phoneNumber || payload?.phone, 40),
-    });
+    try {
+      return await callFinance("createFullPackageUnlockCheckoutSession", {
+        ...payload,
+        appBaseUrl: resolveFrontendAppBaseUrl(payload?.appBaseUrl),
+        idempotencyKey:
+          cleanStr(payload?.idempotencyKey, 180) || buildIdempotencyKey("FULLPKG"),
+        phoneNumber: cleanStr(payload?.phoneNumber || payload?.phone, 40),
+      });
+    } catch (error) {
+      if (!shouldUsePaymentApiFallback(error)) {
+        throw error;
+      }
+      paymentDebugLog("full_package_checkout_api_fallback", {
+        message: error?.message || String(error),
+        status: Number(error?.status || 0) || null,
+      });
+    }
   }
 
   const context = await loadFullPackageCheckoutContext({
@@ -1479,22 +1569,32 @@ export async function adminRejectInProgressPayment({
 
 export async function createPaymentCheckoutSession(payload = {}) {
   if (!isDemoPaymentMode()) {
-    const result = await callFinance("createPaymentCheckoutSession", {
-      ...payload,
-      appBaseUrl: resolveFrontendAppBaseUrl(payload?.appBaseUrl),
-      idempotencyKey:
-        cleanStr(payload?.idempotencyKey, 180) || buildIdempotencyKey("INPROGRESS"),
-      phoneNumber: cleanStr(payload?.phoneNumber || payload?.phone, 40),
-    });
-    const authorizationUrl = cleanStr(
-      result?.authorizationUrl || result?.redirectUrl,
-      1000
-    );
-    return {
-      ...(result || {}),
-      authorizationUrl,
-      redirectUrl: authorizationUrl,
-    };
+    try {
+      const result = await callFinance("createPaymentCheckoutSession", {
+        ...payload,
+        appBaseUrl: resolveFrontendAppBaseUrl(payload?.appBaseUrl),
+        idempotencyKey:
+          cleanStr(payload?.idempotencyKey, 180) || buildIdempotencyKey("INPROGRESS"),
+        phoneNumber: cleanStr(payload?.phoneNumber || payload?.phone, 40),
+      });
+      const authorizationUrl = cleanStr(
+        result?.authorizationUrl || result?.redirectUrl,
+        1000
+      );
+      return {
+        ...(result || {}),
+        authorizationUrl,
+        redirectUrl: authorizationUrl,
+      };
+    } catch (error) {
+      if (!shouldUsePaymentApiFallback(error)) {
+        throw error;
+      }
+      paymentDebugLog("payment_checkout_api_fallback", {
+        message: error?.message || String(error),
+        status: Number(error?.status || 0) || null,
+      });
+    }
   }
 
   const shareToken = cleanStr(payload?.shareToken, 400);
@@ -1585,18 +1685,23 @@ export async function reconcilePaymentReference(payload = {}) {
   try {
     const result = await callFinance("reconcilePaymentReference", { reference });
     return normalizeVerificationResponse(result, reference);
-  } catch (callableError) {
-    const code = cleanStr(callableError?.code, 120).toLowerCase();
-    const message = cleanStr(callableError?.message, 500).toLowerCase();
+  } catch (apiError) {
+    const code = cleanStr(apiError?.code, 120).toLowerCase();
+    const message = cleanStr(apiError?.message, 500).toLowerCase();
+    const status = Number(apiError?.status || 0) || 0;
     const shouldFallback =
-      code.includes("functions/unavailable") ||
-      code.includes("functions/unimplemented") ||
-      code.includes("functions/not-found") ||
-      code.includes("functions/internal") ||
-      code.includes("functions/deadline-exceeded") ||
-      message.includes("deploy cloud functions");
+      Boolean(apiError?.isInfrastructureUnavailable) ||
+      code.startsWith("api/") ||
+      status === 404 ||
+      status === 429 ||
+      status === 500 ||
+      status === 501 ||
+      status === 502 ||
+      status === 503 ||
+      status === 504 ||
+      message.includes("backend is not available");
     if (!shouldFallback) {
-      throw callableError;
+      throw apiError;
     }
   }
 

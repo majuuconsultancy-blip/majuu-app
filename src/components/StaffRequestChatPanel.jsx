@@ -24,6 +24,8 @@ import { normalizeTextDeep } from "../utils/textNormalizer";
 import { getSystemChatMessageLabel, isSystemChatMessage } from "../utils/chatSystemMessages";
 import { safeText } from "../utils/safeText";
 import { buildParticipantSummary } from "../services/chatParticipantService";
+import FileAccessImage from "./FileAccessImage";
+import FileAccessLink from "./FileAccessLink";
 
 /* ---------------- helpers ---------------- */
 function safeStr(x) {
@@ -143,17 +145,38 @@ function RenderMessageBody({ m, mine }) {
       ? "Photo"
       : "Document";
   const hasAttachment = Boolean(attachment?.name);
+  const isImageAttachment =
+    attachmentKind === "photo" ||
+    attachmentKind === "image" ||
+    type === "photo" ||
+    type === "image" ||
+    String(attachment?.mime || attachment?.contentType || "").toLowerCase().startsWith("image/");
 
   if (type === "document" || type === "pdf" || type === "image" || type === "photo") {
     return (
       <div className="grid gap-1">
         <div className="text-xs font-semibold opacity-90">{attachmentLabel}</div>
+        {isImageAttachment ?(
+          <FileAccessImage
+            file={attachment}
+            alt={safeText(attachment?.name) || "attachment"}
+            className="max-h-56 w-full rounded-lg object-cover"
+          />
+        ) : null}
         <div className="text-sm">
           {safeText(attachment?.name) || "attachment"}
           {attachment?.size ?(
             <span className="text-xs opacity-80"> - {attachment.size} bytes</span>
           ) : null}
         </div>
+        {hasAttachment ?(
+          <FileAccessLink
+            file={attachment}
+            className="text-xs font-semibold underline underline-offset-2"
+          >
+            Open attachment
+          </FileAccessLink>
+        ) : null}
       </div>
     );
   }
@@ -168,10 +191,25 @@ function RenderMessageBody({ m, mine }) {
         {hasAttachment ?(
           <div className={`${mine ?"bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
             <div className="text-xs font-semibold opacity-90">{attachmentLabel}</div>
+            {isImageAttachment ?(
+              <FileAccessImage
+                file={attachment}
+                alt={safeText(attachment?.name) || "attachment"}
+                className="mt-1.5 max-h-52 w-full rounded-lg object-cover"
+              />
+            ) : null}
             <div className="text-xs opacity-90">
               {safeText(attachment?.name) || "attachment"}
               {attachment?.size ?` - ${attachment.size} bytes` : ""}
             </div>
+            {hasAttachment ?(
+              <FileAccessLink
+                file={attachment}
+                className="mt-1 inline-flex text-[11px] font-semibold underline underline-offset-2"
+              >
+                Open attachment
+              </FileAccessLink>
+            ) : null}
           </div>
         ) : null}
 
@@ -687,39 +725,14 @@ export default function StaffRequestChatPanel({ requestId }) {
     try {
       // Best: use bundle when both exist (one pending doc)
       if (pdf && t) {
-        try {
-          await sendPendingBundle({
-            requestId: rid,
-            fromRole: "staff",
-            toRole: "user",
-            text: t,
-            attachmentMeta: pdf,
-            pdfMeta: pdf,
-          });
-        } catch (bundleErr) {
-          const code = String(bundleErr?.code || "").toLowerCase();
-          const msg = String(bundleErr?.message || "").toLowerCase();
-          const fallback =
-            code.includes("permission-denied") ||
-            msg.includes("permission") ||
-            msg.includes("invalid type") ||
-            msg.includes("bundle");
-          if (!fallback) throw bundleErr;
-
-          await sendPendingText({
-            requestId: rid,
-            fromRole: "staff",
-            toRole: "user",
-            text: t,
-          });
-          await sendPendingAttachment({
-            requestId: rid,
-            fromRole: "staff",
-            toRole: "user",
-            attachmentMeta: pdf,
-            typeHint: pdf?.attachmentKind || "document",
-          });
-        }
+        await sendPendingBundle({
+          requestId: rid,
+          fromRole: "staff",
+          toRole: "user",
+          text: t,
+          attachmentMeta: pdf,
+          pdfMeta: pdf,
+        });
       } else if (pdf) {
         await sendPendingAttachment({
           requestId: rid,

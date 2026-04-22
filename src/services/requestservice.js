@@ -318,15 +318,20 @@ function ensureVerified(user) {
 function shouldUseLocalCreateFallback(error) {
   const code = cleanStr(error?.code, 180).toLowerCase();
   const message = cleanStr(error?.message, 500).toLowerCase();
+  const status = Number(error?.status || 0) || 0;
   return (
     Boolean(error?.isInfrastructureUnavailable) ||
+    code.startsWith("api/") ||
+    status === 0 ||
+    status === 404 ||
+    status === 429 ||
+    status === 500 ||
+    status === 501 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
     code === "internal" ||
-    code.includes("functions/internal") ||
-    code.includes("functions/unavailable") ||
-    code.includes("functions/unimplemented") ||
-    code.includes("functions/deadline-exceeded") ||
-    code.includes("functions/not-found") ||
-    message.includes("deploy cloud functions")
+    message.includes("backend is not available")
   );
 }
 

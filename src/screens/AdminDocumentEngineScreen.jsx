@@ -16,6 +16,7 @@ import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import {
   auditRequestDocumentBackfill,
   auditUserVaultBackfill,
+  cleanupLegacyDocumentRows,
 } from "../services/documentEngineService";
 import {
   clearDocumentEngineReadMode,
@@ -129,11 +130,17 @@ export default function AdminDocumentEngineScreen() {
   const [requestAuditBusy, setRequestAuditBusy] = useState(false);
   const [requestAuditErr, setRequestAuditErr] = useState("");
   const [requestAudit, setRequestAudit] = useState(null);
+  const [requestCleanupBusy, setRequestCleanupBusy] = useState(false);
+  const [requestCleanupErr, setRequestCleanupErr] = useState("");
+  const [requestCleanupMsg, setRequestCleanupMsg] = useState("");
 
   const [userUidInput, setUserUidInput] = useState("");
   const [userAuditBusy, setUserAuditBusy] = useState(false);
   const [userAuditErr, setUserAuditErr] = useState("");
   const [userAudit, setUserAudit] = useState(null);
+  const [userCleanupBusy, setUserCleanupBusy] = useState(false);
+  const [userCleanupErr, setUserCleanupErr] = useState("");
+  const [userCleanupMsg, setUserCleanupMsg] = useState("");
 
   const validModes = useMemo(() => getDocumentEngineValidModes(), []);
   const effectiveMode = modeState?.effectiveMode || "merge";
@@ -257,6 +264,30 @@ export default function AdminDocumentEngineScreen() {
     }
   };
 
+  const runRequestCleanup = async () => {
+    const requestId = safeStr(requestIdInput, 120);
+    if (!requestId) {
+      setRequestCleanupErr("Enter a request ID first.");
+      return;
+    }
+    setRequestCleanupBusy(true);
+    setRequestCleanupErr("");
+    setRequestCleanupMsg("");
+    try {
+      const report = await cleanupLegacyDocumentRows({
+        requestId,
+        dryRun: false,
+      });
+      setRequestCleanupMsg(
+        `Cleaned ${Number(report?.deleted?.links || 0)} links and ${Number(report?.deleted?.documents || 0)} orphan docs.`
+      );
+    } catch (error) {
+      setRequestCleanupErr(error?.message || "Failed to run request cleanup.");
+    } finally {
+      setRequestCleanupBusy(false);
+    }
+  };
+
   const runUserAudit = async () => {
     const uid = safeStr(userUidInput, 120);
     if (!uid) {
@@ -275,6 +306,30 @@ export default function AdminDocumentEngineScreen() {
       setUserAuditErr(error?.message || "Failed to audit user vault backfill.");
     } finally {
       setUserAuditBusy(false);
+    }
+  };
+
+  const runUserCleanup = async () => {
+    const uid = safeStr(userUidInput, 120);
+    if (!uid) {
+      setUserCleanupErr("Enter a user UID first.");
+      return;
+    }
+    setUserCleanupBusy(true);
+    setUserCleanupErr("");
+    setUserCleanupMsg("");
+    try {
+      const report = await cleanupLegacyDocumentRows({
+        uid,
+        dryRun: false,
+      });
+      setUserCleanupMsg(
+        `Cleaned ${Number(report?.deleted?.links || 0)} links, ${Number(report?.deleted?.documents || 0)} docs, and ${Number(report?.deleted?.legacySelfHelpRows || 0)} legacy self-help rows.`
+      );
+    } catch (error) {
+      setUserCleanupErr(error?.message || "Failed to run user cleanup.");
+    } finally {
+      setUserCleanupBusy(false);
     }
   };
 
@@ -465,9 +520,28 @@ export default function AdminDocumentEngineScreen() {
                     <AppIcon icon={Database} size={ICON_SM} />
                     {requestAuditBusy ? "Checking..." : "Run Request Audit"}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => void runRequestCleanup()}
+                    disabled={requestCleanupBusy}
+                    className="mt-2 ml-2 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/90 px-4 py-2.5 text-sm font-semibold text-zinc-700 transition hover:border-amber-200 hover:bg-amber-50/60 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200"
+                  >
+                    <AppIcon icon={RefreshCw} size={ICON_SM} />
+                    {requestCleanupBusy ? "Cleaning..." : "Clean Legacy Rows"}
+                  </button>
                   {requestAuditErr ? (
                     <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50/70 p-2 text-xs text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-200">
                       {requestAuditErr}
+                    </div>
+                  ) : null}
+                  {requestCleanupErr ? (
+                    <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50/70 p-2 text-xs text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-200">
+                      {requestCleanupErr}
+                    </div>
+                  ) : null}
+                  {requestCleanupMsg ? (
+                    <div className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-2 text-xs text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                      {requestCleanupMsg}
                     </div>
                   ) : null}
                   <AuditSummary title="Request result" report={requestAudit} />
@@ -492,9 +566,28 @@ export default function AdminDocumentEngineScreen() {
                     <AppIcon icon={FolderClock} size={ICON_SM} />
                     {userAuditBusy ? "Checking..." : "Run Vault Audit"}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => void runUserCleanup()}
+                    disabled={userCleanupBusy}
+                    className="mt-2 ml-2 inline-flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/90 px-4 py-2.5 text-sm font-semibold text-zinc-700 transition hover:border-amber-200 hover:bg-amber-50/60 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200"
+                  >
+                    <AppIcon icon={RefreshCw} size={ICON_SM} />
+                    {userCleanupBusy ? "Cleaning..." : "Clean Legacy Rows"}
+                  </button>
                   {userAuditErr ? (
                     <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50/70 p-2 text-xs text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-200">
                       {userAuditErr}
+                    </div>
+                  ) : null}
+                  {userCleanupErr ? (
+                    <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50/70 p-2 text-xs text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/25 dark:text-rose-200">
+                      {userCleanupErr}
+                    </div>
+                  ) : null}
+                  {userCleanupMsg ? (
+                    <div className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-2 text-xs text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                      {userCleanupMsg}
                     </div>
                   ) : null}
                   <AuditSummary title="Vault result" report={userAudit} />

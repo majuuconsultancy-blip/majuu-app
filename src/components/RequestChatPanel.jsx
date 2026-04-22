@@ -18,6 +18,8 @@ import useKeyboardInset from "../hooks/useKeyboardInset";
 import { normalizeTextDeep } from "../utils/textNormalizer";
 import { getSystemChatMessageLabel, isSystemChatMessage } from "../utils/chatSystemMessages";
 import { safeText } from "../utils/safeText";
+import FileAccessImage from "./FileAccessImage";
+import FileAccessLink from "./FileAccessLink";
 
 /* ---------------- helpers ---------------- */
 function safeStr(x) {
@@ -73,17 +75,6 @@ function formatDayLabel(ms) {
   if (diffDays === 0) return "Today";
   if (diffDays === 1) return "Yesterday";
   return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
-}
-
-function shouldFallbackToSplitSend(error) {
-  const code = String(error?.code || "").toLowerCase();
-  const msg = String(error?.message || "").toLowerCase();
-  return (
-    code.includes("permission-denied") ||
-    msg.includes("permission") ||
-    msg.includes("invalid type") ||
-    msg.includes("bundle")
-  );
 }
 
 function IconX(props) {
@@ -868,32 +859,14 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
           status: "pending",
         });
 
-        try {
-          await sendPendingBundle({
-            requestId: rid,
-            fromRole: myRole,
-            toRole,
-            text: t,
-            attachmentMeta: pdf,
-            pdfMeta: pdf,
-          });
-        } catch (bundleErr) {
-          if (!shouldFallbackToSplitSend(bundleErr)) throw bundleErr;
-
-          await sendPendingText({
-            requestId: rid,
-            fromRole: myRole,
-            toRole,
-            text: t,
-          });
-          await sendPendingAttachment({
-            requestId: rid,
-            fromRole: myRole,
-            toRole,
-            attachmentMeta: pdf,
-            typeHint: pdf?.attachmentKind || "document",
-          });
-        }
+        await sendPendingBundle({
+          requestId: rid,
+          fromRole: myRole,
+          toRole,
+          text: t,
+          attachmentMeta: pdf,
+          pdfMeta: pdf,
+        });
       } else if (pdf) {
         pushOptimistic({
           fromRole: myRole,
@@ -978,6 +951,10 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
     const attachmentKind = String(attachment?.attachmentKind || type || "document").toLowerCase();
     const attachmentLabel =
       attachmentKind === "photo" || attachmentKind === "image" ? "Photo" : "Document";
+    const isImageAttachment =
+      attachmentKind === "photo" ||
+      attachmentKind === "image" ||
+      String(attachment?.mime || attachment?.contentType || "").toLowerCase().startsWith("image/");
     const isAttachmentOnly =
       type === "pdf" || type === "document" || type === "image" || type === "photo";
     const isBundleView = type === "bundle_view" || type === "bundle" || item._kind === "bundle_view";
@@ -1003,10 +980,25 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
               {attachment?.name ?(
                 <div className={`${mine ?"bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
                   <div className="text-xs font-semibold opacity-90">{attachmentLabel}</div>
+                  {isImageAttachment ?(
+                    <FileAccessImage
+                      file={attachment}
+                      alt={safeText(attachment?.name) || "attachment"}
+                      className="mt-1.5 max-h-52 w-full rounded-lg object-cover"
+                    />
+                  ) : null}
                   <div className="text-xs opacity-90">
                     {safeText(attachment?.name) || "attachment"}
                     {attachment?.size ?` - ${attachment.size} bytes` : ""}
                   </div>
+                  {attachment?.name ?(
+                    <FileAccessLink
+                      file={attachment}
+                      className="mt-1 inline-flex text-[11px] font-semibold underline underline-offset-2"
+                    >
+                      Open attachment
+                    </FileAccessLink>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -1016,20 +1008,50 @@ export default function RequestChatPanel({ requestId, role = "user", onClose }) 
               {attachment?.name ?(
                 <div className={`${mine ?"bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
                   <div className="text-xs font-semibold opacity-90">{attachmentLabel}</div>
+                  {isImageAttachment ?(
+                    <FileAccessImage
+                      file={attachment}
+                      alt={safeText(attachment?.name) || "attachment"}
+                      className="mt-1.5 max-h-52 w-full rounded-lg object-cover"
+                    />
+                  ) : null}
                   <div className="text-xs opacity-90">
                     {safeText(attachment?.name) || "attachment"}
                     {attachment?.size ?` - ${attachment.size} bytes` : ""}
                   </div>
+                  {attachment?.name ?(
+                    <FileAccessLink
+                      file={attachment}
+                      className="mt-1 inline-flex text-[11px] font-semibold underline underline-offset-2"
+                    >
+                      Open attachment
+                    </FileAccessLink>
+                  ) : null}
                 </div>
               ) : null}
             </div>
           ) : isAttachmentOnly ?(
             <div className="mt-1">
               <div className="font-semibold">{attachmentLabel}</div>
+              {isImageAttachment ?(
+                <FileAccessImage
+                  file={attachment}
+                  alt={safeText(attachment?.name) || "attachment"}
+                  className="mt-1.5 max-h-56 w-full rounded-lg object-cover"
+                />
+              ) : null}
               <div className="text-xs opacity-90">
                 {safeText(attachment?.name) || "attachment"}
                 {attachment?.size ?` - ${attachment.size} bytes` : ""}
               </div>
+              {attachment?.name ?(
+                <FileAccessLink
+                  file={attachment}
+                  className="mt-1 inline-flex text-[11px] font-semibold underline underline-offset-2"
+                >
+                  Open attachment
+                </FileAccessLink>
+              ) : null}
             </div>
           ) : (
             <div className="mt-1">{safeText(m.text)}</div>

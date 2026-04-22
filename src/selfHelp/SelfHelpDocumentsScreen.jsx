@@ -41,6 +41,10 @@ import {
   mergeSelfHelpRuntimeResources,
   subscribeRuntimeSelfHelpResources,
 } from "../services/selfHelpResourceService";
+import { uploadBinaryFile } from "../services/fileUploadService";
+import { buildSelfHelpDocumentStoragePath } from "../services/storageContract";
+import { canResolveFileAccess } from "../services/fileAccessService";
+import FileAccessLink from "../components/FileAccessLink";
 
 const TRACK_ICONS = {
   study: GraduationCap,
@@ -246,9 +250,12 @@ export default function SelfHelpDocumentsScreen({ track }) {
   const handleSave = async (values) => {
     if (!uid || !country) return;
 
+    const resolvedId =
+      safeString(values?.id, 240) ||
+      `${track}::${country}::${Date.now()}::${Math.random().toString(36).slice(2, 8)}`;
     const step = stepById.get(safeString(values?.stepId, 80));
-    const payload = {
-      id: safeString(values?.id, 240),
+    let payload = {
+      id: resolvedId,
       track,
       country,
       category: safeString(values?.category, 40).toLowerCase(),
@@ -258,24 +265,75 @@ export default function SelfHelpDocumentsScreen({ track }) {
       fileName: safeString(values?.fileName, 180),
       fileType: safeString(values?.fileType, 80),
       fileSize: Number(values?.fileSize || 0) || 0,
-      localRef: safeString(values?.localRef, 320),
+      externalUrl: safeString(values?.externalUrl, 1200),
+      storageBucket: safeString(values?.storageBucket, 160),
+      storagePath: safeString(values?.storagePath, 400),
+      storageGeneration: safeString(values?.storageGeneration, 80),
+      storageChecksum: safeString(values?.storageChecksum, 120),
+      storageProvider: safeString(values?.storageProvider, 40).toLowerCase(),
       notes: safeString(values?.notes, 1200),
     };
-    const optimisticProgress = previewSelfHelpDocumentProgress(progress, payload);
 
     setSaving(true);
     setStatusMsg("");
-    setProgress(optimisticProgress);
-    cacheSelfHelpProgress(uid, optimisticProgress);
-    closeDialog();
-    setSaving(false);
 
     try {
+      if (values?.uploadFile instanceof File) {
+        const uploadResult = await uploadBinaryFile({
+          file: values.uploadFile,
+          storagePath: buildSelfHelpDocumentStoragePath({
+            uid,
+            track,
+            country,
+            recordId: resolvedId,
+            fileName: values.uploadFile.name || payload.fileName || "document",
+            contentType: values.uploadFile.type || payload.fileType || "application/octet-stream",
+          }),
+          contentType: values.uploadFile.type || payload.fileType || "application/octet-stream",
+          customMetadata: {
+            ownerUid: uid,
+            source: "self_help",
+            track: safeString(track, 20),
+            country: safeString(country, 80),
+            recordId: resolvedId,
+          },
+        });
+        payload = {
+          ...payload,
+          fileName: safeString(values.uploadFile.name || payload.fileName, 180),
+          fileType: safeString(uploadResult?.contentType || values.uploadFile.type || payload.fileType, 80),
+          fileSize: Number(uploadResult?.sizeBytes || values.uploadFile.size || payload.fileSize || 0) || 0,
+          externalUrl: "",
+          storageKind: safeString(uploadResult?.storageKind || "bucket", 30).toLowerCase(),
+          storageBucket: safeString(uploadResult?.bucket, 160),
+          storagePath: safeString(uploadResult?.path, 400),
+          storageGeneration: safeString(uploadResult?.generation, 80),
+          storageChecksum: safeString(uploadResult?.checksum, 120),
+          storageProvider: safeString(uploadResult?.provider, 40).toLowerCase(),
+        };
+      }
+
+      const hasUploadSelection = values?.uploadFile instanceof File;
+      const hasStoredPath = Boolean(safeString(payload?.storagePath, 400));
+      if (!values?.id && !hasUploadSelection) {
+        throw new Error("Please choose a file to upload before saving.");
+      }
+      if (!hasStoredPath) {
+        throw new Error("Document storage is incomplete. Please upload the file again.");
+      }
+
+      const optimisticProgress = previewSelfHelpDocumentProgress(progress, payload);
+      setProgress(optimisticProgress);
+      cacheSelfHelpProgress(uid, optimisticProgress);
+      closeDialog();
+
       const next = await saveSelfHelpDocumentRecord(uid, payload);
       setProgress(next);
     } catch (error) {
       console.error("SelfHelp document save failed:", error);
-      setStatusMsg("Document updated here, but we could not persist it for next time right now.");
+      setStatusMsg(error?.message || "We could not upload and save this document right now.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -463,9 +521,14 @@ export default function SelfHelpDocumentsScreen({ track }) {
                                   {record.fileType ? ` (${record.fileType})` : ""}
                                 </div>
                               ) : null}
-                              {record.localRef ? (
-                                <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                                  Ref: {record.localRef}
+                              {canResolveFileAccess(record) ? (
+                                <div className="mt-2">
+                                  <FileAccessLink
+                                    file={record}
+                                    className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200"
+                                  >
+                                    Open file
+                                  </FileAccessLink>
                                 </div>
                               ) : null}
                               {record.notes ? (

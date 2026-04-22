@@ -5,7 +5,6 @@ import { auth, db } from "../firebase";
 import RequestModal from "../components/RequestModal";
 import {
   createPendingAttachment,
-  createPendingAttachmentFromMeta,
 } from "../services/attachmentservice";
 import {
   normalizeFullPackageItems,
@@ -539,8 +538,10 @@ export default function FullPackageMissingScreen() {
       }
     } else {
       const metaFiles = Array.isArray(requestUploadMeta?.files) ? requestUploadMeta.files : [];
-      for (const fileMeta of metaFiles) {
-        await createPendingAttachmentFromMeta({ requestId, fileMeta });
+      if (metaFiles.length > 0) {
+        throw new Error(
+          "We now require real file uploads. Please reselect your documents and submit again."
+        );
       }
     }
 

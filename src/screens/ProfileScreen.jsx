@@ -15,6 +15,7 @@ import {
 import AppIcon from "../components/AppIcon";
 import CollapsibleSection from "../components/CollapsibleSection";
 import ThemeToggle from "../components/ThemeToggle";
+import FileAccessImage from "../components/FileAccessImage";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { auth } from "../firebase";
 import { getUserState } from "../services/userservice";
@@ -116,7 +117,7 @@ export default function ProfileScreen() {
   const [err, setErr] = useState("");
 
   const [email, setEmail] = useState("");
-  const [photoURL, setPhotoURL] = useState("");
+  const [profilePhoto, setProfilePhoto] = useState(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [countryOfResidence, setCountryOfResidence] = useState("");
@@ -181,7 +182,6 @@ export default function ProfileScreen() {
 
       lastHydratedUidRef.current = uidNow;
       setEmail(user.email || "");
-      setPhotoURL(user.photoURL || "");
       setErr("");
 
       const cached = readProfileCache(uidNow);
@@ -224,6 +224,7 @@ export default function ProfileScreen() {
         const nextCounty = state?.county || "";
         const nextTown = state?.town || "";
         const nextLanguage = getProfileLanguageLabel(state?.profile?.language || "");
+        const nextProfilePhoto = state?.profilePhoto || null;
         const nextRole = resolveRoleFromUserDoc({
           role: state?.role,
           email: user.email || state?.email || "",
@@ -239,6 +240,7 @@ export default function ProfileScreen() {
         setCounty(nextCounty);
         setTown(nextTown);
         setLanguage(nextLanguage);
+        setProfilePhoto(nextProfilePhoto);
         setRole(nextRole);
         setJourney(normalizeJourney(state?.journey));
 
@@ -387,13 +389,16 @@ export default function ProfileScreen() {
           </div>
 
           <div className="mx-auto h-20 w-20 overflow-hidden rounded-full border border-zinc-200/80 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800/70">
-            {photoURL ? (
-              <img src={photoURL} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-2xl font-semibold text-zinc-700 dark:text-zinc-200">
-                {avatarInitial}
-              </div>
-            )}
+            <FileAccessImage
+              file={profilePhoto}
+              alt=""
+              className="h-full w-full object-cover"
+              fallback={
+                <div className="flex h-full w-full items-center justify-center text-2xl font-semibold text-zinc-700 dark:text-zinc-200">
+                  {avatarInitial}
+                </div>
+              }
+            />
           </div>
 
           <h1 className="mt-3 truncate text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
