@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
-import { motion as Motion } from "../utils/motionProxy";
+import { motion as Motion } from "../utils/motionproxy";
 import {
   Pencil,
   LogOut,

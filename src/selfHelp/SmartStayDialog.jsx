@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion as Motion } from "../utils/motionProxy";
+import { AnimatePresence, motion as Motion } from "../utils/motionproxy";
 import { CalendarDays, Home, MapPin, X } from "lucide-react";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";

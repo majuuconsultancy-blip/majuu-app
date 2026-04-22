@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { motion as Motion } from "../../utils/motionProxy";
+import { motion as Motion } from "../../utils/motionproxy";
 
 function clampPercent(value) {
   const next = Math.round(Number(value));

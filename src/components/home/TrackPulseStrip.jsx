@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion as Motion } from "../../utils/motionProxy";
+import { AnimatePresence, motion as Motion } from "../../utils/motionproxy";
 import { ChevronRight, Newspaper, Radio } from "lucide-react";
 
 import AppIcon from "../AppIcon";

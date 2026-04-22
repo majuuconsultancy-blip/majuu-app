@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 // eslint-disable-next-line no-unused-vars
-import { AnimatePresence, motion } from "../utils/motionProxy";
+import { AnimatePresence, motion } from "../utils/motionproxy";
 import { smartBack } from "../utils/navBack";
 
 import {

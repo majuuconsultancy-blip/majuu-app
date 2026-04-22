@@ -17,7 +17,7 @@ import {
   orderBy,
   where,
 } from "firebase/firestore";
-import { motion } from "../utils/motionProxy";
+import { motion } from "../utils/motionproxy";
 import RequestChatLauncher from "../components/RequestChatLauncher";
 import CollapsibleSection from "../components/CollapsibleSection";
 import RequestDocumentFieldsSection from "../components/RequestDocumentFieldsSection";

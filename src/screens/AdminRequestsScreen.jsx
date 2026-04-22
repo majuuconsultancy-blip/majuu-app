@@ -44,7 +44,7 @@ import {
 import { db } from "../firebase";
 import { getRequestWorkProgress } from "../utils/requestWorkProgress";
 
-import { motion, AnimatePresence } from "../utils/motionProxy";
+import { motion, AnimatePresence } from "../utils/motionproxy";
 import {
   RefreshCw,
   Search,

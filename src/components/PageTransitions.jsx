@@ -1,4 +1,4 @@
-import { motion } from "../utils/motionProxy";
+import { motion } from "../utils/motionproxy";
 import { Capacitor } from "@capacitor/core";
 
 const pageTransition = {

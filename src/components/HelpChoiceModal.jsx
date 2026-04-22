@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { motion as Motion, AnimatePresence } from "../utils/motionProxy";
+import { motion as Motion, AnimatePresence } from "../utils/motionproxy";
 import { useI18n } from "../lib/i18n";
 
 function cleanStr(x, max = 80) {

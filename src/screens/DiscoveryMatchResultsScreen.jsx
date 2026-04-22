@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, ChevronRight, Compass, RefreshCcw, Sparkles } from "lucide-react";
 
-import { motion as Motion } from "../utils/motionProxy";
+import { motion as Motion } from "../utils/motionproxy";
 import AppIcon from "../components/AppIcon";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
 import { APP_TRACK_META, normalizeTrackType } from "../constants/migrationOptions";

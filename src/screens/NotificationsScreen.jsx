@@ -12,7 +12,7 @@ import {
 
 import AppIcon from "../components/AppIcon";
 import { ICON_LG, ICON_MD, ICON_SM } from "../constants/iconSizes";
-import { motion as Motion } from "../utils/motionProxy";
+import { motion as Motion } from "../utils/motionproxy";
 import { safeText } from "../utils/safeText";
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 import { navigateFromPayload } from "../services/pushBridge";

@@ -2,7 +2,7 @@
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { useLocation, useNavigate } from "react-router-dom";
-import { motion as Motion, AnimatePresence } from "../utils/motionProxy";
+import { motion as Motion, AnimatePresence } from "../utils/motionproxy";
 import {
   ArrowLeft,
   Briefcase,

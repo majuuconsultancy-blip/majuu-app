@@ -11,7 +11,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { motion as Motion } from "../utils/motionProxy";
+import { motion as Motion } from "../utils/motionproxy";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { auth } from "../firebase";

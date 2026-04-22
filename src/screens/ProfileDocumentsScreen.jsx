@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, FileText, Inbox, Upload } from "lucide-react";
-import { motion as Motion } from "../utils/motionProxy";
+import { motion as Motion } from "../utils/motionproxy";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { auth } from "../firebase";

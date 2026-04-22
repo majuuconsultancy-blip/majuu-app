@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion as Motion } from "../utils/motionProxy";
+import { AnimatePresence, motion as Motion } from "../utils/motionproxy";
 import { Check, EllipsisVertical, X } from "lucide-react";
 import AppIcon from "../components/AppIcon";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
