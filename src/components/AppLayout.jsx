@@ -7,7 +7,7 @@ import { auth, db } from "../firebase";
 import { useNotifsV2Store } from "../services/notifsV2Store";
 import ScreenLoader from "./ScreenLoader";
 
-import { AnimatePresence } from "../utils/motionProxy";
+import { AnimatePresence } from "../utils/MotionProxy";
 import PageTransitions from "./PageTransitions";
 import { resolveLandingPathFromUserState } from "../journey/journeyLanding";
 
