@@ -1,9 +1,112 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
-export default defineConfig({ 
+function resolveLocalApiFile(pathname = "") {
+  const safePath = String(pathname || "").replace(/\/+$/, "");
+  if (!safePath.startsWith("/api")) return "";
+
+  const directPath = path.join(process.cwd(), `${safePath.replace(/^\/+/, "")}.js`);
+  if (existsSync(directPath)) return directPath;
+
+  const indexPath = path.join(process.cwd(), safePath.replace(/^\/+/, ""), "index.js");
+  if (existsSync(indexPath)) return indexPath;
+
+  return "";
+}
+
+function createNodeLikeResponse(res) {
+  let currentStatus = 200;
+
+  return {
+    status(code) {
+      currentStatus = Number(code || 200) || 200;
+      return this;
+    },
+    setHeader(name, value) {
+      res.setHeader(name, value);
+      return this;
+    },
+    json(payload) {
+      if (!res.headersSent) {
+        res.statusCode = currentStatus;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+      }
+      res.end(JSON.stringify(payload));
+      return this;
+    },
+    send(payload) {
+      if (!res.headersSent) {
+        res.statusCode = currentStatus;
+      }
+      if (typeof payload === "object" && payload !== null) {
+        if (!res.headersSent) {
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+        }
+        res.end(JSON.stringify(payload));
+        return this;
+      }
+      res.end(String(payload ?? ""));
+      return this;
+    },
+    end(payload = "") {
+      if (!res.headersSent) {
+        res.statusCode = currentStatus;
+      }
+      res.end(payload);
+      return this;
+    },
+  };
+}
+
+function localVercelApiPlugin() {
+  return {
+    name: "local-vercel-api",
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const pathname = req.url ? new URL(req.url, "http://127.0.0.1").pathname : "";
+        const apiFile = resolveLocalApiFile(pathname);
+        if (!apiFile) {
+          next();
+          return;
+        }
+
+        try {
+          const moduleUrl = `${pathToFileURL(apiFile).href}?t=${Date.now()}`;
+          const mod = await import(moduleUrl);
+          const handler = mod?.default;
+          if (typeof handler !== "function") {
+            next();
+            return;
+          }
+
+          await handler(req, createNodeLikeResponse(res));
+          if (!res.writableEnded) {
+            res.end();
+          }
+        } catch (error) {
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+          }
+          res.end(
+            JSON.stringify({
+              ok: false,
+              message: "Local API route failed.",
+              error: String(error?.message || error),
+            })
+          );
+        }
+      });
+    },
+  };
+}
+
+export default defineConfig({
   build: {
   rollupOptions: {
     output: {
@@ -20,6 +123,7 @@ export default defineConfig({
 },
 
   plugins: [
+    localVercelApiPlugin(),
     react(),
     tailwindcss(),
     VitePWA({
@@ -72,6 +176,7 @@ export default defineConfig({
       // - Avoid caching Firestore/Auth calls (prevents stale + weirdness)
       workbox: {
         navigateFallback: "/index.html",
+        navigateFallbackDenylist: [/^\/api(?:\/|$)/],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
