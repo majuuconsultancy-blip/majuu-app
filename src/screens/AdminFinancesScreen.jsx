@@ -61,7 +61,6 @@ function formatMoney(amount, currency = "KES") {
 function paymentProviderLabel(value) {
   const key = safeString(value, 40).toLowerCase();
   if (key === "mpesa") return "M-Pesa";
-  if (key === "paystack") return "Paystack";
   return key ? key.toUpperCase() : "Unknown";
 }
 
@@ -516,7 +515,7 @@ export default function AdminFinancesScreen() {
           />
           <TinyStat
             label="Provider Ready"
-            value={environmentStatus?.ready ? "Ready for hosted checkout" : "Missing config"}
+            value={environmentStatus?.ready ? "Ready for M-Pesa STK push" : "Missing config"}
             tone={environmentStatus?.ready ? "good" : "warn"}
           />
           <TinyStat label="Partners" value={`${partners.length} onboarded`} />
@@ -805,150 +804,98 @@ export default function AdminFinancesScreen() {
                             </label>
                           </div>
 
-                          {providerKey === "mpesa" ? (
-                            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                              <label className="grid gap-1.5">
-                                <span className={labelClass}>Shortcode</span>
-                                <input
-                                  value={row?.settings?.shortcode || ""}
-                                  onChange={(event) =>
-                                    updateProviderConfigDraft(
-                                      `providers.${providerKey}.${envKey}.settings.shortcode`,
-                                      event.target.value
-                                    )
-                                  }
-                                  className={inputClass}
-                                />
-                              </label>
-                              <label className="grid gap-1.5">
-                                <span className={labelClass}>Paybill</span>
-                                <input
-                                  value={row?.settings?.paybill || ""}
-                                  onChange={(event) =>
-                                    updateProviderConfigDraft(
-                                      `providers.${providerKey}.${envKey}.settings.paybill`,
-                                      event.target.value
-                                    )
-                                  }
-                                  className={inputClass}
-                                />
-                              </label>
-                              <label className="grid gap-1.5">
-                                <span className={labelClass}>
-                                  Consumer Key {maskedSecrets?.consumerKey ? "(set)" : ""}
-                                </span>
-                                <input
-                                  type="password"
-                                  value={row?.secrets?.consumerKey || ""}
-                                  onChange={(event) =>
-                                    updateProviderConfigDraft(
-                                      `providers.${providerKey}.${envKey}.secrets.consumerKey`,
-                                      event.target.value
-                                    )
-                                  }
-                                  placeholder="Enter new value to update"
-                                  className={inputClass}
-                                />
-                              </label>
-                              <label className="grid gap-1.5">
-                                <span className={labelClass}>
-                                  Consumer Secret {maskedSecrets?.consumerSecret ? "(set)" : ""}
-                                </span>
-                                <input
-                                  type="password"
-                                  value={row?.secrets?.consumerSecret || ""}
-                                  onChange={(event) =>
-                                    updateProviderConfigDraft(
-                                      `providers.${providerKey}.${envKey}.secrets.consumerSecret`,
-                                      event.target.value
-                                    )
-                                  }
-                                  placeholder="Enter new value to update"
-                                  className={inputClass}
-                                />
-                              </label>
-                              <label className="grid gap-1.5">
-                                <span className={labelClass}>
-                                  Passkey {maskedSecrets?.passkey ? "(set)" : ""}
-                                </span>
-                                <input
-                                  type="password"
-                                  value={row?.secrets?.passkey || ""}
-                                  onChange={(event) =>
-                                    updateProviderConfigDraft(
-                                      `providers.${providerKey}.${envKey}.secrets.passkey`,
-                                      event.target.value
-                                    )
-                                  }
-                                  placeholder="Enter new value to update"
-                                  className={inputClass}
-                                />
-                              </label>
-                              <label className="grid gap-1.5">
-                                <span className={labelClass}>Initiator Name</span>
-                                <input
-                                  value={row?.settings?.initiatorName || ""}
-                                  onChange={(event) =>
-                                    updateProviderConfigDraft(
-                                      `providers.${providerKey}.${envKey}.settings.initiatorName`,
-                                      event.target.value
-                                    )
-                                  }
-                                  className={inputClass}
-                                />
-                              </label>
-                            </div>
-                          ) : (
-                            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                              <label className="grid gap-1.5">
-                                <span className={labelClass}>Public Key</span>
-                                <input
-                                  value={row?.settings?.publicKey || ""}
-                                  onChange={(event) =>
-                                    updateProviderConfigDraft(
-                                      `providers.${providerKey}.${envKey}.settings.publicKey`,
-                                      event.target.value
-                                    )
-                                  }
-                                  className={inputClass}
-                                />
-                              </label>
-                              <label className="grid gap-1.5">
-                                <span className={labelClass}>
-                                  Secret Key {maskedSecrets?.secretKey ? "(set)" : ""}
-                                </span>
-                                <input
-                                  type="password"
-                                  value={row?.secrets?.secretKey || ""}
-                                  onChange={(event) =>
-                                    updateProviderConfigDraft(
-                                      `providers.${providerKey}.${envKey}.secrets.secretKey`,
-                                      event.target.value
-                                    )
-                                  }
-                                  placeholder="Enter new value to update"
-                                  className={inputClass}
-                                />
-                              </label>
-                              <label className="grid gap-1.5 sm:col-span-2">
-                                <span className={labelClass}>
-                                  Webhook Secret {maskedSecrets?.webhookSecret ? "(set)" : ""}
-                                </span>
-                                <input
-                                  type="password"
-                                  value={row?.secrets?.webhookSecret || ""}
-                                  onChange={(event) =>
-                                    updateProviderConfigDraft(
-                                      `providers.${providerKey}.${envKey}.secrets.webhookSecret`,
-                                      event.target.value
-                                    )
-                                  }
-                                  placeholder="Enter new value to update"
-                                  className={inputClass}
-                                />
-                              </label>
-                            </div>
-                          )}
+                          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                            <label className="grid gap-1.5">
+                              <span className={labelClass}>Shortcode</span>
+                              <input
+                                value={row?.settings?.shortcode || ""}
+                                onChange={(event) =>
+                                  updateProviderConfigDraft(
+                                    `providers.${providerKey}.${envKey}.settings.shortcode`,
+                                    event.target.value
+                                  )
+                                }
+                                className={inputClass}
+                              />
+                            </label>
+                            <label className="grid gap-1.5">
+                              <span className={labelClass}>Paybill</span>
+                              <input
+                                value={row?.settings?.paybill || ""}
+                                onChange={(event) =>
+                                  updateProviderConfigDraft(
+                                    `providers.${providerKey}.${envKey}.settings.paybill`,
+                                    event.target.value
+                                  )
+                                }
+                                className={inputClass}
+                              />
+                            </label>
+                            <label className="grid gap-1.5">
+                              <span className={labelClass}>
+                                Consumer Key {maskedSecrets?.consumerKey ? "(set)" : ""}
+                              </span>
+                              <input
+                                type="password"
+                                value={row?.secrets?.consumerKey || ""}
+                                onChange={(event) =>
+                                  updateProviderConfigDraft(
+                                    `providers.${providerKey}.${envKey}.secrets.consumerKey`,
+                                    event.target.value
+                                  )
+                                }
+                                placeholder="Enter new value to update"
+                                className={inputClass}
+                              />
+                            </label>
+                            <label className="grid gap-1.5">
+                              <span className={labelClass}>
+                                Consumer Secret {maskedSecrets?.consumerSecret ? "(set)" : ""}
+                              </span>
+                              <input
+                                type="password"
+                                value={row?.secrets?.consumerSecret || ""}
+                                onChange={(event) =>
+                                  updateProviderConfigDraft(
+                                    `providers.${providerKey}.${envKey}.secrets.consumerSecret`,
+                                    event.target.value
+                                  )
+                                }
+                                placeholder="Enter new value to update"
+                                className={inputClass}
+                              />
+                            </label>
+                            <label className="grid gap-1.5">
+                              <span className={labelClass}>
+                                Passkey {maskedSecrets?.passkey ? "(set)" : ""}
+                              </span>
+                              <input
+                                type="password"
+                                value={row?.secrets?.passkey || ""}
+                                onChange={(event) =>
+                                  updateProviderConfigDraft(
+                                    `providers.${providerKey}.${envKey}.secrets.passkey`,
+                                    event.target.value
+                                  )
+                                }
+                                placeholder="Enter new value to update"
+                                className={inputClass}
+                              />
+                            </label>
+                            <label className="grid gap-1.5">
+                              <span className={labelClass}>Initiator Name</span>
+                              <input
+                                value={row?.settings?.initiatorName || ""}
+                                onChange={(event) =>
+                                  updateProviderConfigDraft(
+                                    `providers.${providerKey}.${envKey}.settings.initiatorName`,
+                                    event.target.value
+                                  )
+                                }
+                                className={inputClass}
+                              />
+                            </label>
+                          </div>
                         </div>
                       );
                     })}

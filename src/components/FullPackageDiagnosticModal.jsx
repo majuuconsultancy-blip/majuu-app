@@ -7,7 +7,6 @@ import { useFullPackagePricingList } from "../hooks/useRequestPricing";
 import {
   buildFullPackageHubPath,
   createFullPackageDraft,
-  markFullPackageUnlockPaid,
   normalizeFullPackageItems,
   resolveFullPackageCoverageState,
   syncFullPackageSelection,
@@ -478,6 +477,8 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
         selectedItems: missingItems,
         track: normalizedTrack,
         country: normalizedCountry,
+        amount: gateAmount,
+        currency: "KES",
         draftId,
         returnTo,
         appBaseUrl: typeof window !== "undefined" ? window.location.origin : "",
@@ -490,67 +491,6 @@ export default function FullPackageDiagnosticModal({ open, onClose, track, count
           paymentAmount: 0,
           fullPackageUnlockPaid: true,
         });
-        return;
-      }
-
-      const inlinePaymentReceipt =
-        session?.inlinePaymentReceipt && typeof session.inlinePaymentReceipt === "object"
-          ? session.inlinePaymentReceipt
-          : null;
-      if (inlinePaymentReceipt) {
-        const unlockPaymentMeta = {
-          status: "paid",
-          method: String(inlinePaymentReceipt.method || "demo_provider").trim() || "demo_provider",
-          paidAt: Number(inlinePaymentReceipt.paidAtMs || Date.now()) || Date.now(),
-          amount: Number(session?.amount || gateAmount) || gateAmount,
-          currency: String(session?.currency || "KES").trim().toUpperCase() || "KES",
-          ref: String(
-            inlinePaymentReceipt.transactionReference || session?.reference || ""
-          ).trim(),
-          requestId: String(session?.requestId || inlinePaymentReceipt.requestId || "").trim(),
-          paymentId: String(session?.paymentId || inlinePaymentReceipt.paymentId || "").trim(),
-        };
-
-        await markFullPackageUnlockPaid({
-          fullPackageId: id,
-          selectedItems: missingItems,
-          unlockAmount: Number(session?.amount || gateAmount) || gateAmount,
-          unlockPaymentMeta,
-        });
-
-        await saveWorkflowDraft(draftId, {
-          ...baseDraftPayload,
-          status: WORKFLOW_DRAFT_STATUSES.READY_TO_GENERATE_REQUESTS,
-          paymentState: "paid",
-          paymentAmount: Number(session?.amount || gateAmount) || gateAmount,
-          paymentCurrency: String(session?.currency || "KES").trim().toUpperCase() || "KES",
-          paymentReference: unlockPaymentMeta.ref,
-          fullPackageUnlockPaid: true,
-          linkedPayment: {
-            requestId: unlockPaymentMeta.requestId,
-            paymentId: unlockPaymentMeta.paymentId,
-            paymentType: "unlock_request",
-            status: "paid",
-            paymentState: "paid",
-            amount: Number(session?.amount || gateAmount) || gateAmount,
-            currency: String(session?.currency || "KES").trim().toUpperCase() || "KES",
-            reference: unlockPaymentMeta.ref,
-            method: unlockPaymentMeta.method,
-          },
-        });
-
-        navigate(returnTo, {
-          replace: true,
-          state: {
-            fullPackageId: id,
-            missingItems,
-            unlockPaid: true,
-            unlockPaymentMeta,
-            depositPaid: true,
-            depositPaymentMeta: unlockPaymentMeta,
-          },
-        });
-        onClose?.();
         return;
       }
 

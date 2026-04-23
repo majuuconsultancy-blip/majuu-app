@@ -24,6 +24,7 @@
     "@capacitor/splash-screen": "^8.0.1",
     "@supabase/supabase-js": "^2.104.0",
     "firebase": "^12.8.0",
+    "firebase-admin": "^13.6.0",
     "framer-motion": "^12.38.0",
     "lottie-react": "^2.4.1",
     "lucide-react": "^0.564.0",

@@ -23,9 +23,19 @@ function isSuccessfulPaymentStatus(status = "") {
 
 function normalizePaymentMethod(value = "", fallback = "mpesa") {
   const raw = safeStr(value, 80).toLowerCase();
-  if (raw === "mpesa" || raw === "paystack") return raw;
-  const fallbackValue = safeStr(fallback, 80).toLowerCase();
-  return fallbackValue === "paystack" ? "paystack" : "mpesa";
+  if (raw === "mpesa") return raw;
+  return safeStr(fallback, 80).toLowerCase() === "mpesa" ? "mpesa" : "mpesa";
+}
+
+function isPendingPaymentStatus(status = "") {
+  return new Set([
+    "prompted",
+    "payment_session_created",
+    "awaiting_payment",
+    "payable",
+    "admin_review",
+    "approved",
+  ]).has(safeStr(status, 80).toLowerCase());
 }
 
 function resolveDraftIdFromReturnTo(returnTo = "") {
@@ -156,11 +166,14 @@ export default function PaymentCallbackScreen() {
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimer = 0;
 
-    (async () => {
+    const verify = async (attempt = 0) => {
       if (!cancelled) {
-        setStatus("verifying");
-        setMessage("");
+        if (attempt === 0) {
+          setStatus("verifying");
+          setMessage("");
+        }
         setResolvedReturnTo(returnTo);
         setResolvedDraftId(queryDraftId || resolveDraftIdFromReturnTo(returnTo));
       }
@@ -196,6 +209,83 @@ export default function PaymentCallbackScreen() {
         setResolvedReturnTo(nextReturnTo);
         setResolvedDraftId(nextDraftId);
 
+        if (confirmed) {
+          if (nextDraftId) {
+            const paidDraftStatus = resolvePaidWorkflowDraftStatus({
+              verificationResult: result,
+              returnTo: nextReturnTo,
+            });
+            const method = normalizePaymentMethod(
+              result?.paymentMethod || result?.provider || result?.verificationSummary?.provider,
+              "mpesa"
+            );
+            markDummyPaymentPaid(nextDraftId, {
+              status: "paid",
+              method,
+              paidAtMs: Date.now(),
+              transactionReference: reference,
+              requestId: nextRequestId,
+              paymentId: safeStr(result?.paymentId, 180),
+            });
+
+            void saveWorkflowDraft(nextDraftId, {
+              linkedRequestId: nextRequestId,
+              status: paidDraftStatus,
+              paymentState: "paid",
+              paymentReference: reference,
+              fullPackageUnlockPaid:
+                paidDraftStatus ===
+                WORKFLOW_DRAFT_STATUSES.FULL_PACKAGE_PAID_PENDING_DIAGNOSTICS,
+              linkedPayment: {
+                requestId: nextRequestId,
+                paymentId: safeStr(result?.paymentId, 180),
+                paymentType: "unlock_request",
+                status: "paid",
+                paymentState: "paid",
+                amount: Number(result?.amount || 0) || 0,
+                currency: safeStr(result?.currency || "KES", 8).toUpperCase() || "KES",
+                reference,
+                paidAtMs: Date.now(),
+                verifiedAtMs: Date.now(),
+              },
+            }).catch((draftError) => {
+              console.warn(
+                "Payment callback draft reconciliation failed:",
+                draftError?.message || draftError
+              );
+            });
+          }
+
+          setStatus("success");
+          setMessage(
+            safeStr(result?.message, 400) ||
+              (nextDraftId
+                ? "Payment verified successfully. Continue to finish your request."
+                : "Payment verified successfully.")
+          );
+          return;
+        }
+
+        if (isPendingPaymentStatus(nextStatus)) {
+          const waitingMessage =
+            safeStr(result?.message, 400) ||
+            "We sent the M-Pesa prompt to your phone. Complete it and we will refresh automatically.";
+          if (attempt < 10) {
+            setStatus("verifying");
+            setMessage(waitingMessage);
+            retryTimer = window.setTimeout(() => {
+              void verify(attempt + 1);
+            }, 3000);
+            return;
+          }
+          setStatus("pending");
+          setMessage(
+            waitingMessage ||
+              "We are still waiting for the M-Pesa callback. You can check again in a moment."
+          );
+          return;
+        }
+
         if (!confirmed) {
           setStatus("failed");
           setMessage(
@@ -208,72 +298,33 @@ export default function PaymentCallbackScreen() {
           );
           return;
         }
-
-        if (nextDraftId) {
-          const paidDraftStatus = resolvePaidWorkflowDraftStatus({
-            verificationResult: result,
-            returnTo: nextReturnTo,
-          });
-          const method = normalizePaymentMethod(
-            result?.paymentMethod || result?.provider || result?.verificationSummary?.provider,
-            "mpesa"
-          );
-          markDummyPaymentPaid(nextDraftId, {
-            status: "paid",
-            method,
-            paidAtMs: Date.now(),
-            transactionReference: reference,
-            requestId: nextRequestId,
-            paymentId: safeStr(result?.paymentId, 180),
-          });
-
-          void saveWorkflowDraft(nextDraftId, {
-            linkedRequestId: nextRequestId,
-            status: paidDraftStatus,
-            paymentState: "paid",
-            paymentReference: reference,
-            fullPackageUnlockPaid:
-              paidDraftStatus ===
-              WORKFLOW_DRAFT_STATUSES.FULL_PACKAGE_PAID_PENDING_DIAGNOSTICS,
-            linkedPayment: {
-              requestId: nextRequestId,
-              paymentId: safeStr(result?.paymentId, 180),
-              paymentType: "unlock_request",
-              status: "paid",
-              paymentState: "paid",
-              amount: Number(result?.amount || 0) || 0,
-              currency: safeStr(result?.currency || "KES", 8).toUpperCase() || "KES",
-              reference,
-              paidAtMs: Date.now(),
-              verifiedAtMs: Date.now(),
-            },
-          }).catch((draftError) => {
-            console.warn(
-              "Payment callback draft reconciliation failed:",
-              draftError?.message || draftError
-            );
-          });
-        }
-
-        setStatus("success");
-        setMessage(
-          safeStr(result?.message, 400) ||
-            (nextDraftId
-              ? "Payment verified successfully. Continue to finish your request."
-              : "Payment verified successfully.")
-        );
       } catch (nextError) {
         if (!cancelled) {
-          setStatus("failed");
+          if (attempt < 10) {
+            setStatus("verifying");
+            setMessage(
+              nextError?.message ||
+                "We are still waiting for the payment callback. Trying again..."
+            );
+            retryTimer = window.setTimeout(() => {
+              void verify(attempt + 1);
+            }, 3000);
+            return;
+          }
+          setStatus("pending");
           setMessage(
-            nextError?.message || "We could not confirm this payment yet. Please try again."
+            nextError?.message ||
+              "We could not confirm this payment yet. Please check again shortly."
           );
         }
       }
-    })();
+    };
+
+    void verify(0);
 
     return () => {
       cancelled = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
     };
   }, [reference, requestId, returnTo, queryDraftId, retryNonce]);
 
@@ -302,13 +353,16 @@ export default function PaymentCallbackScreen() {
         <h1 className="mt-3 text-xl font-semibold text-zinc-900">
           {status === "success"
             ? "Payment confirmed"
+            : status === "pending"
+            ? "Waiting for confirmation"
             : status === "failed"
             ? "Payment needs attention"
             : "Confirming your payment"}
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
           {status === "verifying"
-            ? "We are verifying this transaction with the backend before updating MAJUU."
+            ? message ||
+              "We are verifying this transaction with the backend before updating MAJUU."
             : message}
         </p>
         {status === "verifying" ? (
@@ -328,14 +382,14 @@ export default function PaymentCallbackScreen() {
             {resolvedDraftId ? "Continue request" : "Continue"}
           </button>
         ) : null}
-        {status === "failed" ? (
+        {status === "failed" || status === "pending" ? (
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setRetryNonce((value) => value + 1)}
               className="rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white"
             >
-              Try again
+              {status === "pending" ? "Check again" : "Try again"}
             </button>
             {resolvedReturnTo ? (
               <button

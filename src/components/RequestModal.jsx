@@ -19,7 +19,6 @@ import {
   getDummyPaymentDraft,
   getDummyPaymentState,
   setDummyPaymentDraft,
-  setDummyPaymentState,
 } from "../utils/dummyPayment";
 import { useRequestPricingEntry } from "../hooks/useRequestPricing";
 import {
@@ -1454,40 +1453,6 @@ export default function RequestModal({
       }).catch((error) => {
         console.warn("Failed to link workflow draft to payment session:", error?.message || error);
       });
-
-      const inlinePaymentReceipt = normalizeUnlockPaymentReceipt(
-        result?.inlinePaymentReceipt || result?.unlockPaymentReceipt
-      );
-      if (inlinePaymentReceipt) {
-        setDummyPaymentState(draftId, inlinePaymentReceipt);
-        setPaid(true);
-        setErr("");
-        void saveWorkflowDraft(draftId, {
-          status: WORKFLOW_DRAFT_STATUSES.UNLOCK_PAID_PENDING_SUBMISSION,
-          paymentState: "paid",
-          paymentAmount: Number(result?.amount || 0) || parseAmountNumber(amountText),
-          paymentCurrency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
-          paymentReference: String(
-            inlinePaymentReceipt.transactionReference || result?.reference || ""
-          ).trim(),
-          linkedPayment: {
-            requestId: String(result?.requestId || inlinePaymentReceipt.requestId || "").trim(),
-            paymentId: String(result?.paymentId || inlinePaymentReceipt.paymentId || "").trim(),
-            paymentType: "unlock_request",
-            status: "paid",
-            paymentState: "paid",
-            amount: Number(result?.amount || 0) || parseAmountNumber(amountText),
-            currency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
-            reference: String(
-              inlinePaymentReceipt.transactionReference || result?.reference || ""
-            ).trim(),
-            method: String(inlinePaymentReceipt.method || "").trim(),
-          },
-        }).catch((error) => {
-          console.warn("Failed to mark workflow draft as paid:", error?.message || error);
-        });
-        return;
-      }
 
       const redirectUrl = String(result?.authorizationUrl || result?.redirectUrl || "").trim();
       if (redirectUrl && typeof window !== "undefined") {

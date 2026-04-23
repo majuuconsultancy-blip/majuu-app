@@ -1,3 +1,5 @@
+import { auth } from "../firebase";
+
 function cleanStr(value, max = 2000) {
   return String(value || "").trim().slice(0, max);
 }
@@ -87,6 +89,19 @@ export async function apiRequest(
   const url = buildApiUrl(path);
   const upperMethod = cleanStr(method, 12).toUpperCase() || "POST";
   const hasJsonBody = body !== undefined;
+  let authHeaders = {};
+
+  try {
+    const user = auth.currentUser;
+    if (user) {
+      const token = await user.getIdToken();
+      if (cleanStr(token, 4000)) {
+        authHeaders = { Authorization: `Bearer ${token}` };
+      }
+    }
+  } catch {
+    authHeaders = {};
+  }
 
   let response = null;
   try {
@@ -94,6 +109,7 @@ export async function apiRequest(
       method: upperMethod,
       headers: {
         ...(hasJsonBody ? { "Content-Type": "application/json" } : {}),
+        ...authHeaders,
         ...headers,
       },
       body: hasJsonBody ? JSON.stringify(body) : undefined,

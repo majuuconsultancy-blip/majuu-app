@@ -17,7 +17,7 @@ export const SETTLEMENT_HISTORY_COLLECTION = "settlementHistory";
 export const FINANCIAL_AUDIT_LOG_COLLECTION = "financialAuditLogs";
 
 export const PLATFORM_CUT_TYPES = ["percentage", "flat"];
-export const PAYMENT_PROVIDERS = ["mpesa", "paystack"];
+export const PAYMENT_PROVIDERS = ["mpesa"];
 export const PAYOUT_QUEUE_STATUSES = [
   "pending",
   "on_hold",
@@ -82,10 +82,6 @@ function defaultProviderCatalog() {
     mpesa: {
       enabled: true,
       label: "M-Pesa",
-    },
-    paystack: {
-      enabled: false,
-      label: "Paystack",
     },
   };
 }
