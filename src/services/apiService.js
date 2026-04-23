@@ -29,6 +29,28 @@ function buildApiUrl(path = "") {
   return baseUrl ? `${baseUrl}${normalizedPath}` : normalizedPath;
 }
 
+function looksLikeHtmlDocument(value = "") {
+  const text = cleanStr(value, 4000).toLowerCase();
+  if (!text) return false;
+  return (
+    text.startsWith("<!doctype html") ||
+    text.startsWith("<html") ||
+    text.includes("<head") ||
+    text.includes("<body")
+  );
+}
+
+function isLikelySpaFallbackResponse(path = "", response, payload) {
+  const safePath = cleanStr(path, 400);
+  if (!safePath.startsWith("/api")) return false;
+
+  const contentType = cleanStr(response?.headers?.get?.("content-type"), 200).toLowerCase();
+  if (contentType.includes("text/html")) return true;
+
+  const message = cleanStr(payload?.message, 4000);
+  return looksLikeHtmlDocument(message);
+}
+
 async function readApiPayload(response) {
   try {
     return await response.json();
@@ -124,12 +146,25 @@ export async function apiRequest(
   }
 
   const payload = await readApiPayload(response);
+  const isSpaFallback = isLikelySpaFallbackResponse(path, response, payload);
   if (!response.ok) {
     throw buildApiError({
       fallbackMessage,
-      message: extractApiMessage(payload, fallbackMessage),
-      status: response.status,
+      message: isSpaFallback ? fallbackMessage : extractApiMessage(payload, fallbackMessage),
+      status: isSpaFallback ? 404 : response.status,
       details: payload,
+    });
+  }
+
+  if (isSpaFallback) {
+    throw buildApiError({
+      fallbackMessage,
+      message: fallbackMessage,
+      status: 404,
+      details: {
+        path: cleanStr(path, 400),
+        message: "The API route resolved to the app shell instead of a JSON handler.",
+      },
     });
   }
 

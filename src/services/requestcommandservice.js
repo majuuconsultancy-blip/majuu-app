@@ -134,7 +134,17 @@ export async function executeRequestCommand({
 } = {}) {
   const envelope = buildCommandEnvelope({ command, requestId, payload, actorRole });
   try {
-    return await invokeRequestCommand(envelope);
+    const result = await invokeRequestCommand(envelope);
+    if (
+      safeStr(envelope?.command, 80) === "createRequest" &&
+      !safeStr(result?.requestId, 180)
+    ) {
+      console.warn(
+        "createRequest command returned without requestId; using local fallback."
+      );
+      return createRequestCommandFallback(envelope);
+    }
+    return result;
   } catch (error) {
     if (safeStr(envelope?.command, 80) === "createRequest" && isInfrastructureUnavailable(error)) {
       return createRequestCommandFallback(envelope);
