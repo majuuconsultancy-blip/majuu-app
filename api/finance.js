@@ -1,4 +1,4 @@
-import { json, methodNotAllowed, readJsonBody } from "./_lib/http.js";
+import { handleCors, json, methodNotAllowed, readJsonBody } from "./_lib/http.js";
 import { dispatchFinanceAction } from "./_lib/paymentSystem.js";
 
 function safeString(value, max = 400) {
@@ -14,6 +14,10 @@ function sendRouteError(res, error, fallbackMessage) {
 }
 
 export default async function handler(req, res) {
+  if (handleCors(req, res, ["POST"])) {
+    return;
+  }
+
   if (req.method !== "POST") {
     methodNotAllowed(res, ["POST"]);
     return;

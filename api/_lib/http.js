@@ -1,5 +1,27 @@
+import { Buffer } from "node:buffer";
+
 function safeString(value, max = 400) {
   return String(value || "").trim().slice(0, max);
+}
+
+function applyCorsHeaders(req, res, methods = []) {
+  const origin = safeString(req?.headers?.origin, 1000) || "*";
+  const allowMethods = Array.from(
+    new Set(
+      ["OPTIONS", ...(Array.isArray(methods) ? methods : [])]
+        .map((value) => safeString(value, 20).toUpperCase())
+        .filter(Boolean)
+    )
+  );
+
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", allowMethods.join(", "));
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Authorization, Content-Type, X-Requested-With"
+  );
+  res.setHeader("Access-Control-Max-Age", "86400");
 }
 
 export function json(res, status, payload) {
@@ -14,6 +36,15 @@ export function methodNotAllowed(res, allowed = []) {
     ok: false,
     message: "Method not allowed.",
   });
+}
+
+export function handleCors(req, res, methods = []) {
+  applyCorsHeaders(req, res, methods);
+  if (safeString(req?.method, 20).toUpperCase() !== "OPTIONS") {
+    return false;
+  }
+  res.status(204).end();
+  return true;
 }
 
 export async function readJsonBody(req) {
@@ -52,4 +83,3 @@ export function getBearerToken(req) {
   if (!authHeader.toLowerCase().startsWith("bearer ")) return "";
   return safeString(authHeader.slice(7), 4000);
 }
-

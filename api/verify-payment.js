@@ -1,4 +1,4 @@
-import { json, methodNotAllowed, readJsonBody } from "./_lib/http.js";
+import { handleCors, json, methodNotAllowed, readJsonBody } from "./_lib/http.js";
 import { lookupPaymentByReference } from "./_lib/paymentSystem.js";
 
 function safeString(value, max = 400) {
@@ -23,6 +23,10 @@ function readReferenceFromUrl(req) {
 }
 
 export default async function handler(req, res) {
+  if (handleCors(req, res, ["GET", "POST"])) {
+    return;
+  }
+
   if (req.method !== "GET" && req.method !== "POST") {
     methodNotAllowed(res, ["GET", "POST"]);
     return;

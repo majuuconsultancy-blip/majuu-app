@@ -1,7 +1,11 @@
-import { json, methodNotAllowed, readJsonBody } from "./_lib/http.js";
+import { handleCors, json, methodNotAllowed, readJsonBody } from "./_lib/http.js";
 import { processMpesaCallback } from "./_lib/paymentSystem.js";
 
 export default async function handler(req, res) {
+  if (handleCors(req, res, ["GET", "POST"])) {
+    return;
+  }
+
   if (req.method === "GET") {
     json(res, 200, {
       ok: true,
