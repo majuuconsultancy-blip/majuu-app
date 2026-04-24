@@ -220,15 +220,6 @@ function normalizeUnlockPaymentReceipt(input) {
   };
 }
 
-function parseAmountNumber(input) {
-  const digits = String(input || "")
-    .replace(/[^0-9.]+/g, "")
-    .trim();
-  const amount = Number(digits || 0);
-  if (!Number.isFinite(amount) || amount <= 0) return 0;
-  return Math.round(amount);
-}
-
 function stripModalTitlePrefix(value) {
   const text = String(value || "").trim();
   if (!text) return "";
@@ -493,7 +484,6 @@ export default function RequestModal({
   defaultEmail = "",
   defaultCounty = "",
   defaultTown = "",
-  onPay,
   paymentContext = null,
   paymentAmount = "",
   paymentRequired = true,
@@ -1383,6 +1373,23 @@ export default function RequestModal({
 
     const extraFieldSnapshot = serializeExtraFieldSnapshot(extraFieldValues);
     setRequestDraftId(draftId);
+    const payPayload = {
+      requestDraftId: draftId,
+      returnTo,
+      amount: amountText,
+      name: cleanName,
+      phone: cleanPhone,
+      email: cleanEmail,
+      county: cleanCounty,
+      town: cleanTown,
+      city: cleanTown,
+      note: String(note || "").trim(),
+      preferredAgentId: String(preferredAgentId || "").trim(),
+      requestUploadMeta,
+      extraFieldAnswers: extraFieldAnswers || null,
+      paymentContext: paymentContext && typeof paymentContext === "object" ? paymentContext : null,
+    };
+
     setDummyPaymentDraft(draftId, {
       requestDraftId: draftId,
       formState: {
@@ -1401,65 +1408,18 @@ export default function RequestModal({
       },
       paymentContext: paymentContext && typeof paymentContext === "object" ? paymentContext : null,
       amount: amountText,
+      checkoutPayload: payPayload,
       updatedAt: Date.now(),
     });
 
     setErr("");
-    const payPayload = {
-      requestDraftId: draftId,
-      returnTo,
-      amount: amountText,
-      name: cleanName,
-      phone: cleanPhone,
-      email: cleanEmail,
-      county: cleanCounty,
-      town: cleanTown,
-      city: cleanTown,
-      note: String(note || "").trim(),
-      preferredAgentId: String(preferredAgentId || "").trim(),
-      requestUploadMeta,
-      extraFieldAnswers: extraFieldAnswers || null,
-      paymentContext: paymentContext && typeof paymentContext === "object" ? paymentContext : null,
-    };
 
     try {
-      const result = await Promise.resolve(onPay?.(payPayload));
-
-      void saveWorkflowDraft(draftId, {
-        flowFamily:
-          flow === "fullpackage"
-            ? WORKFLOW_DRAFT_FLOW_FAMILIES.FULL_PACKAGE
-            : WORKFLOW_DRAFT_FLOW_FAMILIES.NORMAL_REQUEST,
-        flowKind:
-          flow === "fullpackage"
-            ? WORKFLOW_DRAFT_FLOW_KINDS.FULL_PACKAGE_ITEM_REQUEST
-            : WORKFLOW_DRAFT_FLOW_KINDS.WEHELP_REQUEST,
-        status: WORKFLOW_DRAFT_STATUSES.PAYMENT_INITIATED,
-        linkedRequestId: String(result?.requestId || "").trim(),
-        linkedPayment: {
-          requestId: String(result?.requestId || "").trim(),
-          paymentId: String(result?.paymentId || "").trim(),
-          paymentType: "unlock_request",
-          status: "payment_session_created",
-          paymentState: "pending",
-          amount: Number(result?.amount || 0) || parseAmountNumber(amountText),
-          currency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
-          reference: String(result?.reference || "").trim(),
-        },
-        paymentState: "pending",
-        paymentAmount: Number(result?.amount || 0) || parseAmountNumber(amountText),
-        paymentCurrency: String(result?.currency || "KES").trim().toUpperCase() || "KES",
-        paymentReference: String(result?.reference || "").trim(),
-      }).catch((error) => {
-        console.warn("Failed to link workflow draft to payment session:", error?.message || error);
-      });
-
-      const redirectUrl = String(result?.authorizationUrl || result?.redirectUrl || "").trim();
-      if (redirectUrl && typeof window !== "undefined") {
-        window.location.assign(redirectUrl);
-        return;
-      }
-      throw new Error("Hosted checkout URL was not returned by the backend.");
+      const checkoutUrl = new URL("/app/payment", window.location.origin);
+      checkoutUrl.searchParams.set("draft", draftId);
+      checkoutUrl.searchParams.set("returnTo", returnTo);
+      navigate(`${checkoutUrl.pathname}${checkoutUrl.search}`);
+      return;
     } catch (error) {
       setErr(error?.message || "Failed to start payment. Please try again.");
     }

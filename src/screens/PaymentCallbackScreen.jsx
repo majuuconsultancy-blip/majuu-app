@@ -190,7 +190,7 @@ export default function PaymentCallbackScreen() {
         const result = await reconcilePaymentReference({ reference });
         if (cancelled) return;
         const nextStatus = safeStr(result?.status, 80).toLowerCase();
-        const confirmed = result?.ok === true || isSuccessfulPaymentStatus(nextStatus);
+        const confirmed = isSuccessfulPaymentStatus(nextStatus);
         const nextRequestId = safeStr(result?.requestId || requestId, 180);
         const rawNextReturnTo = safeStr(result?.returnTo || returnTo, 600);
         const nextDraftId =
