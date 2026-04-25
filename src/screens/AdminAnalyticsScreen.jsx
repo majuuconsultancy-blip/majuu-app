@@ -6,11 +6,30 @@ import AppIcon from "../components/AppIcon";
 import { ICON_MD, ICON_SM } from "../constants/iconSizes";
 import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import { loadSaccAnalyticsSnapshot } from "../services/analyticsAdminService";
+import {
+  formatPaymentDropoffPhone,
+  loadPaymentDropoffAnalytics,
+  paymentDropoffStepLabel,
+} from "../services/paymentDropoffAnalyticsService";
 import { smartBack } from "../utils/navBack";
 
 function safeNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function formatMoney(value) {
+  return `KES ${safeNumber(value).toLocaleString()}`;
+}
+
+function formatTimestamp(value) {
+  const safeValue = safeNumber(value);
+  if (!safeValue) return "--";
+  try {
+    return new Date(safeValue).toLocaleString();
+  } catch {
+    return "--";
+  }
 }
 
 function StatRow({ label, value }) {
@@ -56,6 +75,7 @@ export default function AdminAnalyticsScreen() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [data, setData] = useState(null);
+  const [paymentDropoffs, setPaymentDropoffs] = useState([]);
   const [refreshedAtMs, setRefreshedAtMs] = useState(0);
 
   useEffect(() => {
@@ -84,12 +104,17 @@ export default function AdminAnalyticsScreen() {
     setLoading(true);
     setErr("");
     try {
-      const snap = await loadSaccAnalyticsSnapshot({ topLimit: 10 });
+      const [snap, dropoffRows] = await Promise.all([
+        loadSaccAnalyticsSnapshot({ topLimit: 10 }),
+        loadPaymentDropoffAnalytics({ limit: 40 }),
+      ]);
       setData(snap);
+      setPaymentDropoffs(dropoffRows);
       setRefreshedAtMs(Date.now());
     } catch (error) {
       console.error(error);
       setData(null);
+      setPaymentDropoffs([]);
       setErr(error?.message || "Failed to load analytics.");
     } finally {
       setLoading(false);
@@ -99,7 +124,6 @@ export default function AdminAnalyticsScreen() {
   useEffect(() => {
     if (!isSuperAdmin) return;
     void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuperAdmin]);
 
   const counts = data?.counts || {};
@@ -206,6 +230,72 @@ export default function AdminAnalyticsScreen() {
 
             <div className="mt-4 grid gap-3">
               <div className={card}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      Payment drop-off follow-up
+                    </div>
+                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      Sorted by most recent activity, then by intent priority.
+                    </p>
+                  </div>
+                  <div className="rounded-full border border-emerald-200 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                    {paymentDropoffs.length.toLocaleString()} rows
+                  </div>
+                </div>
+
+                <div className="mt-3 overflow-x-auto">
+                  <table className="min-w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-zinc-200/70 text-xs uppercase tracking-[0.12em] text-zinc-500 dark:border-zinc-800/70 dark:text-zinc-400">
+                        <th className="px-2 py-2 font-semibold">Phone</th>
+                        <th className="px-2 py-2 font-semibold">Amount</th>
+                        <th className="px-2 py-2 font-semibold">Service</th>
+                        <th className="px-2 py-2 font-semibold">Step</th>
+                        <th className="px-2 py-2 font-semibold">Timestamp</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paymentDropoffs.map((row) => (
+                        <tr
+                          key={row.id || `${row.requestId}:${row.step}:${row.createdAtMs}`}
+                          className="border-b border-zinc-200/60 last:border-b-0 dark:border-zinc-800/60"
+                        >
+                          <td className="px-2 py-3 align-top font-medium text-zinc-900 dark:text-zinc-100">
+                            {formatPaymentDropoffPhone(row.phoneNumber) || "--"}
+                          </td>
+                          <td className="px-2 py-3 align-top text-zinc-700 dark:text-zinc-200">
+                            {formatMoney(row.amount)}
+                          </td>
+                          <td className="px-2 py-3 align-top text-zinc-700 dark:text-zinc-200">
+                            <div className="font-medium">{row.service || "--"}</div>
+                            {row.requestId ? (
+                              <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                Request: {row.requestId}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td className="px-2 py-3 align-top">
+                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50/80 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/25 dark:text-emerald-200">
+                              {paymentDropoffStepLabel(row.step)}
+                            </span>
+                          </td>
+                          <td className="px-2 py-3 align-top text-zinc-600 dark:text-zinc-300">
+                            {formatTimestamp(row.createdAtMs)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!paymentDropoffs.length ? (
+                    <div className="py-4 text-sm text-zinc-600 dark:text-zinc-300">
+                      No payment drop-off activity yet.
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className={card}>
                 <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                   Track distribution
                 </div>
@@ -310,4 +400,3 @@ export default function AdminAnalyticsScreen() {
     </div>
   );
 }
-

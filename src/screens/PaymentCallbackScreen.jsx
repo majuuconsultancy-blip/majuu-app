@@ -10,32 +10,22 @@ import {
   WORKFLOW_DRAFT_STATUSES,
 } from "../services/workflowdraftservice";
 import { markDummyPaymentPaid } from "../utils/dummyPayment";
+import {
+  getMpesaCheckoutHeadline,
+  getMpesaCheckoutMessage,
+  isPendingMpesaCheckout,
+  isSuccessfulMpesaCheckout,
+  resolveMpesaCheckoutOutcome,
+} from "../utils/mpesaCheckout";
 
 function safeStr(value, max = 600) {
   return String(value || "").trim().slice(0, max);
-}
-
-function isSuccessfulPaymentStatus(status = "") {
-  return new Set(["success", "paid", "held", "payout_ready", "settled"]).has(
-    safeStr(status, 80).toLowerCase()
-  );
 }
 
 function normalizePaymentMethod(value = "", fallback = "mpesa") {
   const raw = safeStr(value, 80).toLowerCase();
   if (raw === "mpesa") return raw;
   return safeStr(fallback, 80).toLowerCase() === "mpesa" ? "mpesa" : "mpesa";
-}
-
-function isPendingPaymentStatus(status = "") {
-  return new Set([
-    "prompted",
-    "payment_session_created",
-    "awaiting_payment",
-    "payable",
-    "admin_review",
-    "approved",
-  ]).has(safeStr(status, 80).toLowerCase());
 }
 
 function resolveDraftIdFromReturnTo(returnTo = "") {
@@ -152,9 +142,9 @@ export default function PaymentCallbackScreen() {
   const navigate = useNavigate();
   const [status, setStatus] = useState("verifying");
   const [message, setMessage] = useState("");
+  const [resolvedDraftId, setResolvedDraftId] = useState("");
   const [resolvedRequestId, setResolvedRequestId] = useState("");
   const [resolvedReturnTo, setResolvedReturnTo] = useState("");
-  const [resolvedDraftId, setResolvedDraftId] = useState("");
   const [retryNonce, setRetryNonce] = useState(0);
 
   const query = useMemo(() => new URLSearchParams(location.search || ""), [location.search]);
@@ -189,8 +179,7 @@ export default function PaymentCallbackScreen() {
       try {
         const result = await reconcilePaymentReference({ reference });
         if (cancelled) return;
-        const nextStatus = safeStr(result?.status, 80).toLowerCase();
-        const confirmed = isSuccessfulPaymentStatus(nextStatus);
+        const outcome = resolveMpesaCheckoutOutcome(result);
         const nextRequestId = safeStr(result?.requestId || requestId, 180);
         const rawNextReturnTo = safeStr(result?.returnTo || returnTo, 600);
         const nextDraftId =
@@ -209,7 +198,7 @@ export default function PaymentCallbackScreen() {
         setResolvedReturnTo(nextReturnTo);
         setResolvedDraftId(nextDraftId);
 
-        if (confirmed) {
+        if (isSuccessfulMpesaCheckout(result)) {
           if (nextDraftId) {
             const paidDraftStatus = resolvePaidWorkflowDraftStatus({
               verificationResult: result,
@@ -224,6 +213,12 @@ export default function PaymentCallbackScreen() {
               method,
               paidAtMs: Date.now(),
               transactionReference: reference,
+              paymentReference: reference,
+              currentReference: reference,
+              checkoutStatus: "success",
+              checkoutFailureReason: "",
+              resultCode: 0,
+              message: getMpesaCheckoutMessage(result),
               requestId: nextRequestId,
               paymentId: safeStr(result?.paymentId, 180),
             });
@@ -257,19 +252,12 @@ export default function PaymentCallbackScreen() {
           }
 
           setStatus("success");
-          setMessage(
-            safeStr(result?.message, 400) ||
-              (nextDraftId
-                ? "Payment verified successfully. Continue to finish your request."
-                : "Payment verified successfully.")
-          );
+          setMessage(getMpesaCheckoutMessage(result));
           return;
         }
 
-        if (isPendingPaymentStatus(nextStatus)) {
-          const waitingMessage =
-            safeStr(result?.message, 400) ||
-            "We sent the M-Pesa prompt to your phone. Complete it and we will refresh automatically.";
+        if (isPendingMpesaCheckout(result)) {
+          const waitingMessage = getMpesaCheckoutMessage(result);
           if (attempt < 10) {
             setStatus("verifying");
             setMessage(waitingMessage);
@@ -286,18 +274,8 @@ export default function PaymentCallbackScreen() {
           return;
         }
 
-        if (!confirmed) {
-          setStatus("failed");
-          setMessage(
-            safeStr(
-              result?.message ||
-                (nextStatus === "failed"
-                  ? "This payment could not be verified."
-                  : "We could not confirm this payment yet.")
-            ) || "We could not confirm this payment yet."
-          );
-          return;
-        }
+        setStatus(outcome);
+        setMessage(getMpesaCheckoutMessage(result));
       } catch (nextError) {
         if (!cancelled) {
           if (attempt < 10) {
@@ -344,32 +322,40 @@ export default function PaymentCallbackScreen() {
     navigate("/app/progress", { replace: true });
   };
 
+  const headline =
+    status === "verifying"
+      ? "Confirming your payment"
+      : getMpesaCheckoutHeadline({
+          checkoutStatus: status === "insufficient" ? "failed" : status,
+          checkoutFailureReason:
+            status === "insufficient" ? "insufficient_balance" : "",
+        });
+  const summary =
+    status === "verifying"
+      ? message ||
+        "We are verifying this transaction with the backend before updating MAJUU."
+      : message;
+  const showPendingActions = status === "pending";
+  const showBackAction =
+    status === "cancelled" ||
+    status === "timeout" ||
+    status === "insufficient" ||
+    status === "failed" ||
+    status === "pending";
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white px-5 py-10">
-      <div className="mx-auto max-w-md rounded-3xl border border-zinc-200 bg-white/80 p-6 shadow-sm">
-        <div className="text-sm font-semibold uppercase tracking-[0.12em] text-emerald-700">
+    <div className="min-h-screen bg-zinc-50 px-5 py-10 dark:bg-zinc-950">
+      <div className="mx-auto max-w-md rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">
           Payment Callback
         </div>
-        <h1 className="mt-3 text-xl font-semibold text-zinc-900">
-          {status === "success"
-            ? "Payment confirmed"
-            : status === "pending"
-            ? "Waiting for confirmation"
-            : status === "failed"
-            ? "Payment needs attention"
-            : "Confirming your payment"}
-        </h1>
-        <p className="mt-2 text-sm text-zinc-600">
-          {status === "verifying"
-            ? message ||
-              "We are verifying this transaction with the backend before updating MAJUU."
-            : message}
-        </p>
+        <h1 className="mt-3 text-xl font-semibold text-zinc-900">{headline}</h1>
+        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">{summary}</p>
         {status === "verifying" ? (
           <div className="mt-4 text-sm font-medium text-emerald-700">Verifying payment...</div>
         ) : null}
         {reference ? (
-          <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+          <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300">
             Reference: {reference}
           </div>
         ) : null}
@@ -382,20 +368,22 @@ export default function PaymentCallbackScreen() {
             {resolvedDraftId ? "Continue request" : "Continue"}
           </button>
         ) : null}
-        {status === "failed" || status === "pending" ? (
+        {showPendingActions || showBackAction ? (
           <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setRetryNonce((value) => value + 1)}
-              className="rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white"
-            >
-              {status === "pending" ? "Check again" : "Try again"}
-            </button>
-            {resolvedReturnTo ? (
+            {showPendingActions ? (
+              <button
+                type="button"
+                onClick={() => setRetryNonce((value) => value + 1)}
+                className="rounded-2xl border border-emerald-200 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white"
+              >
+                Check again
+              </button>
+            ) : null}
+            {showBackAction && resolvedReturnTo ? (
               <button
                 type="button"
                 onClick={() => navigate(resolvedReturnTo, { replace: true })}
-                className="rounded-2xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700"
+                className="rounded-2xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
               >
                 Back to request
               </button>

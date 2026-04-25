@@ -31,6 +31,21 @@ const PAYMENT_READY_STATUSES = new Set([
   "failed",
 ]);
 const PAYMENT_SUCCESS_STATUSES = new Set(["paid", "held", "payout_ready", "settled"]);
+const PENDING_PAYMENT_STATUSES = new Set([
+  "prompted",
+  "payment_session_created",
+  "awaiting_payment",
+  "payable",
+  "admin_review",
+  "approved",
+]);
+const CHECKOUT_STATUS_VALUES = new Set([
+  "pending",
+  "success",
+  "cancelled",
+  "failed",
+  "timeout",
+]);
 
 export const PAYMENT_TYPES = Object.freeze({
   UNLOCK_REQUEST: "unlock_request",
@@ -113,6 +128,12 @@ function normalizeCurrency(value, fallback = "KES") {
   return safeString(value || fallback, 8).toUpperCase() || fallback;
 }
 
+function isSafaricomLocalPhoneNumber(value = "") {
+  return /^(?:70\d|71\d|72\d|74[0-689]|75[789]|76[89]|79\d|11[0-5])\d{6}$/.test(
+    safeString(value, 20)
+  );
+}
+
 function _normalizeTrack(value) {
   const next = lower(value, 24);
   return next === "work" || next === "travel" ? next : "study";
@@ -130,16 +151,121 @@ function normalizePhoneNumber(value = "") {
   if (!digits) return "";
   if (digits.startsWith("254") && digits.length >= 12) {
     const local = digits.slice(3).slice(-9);
-    return /^(7|1)\d{8}$/.test(local) ? `254${local}` : "";
+    return isSafaricomLocalPhoneNumber(local) ? `254${local}` : "";
   }
   if (digits.startsWith("0") && digits.length >= 10) {
     const local = digits.slice(1).slice(-9);
-    return /^(7|1)\d{8}$/.test(local) ? `254${local}` : "";
+    return isSafaricomLocalPhoneNumber(local) ? `254${local}` : "";
   }
-  if (/^(7|1)\d{8}$/.test(digits.slice(-9))) {
+  if (isSafaricomLocalPhoneNumber(digits.slice(-9))) {
     return `254${digits.slice(-9)}`;
   }
   return "";
+}
+
+function normalizeCheckoutStatus(value, fallback = "") {
+  const next = lower(value, 40);
+  return CHECKOUT_STATUS_VALUES.has(next) ? next : fallback;
+}
+
+function normalizeCheckoutFailureReason(value, fallback = "") {
+  const next = lower(value, 80);
+  return next || fallback;
+}
+
+function resolveCheckoutFailureReasonFromResultCode(resultCode) {
+  const code = Number(resultCode);
+  if (!Number.isFinite(code) || code === 0) return "";
+  if (code === 1032) return "user_cancelled";
+  if (code === 1) return "insufficient_balance";
+  if (code === 1037) return "timeout";
+  return "callback_failed";
+}
+
+function resolveCheckoutStatusFromResultCode(resultCode) {
+  const code = Number(resultCode);
+  if (!Number.isFinite(code)) return "";
+  if (code === 0) return "success";
+  if (code === 1032) return "cancelled";
+  if (code === 1037) return "timeout";
+  return "failed";
+}
+
+function resolveStoredCheckoutStatus(paymentData = {}) {
+  const explicit = normalizeCheckoutStatus(
+    paymentData?.checkoutStatus || paymentData?.mpesa?.checkoutStatus
+  );
+  if (explicit) return explicit;
+
+  const resultCode =
+    paymentData?.checkoutResultCode ?? paymentData?.mpesa?.resultCode ?? null;
+  const fromCode = resolveCheckoutStatusFromResultCode(resultCode);
+  if (fromCode) return fromCode;
+
+  const businessStatus = lower(paymentData?.status, 80);
+  if (PAYMENT_SUCCESS_STATUSES.has(businessStatus)) return "success";
+  if (PENDING_PAYMENT_STATUSES.has(businessStatus)) return "pending";
+  if (businessStatus === PAYMENT_STATUSES.FAILED) {
+    const failureReason = normalizeCheckoutFailureReason(
+      paymentData?.checkoutFailureReason || paymentData?.mpesa?.checkoutFailureReason
+    );
+    if (failureReason === "user_cancelled") return "cancelled";
+    if (failureReason === "timeout") return "timeout";
+    return "failed";
+  }
+  return "";
+}
+
+function resolveStoredCheckoutFailureReason(paymentData = {}) {
+  const explicit = normalizeCheckoutFailureReason(
+    paymentData?.checkoutFailureReason || paymentData?.mpesa?.checkoutFailureReason
+  );
+  if (explicit) return explicit;
+  return resolveCheckoutFailureReasonFromResultCode(
+    paymentData?.checkoutResultCode ?? paymentData?.mpesa?.resultCode
+  );
+}
+
+function buildCheckoutStatusMessage({
+  checkoutStatus = "",
+  checkoutFailureReason = "",
+  fallbackMessage = "",
+  businessStatus = "",
+} = {}) {
+  const normalizedStatus = normalizeCheckoutStatus(checkoutStatus);
+  const normalizedFailureReason = normalizeCheckoutFailureReason(checkoutFailureReason);
+  if (normalizedStatus === "success") return "Payment successful 🎉";
+  if (normalizedStatus === "cancelled") {
+    return "You cancelled the payment on your phone";
+  }
+  if (normalizedStatus === "timeout") return "You took too long. Please try again";
+  if (normalizedStatus === "failed") {
+    if (normalizedFailureReason === "insufficient_balance") {
+      return "Insufficient M-Pesa balance";
+    }
+    return "Payment failed. Please try again";
+  }
+  if (normalizedStatus === "pending") {
+    return (
+      safeString(fallbackMessage, 500) ||
+      "We sent the M-Pesa prompt. Complete it on your phone and we will keep checking."
+    );
+  }
+
+  const safeBusinessStatus = lower(businessStatus, 80);
+  if (PAYMENT_SUCCESS_STATUSES.has(safeBusinessStatus)) {
+    return "Payment successful 🎉";
+  }
+  if (PENDING_PAYMENT_STATUSES.has(safeBusinessStatus)) {
+    return (
+      safeString(fallbackMessage, 500) ||
+      "We sent the M-Pesa prompt. Complete it on your phone and we will keep checking."
+    );
+  }
+  if (safeBusinessStatus === PAYMENT_STATUSES.FAILED) {
+    return "Payment failed. Please try again";
+  }
+  return safeString(fallbackMessage, 500) || "Payment status updated.";
 }
 
 function cleanStringList(values, { maxItems = 60, maxLen = 160 } = {}) {
@@ -1307,6 +1433,19 @@ function calculatePaymentBreakdown({
 
 function createPaymentSummary(paymentData = {}, extra = {}) {
   const status = lower(paymentData?.status, 80);
+  const checkoutStatus = resolveStoredCheckoutStatus(paymentData);
+  const checkoutFailureReason = resolveStoredCheckoutFailureReason(paymentData);
+  const effectiveCheckoutStatus =
+    checkoutStatus || (PENDING_PAYMENT_STATUSES.has(status) ? "pending" : "");
+  const checkoutResultCodeRaw =
+    paymentData?.checkoutResultCode ?? paymentData?.mpesa?.resultCode;
+  const checkoutResultCode = Number.isFinite(Number(checkoutResultCodeRaw))
+    ? Number(checkoutResultCodeRaw)
+    : null;
+  const checkoutResultDesc = safeString(
+    paymentData?.checkoutResultDesc || paymentData?.mpesa?.resultDesc,
+    400
+  );
   const reference =
     safeString(
       paymentData?.transactionReference ||
@@ -1314,10 +1453,18 @@ function createPaymentSummary(paymentData = {}, extra = {}) {
         paymentData?.currentReference,
       180
     ) || safeString(extra?.reference, 180);
+  const isSuccess =
+    checkoutStatus === "success" ||
+    (!checkoutStatus && PAYMENT_SUCCESS_STATUSES.has(status));
   return {
-    ok: PAYMENT_SUCCESS_STATUSES.has(status),
-    success: PAYMENT_SUCCESS_STATUSES.has(status),
+    ok: isSuccess,
+    success: isSuccess,
+    pending: effectiveCheckoutStatus === "pending",
     status,
+    checkoutStatus: effectiveCheckoutStatus,
+    checkoutFailureReason,
+    resultCode: checkoutResultCode,
+    resultDesc: checkoutResultDesc,
     requestId: safeString(paymentData?.requestId || extra?.requestId, 180),
     paymentId: safeString(paymentData?.paymentId || extra?.paymentId, 180),
     fullPackageId: safeString(paymentData?.fullPackageId || extra?.fullPackageId, 180),
@@ -1334,17 +1481,12 @@ function createPaymentSummary(paymentData = {}, extra = {}) {
     returnTo: safeString(paymentData?.returnTo || extra?.returnTo, 1200),
     draftId: safeString(paymentData?.draftId || extra?.draftId, 180),
     shareToken: safeString(paymentData?.shareToken || extra?.shareToken, 400),
-    message:
-      safeString(paymentData?.statusMessage || extra?.message, 500) ||
-      (PAYMENT_SUCCESS_STATUSES.has(status)
-        ? "Payment confirmed."
-        : status === PAYMENT_STATUSES.FAILED
-          ? "The payment did not complete."
-          : status === PAYMENT_STATUSES.AWAITING_PAYMENT ||
-              status === PAYMENT_STATUSES.PAYMENT_SESSION_CREATED ||
-              status === PAYMENT_STATUSES.PROMPTED
-            ? "The M-Pesa prompt was sent. Complete the payment on your phone."
-            : "Payment status updated."),
+    message: buildCheckoutStatusMessage({
+      checkoutStatus: effectiveCheckoutStatus,
+      checkoutFailureReason,
+      fallbackMessage: paymentData?.statusMessage || extra?.message,
+      businessStatus: status,
+    }),
     verificationSummary: {
       source: "webhook_state",
       provider: "mpesa",
@@ -1546,6 +1688,11 @@ async function sendStkAndPersist({
       paymentReference: reference,
       transactionReference: reference,
       status: PAYMENT_STATUSES.PAYMENT_SESSION_CREATED,
+      paymentState: "pending",
+      checkoutStatus: "pending",
+      checkoutFailureReason: "",
+      checkoutResultCode: null,
+      checkoutResultDesc: "",
       lastAttemptId: attemptId,
       lastInitiatedAtMs: initiatedAtMs,
       updatedAt: FieldValue.serverTimestamp(),
@@ -1587,6 +1734,11 @@ async function sendStkAndPersist({
     await paymentRef.set(
       {
         status: PAYMENT_STATUSES.AWAITING_PAYMENT,
+        paymentState: "pending",
+        checkoutStatus: "pending",
+        checkoutFailureReason: "",
+        checkoutResultCode: null,
+        checkoutResultDesc: "",
         statusMessage:
           safeString(result?.customerMessage || result?.responseDescription, 400) ||
           "Complete the M-Pesa prompt on your phone.",
@@ -1946,6 +2098,10 @@ async function createUnlockCheckoutSession(payload = {}, req) {
     updatedAt: FieldValue.serverTimestamp(),
     updatedAtMs: nowMs(),
     paymentState: "pending",
+    checkoutStatus: "pending",
+    checkoutFailureReason: "",
+    checkoutResultCode: null,
+    checkoutResultDesc: "",
   };
 
   await paymentRef.set(paymentData, { merge: true });
@@ -1981,6 +2137,11 @@ async function createUnlockCheckoutSession(payload = {}, req) {
     await paymentRef.set(
       {
         status: PAYMENT_STATUSES.FAILED,
+        paymentState: "failed",
+        checkoutStatus: "failed",
+        checkoutFailureReason: "initiation_failed",
+        checkoutResultCode: null,
+        checkoutResultDesc: "",
         statusMessage: safeString(error?.message, 400),
         updatedAt: FieldValue.serverTimestamp(),
         updatedAtMs: nowMs(),
@@ -2008,6 +2169,10 @@ async function createUnlockCheckoutSession(payload = {}, req) {
     currency,
     reference,
     status: PAYMENT_STATUSES.AWAITING_PAYMENT,
+    checkoutStatus: "pending",
+    checkoutFailureReason: "",
+    resultCode: null,
+    resultDesc: "",
     message: stkResult.message,
     authorizationUrl,
     redirectUrl: authorizationUrl,
@@ -2085,6 +2250,10 @@ async function createFullPackageUnlockCheckoutSession(payload = {}, req) {
     updatedAt: FieldValue.serverTimestamp(),
     updatedAtMs: nowMs(),
     paymentState: "pending",
+    checkoutStatus: "pending",
+    checkoutFailureReason: "",
+    checkoutResultCode: null,
+    checkoutResultDesc: "",
   };
 
   await paymentRef.set(paymentData, { merge: true });
@@ -2116,6 +2285,11 @@ async function createFullPackageUnlockCheckoutSession(payload = {}, req) {
     await paymentRef.set(
       {
         status: PAYMENT_STATUSES.FAILED,
+        paymentState: "failed",
+        checkoutStatus: "failed",
+        checkoutFailureReason: "initiation_failed",
+        checkoutResultCode: null,
+        checkoutResultDesc: "",
         statusMessage: safeString(error?.message, 400),
         updatedAt: FieldValue.serverTimestamp(),
         updatedAtMs: nowMs(),
@@ -2145,6 +2319,10 @@ async function createFullPackageUnlockCheckoutSession(payload = {}, req) {
     payableItems: coverage.outstandingItems,
     reference,
     status: PAYMENT_STATUSES.AWAITING_PAYMENT,
+    checkoutStatus: "pending",
+    checkoutFailureReason: "",
+    resultCode: null,
+    resultDesc: "",
     message: stkResult.message,
     authorizationUrl,
     redirectUrl: authorizationUrl,
@@ -2544,6 +2722,11 @@ async function createPaymentCheckoutSession(payload = {}, req) {
     shareToken,
     returnTo: safeString(payload?.returnTo, 1200),
     status: PAYMENT_STATUSES.PROMPTED,
+    paymentState: "pending",
+    checkoutStatus: "pending",
+    checkoutFailureReason: "",
+    checkoutResultCode: null,
+    checkoutResultDesc: "",
     updatedAt: FieldValue.serverTimestamp(),
     updatedAtMs: nowMs(),
   };
@@ -2565,6 +2748,11 @@ async function createPaymentCheckoutSession(payload = {}, req) {
     await paymentRow.ref.set(
       {
         status: PAYMENT_STATUSES.FAILED,
+        paymentState: "failed",
+        checkoutStatus: "failed",
+        checkoutFailureReason: "initiation_failed",
+        checkoutResultCode: null,
+        checkoutResultDesc: "",
         statusMessage: safeString(error?.message, 400),
         updatedAt: FieldValue.serverTimestamp(),
         updatedAtMs: nowMs(),
@@ -2592,6 +2780,11 @@ async function createPaymentCheckoutSession(payload = {}, req) {
     currency,
     reference,
     payerMode: shareToken ? "shared_link" : "request_owner",
+    status: PAYMENT_STATUSES.AWAITING_PAYMENT,
+    checkoutStatus: "pending",
+    checkoutFailureReason: "",
+    resultCode: null,
+    resultDesc: "",
     message: stkResult.message,
     authorizationUrl,
     redirectUrl: authorizationUrl,
@@ -3270,17 +3463,33 @@ export async function processMpesaCallback(payload = {}) {
   const fullPackageId = loaded.fullPackageId;
   const reference =
     safeString(paymentData?.transactionReference, 180) || loaded.canonicalReference;
-  const isSuccess = parsed.resultCode === 0;
+  const callbackReceivedAtMs = nowMs();
+  const checkoutStatus = resolveCheckoutStatusFromResultCode(parsed.resultCode);
+  const checkoutFailureReason = resolveCheckoutFailureReasonFromResultCode(parsed.resultCode);
+  const isSuccess = checkoutStatus === "success";
   const settledAtMs = parsed.transactionDateMs || nowMs();
+  const amountPaid = parsed.amount > 0 ? parsed.amount : roundMoney(paymentData?.amount);
+  const statusMessage = buildCheckoutStatusMessage({
+    checkoutStatus,
+    checkoutFailureReason,
+    fallbackMessage: parsed.resultDesc,
+    businessStatus: isSuccess ? PAYMENT_STATUSES.PAID : PAYMENT_STATUSES.FAILED,
+  });
 
   const commonPatch = {
     provider: "mpesa",
     paymentMethod: "mpesa",
     updatedAt: FieldValue.serverTimestamp(),
-    updatedAtMs: nowMs(),
+    updatedAtMs: callbackReceivedAtMs,
     currentReference: reference,
     paymentReference: reference,
     transactionReference: reference,
+    checkoutStatus: checkoutStatus || (isSuccess ? "success" : "failed"),
+    checkoutFailureReason,
+    checkoutResultCode: parsed.resultCode,
+    checkoutResultDesc: parsed.resultDesc,
+    callbackReceivedAt: FieldValue.serverTimestamp(),
+    callbackReceivedAtMs,
     mpesa: {
       ...(paymentData?.mpesa && typeof paymentData.mpesa === "object" ? paymentData.mpesa : {}),
       merchantRequestId:
@@ -3294,6 +3503,8 @@ export async function processMpesaCallback(payload = {}) {
       receiptNumber: parsed.receiptNumber,
       callbackPhoneNumber: parsed.phoneNumber,
       transactionDateMs: settledAtMs,
+      checkoutStatus: checkoutStatus || (isSuccess ? "success" : "failed"),
+      checkoutFailureReason,
       lastCallbackPayload: parsed.raw,
     },
   };
@@ -3314,10 +3525,12 @@ export async function processMpesaCallback(payload = {}) {
     await loaded.paymentRef.set(
       {
         ...commonPatch,
+        amount: amountPaid,
         status: PAYMENT_STATUSES.FAILED,
-        statusMessage: parsed.resultDesc || "M-Pesa payment failed.",
+        paymentState: "failed",
+        statusMessage,
         failedAt: FieldValue.serverTimestamp(),
-        failedAtMs: nowMs(),
+        failedAtMs: callbackReceivedAtMs,
       },
       { merge: true }
     );
@@ -3350,6 +3563,8 @@ export async function processMpesaCallback(payload = {}) {
       paymentId,
       fullPackageId,
       status: PAYMENT_STATUSES.FAILED,
+      checkoutStatus,
+      checkoutFailureReason,
       resultCode: parsed.resultCode,
       resultDesc: parsed.resultDesc,
     }, "warn");
@@ -3358,6 +3573,8 @@ export async function processMpesaCallback(payload = {}) {
       ok: true,
       matched: true,
       status: PAYMENT_STATUSES.FAILED,
+      checkoutStatus,
+      checkoutFailureReason,
       requestId,
       paymentId,
       fullPackageId,
@@ -3375,13 +3592,12 @@ export async function processMpesaCallback(payload = {}) {
   await loaded.paymentRef.set(
     {
       ...commonPatch,
-      amount: parsed.amount > 0 ? parsed.amount : roundMoney(paymentData?.amount),
+      amount: amountPaid,
       status: nextStatus,
-      statusMessage: "Payment confirmed by M-Pesa callback.",
+      paymentState: "paid",
+      statusMessage,
       paidAt: FieldValue.serverTimestamp(),
       paidAtMs: settledAtMs,
-      callbackReceivedAt: FieldValue.serverTimestamp(),
-      callbackReceivedAtMs: nowMs(),
     },
     { merge: true }
   );
@@ -3397,7 +3613,7 @@ export async function processMpesaCallback(payload = {}) {
       paidAt: settledAtMs,
       ref: reference,
       paymentId,
-      amount: parsed.amount > 0 ? parsed.amount : roundMoney(paymentData?.amount),
+      amount: amountPaid,
       currency: normalizeCurrency(paymentData?.currency || "KES"),
       receiptNumber: parsed.receiptNumber,
     };
@@ -3405,14 +3621,13 @@ export async function processMpesaCallback(payload = {}) {
       {
         unlockPaid: true,
         depositPaid: true,
-        unlockAmount:
-          parsed.amount > 0 ? parsed.amount : roundMoney(paymentData?.amount),
+        unlockAmount: amountPaid,
         unlockCurrency: normalizeCurrency(paymentData?.currency || "KES"),
         unlockPaymentMeta,
         depositPaymentMeta: unlockPaymentMeta,
         unlockCoverage: {
           coveredItems,
-          lastUpdatedAtMs: nowMs(),
+          lastUpdatedAtMs: callbackReceivedAtMs,
           lastPaymentId: paymentId,
         },
         coveredItems,
@@ -3427,7 +3642,7 @@ export async function processMpesaCallback(payload = {}) {
       paidAt: settledAtMs,
       ref: reference,
       paymentId,
-      amount: parsed.amount > 0 ? parsed.amount : roundMoney(paymentData?.amount),
+      amount: amountPaid,
       currency: normalizeCurrency(paymentData?.currency || "KES"),
       receiptNumber: parsed.receiptNumber,
     };
@@ -3448,7 +3663,7 @@ export async function processMpesaCallback(payload = {}) {
     const queueId = await ensurePayoutQueueForPayment({
       paymentData: {
         ...paymentData,
-        amount: parsed.amount > 0 ? parsed.amount : roundMoney(paymentData?.amount),
+        amount: amountPaid,
       },
       requestData: loaded.requestData || {},
       paymentPath,
@@ -3472,6 +3687,7 @@ export async function processMpesaCallback(payload = {}) {
     paymentId,
     fullPackageId,
     status: nextStatus,
+    checkoutStatus,
     resultCode: parsed.resultCode,
     resultDesc: parsed.resultDesc,
     receiptNumber: parsed.receiptNumber,
@@ -3481,6 +3697,7 @@ export async function processMpesaCallback(payload = {}) {
     ok: true,
     matched: true,
     status: nextStatus,
+    checkoutStatus,
     requestId,
     paymentId,
     fullPackageId,

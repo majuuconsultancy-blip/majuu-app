@@ -217,6 +217,26 @@ export async function verifyPayment({ reference = "", ...rest } = {}) {
   );
 }
 
+export async function trackPaymentDropoff(payload = {}) {
+  return apiRequest(
+    "/api/analytics/payment-dropoff",
+    {
+      method: "POST",
+      body: payload && typeof payload === "object" ? payload : {},
+    },
+    "Payment analytics could not be saved right now."
+  );
+}
+
+export async function fetchPaymentDropoffAnalytics({ limit = 50 } = {}) {
+  const safeLimit = Math.max(1, Math.min(100, Number(limit || 0) || 50));
+  return apiRequest(
+    `/api/analytics/payment-dropoff?limit=${encodeURIComponent(String(safeLimit))}`,
+    { method: "GET" },
+    "Payment drop-off analytics could not be loaded right now."
+  );
+}
+
 export async function invokeFinanceAction(action, payload = {}) {
   return apiRequest(
     "/api/finance",

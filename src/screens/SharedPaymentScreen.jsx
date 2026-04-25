@@ -6,6 +6,7 @@ import {
   paymentStatusUi,
   resolveSharedPaymentLink,
 } from "../services/paymentservice";
+import { normalizeSafaricomMpesaNumber } from "../utils/mpesaCheckout";
 
 function safeStr(value, max = 400) {
   return String(value || "").trim().slice(0, max);
@@ -14,10 +15,6 @@ function safeStr(value, max = 400) {
 function isValidEmail(value) {
   const email = safeStr(value, 160).toLowerCase();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function normalizePhone(value) {
-  return String(value || "").replace(/\D+/g, "").slice(-12);
 }
 
 export default function SharedPaymentScreen() {
@@ -60,6 +57,12 @@ export default function SharedPaymentScreen() {
       setError("Enter a valid email address before continuing.");
       return;
     }
+    const normalizedPhone = normalizeSafaricomMpesaNumber(phoneNumber);
+    if (!normalizedPhone) {
+      setError("Please enter a valid Safaricom M-Pesa number");
+      return;
+    }
+    setPhoneNumber(normalizedPhone);
 
     setBusy(true);
     setError("");
@@ -67,7 +70,7 @@ export default function SharedPaymentScreen() {
       const session = await createPaymentCheckoutSession({
         shareToken,
         email: cleanEmail,
-        phoneNumber: normalizePhone(phoneNumber),
+        phoneNumber: normalizedPhone,
         appBaseUrl: typeof window !== "undefined" ? window.location.origin : "",
         returnTo: `${location.pathname}${location.search || ""}`,
       });

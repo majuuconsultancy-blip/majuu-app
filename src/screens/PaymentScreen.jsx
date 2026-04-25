@@ -3,6 +3,11 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { auth } from "../firebase";
 import { buildLegalDocRoute, LEGAL_DOC_KEYS } from "../legal/legalRegistry";
+import {
+  buildPaymentDropoffDedupeKey,
+  PAYMENT_DROPOFF_STEPS,
+  trackPaymentDropoff,
+} from "../services/paymentDropoffAnalyticsService";
 import { createUnlockCheckoutSession, reconcilePaymentReference } from "../services/paymentservice";
 import { getRequestPricingQuote, toRequestPricingSnapshot } from "../services/pricingservice";
 import { createServiceRequest } from "../services/requestservice";
@@ -14,11 +19,19 @@ import {
   WORKFLOW_DRAFT_STATUSES,
 } from "../services/workflowdraftservice";
 import {
+  clearDummyPaymentState,
   getDummyPaymentDraft,
   getDummyPaymentState,
   markDummyPaymentPaid,
   setDummyPaymentState,
 } from "../utils/dummyPayment";
+import {
+  getMpesaCheckoutMessage,
+  isPendingMpesaCheckout,
+  isSuccessfulMpesaCheckout,
+  normalizeSafaricomMpesaNumber,
+  resolveMpesaCheckoutOutcome,
+} from "../utils/mpesaCheckout";
 import { smartBack } from "../utils/navBack";
 
 function safeStr(value, max = 1200) {
@@ -50,21 +63,121 @@ function normalizePhoneInput(value = "") {
   return safeStr(value, 40);
 }
 
-function isSuccessfulPaymentStatus(status = "") {
-  return new Set(["paid", "held", "payout_ready", "settled"]).has(
-    lower(status, 80)
+function safeNumber(value) {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : null;
+}
+
+function resolveInitialPhoneValue(checkoutPayload = {}, storedDraft = {}) {
+  return normalizePhoneInput(
+    checkoutPayload?.phone || storedDraft?.formState?.phone || storedDraft?.phone
   );
 }
 
-function isPendingPaymentStatus(status = "") {
-  return new Set([
-    "prompted",
-    "payment_session_created",
-    "awaiting_payment",
-    "payable",
-    "admin_review",
-    "approved",
-  ]).has(lower(status, 80));
+function createStoredPaymentState(result = {}, extra = {}) {
+  const source = result && typeof result === "object" ? result : {};
+  const current = extra?.current && typeof extra.current === "object" ? extra.current : {};
+  const reference = safeStr(
+    source?.reference ||
+      source?.paymentReference ||
+      source?.currentReference ||
+      source?.transactionReference ||
+      current?.paymentReference ||
+      current?.currentReference ||
+      current?.reference ||
+      current?.transactionReference,
+    180
+  );
+  const resultCode = safeNumber(
+    source?.resultCode ?? source?.checkoutResultCode ?? current?.resultCode
+  );
+  const checkoutFailureReason = lower(
+    source?.checkoutFailureReason || current?.checkoutFailureReason,
+    80
+  );
+  const outcome = resolveMpesaCheckoutOutcome({
+    ...current,
+    ...source,
+    resultCode,
+    checkoutFailureReason,
+  });
+
+  return {
+    ...(current && typeof current === "object" ? current : {}),
+    status: lower(source?.status || current?.status, 80),
+    checkoutStatus:
+      outcome === "insufficient"
+        ? "failed"
+        : lower(source?.checkoutStatus || outcome || current?.checkoutStatus, 40),
+    checkoutFailureReason:
+      checkoutFailureReason || (outcome === "insufficient" ? "insufficient_balance" : ""),
+    resultCode,
+    resultDesc: safeStr(
+      source?.resultDesc || source?.checkoutResultDesc || current?.resultDesc,
+      400
+    ),
+    message: safeStr(source?.message || current?.message, 400),
+    method: "mpesa",
+    phoneNumber: normalizePhoneInput(
+      extra?.phoneNumber || source?.phoneNumber || current?.phoneNumber
+    ),
+    requestId: safeStr(source?.requestId || extra?.requestId || current?.requestId, 180),
+    paymentId: safeStr(source?.paymentId || current?.paymentId, 180),
+    transactionReference: reference,
+    paymentReference: reference,
+    currentReference: reference,
+    reference,
+    amount: roundMoney(source?.amount || current?.amount),
+    currency: normalizeCurrency(source?.currency || current?.currency || "KES"),
+    checkoutRequestId: safeStr(
+      source?.checkoutRequestId || current?.checkoutRequestId,
+      180
+    ),
+    merchantRequestId: safeStr(
+      source?.merchantRequestId || current?.merchantRequestId,
+      180
+    ),
+  };
+}
+
+function sendPaymentDropoffEvent({
+  step = "",
+  phoneNumber = "",
+  amount = 0,
+  serviceName = "",
+  requestId = "",
+  paymentId = "",
+  reference = "",
+  draftId = "",
+  dedupe = false,
+} = {}) {
+  const safeStep = safeStr(step, 80).toLowerCase();
+  if (!safeStep) return;
+  const safeReference = safeStr(reference, 180);
+  const safePaymentId = safeStr(paymentId, 180);
+  const safeRequestId = safeStr(requestId, 180);
+  void trackPaymentDropoff(
+    {
+      step: safeStep,
+      phoneNumber: normalizeSafaricomMpesaNumber(phoneNumber),
+      amount: roundMoney(amount),
+      service: safeStr(serviceName, 180),
+      requestId: safeRequestId,
+      paymentId: safePaymentId,
+      reference: safeReference,
+      draftId: safeStr(draftId, 180),
+    },
+    {
+      dedupeKey: dedupe
+        ? buildPaymentDropoffDedupeKey({
+            step: safeStep,
+            reference: safeReference,
+            paymentId: safePaymentId,
+            requestId: safeRequestId,
+          })
+        : "",
+    }
+  );
 }
 
 function resolveCheckoutPayload(draft = {}, fallbackReturnTo = "") {
@@ -229,32 +342,15 @@ export default function PaymentScreen() {
     () => resolveCheckoutPayload(storedDraft, queryReturnTo),
     [storedDraft, queryReturnTo]
   );
-  const initialPaymentState = useMemo(() => getDummyPaymentState(draftId), [draftId]);
-
   const [phone, setPhone] = useState(() =>
-    normalizePhoneInput(
-      initialPaymentState?.phoneNumber ||
-        checkoutPayload?.phone ||
-        storedDraft?.formState?.phone
-    )
+    resolveInitialPhoneValue(checkoutPayload, storedDraft)
   );
-  const [paymentState, setPaymentState] = useState(initialPaymentState || null);
-  const paymentStateRef = useRef(initialPaymentState || null);
-  const [status, setStatus] = useState(() => {
-    const storedStatus = lower(initialPaymentState?.status, 80);
-    if (storedStatus === "paid") return "success";
-    if (initialPaymentState?.reference && isPendingPaymentStatus(storedStatus)) {
-      return "waiting";
-    }
-    return "ready";
-  });
-  const [message, setMessage] = useState(() => {
-    if (lower(initialPaymentState?.status, 80) === "paid") {
-      return "Payment confirmed. Continue to finish your request.";
-    }
-    return "";
-  });
+  const [paymentState, setPaymentState] = useState(null);
+  const paymentStateRef = useRef(null);
+  const [status, setStatus] = useState("ready");
+  const [message, setMessage] = useState("");
   const [working, setWorking] = useState(false);
+  const [verificationNonce, setVerificationNonce] = useState(0);
 
   const reference = safeStr(
     paymentState?.reference || paymentState?.transactionReference,
@@ -263,26 +359,88 @@ export default function PaymentScreen() {
   const effectiveReturnTo =
     safeStr(checkoutPayload?.returnTo, 1200) || queryReturnTo || "/app/progress";
   const amountLabel = safeStr(checkoutPayload?.amount, 120);
+  const amountValue = parseAmountNumber(checkoutPayload?.amount);
   const paymentContext =
     checkoutPayload?.paymentContext && typeof checkoutPayload.paymentContext === "object"
       ? checkoutPayload.paymentContext
       : {};
   const serviceName =
     safeStr(paymentContext?.serviceName, 180) || "Request unlock payment";
+  const analyticsAmount = roundMoney(paymentState?.amount || amountValue);
 
   useEffect(() => {
     paymentStateRef.current = paymentState;
   }, [paymentState]);
 
   useEffect(() => {
-    if (!draftId || storedDraft) return;
-    setStatus("failed");
-    setMessage("This payment draft could not be found. Please go back and start again.");
-  }, [draftId, storedDraft]);
+    if (!draftId) {
+      setPhone(resolveInitialPhoneValue(checkoutPayload, storedDraft));
+      setPaymentState(null);
+      setStatus("ready");
+      setMessage("");
+      setWorking(false);
+      setVerificationNonce(0);
+      return;
+    }
+    if (!storedDraft) {
+      setPaymentState(null);
+      setStatus("failed");
+      setMessage("This payment draft could not be found. Please go back and start again.");
+      setWorking(false);
+      return;
+    }
+
+    const storedPayment = getDummyPaymentState(draftId);
+    const storedReference = safeStr(
+      storedPayment?.reference ||
+        storedPayment?.paymentReference ||
+        storedPayment?.currentReference ||
+        storedPayment?.transactionReference,
+      180
+    );
+    const storedOutcome = storedPayment ? resolveMpesaCheckoutOutcome(storedPayment) : "";
+
+    setPhone(
+      resolveInitialPhoneValue(checkoutPayload, storedDraft) ||
+        normalizePhoneInput(storedPayment?.phoneNumber)
+    );
+    if (storedPayment && storedOutcome === "success") {
+      setPaymentState(storedPayment);
+      setStatus("success");
+      setMessage(getMpesaCheckoutMessage(storedPayment));
+    } else if (storedPayment && storedOutcome === "pending" && storedReference) {
+      setPaymentState(storedPayment);
+      setStatus("pending");
+      setMessage(getMpesaCheckoutMessage(storedPayment));
+    } else if (storedPayment && storedOutcome && storedOutcome !== "pending") {
+      setPaymentState(storedPayment);
+      setStatus(storedOutcome);
+      setMessage(getMpesaCheckoutMessage(storedPayment));
+    } else {
+      if (storedPayment && !storedReference) {
+        clearDummyPaymentState(draftId);
+      }
+      setPaymentState(null);
+      setStatus("ready");
+      setMessage("");
+    }
+    setWorking(false);
+    setVerificationNonce(0);
+  }, [checkoutPayload, draftId, storedDraft]);
+
+  useEffect(() => {
+    return () => {
+      if (!draftId) return;
+      const currentPaymentState = paymentStateRef.current || getDummyPaymentState(draftId);
+      if (currentPaymentState && !isSuccessfulMpesaCheckout(currentPaymentState)) {
+        clearDummyPaymentState(draftId);
+      }
+    };
+  }, [draftId]);
 
   useEffect(() => {
     if (!draftId || !reference) return undefined;
-    if (status !== "waiting" && status !== "pending") return undefined;
+    if (status !== "pending") return undefined;
 
     let cancelled = false;
     let retryTimer = 0;
@@ -292,52 +450,51 @@ export default function PaymentScreen() {
         const result = await reconcilePaymentReference({ reference });
         if (cancelled) return;
 
-        const nextStatus = lower(result?.status, 80);
-        if (isSuccessfulPaymentStatus(nextStatus)) {
+        const currentPaymentState =
+          getDummyPaymentState(draftId) || paymentStateRef.current || {};
+        const nextPaymentState = createStoredPaymentState(result, {
+          current: currentPaymentState,
+          phoneNumber: currentPaymentState?.phoneNumber,
+        });
+        const outcome = resolveMpesaCheckoutOutcome(nextPaymentState);
+
+        if (outcome === "success") {
           const paidState = await persistVerifiedDraft({
             draftId,
             result,
             reference,
           });
           if (cancelled) return;
-          setPaymentState((prev) => ({
-            ...(prev && typeof prev === "object" ? prev : {}),
+          const successfulPaymentState = {
+            ...(paymentStateRef.current && typeof paymentStateRef.current === "object"
+              ? paymentStateRef.current
+              : {}),
+            ...nextPaymentState,
             ...(paidState && typeof paidState === "object" ? paidState : {}),
             requestId: safeStr(result?.requestId, 180),
             paymentId: safeStr(result?.paymentId, 180),
             reference,
-          }));
+            transactionReference: reference,
+            paymentReference: reference,
+            currentReference: reference,
+            checkoutStatus: "success",
+            checkoutFailureReason: "",
+            resultCode: 0,
+          };
+          setDummyPaymentState(draftId, successfulPaymentState);
+          setPaymentState(successfulPaymentState);
           setStatus("success");
-          setMessage("Payment confirmed. Continue to finish your request.");
+          setMessage(getMpesaCheckoutMessage(successfulPaymentState));
           return;
         }
 
-        if (isPendingPaymentStatus(nextStatus)) {
-          const currentPaymentState =
-            getDummyPaymentState(draftId) || paymentStateRef.current || {};
-          const waitingMessage =
-            safeStr(result?.message, 400) ||
-            "We sent the M-Pesa prompt. Complete it on your phone and we will keep checking.";
-          const nextPaymentState = {
-            ...(currentPaymentState && typeof currentPaymentState === "object"
-              ? currentPaymentState
-              : {}),
-            status: nextStatus || "awaiting_payment",
-            message: waitingMessage,
-            requestId:
-              safeStr(result?.requestId, 180) ||
-              safeStr(currentPaymentState?.requestId, 180),
-            paymentId:
-              safeStr(result?.paymentId, 180) ||
-              safeStr(currentPaymentState?.paymentId, 180),
-            reference,
-            transactionReference: reference,
-          };
-          setDummyPaymentState(draftId, nextPaymentState);
-          setPaymentState(nextPaymentState);
-          setMessage(waitingMessage);
+        setDummyPaymentState(draftId, nextPaymentState);
+        setPaymentState(nextPaymentState);
+
+        if (outcome === "pending") {
+          setMessage(getMpesaCheckoutMessage(nextPaymentState));
           if (attempt < 15) {
-            setStatus("waiting");
+            setStatus("pending");
             retryTimer = window.setTimeout(() => {
               void verify(attempt + 1);
             }, 3000);
@@ -347,14 +504,12 @@ export default function PaymentScreen() {
           return;
         }
 
-        setStatus("failed");
-        setMessage(
-          safeStr(result?.message, 400) || "This payment could not be confirmed."
-        );
+        setStatus(outcome);
+        setMessage(getMpesaCheckoutMessage(nextPaymentState));
       } catch (error) {
         if (cancelled) return;
         if (attempt < 15) {
-          setStatus("waiting");
+          setStatus("pending");
           setMessage(
             safeStr(error?.message, 400) ||
               "We are still waiting for the M-Pesa callback. Trying again..."
@@ -379,7 +534,72 @@ export default function PaymentScreen() {
       cancelled = true;
       if (retryTimer) window.clearTimeout(retryTimer);
     };
-  }, [draftId, paymentState?.status, reference, status]);
+  }, [draftId, reference, status, verificationNonce]);
+
+  useEffect(() => {
+    if (status !== "pending" || !reference) return undefined;
+    const timer = window.setTimeout(() => {
+      sendPaymentDropoffEvent({
+        step: PAYMENT_DROPOFF_STEPS.TIMEOUT,
+        phoneNumber: paymentState?.phoneNumber || phone,
+        amount: analyticsAmount,
+        serviceName,
+        requestId: paymentState?.requestId,
+        paymentId: paymentState?.paymentId,
+        reference,
+        draftId,
+        dedupe: true,
+      });
+    }, 75000);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [analyticsAmount, draftId, paymentState?.paymentId, paymentState?.phoneNumber, paymentState?.requestId, phone, reference, serviceName, status]);
+
+  useEffect(() => {
+    if (!reference) return;
+    if (status === "cancelled") {
+      sendPaymentDropoffEvent({
+        step: PAYMENT_DROPOFF_STEPS.CANCELLED,
+        phoneNumber: paymentState?.phoneNumber || phone,
+        amount: analyticsAmount,
+        serviceName,
+        requestId: paymentState?.requestId,
+        paymentId: paymentState?.paymentId,
+        reference,
+        draftId,
+        dedupe: true,
+      });
+      return;
+    }
+    if (status === "insufficient") {
+      sendPaymentDropoffEvent({
+        step: PAYMENT_DROPOFF_STEPS.INSUFFICIENT_BALANCE,
+        phoneNumber: paymentState?.phoneNumber || phone,
+        amount: analyticsAmount,
+        serviceName,
+        requestId: paymentState?.requestId,
+        paymentId: paymentState?.paymentId,
+        reference,
+        draftId,
+        dedupe: true,
+      });
+      return;
+    }
+    if (status === "timeout") {
+      sendPaymentDropoffEvent({
+        step: PAYMENT_DROPOFF_STEPS.TIMEOUT,
+        phoneNumber: paymentState?.phoneNumber || phone,
+        amount: analyticsAmount,
+        serviceName,
+        requestId: paymentState?.requestId,
+        paymentId: paymentState?.paymentId,
+        reference,
+        draftId,
+        dedupe: true,
+      });
+    }
+  }, [analyticsAmount, draftId, paymentState?.paymentId, paymentState?.phoneNumber, paymentState?.requestId, phone, reference, serviceName, status]);
 
   const goBack = () => {
     if (effectiveReturnTo && effectiveReturnTo !== "/app/progress") {
@@ -420,12 +640,13 @@ export default function PaymentScreen() {
       return;
     }
 
-    const checkoutPhone = normalizePhoneInput(phone);
+    const checkoutPhone = normalizeSafaricomMpesaNumber(phone);
     if (!checkoutPhone) {
       setStatus("failed");
-      setMessage("Enter the M-Pesa phone number that should receive the STK push.");
+      setMessage("Please enter a valid Safaricom M-Pesa number");
       return;
     }
+    setPhone(checkoutPhone);
 
     if (
       !safeStr(latestContext?.track, 40) ||
@@ -437,9 +658,24 @@ export default function PaymentScreen() {
       return;
     }
 
+    const existingPaymentState = paymentStateRef.current || {};
+    sendPaymentDropoffEvent({
+      step: PAYMENT_DROPOFF_STEPS.INITIATED,
+      phoneNumber: checkoutPhone,
+      amount: parseAmountNumber(latestPayload?.amount),
+      serviceName: safeStr(latestContext?.serviceName, 180) || serviceName,
+      requestId: safeStr(existingPaymentState?.requestId, 180),
+      draftId,
+    });
+
     setWorking(true);
     setStatus("starting");
     setMessage("");
+    clearDummyPaymentState(draftId);
+    setPaymentState({
+      requestId: safeStr(existingPaymentState?.requestId, 180),
+      phoneNumber: checkoutPhone,
+    });
 
     try {
       const userState = await getUserState(user.uid).catch(() => null);
@@ -455,7 +691,7 @@ export default function PaymentScreen() {
         throw new Error("Request pricing is unavailable right now. Please try again.");
       }
 
-      let requestId = safeStr(paymentState?.requestId, 180);
+      let requestId = safeStr(existingPaymentState?.requestId, 180);
       if (!requestId) {
         requestId = await createServiceRequest({
           uid: user.uid,
@@ -503,19 +739,14 @@ export default function PaymentScreen() {
         phoneNumber: checkoutPhone,
       });
 
-      const nextPaymentState = {
-        status: lower(result?.status, 80) || "awaiting_payment",
-        method: "mpesa",
+      const nextPaymentState = createStoredPaymentState(result, {
+        current: {
+          ...existingPaymentState,
+          requestId,
+        },
+        requestId,
         phoneNumber: checkoutPhone,
-        requestId: safeStr(result?.requestId || requestId, 180),
-        paymentId: safeStr(result?.paymentId, 180),
-        transactionReference: safeStr(result?.reference, 180),
-        reference: safeStr(result?.reference, 180),
-        amount: roundMoney(result?.amount || parseAmountNumber(latestPayload?.amount)),
-        currency: normalizeCurrency(result?.currency || "KES"),
-        checkoutRequestId: safeStr(result?.checkoutRequestId, 180),
-        merchantRequestId: safeStr(result?.merchantRequestId, 180),
-      };
+      });
 
       setDummyPaymentState(draftId, nextPaymentState);
       setPaymentState(nextPaymentState);
@@ -529,7 +760,7 @@ export default function PaymentScreen() {
         amountText: latestPayload?.amount,
       });
 
-      if (isSuccessfulPaymentStatus(result?.status)) {
+      if (isSuccessfulMpesaCheckout(nextPaymentState)) {
         const paidState = await persistVerifiedDraft({
           draftId,
           result: {
@@ -538,20 +769,46 @@ export default function PaymentScreen() {
           },
           reference: safeStr(result?.reference, 180),
         });
-        setPaymentState((prev) => ({
-          ...(prev && typeof prev === "object" ? prev : {}),
+        const successfulPaymentState = {
+          ...(paymentStateRef.current && typeof paymentStateRef.current === "object"
+            ? paymentStateRef.current
+            : {}),
+          ...nextPaymentState,
           ...(paidState && typeof paidState === "object" ? paidState : {}),
-        }));
+          checkoutStatus: "success",
+          checkoutFailureReason: "",
+          resultCode: 0,
+          paymentReference: safeStr(result?.reference, 180),
+          currentReference: safeStr(result?.reference, 180),
+        };
+        setDummyPaymentState(draftId, successfulPaymentState);
+        setPaymentState(successfulPaymentState);
         setStatus("success");
-        setMessage("Payment confirmed. Continue to finish your request.");
+        setMessage(getMpesaCheckoutMessage(successfulPaymentState));
         return;
       }
 
-      setStatus("waiting");
-      setMessage(
-        safeStr(result?.message, 400) ||
-          "We sent the M-Pesa prompt. Complete it on your phone and we will keep checking."
-      );
+      if (isPendingMpesaCheckout(nextPaymentState)) {
+        sendPaymentDropoffEvent({
+          step: PAYMENT_DROPOFF_STEPS.STK_SENT,
+          phoneNumber: checkoutPhone,
+          amount:
+            roundMoney(nextPaymentState?.amount) || parseAmountNumber(latestPayload?.amount),
+          serviceName: safeStr(latestContext?.serviceName, 180) || serviceName,
+          requestId: safeStr(nextPaymentState?.requestId || requestId, 180),
+          paymentId: safeStr(nextPaymentState?.paymentId, 180),
+          reference: safeStr(nextPaymentState?.reference, 180),
+          draftId,
+          dedupe: true,
+        });
+        setStatus("pending");
+        setMessage(getMpesaCheckoutMessage(nextPaymentState));
+        setVerificationNonce((value) => value + 1);
+        return;
+      }
+
+      setStatus(resolveMpesaCheckoutOutcome(nextPaymentState));
+      setMessage(getMpesaCheckoutMessage(nextPaymentState));
     } catch (error) {
       setStatus("failed");
       setMessage(
@@ -563,17 +820,52 @@ export default function PaymentScreen() {
   };
 
   const handleCheckAgain = async () => {
-    if (!reference) {
+    if (!reference || status !== "pending") {
       setStatus("failed");
       setMessage("Payment reference is missing. Start payment again.");
       return;
     }
-    setStatus("waiting");
+    setStatus("pending");
     setMessage("Checking payment status...");
+    setVerificationNonce((value) => value + 1);
   };
 
+  const canRetry = new Set(["failed", "cancelled", "timeout", "insufficient"]).has(status);
+  const showStatusBanner = canRetry || status === "success";
+  const heading =
+    status === "success"
+      ? "Payment successful"
+      : status === "pending"
+      ? "Complete payment on your phone"
+      : status === "cancelled"
+      ? "Payment cancelled"
+      : status === "timeout"
+      ? "Payment timed out"
+      : status === "insufficient"
+      ? "Payment needs attention"
+      : status === "failed"
+      ? "Payment failed"
+      : status === "starting"
+      ? "Starting checkout"
+      : "Pay to unlock your request";
+  const summary =
+    status === "success"
+      ? "The backend has confirmed your M-Pesa payment."
+      : status === "pending"
+      ? "After you approve the STK push, we will confirm the payment here automatically."
+      : status === "starting"
+      ? "We are preparing your M-Pesa checkout now."
+      : "Enter the Safaricom M-Pesa number that should receive the STK prompt, then press Pay.";
+  const bannerCls =
+    status === "success"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200"
+      : status === "insufficient"
+      ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200"
+      : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200";
+  const payButtonDisabled = working || status === "starting" || status === "pending";
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white px-5 py-6 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950">
+    <div className="min-h-screen bg-zinc-50 px-5 py-6 dark:bg-zinc-950">
       <div className="mx-auto max-w-md">
         <button
           onClick={goBack}
@@ -583,28 +875,17 @@ export default function PaymentScreen() {
           Back
         </button>
 
-        <div className="rounded-3xl border border-zinc-200 bg-white/80 p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/70">
-          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
+        <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">
             M-Pesa Checkout
           </div>
-          <h1 className="mt-2 text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-            {status === "success"
-              ? "Payment confirmed"
-              : status === "waiting" || status === "pending"
-              ? "Complete payment on your phone"
-              : "Pay to unlock your request"}
+          <h1 className="mt-3 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+            {heading}
           </h1>
-          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-            {status === "success"
-              ? message || "Your payment has been confirmed by the backend."
-              : status === "waiting" || status === "pending"
-              ? message ||
-                "After you approve the STK push, we will confirm the payment here automatically."
-              : "Enter the Safaricom M-Pesa number that should receive the STK prompt, then press Pay."}
-          </p>
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">{summary}</p>
 
-          <div className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-            <div className="text-xs uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+          <div className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+            <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
               Service
             </div>
             <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -624,11 +905,11 @@ export default function PaymentScreen() {
             <input
               value={phone}
               onChange={(event) => setPhone(event.target.value)}
-              placeholder="e.g. 07XXXXXXXX or 2547XXXXXXXX"
-              className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+              placeholder="e.g. 0712345678"
+              className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
               inputMode="tel"
               autoComplete="tel"
-              disabled={working || status === "waiting"}
+              disabled={working || status === "pending"}
             />
             <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
               This number can be different from the contact number on your request.
@@ -636,13 +917,13 @@ export default function PaymentScreen() {
           </div>
 
           {reference ? (
-            <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+            <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300">
               Reference: {reference}
             </div>
           ) : null}
 
-          {status === "failed" ? (
-            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200">
+          {showStatusBanner ? (
+            <div className={`mt-4 rounded-2xl border px-3 py-3 text-sm ${bannerCls}`}>
               {message}
             </div>
           ) : null}
@@ -660,21 +941,22 @@ export default function PaymentScreen() {
               <button
                 type="button"
                 onClick={handleStartPayment}
-                disabled={working || status === "waiting"}
+                disabled={payButtonDisabled}
                 className="w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
               >
                 {working
                   ? "Starting checkout..."
-                  : status === "pending" || status === "failed"
-                  ? "Send STK push again"
+                  : canRetry
+                  ? "Try payment again"
                   : "Pay"}
               </button>
             )}
 
-            {status === "waiting" || status === "pending" ? (
+            {status === "pending" ? (
               <button
                 type="button"
                 onClick={handleCheckAgain}
+                disabled={working}
                 className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
               >
                 Check payment status
@@ -690,7 +972,7 @@ export default function PaymentScreen() {
             </button>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-zinc-200 bg-white/60 p-3 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
+          <div className="mt-4 text-center text-xs text-zinc-500 dark:text-zinc-400">
             Review{" "}
             <button
               type="button"

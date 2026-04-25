@@ -1218,12 +1218,15 @@ export default function RequestModal({
 
   const handleClose = useMemo(() => {
     return () => {
+      if (requestDraftId && !paid) {
+        clearDummyPaymentState(requestDraftId);
+      }
       persistDraftBeforeCloseRef.current?.();
       releaseBodyLockRef.current?.();
       releaseBodyLockRef.current = () => {};
       finishClose();
     };
-  }, [finishClose]);
+  }, [finishClose, paid, requestDraftId]);
 
   // lock body scroll (ANDROID SAFE)
   useEffect(() => {
