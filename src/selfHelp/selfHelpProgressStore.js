@@ -1185,15 +1185,18 @@ export async function saveSelfHelpDocumentRecord(uid, payload) {
     addedAt: payload?.addedAt || Date.now(),
     updatedAt: Date.now(),
   };
-  await Promise.all([
-    syncStateToCloud(uid, saved),
-    syncDocumentRecordToCloud(uid, mirroredRecord),
-    mirrorSelfHelpDocumentRecord({
-      uid,
-      record: mirroredRecord,
-      actorUid: uid,
-    }),
-  ]);
+  syncCloudWrite(
+    Promise.allSettled([
+      syncStateToCloud(uid, saved),
+      syncDocumentRecordToCloud(uid, mirroredRecord),
+      mirrorSelfHelpDocumentRecord({
+        uid,
+        record: mirroredRecord,
+        actorUid: uid,
+      }),
+    ]),
+    "document-save"
+  );
   return saved;
 }
 
@@ -1206,10 +1209,13 @@ export async function deleteSelfHelpDocumentRecord(uid, payload) {
     ...current,
     documents: current.documents.filter((item) => item.id !== id),
   });
-  await Promise.all([
-    syncStateToCloud(uid, saved),
-    deleteDocumentRecordFromCloud(uid, id),
-    deleteSelfHelpDocumentMirror({ uid, recordId: id }),
-  ]);
+  syncCloudWrite(
+    Promise.allSettled([
+      syncStateToCloud(uid, saved),
+      deleteDocumentRecordFromCloud(uid, id),
+      deleteSelfHelpDocumentMirror({ uid, recordId: id }),
+    ]),
+    "document-delete"
+  );
   return saved;
 }

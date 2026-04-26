@@ -22,6 +22,7 @@ import RequestChatLauncher from "../components/RequestChatLauncher";
 import CollapsibleSection from "../components/CollapsibleSection";
 import RequestDocumentFieldsSection from "../components/RequestDocumentFieldsSection";
 import RequestExtraDetailsSection from "../components/RequestExtraDetailsSection";
+import FileAccessLink from "../components/FileAccessLink";
 
 import { auth, db } from "../firebase";
 import { clearActiveProcess } from "../services/userservice";
@@ -1647,15 +1648,21 @@ export default function RequestStatusScreen() {
                 ) : (
                   effectiveAdminFiles.map((f, idx) => {
                     const name = String(f.name || "Document");
-                    const url = String(f.url || "").trim();
-
-                    return (
+                    const fileRef = {
+                      ...f,
+                      externalUrl: String(f.url || "").trim(),
+                    };
+                    const hasAccess =
+                      Boolean(fileRef.externalUrl) ||
+                      Boolean(fileRef.storagePath);
+                    const card = (
                       <motion.div
-                        key={f.id}
                         initial={{ opacity: 0, y: 6 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: Math.min(0.2, idx * 0.03), duration: 0.18 }}
-                        className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99]"
+                        className={`rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-4 transition hover:border-emerald-200 hover:bg-white active:scale-[0.99] ${
+                          hasAccess ? "cursor-pointer" : ""
+                        }`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
@@ -1665,20 +1672,29 @@ export default function RequestStatusScreen() {
                             <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">Open to download</div>
                           </div>
 
-                          <a
-                            href={url || "#"}
-                            target="_blank"
-                            rel="noreferrer"
+                          <span
                             className={`shrink-0 inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] ${
-                              url
-                                ? "border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
-                                : "border-zinc-200 dark:border-zinc-800 bg-zinc-100 text-zinc-400 cursor-not-allowed pointer-events-none"
+                              hasAccess
+                                ? "border-emerald-200 bg-emerald-600 text-white"
+                                : "border-zinc-200 dark:border-zinc-800 bg-zinc-100 text-zinc-400"
                             }`}
                           >
                             Open
-                          </a>
+                          </span>
                         </div>
                       </motion.div>
+                    );
+
+                    return hasAccess ? (
+                      <FileAccessLink
+                        key={f.id}
+                        file={fileRef}
+                        className="block no-underline"
+                      >
+                        {card}
+                      </FileAccessLink>
+                    ) : (
+                      <div key={f.id}>{card}</div>
                     );
                   })
                 )}

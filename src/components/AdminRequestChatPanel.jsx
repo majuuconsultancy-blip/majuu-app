@@ -21,6 +21,12 @@ import {
   adminSendAttachmentDirect,
 } from "../services/chatservice";
 import { CHAT_ATTACHMENT_OPTIONS, prepareChatAttachmentFromFile } from "../services/chatAttachmentService";
+import {
+  getRequestChatAvailability,
+  loadChatCollectionCache,
+  saveChatCollectionCache,
+} from "../services/chatUiService";
+import { openFileReference } from "../services/fileOpenService";
 import useKeyboardInset from "../hooks/useKeyboardInset";
 import { normalizeTextDeep } from "../utils/textNormalizer";
 import { getSystemChatMessageLabel, isSystemChatMessage } from "../utils/chatSystemMessages";
@@ -239,9 +245,20 @@ function IconPlus(props) {
 /* ---------------- component ---------------- */
 export default function AdminRequestChatPanel({ requestId, onClose }) {
   const rid = useMemo(() => safeStr(requestId), [requestId]);
+  const pendingCacheScope = useMemo(() => "admin:pending", []);
+  const publishedCacheScope = useMemo(() => "admin:published", []);
+  const cachedPending = useMemo(
+    () => loadChatCollectionCache({ requestId: rid, scope: pendingCacheScope, kind: "pending" }),
+    [rid, pendingCacheScope]
+  );
+  const cachedPublished = useMemo(
+    () => loadChatCollectionCache({ requestId: rid, scope: publishedCacheScope, kind: "published" }),
+    [rid, publishedCacheScope]
+  );
 
-  const [pending, setPending] = useState([]);
-  const [published, setPublished] = useState([]);
+  const [pending, setPending] = useState(() => cachedPending);
+  const [published, setPublished] = useState(() => cachedPublished);
+  const [requestRow, setRequestRow] = useState(null);
   const [handoffNow, setHandoffNow] = useState(() => Date.now());
 
   const [busyKey, setBusyKey] = useState(""); // message id or bundle id
@@ -289,6 +306,11 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
   const taRef = useRef(null);
   useAutosizeTextArea(taRef, text, { maxRows: 6 });
+  const chatAvailability = useMemo(
+    () => getRequestChatAvailability(requestRow || {}, { role: "admin" }),
+    [requestRow]
+  );
+  const chatEnabled = chatAvailability.enabled;
 
   /* ---------- persist no-actions so buttons never return on remount ---------- */
   const noActionsKey = useMemo(() => (rid ?`adminChat_noActions_${rid}` : ""), [rid]);
@@ -315,6 +337,26 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     }
   }, [noActionsKey, optimisticNoActions]);
 
+  useEffect(() => {
+    if (!rid) return;
+    saveChatCollectionCache({
+      requestId: rid,
+      scope: pendingCacheScope,
+      kind: "pending",
+      rows: pending,
+    });
+  }, [rid, pendingCacheScope, pending]);
+
+  useEffect(() => {
+    if (!rid) return;
+    saveChatCollectionCache({
+      requestId: rid,
+      scope: publishedCacheScope,
+      kind: "published",
+      rows: published,
+    });
+  }, [rid, publishedCacheScope, published]);
+
   /* ---------- scroll helper ---------- */
   const scrollToBottom = () => {
     const el = threadRef.current;
@@ -337,6 +379,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
       reqRef,
       (snap) => {
         const d = snap.exists() ? snap.data() || {} : {};
+        setRequestRow(d);
         const staffUid = String(
           d?.assignedTo ||
             d?.assignedStaffUid ||
@@ -426,6 +469,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
         }
       },
       () => {
+        setRequestRow(null);
         setHeaderUser({
           uid: "",
           name: "User",
@@ -822,6 +866,10 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
 
   /* ---------- admin direct send ---------- */
   const openPicker = (mode = "document") => {
+    if (!chatEnabled) {
+      setErr(chatAvailability.message || "Chat is not active yet.");
+      return;
+    }
     setPickerMode(mode);
     setAttachmentMenuOpen(false);
     window.setTimeout(() => fileInputRef.current?.click(), 0);
@@ -849,7 +897,21 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     }
   };
 
-  const canSend = Boolean(safeStr(text) || pickedPdf) && !attachmentPreparing;
+  const canSend = chatEnabled && Boolean(safeStr(text) || pickedPdf) && !attachmentPreparing;
+
+  const buildAttachmentCardProps = (attachment, isImageAttachment) => {
+    if (!attachment?.name || isImageAttachment) return {};
+    return {
+      role: "button",
+      tabIndex: 0,
+      onClick: () => void openFileReference(attachment),
+      onKeyDown: (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        void openFileReference(attachment);
+      },
+    };
+  };
 
   const sendNow = async () => {
     setErr("");
@@ -857,6 +919,10 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
     const pdf = pickedPdf;
     if (!rid) return;
     if (!t && !pdf) return;
+    if (!chatEnabled) {
+      setErr(chatAvailability.message || "Chat is not active yet.");
+      return;
+    }
 
     setSending(true);
     try {
@@ -963,6 +1029,13 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
           </div>
         </div>
       ) : null}
+      {!chatEnabled ?(
+        <div className="px-3 pt-2">
+          <div className="rounded-xl border border-amber-200 bg-amber-50/85 px-3 py-2 text-xs text-amber-900">
+            {chatAvailability.message}
+          </div>
+        </div>
+      ) : null}
 
       <div ref={threadRef} className="flex-1 overflow-y-auto px-3 py-2">
         {timelineRows.length === 0 ?(
@@ -1045,7 +1118,8 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                               isLeft
                                 ?"bg-zinc-50 dark:bg-zinc-950"
                                 : "bg-white/10 dark:bg-zinc-900/60"
-                            } rounded-xl p-2`}
+                            } rounded-xl p-2 ${!isImageAttachment ? "cursor-pointer" : ""}`}
+                            {...buildAttachmentCardProps(attachment, isImageAttachment)}
                           >
                             <div className="text-xs font-semibold opacity-90">{attachmentLabel}</div>
                             {isImageAttachment ?(
@@ -1053,6 +1127,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                                 file={attachment}
                                 alt={safeText(attachment?.name) || "attachment"}
                                 className="mt-1.5 max-h-52 w-full rounded-lg object-cover"
+                                openOnClick
                               />
                             ) : null}
                             <div className="text-xs opacity-90">
@@ -1071,13 +1146,17 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
                         ) : null}
                       </div>
                     ) : isAttachmentOnly ?(
-                      <div className="mt-1 grid gap-1.5">
+                      <div
+                        className={`mt-1 grid gap-1.5 ${!isImageAttachment ? "cursor-pointer" : ""}`}
+                        {...buildAttachmentCardProps(attachment, isImageAttachment)}
+                      >
                         <div className="text-xs font-semibold opacity-90">{attachmentLabel}</div>
                         {isImageAttachment ?(
                           <FileAccessImage
                             file={attachment}
                             alt={safeText(attachment?.name) || "attachment"}
                             className="max-h-56 w-full rounded-lg object-cover"
+                            openOnClick
                           />
                         ) : null}
                         <div className="text-xs opacity-90">
@@ -1168,6 +1247,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
           <select
             value={sendTo}
             onChange={(e) => setSendTo(e.target.value)}
+            disabled={!chatEnabled}
             className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 px-3 py-2 text-sm"
           >
             <option value="user">To User</option>
@@ -1205,7 +1285,8 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
               onMouseDown={keepComposerFocusOnAction}
               onTouchStart={keepComposerFocusOnAction}
               onClick={() => setAttachmentMenuOpen((value) => !value)}
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-300"
+              disabled={!chatEnabled || sending}
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-300 disabled:opacity-60"
               title="Attach"
             >
               <IconPlus className="h-5 w-5" />
@@ -1235,10 +1316,11 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             onChange={(e) => setText(e.target.value)}
             onFocus={() => setComposerFocused(true)}
             onBlur={() => setComposerFocused(false)}
-            placeholder="Message"
+            placeholder={chatEnabled ? "Message" : "Chat unlocks when work starts"}
             rows={1}
             className="w-full resize-none rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
             style={{ overflowY: "hidden" }}
+            disabled={!chatEnabled}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -1252,7 +1334,7 @@ export default function AdminRequestChatPanel({ requestId, onClose }) {
             onMouseDown={keepComposerFocusOnAction}
             onTouchStart={keepComposerFocusOnAction}
             onClick={sendNow}
-            disabled={sending || !canSend || attachmentPreparing}
+            disabled={!chatEnabled || sending || !canSend || attachmentPreparing}
             className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition ${sendBtnTone}`}
             title="Send"
           >

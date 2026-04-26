@@ -15,9 +15,7 @@ function normalizeProvider(value = "") {
 }
 
 const STORAGE_PROVIDER = normalizeProvider(import.meta.env.VITE_STORAGE_PROVIDER || "supabase");
-const STORAGE_FALLBACK_PROVIDER = normalizeProvider(
-  import.meta.env.VITE_STORAGE_FALLBACK_PROVIDER || "firebase"
-);
+const STORAGE_FALLBACK_PROVIDER = normalizeProvider(import.meta.env.VITE_STORAGE_FALLBACK_PROVIDER || "");
 const SUPABASE_URL = safeStr(import.meta.env.VITE_SUPABASE_URL, 600);
 const SUPABASE_ANON_KEY = safeStr(import.meta.env.VITE_SUPABASE_ANON_KEY, 1200);
 const SUPABASE_STORAGE_BUCKET =
@@ -47,8 +45,6 @@ export function getFallbackStorageProvider(primaryProvider = "") {
     }
     return STORAGE_FALLBACK_PROVIDER;
   }
-  if (primary === "supabase") return "firebase";
-  if (hasSupabaseConfig()) return "supabase";
   return "";
 }
 

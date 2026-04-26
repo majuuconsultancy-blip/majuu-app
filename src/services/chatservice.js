@@ -316,6 +316,38 @@ async function mirrorPublishedChatDocument({
   }
 }
 
+async function mirrorAdminDirectAttachmentIfNeeded({
+  requestId,
+  toRole,
+  attachmentMeta,
+  messageId,
+  localFallback = false,
+} = {}) {
+  const rid = safeStr(requestId);
+  const mid = safeStr(messageId);
+  const tr = normalizeRole(toRole);
+  const meta = normalizeAttachmentMeta(attachmentMeta);
+  if (!localFallback || !rid || !mid || !meta) return;
+
+  const admin = mustUser();
+  const requestSnap = await getDoc(reqRef(rid));
+  if (!requestSnap.exists()) return;
+  const requestData = { id: requestSnap.id, ...requestSnap.data() };
+
+  await mirrorPublishedChatDocument({
+    requestId: rid,
+    requestData,
+    messageId: mid,
+    fromRole: "admin",
+    fromUid: admin.uid,
+    toRole: tr,
+    toUid: resolveReceiverUid({ req: requestData, toRole: tr }),
+    attachmentMeta: meta,
+    actorUid: admin.uid,
+    sourceChannel: "chat_admin_direct_message",
+  });
+}
+
 /* -------------------- Sender: User/Staff -> Pending -------------------- */
 
 export async function sendPendingText({ requestId, fromRole, toRole, text } = {}) {
@@ -808,6 +840,13 @@ export async function adminSendAttachmentDirect({
     actorRole: "admin",
   });
   if (!commandResult?.ok) throw new Error("Failed to send message.");
+  await mirrorAdminDirectAttachmentIfNeeded({
+    requestId: rid,
+    toRole: tr,
+    attachmentMeta: meta,
+    messageId: safeStr(commandResult?.messageId),
+    localFallback: commandResult?.localFallback === true,
+  });
   return {
     ok: true,
     publishedId: safeStr(commandResult?.messageId),
@@ -859,6 +898,13 @@ export async function adminSendBundleDirect({
     actorRole: "admin",
   });
   if (!commandResult?.ok) throw new Error("Failed to send message.");
+  await mirrorAdminDirectAttachmentIfNeeded({
+    requestId: rid,
+    toRole: tr,
+    attachmentMeta: meta,
+    messageId: safeStr(commandResult?.messageId),
+    localFallback: commandResult?.localFallback === true,
+  });
   return {
     ok: true,
     publishedId: safeStr(commandResult?.messageId),

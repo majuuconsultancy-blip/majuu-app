@@ -36,6 +36,7 @@ import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
 import RequestProgressUpdatesList from "../components/RequestProgressUpdatesList";
 import RequestExtraDetailsSection from "../components/RequestExtraDetailsSection";
 import StaffRequestChatPanel from "../components/StaffRequestChatPanel";
+import FileAccessLink from "../components/FileAccessLink";
 import { smartBack } from "../utils/navBack";
 import { normalizeTextDeep } from "../utils/textNormalizer";
 import {
@@ -1174,15 +1175,13 @@ export default function StaffRequestDetailsScreen() {
                           </div>
 
                           {d.url ?(
-                            <a
-                              href={d.url}
-                              target="_blank"
-                              rel="noreferrer"
+                            <FileAccessLink
+                              file={{ externalUrl: d.url, name: d.name || "File" }}
                               className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800 dark:text-emerald-200 dark:hover:text-emerald-100"
                             >
                               <IconLink className="h-4 w-4" />
                               Open link
-                            </a>
+                            </FileAccessLink>
                           ) : (
                             <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">No link</div>
                           )}

@@ -22,5 +22,6 @@ public class MainActivity extends BridgeActivity {
         }
 
         registerPlugin(SafeAreaInsetsPlugin.class);
+        registerPlugin(ExternalFileOpenerPlugin.class);
     }
 }

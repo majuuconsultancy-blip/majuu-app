@@ -51,7 +51,8 @@ export default function ProfileDocumentsScreen() {
   const [uid, setUid] = useState("");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  const [tab, setTab] = useState("uploaded");
+  const [tab, setTab] = useState("all");
+  const [allRows, setAllRows] = useState([]);
   const [uploaded, setUploaded] = useState([]);
   const [downloaded, setDownloaded] = useState([]);
 
@@ -72,6 +73,7 @@ export default function ProfileDocumentsScreen() {
     const unsub = subscribeUserDocumentHub({
       uid,
       onData: (rows) => {
+        setAllRows(Array.isArray(rows?.all) ? rows.all : []);
         setUploaded(Array.isArray(rows?.uploaded) ? rows.uploaded : []);
         setDownloaded(
           Array.isArray(rows?.downloaded)
@@ -93,8 +95,8 @@ export default function ProfileDocumentsScreen() {
   }, [uid]);
 
   const activeRows = useMemo(
-    () => (tab === "downloaded" ? downloaded : uploaded),
-    [tab, downloaded, uploaded]
+    () => (tab === "uploaded" ? uploaded : tab === "downloaded" ? downloaded : allRows),
+    [tab, allRows, downloaded, uploaded]
   );
 
   const tabBase =
@@ -139,6 +141,16 @@ export default function ProfileDocumentsScreen() {
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
+              onClick={() => setTab("all")}
+              className={`${tabBase} ${tab === "all" ? tabActive : tabIdle}`}
+            >
+              <AppIcon size={ICON_SM} icon={FileText} />
+              All
+              <span className="rounded-full bg-white/75 px-2 py-0.5 text-xs">{allRows.length}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setTab("uploaded")}
               className={`${tabBase} ${tab === "uploaded" ? tabActive : tabIdle}`}
             >
@@ -171,7 +183,7 @@ export default function ProfileDocumentsScreen() {
               </div>
             ) : activeRows.length === 0 ? (
               <div className="rounded-2xl border border-zinc-200/80 bg-white/80 px-4 py-5 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-300">
-                No {tab} documents yet.
+                No {tab === "all" ? "" : `${tab} `}documents yet.
               </div>
             ) : (
               <div className="grid gap-2">
@@ -191,12 +203,8 @@ export default function ProfileDocumentsScreen() {
                   const createdAtLabel = prettyDate(
                     Number(row?.createdAtMs || row?.updatedAtMs || 0)
                   );
-
-                  return (
-                    <div
-                      key={row.id}
-                      className="rounded-2xl border border-zinc-200/80 bg-white/80 p-3 dark:border-zinc-800 dark:bg-zinc-950/40"
-                    >
+                  const card = (
+                    <div className="rounded-2xl border border-zinc-200/80 bg-white/80 p-3 dark:border-zinc-800 dark:bg-zinc-950/40">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="break-words text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -214,20 +222,29 @@ export default function ProfileDocumentsScreen() {
                           ) : null}
                         </div>
 
-                        {openable ? (
-                          <FileAccessLink
-                            file={fileRef}
-                            className="shrink-0 rounded-xl border border-emerald-200 bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
-                          >
-                            Open
-                          </FileAccessLink>
-                        ) : (
-                          <span className="shrink-0 rounded-xl border border-zinc-200 bg-zinc-100 px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
-                            Metadata
-                          </span>
-                        )}
+                        <span
+                          className={`shrink-0 rounded-xl px-3 py-2 text-xs font-semibold ${
+                            openable
+                              ? "border border-emerald-200 bg-emerald-600 text-white"
+                              : "border border-zinc-200 bg-zinc-100 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400"
+                          }`}
+                        >
+                          {openable ? "Open" : "Metadata"}
+                        </span>
                       </div>
                     </div>
+                  );
+
+                  return openable ? (
+                    <FileAccessLink
+                      key={row.id}
+                      file={fileRef}
+                      className="block no-underline"
+                    >
+                      {card}
+                    </FileAccessLink>
+                  ) : (
+                    <div key={row.id}>{card}</div>
                   );
                 })}
               </div>

@@ -18,6 +18,12 @@ import {
   sendPendingBundle,
 } from "../services/chatservice";
 import { CHAT_ATTACHMENT_OPTIONS, prepareChatAttachmentFromFile } from "../services/chatAttachmentService";
+import {
+  getRequestChatAvailability,
+  loadChatCollectionCache,
+  saveChatCollectionCache,
+} from "../services/chatUiService";
+import { openFileReference } from "../services/fileOpenService";
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 import useKeyboardInset from "../hooks/useKeyboardInset";
 import { normalizeTextDeep } from "../utils/textNormalizer";
@@ -154,13 +160,28 @@ function RenderMessageBody({ m, mine }) {
 
   if (type === "document" || type === "pdf" || type === "image" || type === "photo") {
     return (
-      <div className="grid gap-1">
+      <div
+        className={`grid gap-1 ${!isImageAttachment && hasAttachment ? "cursor-pointer" : ""}`}
+        {...(!isImageAttachment && hasAttachment
+          ? {
+              role: "button",
+              tabIndex: 0,
+              onClick: () => void openFileReference(attachment),
+              onKeyDown: (event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                void openFileReference(attachment);
+              },
+            }
+          : {})}
+      >
         <div className="text-xs font-semibold opacity-90">{attachmentLabel}</div>
         {isImageAttachment ?(
           <FileAccessImage
             file={attachment}
             alt={safeText(attachment?.name) || "attachment"}
             className="max-h-56 w-full rounded-lg object-cover"
+            openOnClick
           />
         ) : null}
         <div className="text-sm">
@@ -189,13 +210,28 @@ function RenderMessageBody({ m, mine }) {
         {txt ?<div className="break-words whitespace-pre-wrap">{safeText(txt)}</div> : null}
 
         {hasAttachment ?(
-          <div className={`${mine ?"bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2`}>
+          <div
+            className={`${mine ?"bg-white/10 dark:bg-zinc-900/60" : "bg-zinc-50 dark:bg-zinc-950"} rounded-xl p-2 ${!isImageAttachment ? "cursor-pointer" : ""}`}
+            {...(!isImageAttachment
+              ? {
+                  role: "button",
+                  tabIndex: 0,
+                  onClick: () => void openFileReference(attachment),
+                  onKeyDown: (event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    void openFileReference(attachment);
+                  },
+                }
+              : {})}
+          >
             <div className="text-xs font-semibold opacity-90">{attachmentLabel}</div>
             {isImageAttachment ?(
               <FileAccessImage
                 file={attachment}
                 alt={safeText(attachment?.name) || "attachment"}
                 className="mt-1.5 max-h-52 w-full rounded-lg object-cover"
+                openOnClick
               />
             ) : null}
             <div className="text-xs opacity-90">
@@ -292,13 +328,25 @@ export default function StaffRequestChatPanel({ requestId }) {
   const rid = useMemo(() => safeStr(requestId), [requestId]);
   const location = useLocation();
   const navigate = useNavigate();
-
   const [uid, setUid] = useState("");
+  const sessionUid = auth.currentUser?.uid || "";
+  const publishedCacheScope = useMemo(() => "staff:published", []);
+  const pendingCacheScope = useMemo(() => `staff:${uid || sessionUid || "anon"}`, [uid, sessionUid]);
+  const cachedPublished = useMemo(
+    () => loadChatCollectionCache({ requestId: rid, scope: publishedCacheScope, kind: "published" }),
+    [rid, publishedCacheScope]
+  );
+  const cachedPendingMine = useMemo(
+    () => loadChatCollectionCache({ requestId: rid, scope: pendingCacheScope, kind: "pending" }),
+    [rid, pendingCacheScope]
+  );
+
   const [open, setOpen] = useState(false);
   const hasUnreadChat = useNotifsV2Store((s) => Boolean(rid && s.unreadByRequest?.[rid]?.unread));
 
-  const [published, setPublished] = useState([]); // /messages
-  const [pendingMine, setPendingMine] = useState([]); // /pendingMessages (staff only)
+  const [published, setPublished] = useState(() => cachedPublished); // /messages
+  const [pendingMine, setPendingMine] = useState(() => cachedPendingMine); // /pendingMessages (staff only)
+  const [requestRow, setRequestRow] = useState(null);
   const [handoffNow, setHandoffNow] = useState(() => Date.now());
 
   const [text, setText] = useState("");
@@ -327,6 +375,31 @@ export default function StaffRequestChatPanel({ requestId }) {
   const taRef = useRef(null);
   const keyboardInset = useKeyboardInset(open);
   useAutosizeTextArea(taRef, text, { maxRows: 6 });
+  const chatAvailability = useMemo(
+    () => getRequestChatAvailability(requestRow || {}, { role: "staff" }),
+    [requestRow]
+  );
+  const chatEnabled = chatAvailability.enabled;
+
+  useEffect(() => {
+    if (!rid) return;
+    saveChatCollectionCache({
+      requestId: rid,
+      scope: publishedCacheScope,
+      kind: "published",
+      rows: published,
+    });
+  }, [rid, publishedCacheScope, published]);
+
+  useEffect(() => {
+    if (!rid || !(uid || sessionUid)) return;
+    saveChatCollectionCache({
+      requestId: rid,
+      scope: pendingCacheScope,
+      kind: "pending",
+      rows: pendingMine,
+    });
+  }, [rid, uid, sessionUid, pendingCacheScope, pendingMine]);
 
   /* ---------- auth (needed to filter staff pending) ---------- */
   useEffect(() => {
@@ -463,6 +536,7 @@ export default function StaffRequestChatPanel({ requestId }) {
       doc(db, "serviceRequests", rid),
       (snap) => {
         const requestRow = snap.exists() ? snap.data() || {} : {};
+        setRequestRow(requestRow);
         const ownerUid = safeStr(requestRow?.uid);
         const fallbackName = safeStr(
           requestRow?.applicantName || requestRow?.applicant || requestRow?.name || ""
@@ -509,6 +583,7 @@ export default function StaffRequestChatPanel({ requestId }) {
         );
       },
       () => {
+        setRequestRow(null);
         setHeaderUser({
           uid: "",
           name: "User",
@@ -677,6 +752,10 @@ export default function StaffRequestChatPanel({ requestId }) {
 
   /* ---------- file picker ---------- */
   const openPicker = (mode = "document") => {
+    if (!chatEnabled) {
+      setErr(chatAvailability.message || "Chat is not active yet.");
+      return;
+    }
     setPickerMode(mode);
     setAttachmentMenuOpen(false);
     window.setTimeout(() => fileInputRef.current?.click(), 0);
@@ -702,7 +781,7 @@ export default function StaffRequestChatPanel({ requestId }) {
     }
   };
 
-  const canSend = Boolean(safeStr(text) || pickedPdf) && !attachmentPreparing;
+  const canSend = chatEnabled && Boolean(safeStr(text) || pickedPdf) && !attachmentPreparing;
   const keepComposerFocusOnAction = (event) => {
     event.preventDefault();
   };
@@ -716,6 +795,10 @@ export default function StaffRequestChatPanel({ requestId }) {
     const pdf = pickedPdf;
 
     if (!t && !pdf) return;
+    if (!chatEnabled) {
+      setErr(chatAvailability.message || "Chat is not active yet.");
+      return;
+    }
 
     // prevent double send
     if (sendLockRef.current) return;
@@ -802,6 +885,13 @@ export default function StaffRequestChatPanel({ requestId }) {
         <div className="px-3 pt-2">
           <div className="rounded-xl border border-rose-100 bg-rose-50/80 px-3 py-2 text-xs text-rose-700">
             {err}
+          </div>
+        </div>
+      ) : null}
+      {!chatEnabled ?(
+        <div className="px-3 pt-2">
+          <div className="rounded-xl border border-amber-200 bg-amber-50/85 px-3 py-2 text-xs text-amber-900">
+            {chatAvailability.message}
           </div>
         </div>
       ) : null}
@@ -933,7 +1023,7 @@ export default function StaffRequestChatPanel({ requestId }) {
               onMouseDown={keepComposerFocusOnAction}
               onTouchStart={keepComposerFocusOnAction}
               onClick={() => setAttachmentMenuOpen((value) => !value)}
-              disabled={sending}
+              disabled={!chatEnabled || sending}
               className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-300 disabled:opacity-60"
               title="Attach"
             >
@@ -964,10 +1054,11 @@ export default function StaffRequestChatPanel({ requestId }) {
             onChange={(e) => setText(e.target.value)}
             onFocus={() => setComposerFocused(true)}
             onBlur={() => setComposerFocused(false)}
-            placeholder="Message"
+            placeholder={chatEnabled ? "Message" : "Chat unlocks when work starts"}
             rows={1}
             className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
             style={{ overflowY: "hidden" }}
+            disabled={!chatEnabled}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -981,7 +1072,7 @@ export default function StaffRequestChatPanel({ requestId }) {
             onMouseDown={keepComposerFocusOnAction}
             onTouchStart={keepComposerFocusOnAction}
             onClick={sendNow}
-            disabled={sending || !canSend || attachmentPreparing}
+            disabled={!chatEnabled || sending || !canSend || attachmentPreparing}
             className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition ${sendBtnTone}`}
             title="Send"
           >

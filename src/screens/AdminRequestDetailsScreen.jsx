@@ -31,6 +31,7 @@ import RequestDocumentFieldsSection from "../components/RequestDocumentFieldsSec
 import RequestExtraDetailsSection from "../components/RequestExtraDetailsSection";
 import RequestWorkProgressCard from "../components/RequestWorkProgressCard";
 import RequestProgressUpdatesList from "../components/RequestProgressUpdatesList";
+import FileAccessLink from "../components/FileAccessLink";
 import { ICON_SM, ICON_MD } from "../constants/iconSizes";
 import { smartBack } from "../utils/navBack";
 import { normalizeTextDeep } from "../utils/textNormalizer";
@@ -1825,14 +1826,12 @@ export default function AdminRequestDetailsScreen() {
                         </div>
 
                         {hasLink ?(
-                          <a
-                            href={url}
-                            target="_blank"
-                            rel="noreferrer"
+                          <FileAccessLink
+                            file={{ externalUrl: url, name: safeStr(d?.name) || "Staff file" }}
                             className="mt-2 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-800"
                           >
                             Open link
-                          </a>
+                          </FileAccessLink>
                         ) : (
                           <div className="mt-2 text-sm text-zinc-500">
                             No valid link
@@ -1944,15 +1943,13 @@ export default function AdminRequestDetailsScreen() {
                       </div>
 
                       {d.url ?(
-                        <a
-                          href={d.url}
-                          target="_blank"
-                          rel="noreferrer"
+                        <FileAccessLink
+                          file={{ externalUrl: d.url, name: d.name || "File" }}
                           className="mt-2 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-800"
-                          title="Open in new tab"
+                          title="Open file"
                         >
                           Open link
-                        </a>
+                        </FileAccessLink>
                       ) : (
                         <div className="mt-2 text-sm text-zinc-500">No link</div>
                       )}

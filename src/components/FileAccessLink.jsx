@@ -1,4 +1,5 @@
 import useResolvedFileUrl from "../hooks/useResolvedFileUrl";
+import { openResolvedFileUrl } from "../services/fileOpenService";
 
 export default function FileAccessLink({
   file,
@@ -24,7 +25,21 @@ export default function FileAccessLink({
   }
 
   return (
-    <a href={url} target={target} rel={rel} className={className} title={title}>
+    <a
+      href={url}
+      target={target}
+      rel={rel}
+      className={className}
+      title={title}
+      onClick={(event) => {
+        event.preventDefault();
+        void openResolvedFileUrl({
+          url,
+          mimeType: file?.mime || file?.contentType || file?.type || "",
+          title: file?.name || file?.fileName || title || "Open with",
+        });
+      }}
+    >
       {children}
     </a>
   );

@@ -320,6 +320,75 @@ service cloud.firestore {
       return r in ["user", "staff", "admin"];
     }
 
+    function chatMessageKindOk(kind) {
+      return kind in ["message", "document", "photo"];
+    }
+
+    function chatAttachmentNameOk(meta) {
+      return meta == null || (meta is map && str(meta.name).size() > 0);
+    }
+
+    function pendingMessagePayloadOk(requestId) {
+      return request.resource.data.keys().hasOnly([
+          "requestId",
+          "fromRole",
+          "fromUid",
+          "toRole",
+          "type",
+          "messageKind",
+          "text",
+          "attachmentMeta",
+          "pdfMeta",
+          "status",
+          "createdAt",
+          "createdAtMs"
+        ])
+        && str(request.resource.data.requestId) == requestId
+        && request.resource.data.fromUid == authUid()
+        && request.resource.data.status == "pending"
+        && chatRoleOk(request.resource.data.fromRole)
+        && chatRoleOk(request.resource.data.toRole)
+        && chatTypeOk(request.resource.data.type)
+        && chatMessageKindOk(request.resource.data.messageKind)
+        && chatAttachmentNameOk(request.resource.data.attachmentMeta)
+        && chatAttachmentNameOk(request.resource.data.pdfMeta)
+        && (
+          (request.resource.data.type == "text" && str(request.resource.data.text).size() > 0)
+          || (
+            request.resource.data.type in ["document", "pdf", "image", "photo"]
+            && request.resource.data.attachmentMeta is map
+            && str(request.resource.data.attachmentMeta.name).size() > 0
+          )
+          || (
+            request.resource.data.type == "bundle"
+            && (
+              str(request.resource.data.text).size() > 0
+              || (
+                request.resource.data.attachmentMeta is map
+                && str(request.resource.data.attachmentMeta.name).size() > 0
+              )
+            )
+          )
+        );
+    }
+
+    function canCreateOwnPendingMessage(requestId) {
+      return signedIn()
+        && pendingMessagePayloadOk(requestId)
+        && (
+          (
+            isRequestOwner(requestId)
+            && request.resource.data.fromRole == "user"
+            && request.resource.data.toRole == "staff"
+          )
+          || (
+            isRequestAssignedStaff(requestId)
+            && request.resource.data.fromRole == "staff"
+            && request.resource.data.toRole == "user"
+          )
+        );
+    }
+
     function requestIdFromData(data) {
       return data != null && data.requestId != null ? str(data.requestId) : "";
     }
@@ -1151,7 +1220,7 @@ service cloud.firestore {
             && (isRequestOwner(requestId) || isRequestAssignedStaff(requestId))
           );
 
-        allow create: if false;
+        allow create: if canCreateOwnPendingMessage(requestId);
 
         allow update, delete: if canAdminAccessRequest(requestId);
       }
