@@ -1,6 +1,11 @@
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 
 import { db } from "../firebase";
+import {
+  adminFallbackRouteForNotificationScope,
+  ADMIN_ROUTES,
+  buildAdminRequestPath,
+} from "../admin/adminPathing";
 import { triggerNotificationPush } from "./apiService";
 
 function safeStr(value) {
@@ -29,7 +34,9 @@ function routeForScope(scope, requestId, { openChat = false } = {}) {
     return rid ? `/staff/request/${encodeURIComponent(rid)}${suffix}` : "/staff/tasks";
   }
   if (normalizedScope === "admin" || normalizedScope === "assignedadmin") {
-    return rid ? `/app/admin/request/${encodeURIComponent(rid)}${suffix}` : "/app/admin";
+    return rid
+      ? buildAdminRequestPath(rid, { openChat })
+      : adminFallbackRouteForNotificationScope(normalizedScope);
   }
   return rid ? `/app/request/${encodeURIComponent(rid)}${suffix}` : "/app/progress";
 }
@@ -272,7 +279,7 @@ function buildNotificationCopy(type, requestId, scope, extras = {}) {
       return {
         title: "Push subscription expiring in 5 days",
         body: "A partner push subscription is nearing expiry.",
-        route: "/app/admin/sacc/push-campaigns",
+        route: ADMIN_ROUTES.pushCampaigns,
       };
     default:
       return {

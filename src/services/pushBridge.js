@@ -3,6 +3,10 @@ import { PushNotifications } from "@capacitor/push-notifications";
 import { LocalNotifications } from "@capacitor/local-notifications";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
+import {
+  adminFallbackRouteForNotificationScope,
+  buildAdminRequestPath,
+} from "../admin/adminPathing";
 
 function safeStr(value) {
   return String(value || "").trim();
@@ -112,10 +116,14 @@ export function resolveRouteFromPayload(rawPayload = {}) {
     return rid ? `/staff/request/${rid}?openChat=1` : "/staff/tasks";
   }
   if (type === "NEW_REQUEST") {
-    return rid ? `/app/admin/request/${rid}` : "/app/admin";
+    return requestId
+      ? buildAdminRequestPath(requestId)
+      : adminFallbackRouteForNotificationScope("admin");
   }
   if (type === "ADMIN_NEW_MESSAGE") {
-    return rid ? `/app/admin/request/${rid}?openChat=1` : "/app/admin";
+    return requestId
+      ? buildAdminRequestPath(requestId, { openChat: true })
+      : adminFallbackRouteForNotificationScope("admin");
   }
 
   return "";
@@ -145,7 +153,10 @@ function setOpenChatSessionFlag(route) {
       sessionStorage.setItem(`maj_open_chat:${requestId}`, "1");
     } else if (url.pathname.startsWith("/staff/request/")) {
       sessionStorage.setItem(`maj_open_staff_chat:${requestId}`, "1");
-    } else if (url.pathname.startsWith("/app/admin/request/")) {
+    } else if (
+      url.pathname.startsWith("/app/admin/request/") ||
+      url.pathname.startsWith("/admin/requests/")
+    ) {
       sessionStorage.setItem(`maj_open_admin_chat:${requestId}`, "1");
     }
   } catch {

@@ -651,7 +651,15 @@ const listItem = {
   show: { opacity: 1, y: 0, scale: 1, transition: { type: "spring", stiffness: 520, damping: 42 } },
 };
 
-export default function AdminRequestsScreen() {
+export default function AdminRequestsScreen({
+  headingTitle = "Admin",
+  headingSubtitle = "Manage incoming requests, assignments and decisions.",
+  notificationsPath = "/app/admin/notifications",
+  requestDetailPathBase = "/app/admin/request/",
+  showAssignedAdminAccessPanel = true,
+  showSaccEntryPanel = true,
+  showNotificationsButton = true,
+} = {}) {
   void motion;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1341,7 +1349,9 @@ export default function AdminRequestsScreen() {
     const qs = new URLSearchParams();
     qs.set("tab", status);
     if (q) qs.set("q", q);
-    navigate(`/app/admin/request/${id}?${qs.toString()}`);
+    const requestBase = String(requestDetailPathBase || "/app/admin/request/")
+      .replace(/\/+$/, "");
+    navigate(`${requestBase}/${encodeURIComponent(String(id || "").trim())}?${qs.toString()}`);
   };
 
   const clearLongPressTimer = () => {
@@ -1545,10 +1555,10 @@ export default function AdminRequestsScreen() {
           <div className="flex items-end justify-between gap-3">
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 sm:text-3xl">
-                Admin
+                {headingTitle}
               </h1>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                Manage incoming requests, assignments and decisions.
+                {headingSubtitle}
               </p>
               <p className={`mt-1 text-sm sm:text-base font-semibold ${adminLabelTone}`}>
                 {adminLabel}
@@ -1556,20 +1566,22 @@ export default function AdminRequestsScreen() {
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => navigate("/app/admin/notifications")}
-                className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-700 transition hover:bg-zinc-100 active:scale-[0.99] dark:text-zinc-200 dark:hover:bg-zinc-900"
-                aria-label="Notifications"
-                title="Notifications"
-              >
-                <AppIcon size={ICON_MD} className="text-emerald-700 dark:text-emerald-200" icon={Bell} />
-                {unreadNotifCount > 0 ? (
-                  <span className="absolute right-0 top-0 inline-flex min-w-[18px] -translate-y-1/4 translate-x-1/4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold leading-none text-white shadow-[0_0_0_3px_rgba(244,63,94,0.14)]">
-                    {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
-                  </span>
-                ) : null}
-              </button>
+              {showNotificationsButton ? (
+                <button
+                  type="button"
+                  onClick={() => navigate(notificationsPath)}
+                  className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-700 transition hover:bg-zinc-100 active:scale-[0.99] dark:text-zinc-200 dark:hover:bg-zinc-900"
+                  aria-label="Notifications"
+                  title="Notifications"
+                >
+                  <AppIcon size={ICON_MD} className="text-emerald-700 dark:text-emerald-200" icon={Bell} />
+                  {unreadNotifCount > 0 ? (
+                    <span className="absolute right-0 top-0 inline-flex min-w-[18px] -translate-y-1/4 translate-x-1/4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold leading-none text-white shadow-[0_0_0_3px_rgba(244,63,94,0.14)]">
+                      {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
+                    </span>
+                  ) : null}
+                </button>
+              ) : null}
 
               <button
                 onClick={load}
@@ -1584,8 +1596,8 @@ export default function AdminRequestsScreen() {
           </div>
         </div>
 
-        {roleCtx?.isSuperAdmin ?<AssignedAdminAccessPanel /> : null}
-        {roleCtx?.isSuperAdmin ?<SaccEntryPanel /> : null}
+        {roleCtx?.isSuperAdmin && showAssignedAdminAccessPanel ?<AssignedAdminAccessPanel /> : null}
+        {roleCtx?.isSuperAdmin && showSaccEntryPanel ?<SaccEntryPanel /> : null}
         {roleCtx?.isSuperAdmin ?(
           <div className="mt-5">
             <div className="flex flex-wrap items-center gap-3">

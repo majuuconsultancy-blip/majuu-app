@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Bell,
   Check,
@@ -17,6 +17,10 @@ import { safeText } from "../utils/safeText";
 import { notifsV2Store, useNotifsV2Store } from "../services/notifsV2Store";
 import { navigateFromPayload } from "../services/pushBridge";
 import { smartBack } from "../utils/navBack";
+import {
+  adminFallbackRouteForNotificationScope,
+  isAdminRoutePath,
+} from "../admin/adminPathing";
 
 const LONG_PRESS_MS = 420;
 
@@ -72,6 +76,7 @@ function SelectionMark({ selected = false }) {
 
 export default function NotificationsScreen() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [busy, setBusy] = useState("");
   const [actionErr, setActionErr] = useState("");
   const [selectionMode, setSelectionMode] = useState(false);
@@ -84,9 +89,15 @@ export default function NotificationsScreen() {
 
   const backTo = useMemo(() => {
     if (role === "staff") return "/staff/tasks";
-    if (role === "admin" || role === "assignedadmin") return "/app/admin";
+    if (
+      role === "admin" ||
+      role === "assignedadmin" ||
+      (role === "user" && isAdminRoutePath(location.pathname))
+    ) {
+      return adminFallbackRouteForNotificationScope(role);
+    }
     return "/app/progress";
-  }, [role]);
+  }, [location.pathname, role]);
 
   const headingLabel =
     role === "staff"

@@ -55,6 +55,8 @@ import { ANALYTICS_EVENT_TYPES } from "./constants/analyticsEvents";
 import { logAnalyticsEvent } from "./services/analyticsService";
 import { useI18n } from "./lib/i18n";
 import { AuthSessionProvider, useAuthSession } from "./auth/AuthSessionContext";
+import LegacyAdminRedirect from "./admin/LegacyAdminRedirect";
+import { ADMIN_ROUTES, isAdminRoutePath } from "./admin/adminPathing";
 import { resolvePostAuthLandingPath } from "./utils/postAuthLanding";
 
 const LAZY_RELOAD_GUARD_KEY = "__majuu_lazy_route_reload_once__";
@@ -148,7 +150,6 @@ const AdminAssignAdminScreen = lazyWithRetry(() => import("./screens/AdminAssign
 const AdminManageAdminsScreen = lazyWithRetry(() => import("./screens/AdminManageAdminsScreen"));
 const AdminAssignManagerScreen = lazyWithRetry(() => import("./screens/AdminAssignManagerScreen"));
 const AdminManageManagersScreen = lazyWithRetry(() => import("./screens/AdminManageManagersScreen"));
-const AdminSaccScreen = lazyWithRetry(() => import("./screens/AdminSaccScreen"));
 const AdminAnalyticsScreen = lazyWithRetry(() => import("./screens/AdminAnalyticsScreen"));
 const AdminNewsManagementScreen = lazyWithRetry(() => import("./screens/AdminNewsManagementScreen"));
 const AdminPricingControlsScreen = lazyWithRetry(() => import("./screens/AdminPricingControlsScreen"));
@@ -160,6 +161,9 @@ const AdminPushCampaignsScreen = lazyWithRetry(() =>
 const AdminCountryManagementScreen = lazyWithRetry(() =>
   import("./screens/AdminCountryManagementScreen")
 );
+const AdminPortalLayout = lazyWithRetry(() => import("./admin/AdminPortalLayout"));
+const AdminDashboardScreen = lazyWithRetry(() => import("./admin/AdminDashboardScreen"));
+const AdminAssignSystemScreen = lazyWithRetry(() => import("./admin/AdminAssignSystemScreen"));
 const AdminHomeDesignScreen = lazyWithRetry(() => import("./screens/AdminHomeDesignScreen"));
 const AdminRequestManagementScreen = lazyWithRetry(() =>
   import("./screens/AdminRequestManagementScreen")
@@ -407,7 +411,7 @@ function GuestOnlyRoute({ children }) {
   return children;
 }
 
-function renderAdminRoute(content, fallbackPath = "/app/admin", gateOptions = {}) {
+function renderAdminRoute(content, fallbackPath = ADMIN_ROUTES.requests, gateOptions = {}) {
   return (
     <AdminGate fallbackPath={fallbackPath} {...(gateOptions || {})}>
       <RouteErrorBoundary fallbackPath={fallbackPath}>
@@ -717,6 +721,9 @@ function AppRoutes() {
           <Route path="/payment/callback" element={<PaymentCallbackScreen />} />
           <Route path="/pay/shared/:shareToken" element={<SharedPaymentScreen />} />
 
+          {/* Legacy admin URL compatibility */}
+          <Route path="/app/admin/*" element={<LegacyAdminRedirect />} />
+
           {/* Track selection hub */}
           <Route
             path="/dashboard"
@@ -808,6 +815,167 @@ function AppRoutes() {
               </RequireAuthRoute>
             }
           />
+
+          {/* Desktop admin portal */}
+          <Route
+            path="/admin"
+            element={renderAdminRoute(<AdminPortalLayout />, "/dashboard", {
+              allowManager: true,
+            })}
+          >
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route
+              path="dashboard"
+              element={renderAdminRoute(<AdminDashboardScreen />, "/dashboard", {
+                allowManager: true,
+              })}
+            />
+            <Route
+              path="requests"
+              element={renderAdminRoute(
+                <AdminRequestsScreen
+                  requestDetailPathBase={`${ADMIN_ROUTES.requests}/`}
+                  notificationsPath={ADMIN_ROUTES.notifications}
+                  headingTitle="Requests"
+                  headingSubtitle="Manage incoming requests, queue health, and routing decisions."
+                  showAssignedAdminAccessPanel={false}
+                  showSaccEntryPanel={false}
+                  showNotificationsButton={false}
+                />,
+                ADMIN_ROUTES.dashboard
+              )}
+            />
+            <Route
+              path="requests/:requestId"
+              element={renderAdminRoute(<AdminRequestDetailsScreen />, ADMIN_ROUTES.requests)}
+            />
+            <Route
+              path="requests/:requestId/documents"
+              element={renderAdminRoute(<AdminRequestDocumentsScreen />, ADMIN_ROUTES.requests)}
+            />
+            <Route
+              path="notifications"
+              element={renderAdminRoute(<NotificationsScreen />, ADMIN_ROUTES.dashboard, {
+                allowManager: true,
+              })}
+            />
+            <Route
+              path="assign-system"
+              element={renderAdminRoute(<AdminAssignSystemScreen />, ADMIN_ROUTES.dashboard, {
+                superAdminOnly: true,
+              })}
+            />
+            <Route
+              path="assign-system/admins/assign"
+              element={renderAdminRoute(<AdminAssignAdminScreen />, ADMIN_ROUTES.assignSystem, {
+                superAdminOnly: true,
+              })}
+            />
+            <Route
+              path="assign-system/admins/manage"
+              element={renderAdminRoute(<AdminManageAdminsScreen />, ADMIN_ROUTES.assignSystem, {
+                superAdminOnly: true,
+              })}
+            />
+            <Route
+              path="assign-system/managers/assign"
+              element={renderAdminRoute(<AdminAssignManagerScreen />, ADMIN_ROUTES.assignSystem, {
+                superAdminOnly: true,
+              })}
+            />
+            <Route
+              path="assign-system/managers/manage"
+              element={renderAdminRoute(
+                <AdminManageManagersScreen />,
+                ADMIN_ROUTES.assignSystem,
+                {
+                  superAdminOnly: true,
+                }
+              )}
+            />
+            <Route
+              path="staff"
+              element={renderAdminRoute(<AdminManageStaffScreen />, ADMIN_ROUTES.requests)}
+            />
+            <Route
+              path="partnerships"
+              element={renderAdminRoute(<AdminPartnershipsScreen />, ADMIN_ROUTES.dashboard, {
+                superAdminOnly: true,
+              })}
+            />
+            <Route
+              path="countries"
+              element={renderAdminRoute(<AdminCountryManagementScreen />, ADMIN_ROUTES.dashboard, {
+                superAdminOnly: true,
+              })}
+            />
+            <Route
+              path="pricing"
+              element={renderAdminRoute(<AdminPricingControlsScreen />, ADMIN_ROUTES.dashboard, {
+                superAdminOnly: true,
+              })}
+            />
+            <Route
+              path="finances"
+              element={renderAdminRoute(<AdminFinancesScreen />, ADMIN_ROUTES.dashboard, {
+                allowManager: true,
+                requiredManagerModule: "finances",
+              })}
+            />
+            <Route
+              path="news"
+              element={renderAdminRoute(<AdminNewsManagementScreen />, ADMIN_ROUTES.dashboard, {
+                allowManager: true,
+                requiredManagerModule: "news",
+              })}
+            />
+            <Route
+              path="self-help"
+              element={renderAdminRoute(
+                <AdminSelfHelpLinksManagementScreen />,
+                ADMIN_ROUTES.dashboard,
+                {
+                  allowManager: true,
+                  requiredManagerModule: "selfhelp-links",
+                }
+              )}
+            />
+            <Route
+              path="push-campaigns"
+              element={renderAdminRoute(<AdminPushCampaignsScreen />, ADMIN_ROUTES.dashboard, {
+                superAdminOnly: true,
+              })}
+            />
+            <Route
+              path="analytics"
+              element={renderAdminRoute(<AdminAnalyticsScreen />, ADMIN_ROUTES.dashboard, {
+                superAdminOnly: true,
+              })}
+            />
+            <Route
+              path="system/request-management"
+              element={renderAdminRoute(
+                <AdminRequestManagementScreen />,
+                ADMIN_ROUTES.dashboard,
+                {
+                  allowManager: true,
+                  requiredManagerModule: "request-management",
+                }
+              )}
+            />
+            <Route
+              path="system/document-engine"
+              element={renderAdminRoute(<AdminDocumentEngineScreen />, ADMIN_ROUTES.dashboard, {
+                superAdminOnly: true,
+              })}
+            />
+            <Route
+              path="system/home-design"
+              element={renderAdminRoute(<AdminHomeDesignScreen />, ADMIN_ROUTES.dashboard, {
+                superAdminOnly: true,
+              })}
+            />
+          </Route>
 
           {/* App shell */}
           <Route
@@ -902,112 +1070,6 @@ function AppRoutes() {
 
             <Route path="settings" element={<SettingsScreen />} />
             <Route path="notifications" element={<NotificationsScreen />} />
-
-            {/* Admin */}
-            <Route
-              path="admin"
-              element={renderAdminRoute(<AdminRequestsScreen />, "/dashboard")}
-            />
-            <Route
-              path="admin/notifications"
-              element={renderAdminRoute(<NotificationsScreen />)}
-            />
-            <Route
-              path="admin/request/:requestId"
-              element={renderAdminRoute(<AdminRequestDetailsScreen />)}
-            />
-            <Route
-              path="admin/request/:requestId/documents"
-              element={renderAdminRoute(<AdminRequestDocumentsScreen />)}
-            />
-            <Route
-              path="admin/manage-staff"
-              element={renderAdminRoute(<AdminManageStaffScreen />)}
-            />
-            <Route
-              path="admin/assign-admin"
-              element={renderAdminRoute(<AdminAssignAdminScreen />)}
-            />
-            <Route
-              path="admin/manage-admins"
-              element={renderAdminRoute(<AdminManageAdminsScreen />)}
-            />
-            <Route
-              path="admin/sacc"
-              element={renderAdminRoute(<AdminSaccScreen />, "/dashboard", {
-                allowManager: true,
-              })}
-            />
-            <Route
-              path="admin/sacc/assign-manager"
-              element={renderAdminRoute(<AdminAssignManagerScreen />, "/app/admin/sacc")}
-            />
-            <Route
-              path="admin/sacc/manage-managers"
-              element={renderAdminRoute(<AdminManageManagersScreen />, "/app/admin/sacc")}
-            />
-            <Route
-              path="admin/sacc/analytics"
-              element={renderAdminRoute(<AdminAnalyticsScreen />, "/app/admin/sacc")}
-            />
-            <Route
-              path="admin/sacc/request-management"
-              element={renderAdminRoute(<AdminRequestManagementScreen />, "/app/admin/sacc", {
-                allowManager: true,
-                requiredManagerModule: "request-management",
-              })}
-            />
-            <Route
-              path="admin/sacc/document-engine"
-              element={renderAdminRoute(<AdminDocumentEngineScreen />, "/app/admin/sacc")}
-            />
-            <Route
-              path="admin/sacc/home-design"
-              element={renderAdminRoute(<AdminHomeDesignScreen />, "/app/admin/sacc")}
-            />
-            <Route
-              path="admin/sacc/news"
-              element={renderAdminRoute(<AdminNewsManagementScreen />, "/app/admin/sacc", {
-                allowManager: true,
-                requiredManagerModule: "news",
-              })}
-            />
-            <Route
-              path="admin/sacc/partnerships"
-              element={renderAdminRoute(<AdminPartnershipsScreen />, "/app/admin/sacc")}
-            />
-            <Route
-              path="admin/sacc/push-campaigns"
-              element={renderAdminRoute(<AdminPushCampaignsScreen />, "/app/admin/sacc", {
-                superAdminOnly: true,
-              })}
-            />
-            <Route
-              path="admin/sacc/pricing"
-              element={renderAdminRoute(<AdminPricingControlsScreen />, "/app/admin/sacc")}
-            />
-            <Route
-              path="admin/sacc/finances"
-              element={renderAdminRoute(<AdminFinancesScreen />, "/app/admin/sacc", {
-                allowManager: true,
-                requiredManagerModule: "finances",
-              })}
-            />
-            <Route
-              path="admin/sacc/selfhelp-links"
-              element={renderAdminRoute(
-                <AdminSelfHelpLinksManagementScreen />,
-                "/app/admin/sacc",
-                {
-                  allowManager: true,
-                  requiredManagerModule: "selfhelp-links",
-                }
-              )}
-            />
-            <Route
-              path="admin/sacc/countries"
-              element={renderAdminRoute(<AdminCountryManagementScreen />, "/app/admin/sacc")}
-            />
           </Route>
 
           {/* Fallback */}
@@ -1029,6 +1091,12 @@ function DocumentLanguageSync() {
   return null;
 }
 
+function AppViewportShell({ children }) {
+  const location = useLocation();
+  const shellClass = isAdminRoutePath(location.pathname) ? "admin-safe-area" : "app-safe-area";
+  return <div className={shellClass}>{children}</div>;
+}
+
 export default function App() {
   useEffect(() => runWhenIdle(preloadCriticalScreens), []);
 
@@ -1037,9 +1105,9 @@ export default function App() {
     <Router>
       <AuthSessionProvider>
         <DocumentLanguageSync />
-        <div className="app-safe-area">
+        <AppViewportShell>
           <AppRoutes />
-        </div>
+        </AppViewportShell>
       </AuthSessionProvider>
     </Router>
   );

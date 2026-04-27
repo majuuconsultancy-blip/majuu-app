@@ -159,6 +159,20 @@ svg {
   background: linear-gradient(180deg, #09090b 0%, #09090b 100%);
 }
 
+.admin-safe-area {
+  min-height: var(--app-viewport-height);
+  padding-top: var(--app-safe-top);
+  padding-left: var(--app-safe-left);
+  padding-right: var(--app-safe-right);
+  background:
+    radial-gradient(circle at top left, rgba(16, 185, 129, 0.08), transparent 32%),
+    linear-gradient(180deg, #f5fbf7 0%, #eef4f2 100%);
+}
+
+.dark .admin-safe-area {
+  background: linear-gradient(180deg, #09090b 0%, #0f172a 100%);
+}
+
 body.request-modal-open .app-bottom-nav,
 body.app-keyboard-open .app-bottom-nav {
   opacity: 0;

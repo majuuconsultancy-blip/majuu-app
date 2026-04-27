@@ -24,6 +24,7 @@ import {
   normalizeUserRole,
   resolveRoleFromUserDoc,
 } from "../services/adminroleservice";
+import { resolveAdminLandingPath } from "../admin/adminPathing";
 import {
   journeyDisplayCountry,
   normalizeJourney,
@@ -589,7 +590,15 @@ export default function ProfileScreen() {
           {hasAdminTools ? (
             <Motion.button
               type="button"
-              onClick={() => navigate(isManager ? "/app/admin/sacc" : "/app/admin")}
+              onClick={() =>
+                navigate(
+                  resolveAdminLandingPath({
+                    isSuperAdmin: normalizeUserRole(role) === "superAdmin",
+                    isManager,
+                    isAdmin,
+                  }) || "/admin/requests"
+                )
+              }
               variants={floatCard}
               initial="rest"
               whileHover="hover"

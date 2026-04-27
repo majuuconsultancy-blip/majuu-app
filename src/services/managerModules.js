@@ -1,3 +1,5 @@
+import { ADMIN_ROUTES } from "../admin/adminPathing";
+
 export const MANAGER_STATUS_PENDING = "pending";
 
 export const MANAGER_MODULE_CATALOG = Object.freeze([
@@ -5,25 +7,25 @@ export const MANAGER_MODULE_CATALOG = Object.freeze([
     key: "finances",
     label: "Finances",
     description: "Payment controls, payout review, and finance settings.",
-    saccPath: "/app/admin/sacc/finances",
+    saccPath: ADMIN_ROUTES.finances,
   },
   {
     key: "news",
     label: "News",
     description: "News and discovery publication management.",
-    saccPath: "/app/admin/sacc/news",
+    saccPath: ADMIN_ROUTES.news,
   },
   {
     key: "request-management",
     label: "Requests",
     description: "Request definitions and request module structure.",
-    saccPath: "/app/admin/sacc/request-management",
+    saccPath: ADMIN_ROUTES.requestManagement,
   },
   {
     key: "selfhelp-links",
     label: "Affiliates",
     description: "Affiliate/self-help link resources and partner links.",
-    saccPath: "/app/admin/sacc/selfhelp-links",
+    saccPath: ADMIN_ROUTES.selfHelp,
   },
 ]);
 

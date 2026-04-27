@@ -1,5 +1,7 @@
 import { resolveLandingPathFromUserState } from "../journey/journeyLanding";
+import { getCurrentUserRoleContext } from "../services/adminroleservice";
 import { isBiometricPromptPending } from "../services/biometricLockService";
+import { resolveAdminLandingPath } from "../admin/adminPathing";
 
 export const BIOMETRIC_SETUP_PATH = "/setup/biometric";
 
@@ -34,6 +36,14 @@ export async function resolvePostAuthLandingPath({ uid, userState } = {}) {
   try {
     const promptPending = await isBiometricPromptPending(safeUid);
     if (promptPending) return BIOMETRIC_SETUP_PATH;
+  } catch (error) {
+    void error;
+  }
+
+  try {
+    const roleCtx = await getCurrentUserRoleContext(safeUid);
+    const adminLanding = resolveAdminLandingPath(roleCtx);
+    if (adminLanding) return adminLanding;
   } catch (error) {
     void error;
   }

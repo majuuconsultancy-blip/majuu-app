@@ -8,6 +8,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { buildAdminRequestPath } from "../admin/adminPathing";
 import { getReadStateDocRef } from "../utils/unreadChat";
 import { normalizeTextDeep } from "../utils/textNormalizer";
 import { isUnsubmittedGhostRequest } from "../utils/requestGhosts";
@@ -259,13 +260,13 @@ function createAdminForegroundPushWatchers({ role, uid }) {
 
             if (!shouldNotify) return;
 
-            scheduleForegroundLocalNotification({
-              dedupeKey: `admin:new_request:${rid}`,
-              title: "New request",
-              body: "A new service request was submitted.",
-              route: `/app/admin/request/${encodeURIComponent(rid)}`,
-              extra: { type: "NEW_REQUEST", requestId: rid },
-            }).catch(() => {
+              scheduleForegroundLocalNotification({
+                dedupeKey: `admin:new_request:${rid}`,
+                title: "New request",
+                body: "A new service request was submitted.",
+                route: buildAdminRequestPath(rid),
+                extra: { type: "NEW_REQUEST", requestId: rid },
+              }).catch(() => {
               // ignore foreground notification scheduling failures
             });
           });
@@ -309,7 +310,7 @@ function createAdminForegroundPushWatchers({ role, uid }) {
                 dedupeKey: `admin:pending:${rid}:${mid}`,
                 title,
                 body,
-                route: `/app/admin/request/${encodeURIComponent(rid)}?openChat=1`,
+                route: buildAdminRequestPath(rid, { openChat: true }),
                 extra: {
                   type:
                     kind === "photo"
