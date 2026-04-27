@@ -1,6 +1,7 @@
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 
 import { db } from "../firebase";
+import { triggerNotificationPush } from "./apiService";
 
 function safeStr(value) {
   return String(value || "").trim();
@@ -39,6 +40,12 @@ function buildNotificationCopy(type, requestId, scope, extras = {}) {
   const paymentLabel = safeStr(extras.paymentLabel || extras.label || "Payment");
 
   switch (notifType) {
+    case "REQUEST_RECEIVED":
+      return {
+        title: "Request received",
+        body: "Your request has been received by the admin team.",
+        route: routeForScope(scope, requestId),
+      };
     case "REQUEST_IN_PROGRESS":
     case "REQUEST_STARTED":
       return {
@@ -175,6 +182,12 @@ function buildNotificationCopy(type, requestId, scope, extras = {}) {
       return {
         title: "Payment successful",
         body: amountText ? `${paymentLabel} ${amountText} was successful.` : "Payment successful.",
+        route: routeForScope(scope, requestId),
+      };
+    case "PAYMENT_FAILED":
+      return {
+        title: "Payment failed",
+        body: amountText ? `${paymentLabel} ${amountText} failed.` : "A payment attempt failed.",
         route: routeForScope(scope, requestId),
       };
     case "PAYMENT_RECEIVED":
@@ -346,7 +359,7 @@ async function createNotificationDoc({
     { merge: true }
   );
 
-  return {
+  const created = {
     id,
     type: notifType,
     role: normalizedScope,
@@ -360,6 +373,16 @@ async function createNotificationDoc({
     readAt: null,
     createdAtMs: now,
   };
+  try {
+    await triggerNotificationPush({
+      scope: normalizedScope,
+      uid: targetUid,
+      notification: created,
+    });
+  } catch (error) {
+    console.warn("Failed to trigger notification push:", error?.message || error);
+  }
+  return created;
 }
 
 export async function createUserNotification({ uid, type, requestId, extras, notificationId } = {}) {

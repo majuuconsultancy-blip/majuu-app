@@ -41,6 +41,7 @@ import {
 import { db, auth } from "../firebase";
 import { createStaffNotification, createUserNotification } from "./notificationDocs";
 import { mirrorPublishedChatAttachment, mirrorPublishedChatPdf } from "./documentEngineService";
+import { notifyMessageCreated } from "./notificationEventService";
 import { sendMessageCommand } from "./requestcommandservice";
 import { uploadBinaryFile } from "./fileUploadService";
 import { buildChatAttachmentStoragePath } from "./storageContract";
@@ -66,6 +67,23 @@ function mustUser() {
 
 function safeStr(x) {
   return String(x || "").trim();
+}
+
+async function emitMessageCreatedNotification({ requestId, messageId, status }) {
+  const rid = safeStr(requestId);
+  const mid = safeStr(messageId);
+  const safeStatus = safeStr(status).toLowerCase();
+  if (!rid || !mid || !safeStatus) return;
+
+  try {
+    await notifyMessageCreated({
+      requestId: rid,
+      messageId: mid,
+      status: safeStatus,
+    });
+  } catch (error) {
+    console.warn("Failed to emit chat notification event:", error?.message || error);
+  }
 }
 
 function normalizeRole(role) {
@@ -321,13 +339,12 @@ async function mirrorAdminDirectAttachmentIfNeeded({
   toRole,
   attachmentMeta,
   messageId,
-  localFallback = false,
 } = {}) {
   const rid = safeStr(requestId);
   const mid = safeStr(messageId);
   const tr = normalizeRole(toRole);
   const meta = normalizeAttachmentMeta(attachmentMeta);
-  if (!localFallback || !rid || !mid || !meta) return;
+  if (!rid || !mid || !meta) return;
 
   const admin = mustUser();
   const requestSnap = await getDoc(reqRef(rid));
@@ -372,6 +389,11 @@ export async function sendPendingText({ requestId, fromRole, toRole, text } = {}
   if (!result?.ok) {
     throw new Error("Failed to send message.");
   }
+  await emitMessageCreatedNotification({
+    requestId: rid,
+    messageId: safeStr(result?.messageId),
+    status: safeStr(result?.status) || "pending",
+  });
   return { ok: true, id: safeStr(result?.messageId) };
 }
 
@@ -410,6 +432,11 @@ export async function sendPendingAttachment({
   if (!result?.ok) {
     throw new Error("Failed to send message.");
   }
+  await emitMessageCreatedNotification({
+    requestId: rid,
+    messageId: safeStr(result?.messageId),
+    status: safeStr(result?.status) || "pending",
+  });
   return { ok: true, id: safeStr(result?.messageId) };
 }
 
@@ -484,6 +511,11 @@ export async function sendPendingBundle({
   if (!result?.ok) {
     throw new Error("Failed to send message.");
   }
+  await emitMessageCreatedNotification({
+    requestId: rid,
+    messageId: safeStr(result?.messageId),
+    status: safeStr(result?.status) || "pending",
+  });
   return { ok: true, id: safeStr(result?.messageId) };
 }
 
@@ -651,7 +683,11 @@ export async function adminApprovePending({
       sourceChannel: "chat_approved_message",
     });
   }
-  // Notification fan-out is written through the notification docs service.
+  await emitMessageCreatedNotification({
+    requestId: rid,
+    messageId: pubRef.id,
+    status: "published",
+  });
   return { ok: true, publishedId: pubRef.id, receiverUid: receiverUid || null };
 }
 
@@ -803,6 +839,11 @@ export async function adminSendTextDirect({ requestId, toRole, text } = {}) {
     actorRole: "admin",
   });
   if (!commandResult?.ok) throw new Error("Failed to send message.");
+  await emitMessageCreatedNotification({
+    requestId: rid,
+    messageId: safeStr(commandResult?.messageId),
+    status: safeStr(commandResult?.status) || "published",
+  });
   return {
     ok: true,
     publishedId: safeStr(commandResult?.messageId),
@@ -846,6 +887,11 @@ export async function adminSendAttachmentDirect({
     attachmentMeta: meta,
     messageId: safeStr(commandResult?.messageId),
     localFallback: commandResult?.localFallback === true,
+  });
+  await emitMessageCreatedNotification({
+    requestId: rid,
+    messageId: safeStr(commandResult?.messageId),
+    status: safeStr(commandResult?.status) || "published",
   });
   return {
     ok: true,
@@ -904,6 +950,11 @@ export async function adminSendBundleDirect({
     attachmentMeta: meta,
     messageId: safeStr(commandResult?.messageId),
     localFallback: commandResult?.localFallback === true,
+  });
+  await emitMessageCreatedNotification({
+    requestId: rid,
+    messageId: safeStr(commandResult?.messageId),
+    status: safeStr(commandResult?.status) || "published",
   });
   return {
     ok: true,

@@ -132,6 +132,7 @@ export function defaultFinanceSettings() {
     defaultCurrency: "KES",
     refundControls: {
       unlockAutoRefundHours: 48,
+      unlockAutoRefundReminderHours: 2,
       autoRefundEnabled: true,
       sharedLinkExpiryHours: 72,
     },
@@ -235,6 +236,13 @@ export function normalizeFinanceSettingsDoc(row = {}) {
     refundControls: {
       unlockAutoRefundHours: roundMoney(
         source?.refundControls?.unlockAutoRefundHours ?? defaults.refundControls.unlockAutoRefundHours
+      ),
+      unlockAutoRefundReminderHours: Math.max(
+        0,
+        roundMoney(
+          source?.refundControls?.unlockAutoRefundReminderHours ??
+            defaults.refundControls.unlockAutoRefundReminderHours
+        )
       ),
       autoRefundEnabled: source?.refundControls?.autoRefundEnabled !== false,
       sharedLinkExpiryHours: roundMoney(

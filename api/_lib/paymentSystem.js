@@ -8,6 +8,12 @@ import {
   MPESA_REFUND_CAPABILITIES,
   buildRefundPlaceholder,
 } from "./mpesaRefundService.js";
+import {
+  createManyNotificationsAndPush,
+  listSuperAdminUids,
+  makeNotificationId,
+  notifyPaymentParticipants,
+} from "./notificationServer.js";
 
 const FINANCE_SETTINGS_COLLECTION = "financeSettings";
 const FINANCE_SETTINGS_DOC = "global";
@@ -523,6 +529,7 @@ function defaultFinanceSettings() {
     defaultCurrency: "KES",
     refundControls: {
       unlockAutoRefundHours: 48,
+      unlockAutoRefundReminderHours: 2,
       autoRefundEnabled: true,
       sharedLinkExpiryHours: 72,
     },
@@ -659,6 +666,11 @@ function resolvePositiveHours(value, fallback) {
   return next > 0 ? next : fallback;
 }
 
+function resolveNonNegativeHours(value, fallback = 0) {
+  const next = roundMoney(value);
+  return next >= 0 ? next : fallback;
+}
+
 function resolveShortcodeType(value) {
   return lower(value, 20) === "till" ? "till" : "paybill";
 }
@@ -735,6 +747,10 @@ function normalizeFinanceSettingsDoc(source = {}) {
       unlockAutoRefundHours: resolvePositiveHours(
         raw?.refundControls?.unlockAutoRefundHours,
         defaults.refundControls.unlockAutoRefundHours
+      ),
+      unlockAutoRefundReminderHours: resolveNonNegativeHours(
+        raw?.refundControls?.unlockAutoRefundReminderHours,
+        defaults.refundControls.unlockAutoRefundReminderHours
       ),
       autoRefundEnabled: resolveBoolean(
         raw?.refundControls?.autoRefundEnabled,
@@ -2413,6 +2429,29 @@ async function createInProgressPaymentProposal(payload = {}, req) {
     },
   });
 
+  await notifyPaymentParticipants({
+    requestData: { id: requestRow.id, ...requestRow.data },
+    payment: {
+      paymentId,
+      requestId: requestRow.id,
+      paymentType: PAYMENT_TYPES.IN_PROGRESS,
+      flowType: "in_progress_payment",
+      amount: breakdown.finalUserPayable,
+      currency: breakdown.currency,
+      status: PAYMENT_STATUSES.ADMIN_REVIEW,
+      paymentLabel,
+      createdByStaffUid: caller.role === "staff" ? caller.uid : "",
+    },
+    type: "PAYMENT_UPDATE",
+    title: "Payment awaiting review",
+    body: `${paymentLabel} is waiting for admin review.`,
+    notifyUser: false,
+    notifySuperAdmins: true,
+    superAdminTitle: "In-progress payment awaiting review",
+    superAdminBody: `${paymentLabel} is waiting for finance review.`,
+    notifyStaff: false,
+  });
+
   return {
     ok: true,
     requestId: requestRow.id,
@@ -2509,6 +2548,25 @@ async function adminApprovePaymentRequest(payload = {}, req) {
     details: { breakdown, paymentLabel },
   });
 
+  await notifyPaymentParticipants({
+    requestData: { id: paymentRow.requestRow.id, ...paymentRow.requestRow.data },
+    payment: {
+      ...paymentData,
+      id: paymentRow.id,
+      paymentId: paymentRow.id,
+      requestId: paymentRow.requestRow.id,
+      paymentType: PAYMENT_TYPES.IN_PROGRESS,
+      flowType: "in_progress_payment",
+      amount: breakdown.finalUserPayable,
+      currency: breakdown.currency,
+      status: PAYMENT_STATUSES.PAYABLE,
+      paymentLabel,
+    },
+    type: "PAYMENT_REQUIRED",
+    title: "Payment available",
+    body: `${paymentLabel} is approved and ready for payment.`,
+  });
+
   return {
     ok: true,
     requestId: paymentRow.requestRow.id,
@@ -2558,6 +2616,21 @@ async function adminRevokePaymentRequest(payload = {}, req) {
     requestId: paymentRow.requestRow.id,
     paymentId: paymentRow.id,
     reason: payload?.reason,
+  });
+
+  await notifyPaymentParticipants({
+    requestData: { id: paymentRow.requestRow.id, ...paymentRow.requestRow.data },
+    payment: {
+      ...paymentRow.data,
+      id: paymentRow.id,
+      paymentId: paymentRow.id,
+      requestId: paymentRow.requestRow.id,
+      status: PAYMENT_STATUSES.REVOKED,
+    },
+    type: "PAYMENT_UPDATE",
+    title: "Payment request revoked",
+    body: safeString(payload?.reason, 240) || "A payment request was revoked.",
+    notifySuperAdmins: true,
   });
 
   return {
@@ -3028,6 +3101,22 @@ async function requestPaymentRefund(payload = {}, req) {
     reason: payload?.userReason,
   });
 
+  await notifyPaymentParticipants({
+    requestData: { id: paymentRow.requestRow.id, ...paymentRow.requestRow.data },
+    payment: {
+      ...paymentRow.data,
+      id: paymentRow.id,
+      paymentId: paymentRow.id,
+      requestId: paymentRow.requestRow.id,
+    },
+    type: "REFUND_REQUESTED",
+    title: "Refund requested",
+    body: "A refund has been requested.",
+    refundId,
+    notifySuperAdmins: true,
+    superAdminType: "SUPER_ADMIN_REFUND_REQUESTED",
+  });
+
   return { ok: true, requestId: paymentRow.requestRow.id, refundId };
 }
 
@@ -3097,6 +3186,28 @@ async function adminDecidePaymentRefund(payload = {}, req) {
       refundId,
       reason: payload?.note,
     });
+    await notifyPaymentParticipants({
+      requestData: { id: requestRow.id, ...requestRow.data },
+      payment: {
+        ...paymentRow.data,
+        id: paymentRow.id,
+        paymentId: paymentRow.id,
+        requestId: requestRow.id,
+      },
+      type: "REFUND_APPROVED",
+      title: "Refund approved",
+      body: safeString(payload?.expectedRefundPeriodText, 240)
+        ? `Refund approved. ${safeString(payload?.expectedRefundPeriodText, 240)}`
+        : "A refund has been approved.",
+      refundId,
+      notifyAdmins: false,
+      notifyStaff: false,
+      notifySuperAdmins: true,
+      superAdminTitle: "Refund approved",
+      superAdminBody: safeString(payload?.expectedRefundPeriodText, 240)
+        ? `Refund approved. ${safeString(payload?.expectedRefundPeriodText, 240)}`
+        : "A refund has been approved.",
+    });
     return { ok: true, requestId: requestRow.id, refundId, status: REFUND_STATUSES.APPROVED };
   }
 
@@ -3128,6 +3239,24 @@ async function adminDecidePaymentRefund(payload = {}, req) {
     paymentId: paymentRow.id,
     refundId,
     reason: payload?.note,
+  });
+  await notifyPaymentParticipants({
+    requestData: { id: requestRow.id, ...requestRow.data },
+    payment: {
+      ...paymentRow.data,
+      id: paymentRow.id,
+      paymentId: paymentRow.id,
+      requestId: requestRow.id,
+    },
+    type: "REFUND_REJECTED",
+    title: "Refund rejected",
+    body: safeString(payload?.note, 240) || "A refund was rejected.",
+    refundId,
+    notifyAdmins: false,
+    notifyStaff: false,
+    notifySuperAdmins: true,
+    superAdminTitle: "Refund rejected",
+    superAdminBody: safeString(payload?.note, 240) || "A refund was rejected.",
   });
   return { ok: true, requestId: requestRow.id, refundId, status: REFUND_STATUSES.REJECTED };
 }
@@ -3214,6 +3343,26 @@ async function releasePartnerPayout(payload = {}, req) {
     reason: payload?.releaseNotes,
   });
 
+  await notifyPaymentParticipants({
+    requestData: {
+      id: safeString(queueData?.requestId, 180),
+    },
+    payment: {
+      paymentId: safeString(queueData?.paymentId, 180),
+      requestId: safeString(queueData?.requestId, 180),
+      amount: roundMoney(queueData?.amount),
+      currency: normalizeCurrency(queueData?.currency || "KES"),
+      paymentLabel: safeString(queueData?.paymentLabel || "In-progress payment", 180),
+    },
+    type: "SUPER_ADMIN_IN_PROGRESS_PAYMENT_RECEIVED",
+    title: "In-progress payment released",
+    body: "An in-progress payment was released to the partner.",
+    notifyUser: false,
+    notifyAdmins: false,
+    notifySuperAdmins: true,
+    notifyStaff: false,
+  });
+
   return { ok: true, queueId, settlementReference };
 }
 
@@ -3222,13 +3371,45 @@ async function listUnlockAutoRefundCandidates(payload = {}, req) {
   ensureFinanceManager(caller);
 
   const settings = await getFinanceSettings();
+  const scan = await collectUnlockAutoRefundStatusRows({
+    requestIds: payload?.requestIds,
+    settings,
+  });
+  return {
+    ok: true,
+    rows: scan.rows
+      .filter((row) => row.state === "eligible")
+      .map((row) => ({
+        requestId: row.requestId,
+        paymentId: row.paymentId,
+        amount: row.amount,
+        currency: row.currency,
+        reference: row.reference,
+        paidAtMs: row.paidAtMs,
+        eligibleAtMs: row.eligibleAtMs,
+      })),
+  };
+}
+
+async function collectUnlockAutoRefundStatusRows({
+  requestIds = [],
+  settings = null,
+} = {}) {
+  const resolvedSettings = settings || (await getFinanceSettings());
   const refundHours = resolvePositiveHours(
-    settings?.refundControls?.unlockAutoRefundHours,
+    resolvedSettings?.refundControls?.unlockAutoRefundHours,
     48
   );
-  const eligibleThresholdMs = nowMs() - refundHours * 60 * 60 * 1000;
+  const reminderHours = Math.min(
+    refundHours,
+    resolveNonNegativeHours(
+      resolvedSettings?.refundControls?.unlockAutoRefundReminderHours,
+      2
+    )
+  );
+  const currentMs = nowMs();
   const filterIds = new Set(
-    cleanStringList(payload?.requestIds, { maxItems: 80, maxLen: 180 })
+    cleanStringList(requestIds, { maxItems: 80, maxLen: 180 })
   );
   const requestSnap = await db
     .collection("serviceRequests")
@@ -3246,18 +3427,132 @@ async function listUnlockAutoRefundCandidates(payload = {}, req) {
     const paymentData = paymentSnap.data() || {};
     if (lower(paymentData?.status, 80) !== PAYMENT_STATUSES.PAID) continue;
     const paidAtMs = Number(paymentData?.paidAtMs || 0);
-    if (!paidAtMs || paidAtMs > eligibleThresholdMs) continue;
+    if (!paidAtMs) continue;
+    const eligibleAtMs = paidAtMs + refundHours * 60 * 60 * 1000;
+    const reminderAtMs = eligibleAtMs - reminderHours * 60 * 60 * 1000;
+    const state =
+      currentMs >= eligibleAtMs
+        ? "eligible"
+        : reminderHours > 0 && currentMs >= reminderAtMs
+        ? "reminder"
+        : "pending";
     rows.push({
       requestId: docSnap.id,
+      requestData,
       paymentId,
+      paymentData,
       amount: roundMoney(paymentData?.amount),
       currency: normalizeCurrency(paymentData?.currency || "KES"),
       reference: safeString(paymentData?.transactionReference, 180),
       paidAtMs,
-      eligibleAtMs: paidAtMs + refundHours * 60 * 60 * 1000,
+      eligibleAtMs,
+      reminderAtMs,
+      reminderHours,
+      refundHours,
+      state,
+      msUntilEligible: eligibleAtMs - currentMs,
+      paymentLabel: safeString(
+        paymentData?.paymentLabel || paymentData?.label || "Unlock payment",
+        180
+      ),
     });
   }
-  return { ok: true, rows };
+  return {
+    ok: true,
+    nowMs: currentMs,
+    refundHours,
+    reminderHours,
+    rows,
+    settings: resolvedSettings,
+  };
+}
+
+async function scanUnlockAutoRefundNotifications(payload = {}, req) {
+  const caller = await verifyCaller(req);
+  ensureFinanceManager(caller);
+
+  const scan = await collectUnlockAutoRefundStatusRows({
+    requestIds: payload?.requestIds,
+  });
+  const reminderRows = scan.rows.filter((row) => row.state === "reminder");
+  const eligibleRows = scan.rows.filter((row) => row.state === "eligible");
+  const superAdminUids = await listSuperAdminUids();
+
+  if (!superAdminUids.length) {
+    return {
+      ok: true,
+      reminded: reminderRows.length,
+      overdue: eligibleRows.length,
+      written: 0,
+    };
+  }
+
+  const items = [];
+  reminderRows.forEach((row) => {
+    superAdminUids.forEach((uid) => {
+      items.push({
+        scope: "admin",
+        uid,
+        type: "SUPER_ADMIN_REQUEST_NEARING_AUTO_REFUND_DEADLINE",
+        requestId: row.requestId,
+        notificationId: makeNotificationId(
+          "unlock_auto_refund_reminder",
+          row.requestId,
+          row.paymentId,
+          row.eligibleAtMs,
+          uid
+        ),
+        extras: {
+          amount: row.amount,
+          currency: row.currency,
+          paymentLabel: row.paymentLabel,
+          title: "Unlock request nearing auto-refund",
+          body:
+            row.reminderHours === 1
+              ? "Unlock payment will auto-refund in about 1 hour if work does not start."
+              : `Unlock payment will auto-refund in about ${row.reminderHours} hours if work does not start.`,
+        },
+      });
+    });
+  });
+  eligibleRows.forEach((row) => {
+    const autoRefundEnabled =
+      scan.settings?.refundControls?.autoRefundEnabled !== false;
+    superAdminUids.forEach((uid) => {
+      items.push({
+        scope: "admin",
+        uid,
+        type: "PAYMENT_UPDATE",
+        requestId: row.requestId,
+        notificationId: makeNotificationId(
+          "unlock_auto_refund_due",
+          row.requestId,
+          row.paymentId,
+          row.eligibleAtMs,
+          uid
+        ),
+        extras: {
+          amount: row.amount,
+          currency: row.currency,
+          paymentLabel: row.paymentLabel,
+          title: autoRefundEnabled
+            ? "Unlock auto-refund due"
+            : "Unlock refund deadline reached",
+          body: autoRefundEnabled
+            ? "Unlock payment reached the refund deadline. Process the refund sweep from the finance cockpit."
+            : "Unlock payment reached the refund deadline while auto-refund sweep is disabled.",
+        },
+      });
+    });
+  });
+
+  const written = await createManyNotificationsAndPush(items);
+  return {
+    ok: true,
+    reminded: reminderRows.length,
+    overdue: eligibleRows.length,
+    written: Array.isArray(written) ? written.length : 0,
+  };
 }
 
 async function runUnlockAutoRefundSweep(payload = {}, req) {
@@ -3265,6 +3560,8 @@ async function runUnlockAutoRefundSweep(payload = {}, req) {
   let applied = 0;
   for (const row of Array.isArray(candidates?.rows) ? candidates.rows : []) {
     const requestRow = await loadRequestRow(row.requestId);
+    const paymentSnap = await requestRow.ref.collection("payments").doc(row.paymentId).get();
+    const paymentData = paymentSnap.exists ? paymentSnap.data() || {} : {};
     const refundRef = requestRow.ref.collection("refundRequests").doc();
     await refundRef.set({
       refundId: refundRef.id,
@@ -3299,6 +3596,25 @@ async function runUnlockAutoRefundSweep(payload = {}, req) {
       },
       { merge: true }
     );
+    await notifyPaymentParticipants({
+      requestData: { id: row.requestId, ...requestRow.data },
+      payment: {
+        ...paymentData,
+        id: row.paymentId,
+        paymentId: row.paymentId,
+        requestId: row.requestId,
+        amount: row.amount,
+        currency: row.currency,
+        status: PAYMENT_STATUSES.REFUND_UNDER_REVIEW,
+      },
+      type: "PAYMENT_UPDATE",
+      title: "Unlock auto-refund queued",
+      body: "Unlock payment reached the refund deadline and was queued for refund handling.",
+      notifyUser: false,
+      notifyAdmins: false,
+      notifySuperAdmins: true,
+      notifyStaff: false,
+    });
     applied += 1;
   }
   return { ok: true, applied };
@@ -3569,6 +3885,26 @@ export async function processMpesaCallback(payload = {}) {
       resultDesc: parsed.resultDesc,
     }, "warn");
 
+    if (requestId) {
+      await notifyPaymentParticipants({
+        requestData: { id: requestId, ...(loaded.requestData || {}) },
+        payment: {
+          ...paymentData,
+          id: paymentId,
+          paymentId,
+          requestId,
+          amount: amountPaid,
+          status: PAYMENT_STATUSES.FAILED,
+        },
+        type: "PAYMENT_FAILED",
+        title: "Payment failed",
+        body: statusMessage || "A payment attempt failed.",
+        notifyAdmins: false,
+        notifySuperAdmins: false,
+        notifyStaff: false,
+      });
+    }
+
     return {
       ok: true,
       matched: true,
@@ -3692,6 +4028,68 @@ export async function processMpesaCallback(payload = {}) {
     resultDesc: parsed.resultDesc,
     receiptNumber: parsed.receiptNumber,
   });
+
+  if (requestId) {
+    const paymentBody =
+      paymentType === PAYMENT_TYPES.IN_PROGRESS
+        ? "Payment successful. The payment is now held pending release."
+        : "Payment successful.";
+    await notifyPaymentParticipants({
+      requestData: { id: requestId, ...(loaded.requestData || {}) },
+      payment: {
+        ...paymentData,
+        id: paymentId,
+        paymentId,
+        requestId,
+        amount: amountPaid,
+        status: nextStatus,
+      },
+      type: "PAYMENT_SUCCESSFUL",
+      title: "Payment successful",
+      body: paymentBody,
+      notifyAdmins: paymentType === PAYMENT_TYPES.IN_PROGRESS,
+      adminType:
+        paymentType === PAYMENT_TYPES.IN_PROGRESS ? "PAYMENT_RECEIVED" : "PAYMENT_SUCCESSFUL",
+      adminTitle:
+        paymentType === PAYMENT_TYPES.IN_PROGRESS
+          ? "In-progress payment made"
+          : "Payment successful",
+      adminBody:
+        paymentType === PAYMENT_TYPES.IN_PROGRESS
+          ? "A user paid an in-progress payment."
+          : paymentBody,
+      notifySuperAdmins: true,
+      superAdminType:
+        paymentType === PAYMENT_TYPES.IN_PROGRESS
+          ? "SUPER_ADMIN_USER_PAID_IN_PROGRESS_PAYMENT"
+          : paymentType === PAYMENT_TYPES.UNLOCK_REQUEST
+          ? "SUPER_ADMIN_UNLOCK_REQUEST_PAYMENT_MADE"
+          : "PAYMENT_SUCCESSFUL",
+      superAdminTitle:
+        paymentType === PAYMENT_TYPES.IN_PROGRESS
+          ? "User paid in-progress payment"
+          : paymentType === PAYMENT_TYPES.UNLOCK_REQUEST
+          ? "Unlock request payment made"
+          : "Payment successful",
+      superAdminBody:
+        paymentType === PAYMENT_TYPES.IN_PROGRESS
+          ? "A user paid an in-progress payment and it is awaiting release."
+          : paymentType === PAYMENT_TYPES.UNLOCK_REQUEST
+          ? "An unlock request payment was completed."
+          : paymentBody,
+      notifyStaff: paymentType === PAYMENT_TYPES.IN_PROGRESS,
+      staffType:
+        paymentType === PAYMENT_TYPES.IN_PROGRESS ? "PAYMENT_RECEIVED" : "PAYMENT_SUCCESSFUL",
+      staffTitle:
+        paymentType === PAYMENT_TYPES.IN_PROGRESS
+          ? "In-progress payment made"
+          : "Payment successful",
+      staffBody:
+        paymentType === PAYMENT_TYPES.IN_PROGRESS
+          ? "A user paid an in-progress payment."
+          : paymentBody,
+    });
+  }
 
   return {
     ok: true,
@@ -3827,6 +4225,8 @@ export async function dispatchFinanceAction({ action = "", payload = {}, req } =
       return listUnlockAutoRefundCandidates(payload, req);
     case "runUnlockAutoRefundSweep":
       return runUnlockAutoRefundSweep(payload, req);
+    case "scanUnlockAutoRefundNotifications":
+      return scanUnlockAutoRefundNotifications(payload, req);
     default: {
       const error = new Error(`Unsupported finance action: ${safeAction || "unknown"}`);
       error.statusCode = 400;

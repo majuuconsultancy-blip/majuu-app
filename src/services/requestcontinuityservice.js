@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { normalizeTextDeep } from "../utils/textNormalizer";
+import { notifyProgressUpdated } from "./notificationEventService";
 import { updateProgressCommand } from "./requestcommandservice";
 import {
   REQUEST_BACKEND_STATUSES,
@@ -162,8 +163,14 @@ export async function createRequestProgressUpdate({
     visibleToUser: visibleToUser !== false,
   });
   if (!commandResult?.ok) throw new Error("Failed to create progress update.");
+  const updateId = safeStr(commandResult?.updateId, 180);
+  if (updateId) {
+    notifyProgressUpdated({ requestId: rid, updateId }).catch((error) => {
+      console.warn("Failed to emit progress notification event:", error?.message || error);
+    });
+  }
   return {
-    id: safeStr(commandResult?.updateId, 180),
+    id: updateId,
     requestId: rid,
     progressPercent: Number(commandResult?.progressPercent || 0),
     content: safeStr(content, 2000),
@@ -216,9 +223,15 @@ export async function postRequestProgressUpdate({
     visibleToUser: visibleToUser !== false,
   });
   if (!commandResult?.ok) throw new Error("Progress update failed.");
+  const updateId = safeStr(commandResult?.updateId, 180);
+  if (updateId) {
+    notifyProgressUpdated({ requestId: rid, updateId }).catch((error) => {
+      console.warn("Failed to emit progress notification event:", error?.message || error);
+    });
+  }
   return {
     ok: true,
-    updateId: safeStr(commandResult?.updateId, 180),
+    updateId,
     progressPercent: Number(commandResult?.progressPercent || commandProgress),
   };
 

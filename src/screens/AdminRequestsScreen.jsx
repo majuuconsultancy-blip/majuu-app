@@ -1,4 +1,4 @@
-﻿// ✅ AdminRequestsScreen.jsx (FULL COPY-PASTE)
+// ✅ AdminRequestsScreen.jsx (FULL COPY-PASTE)
 // Stable fix:
 // ✅ Filters kept (date range, assigned, staff status, staff recommendation)
 // ✅ RED DOTS are now GLOBAL + CONSISTENT:
@@ -26,6 +26,7 @@ import { STAFF_SPECIALITY_OPTIONS } from "../constants/staffSpecialities";
 import {
   applyUnlockAutoRefundSweep,
   listUnlockAutoRefundEligibleRequests,
+  scanUnlockAutoRefundNotifications,
 } from "../services/paymentservice";
 import { useNotifsV2Store } from "../services/notifsV2Store";
 
@@ -46,6 +47,7 @@ import { getRequestWorkProgress } from "../utils/requestWorkProgress";
 
 import { motion, AnimatePresence } from "../utils/motionproxy";
 import {
+  Bell,
   RefreshCw,
   Search,
   ChevronRight,
@@ -698,6 +700,7 @@ export default function AdminRequestsScreen() {
   const longPressStateRef = useRef({ id: "", fired: false, x: 0, y: 0 });
   const staleSweepAtRef = useRef(0);
   const unreadByRequest = useNotifsV2Store((s) => s.unreadByRequest || {});
+  const unreadNotifCount = useNotifsV2Store((s) => Number(s.unreadNotifCount || 0) || 0);
 
   // ✅ subtle entrance
   const [enter, setEnter] = useState(false);
@@ -789,6 +792,7 @@ export default function AdminRequestsScreen() {
     setVisibleCount(INITIAL_RENDER_COUNT);
   }, [status, debouncedSearch, filters]);
 
+  // ✅ Subscribe to auto-routing toggle (superAdmin only)
   useEffect(() => {
     return () => {
       clearLongPressTimer();
@@ -1069,6 +1073,34 @@ export default function AdminRequestsScreen() {
   }, [items, roleCtx?.isSuperAdmin]);
 
   /* ---------- ✅ GLOBAL new-message dots (fixed) ---------- */
+  useEffect(() => {
+    if (!roleCtx?.isSuperAdmin) return undefined;
+
+    let cancelled = false;
+    const runScan = async () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      try {
+        await scanUnlockAutoRefundNotifications();
+      } catch (error) {
+        if (!cancelled) {
+          console.warn(
+            "superadmin unlock auto-refund notification scan failed:",
+            error?.message || error
+          );
+        }
+      }
+    };
+
+    void runScan();
+    const intervalId =
+      typeof window !== "undefined" ? window.setInterval(() => void runScan(), 120000) : 0;
+
+    return () => {
+      cancelled = true;
+      if (intervalId) window.clearInterval(intervalId);
+    };
+  }, [roleCtx?.isSuperAdmin]);
+
   const [pendingSet, setPendingSet] = useState(() => new Set()); // Set<requestId>
   const [reqMetaById, setReqMetaById] = useState({}); // { [rid]: { status, assignedTo, tabKey } }
 
@@ -1523,15 +1555,32 @@ export default function AdminRequestsScreen() {
               </p>
             </div>
 
-            <button
-              onClick={load}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-700 transition hover:bg-zinc-100 active:scale-[0.99] dark:text-zinc-200 dark:hover:bg-zinc-900"
-              type="button"
-              aria-label="Refresh"
-              title="Refresh"
-            >
-              <AppIcon size={ICON_MD} className="text-emerald-700 dark:text-emerald-200" icon={RefreshCw} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigate("/app/admin/notifications")}
+                className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-700 transition hover:bg-zinc-100 active:scale-[0.99] dark:text-zinc-200 dark:hover:bg-zinc-900"
+                aria-label="Notifications"
+                title="Notifications"
+              >
+                <AppIcon size={ICON_MD} className="text-emerald-700 dark:text-emerald-200" icon={Bell} />
+                {unreadNotifCount > 0 ? (
+                  <span className="absolute right-0 top-0 inline-flex min-w-[18px] -translate-y-1/4 translate-x-1/4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold leading-none text-white shadow-[0_0_0_3px_rgba(244,63,94,0.14)]">
+                    {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
+                  </span>
+                ) : null}
+              </button>
+
+              <button
+                onClick={load}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-700 transition hover:bg-zinc-100 active:scale-[0.99] dark:text-zinc-200 dark:hover:bg-zinc-900"
+                type="button"
+                aria-label="Refresh"
+                title="Refresh"
+              >
+                <AppIcon size={ICON_MD} className="text-emerald-700 dark:text-emerald-200" icon={RefreshCw} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1549,6 +1598,8 @@ export default function AdminRequestsScreen() {
                 <AppIcon size={ICON_MD} icon={RefreshCw} />
                 {routingBusy ?"Routing..." : "Route Unrouted New"}
               </button>
+
+              {/* ✅ Auto-Routing Toggle */}
               {unlockRefundEligible.length > 0 ?(
                 <button
                   type="button"

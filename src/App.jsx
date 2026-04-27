@@ -909,6 +909,10 @@ function AppRoutes() {
               element={renderAdminRoute(<AdminRequestsScreen />, "/dashboard")}
             />
             <Route
+              path="admin/notifications"
+              element={renderAdminRoute(<NotificationsScreen />)}
+            />
+            <Route
               path="admin/request/:requestId"
               element={renderAdminRoute(<AdminRequestDetailsScreen />)}
             />

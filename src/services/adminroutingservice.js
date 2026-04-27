@@ -15,6 +15,7 @@ import {
   normalizeAdminScope,
   normalizeUserRole,
 } from "./adminroleservice";
+import { createAdminNotification, createUserNotification } from "./notificationDocs";
 import {
   evaluatePartnerRequestCompatibility,
   fetchPartnerById,
@@ -796,6 +797,40 @@ async function applyRouteToRequest({
     },
     { merge: true }
   );
+
+  const requestOwnerUid = safeStr(requestData?.uid);
+  const routedBody =
+    safeStr(reason) === "timeout_reassignment"
+      ? "A request was reassigned to your queue after timeout."
+      : "A new request was routed to your queue.";
+
+  try {
+    await createAdminNotification({
+      uid: targetUid,
+      type: "NEW_REQUEST",
+      requestId,
+      notificationId: `admin_route_${safeStr(requestId)}_${targetUid}`,
+      extras: {
+        title: "New routed request",
+        body: routedBody,
+      },
+    });
+  } catch (error) {
+    console.warn("Failed to write routed admin notification:", error?.message || error);
+  }
+
+  if (requestOwnerUid) {
+    try {
+      await createUserNotification({
+        uid: requestOwnerUid,
+        type: "REQUEST_RECEIVED",
+        requestId,
+        notificationId: `request_received_${safeStr(requestId)}`,
+      });
+    } catch (error) {
+      console.warn("Failed to write request received notification:", error?.message || error);
+    }
+  }
 
   return {
     ok: true,

@@ -14,7 +14,11 @@ import {
 } from "firebase/firestore";
 
 import { db, auth } from "../firebase";
-import { createStaffNotification, createUserNotification } from "./notificationDocs";
+import {
+  createAdminNotification,
+  createStaffNotification,
+  createUserNotification,
+} from "./notificationDocs";
 import { getCurrentUserRoleContext } from "./adminroleservice";
 import {
   adminArchiveRequestCommand,
@@ -63,6 +67,38 @@ function sortByCreatedAtDesc(rows) {
     const bSec = Number(b?.createdAt?.seconds || 0);
     return bSec - aSec;
   });
+}
+
+async function listSuperAdminUids({ excludeUids = [] } = {}) {
+  const blocked = new Set(
+    (Array.isArray(excludeUids) ? excludeUids : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+
+  const seen = new Set();
+  const rows = [];
+  const roleVariants = ["superAdmin", "superadmin", "super_admin", "super-admin", "super admin"];
+
+  await Promise.all(
+    roleVariants.map(async (roleValue) => {
+      try {
+        const snap = await getDocs(
+          query(collection(db, "users"), where("role", "==", roleValue), qLimit(50))
+        );
+        snap.forEach((docSnap) => {
+          const uid = String(docSnap.id || "").trim();
+          if (!uid || blocked.has(uid) || seen.has(uid)) return;
+          seen.add(uid);
+          rows.push(uid);
+        });
+      } catch (error) {
+        console.warn("Failed to load superadmin notification targets:", error?.message || error);
+      }
+    })
+  );
+
+  return rows;
 }
 
 function rowMatchesRequestFilters(row, { status = "", track = "", uid = "" } = {}) {
@@ -536,63 +572,18 @@ export async function adminAcceptRequest({ requestId, note = "" }) {
   if (!completeResult?.ok) {
     throw new Error("Failed to complete request.");
   }
-  return true;
-
-  const reqRef = doc(db, "serviceRequests", requestId);
-  const snap = await getDoc(reqRef);
-  if (!snap.exists()) throw new Error("Request not found");
-
-  const req = snap.data() || {};
-  assertRequestInActorScope(req, { actorUid: actingAdminUid, roleCtx });
-  const currentStatus = String(req?.status || "").trim().toLowerCase();
-  if (currentStatus === "new") {
-    throw new Error("Staff must start work before you can accept this request.");
-  }
-  const uid = String(req?.uid || "").trim();
-  const lockedAdminUid = String(
-    req?.ownerLockedAdminUid || req?.currentAdminUid || actingAdminUid
-  ).trim();
-  const nowMs = Date.now();
-  const existingRoutingMeta = req?.routingMeta && typeof req.routingMeta === "object"
-    ? req.routingMeta
-    : {};
-
-  await updateDoc(reqRef, {
-    status: "closed",
-    adminDecisionNote: String(note || "").trim(),
-    decidedAt: serverTimestamp(),
-    adminRespondedAt: serverTimestamp(),
-    adminRespondedAtMs: nowMs,
-    adminRespondedBy: actingAdminUid || null,
-    ownerLockedAdminUid: lockedAdminUid || "",
-    ownerLockedAt: serverTimestamp(),
-    routingMeta: {
-      ...existingRoutingMeta,
-      handledAt: serverTimestamp(),
-      handledAtMs: nowMs,
-      lockedOwnerAdminUid: lockedAdminUid || "",
-    },
-    staffProgressPercent: 100,
-    staffProgressUpdatedAt: serverTimestamp(),
-    staffProgressUpdatedAtMs: nowMs,
-    updatedAt: serverTimestamp(),
-    ...buildRequestContinuityPatch(req, {
-      status: "closed",
-      backendStatus: REQUEST_BACKEND_STATUSES.COMPLETED,
-      userStatus: "completed",
-      everAssigned: true,
-    }),
-  });
-
-  const result = await updateStaffStatsAfterDecision({
+  const decisionResult = await updateStaffStatsAfterDecision({
     requestId,
     finalDecision: "accepted",
   });
+  const latestRequestSnap = await getDoc(doc(db, "serviceRequests", requestId));
+  const latestRequestData = latestRequestSnap.exists() ? latestRequestSnap.data() || {} : {};
+  const requestOwnerUid = String(latestRequestData?.uid || "").trim();
 
-  if (uid) {
+  if (requestOwnerUid) {
     try {
       await createUserNotification({
-        uid,
+        uid: requestOwnerUid,
         type: "REQUEST_ACCEPTED",
         requestId,
       });
@@ -601,16 +592,16 @@ export async function adminAcceptRequest({ requestId, note = "" }) {
     }
   }
 
-  if (result?.staffUid) {
+  if (decisionResult?.staffUid) {
     try {
       await createStaffNotification({
-        uid: result.staffUid,
+        uid: decisionResult.staffUid,
         type: "STAFF_REQUEST_ACCEPTED_BY_ADMIN",
         requestId,
         extras: {
-          rewarded: Boolean(result?.rewarded),
-          recommendationMatched: Boolean(result?.matched),
-          noRewardReason: String(result?.reason || ""),
+          rewarded: Boolean(decisionResult?.rewarded),
+          recommendationMatched: Boolean(decisionResult?.matched),
+          noRewardReason: String(decisionResult?.reason || ""),
         },
       });
     } catch (error) {
@@ -618,6 +609,29 @@ export async function adminAcceptRequest({ requestId, note = "" }) {
     }
   }
 
+  try {
+    const superAdminUids = await listSuperAdminUids({
+      excludeUids: [auth.currentUser?.uid, latestRequestData?.currentAdminUid].filter(Boolean),
+    });
+    await Promise.all(
+      superAdminUids.map((uid) =>
+        createAdminNotification({
+          uid,
+          type: "REQUEST_ACCEPTED",
+          requestId,
+          extras: {
+            title: "Request accepted",
+            body: "A request was accepted and completed.",
+          },
+        })
+      )
+    );
+  } catch (error) {
+    console.warn(
+      "Failed to write superadmin request accepted notifications:",
+      error?.message || error
+    );
+  }
   return true;
 }
 
@@ -641,60 +655,18 @@ export async function adminRejectRequest({ requestId, note = "" }) {
   if (!completeResult?.ok) {
     throw new Error("Failed to complete request.");
   }
-  return true;
-
-  const reqRef = doc(db, "serviceRequests", requestId);
-  const snap = await getDoc(reqRef);
-  if (!snap.exists()) throw new Error("Request not found");
-
-  const req = snap.data() || {};
-  assertRequestInActorScope(req, { actorUid: actingAdminUid, roleCtx });
-  const currentStatus = String(req?.status || "").trim().toLowerCase();
-  if (currentStatus === "new") {
-    throw new Error("Staff must start work before you can reject this request.");
-  }
-  const uid = String(req?.uid || "").trim();
-  const lockedAdminUid = String(
-    req?.ownerLockedAdminUid || req?.currentAdminUid || actingAdminUid
-  ).trim();
-  const nowMs = Date.now();
-  const existingRoutingMeta = req?.routingMeta && typeof req.routingMeta === "object"
-    ? req.routingMeta
-    : {};
-
-  await updateDoc(reqRef, {
-    status: "rejected",
-    adminDecisionNote: String(note || "").trim(),
-    decidedAt: serverTimestamp(),
-    adminRespondedAt: serverTimestamp(),
-    adminRespondedAtMs: nowMs,
-    adminRespondedBy: actingAdminUid || null,
-    ownerLockedAdminUid: lockedAdminUid || "",
-    ownerLockedAt: serverTimestamp(),
-    routingMeta: {
-      ...existingRoutingMeta,
-      handledAt: serverTimestamp(),
-      handledAtMs: nowMs,
-      lockedOwnerAdminUid: lockedAdminUid || "",
-    },
-    updatedAt: serverTimestamp(),
-    ...buildRequestContinuityPatch(req, {
-      status: "rejected",
-      backendStatus: REQUEST_BACKEND_STATUSES.COMPLETED,
-      userStatus: "completed",
-      everAssigned: true,
-    }),
-  });
-
-  const result = await updateStaffStatsAfterDecision({
+  const decisionResult = await updateStaffStatsAfterDecision({
     requestId,
     finalDecision: "rejected",
   });
+  const latestRequestSnap = await getDoc(doc(db, "serviceRequests", requestId));
+  const latestRequestData = latestRequestSnap.exists() ? latestRequestSnap.data() || {} : {};
+  const requestOwnerUid = String(latestRequestData?.uid || "").trim();
 
-  if (uid) {
+  if (requestOwnerUid) {
     try {
       await createUserNotification({
-        uid,
+        uid: requestOwnerUid,
         type: "REQUEST_REJECTED",
         requestId,
       });
@@ -703,16 +675,16 @@ export async function adminRejectRequest({ requestId, note = "" }) {
     }
   }
 
-  if (result?.staffUid) {
+  if (decisionResult?.staffUid) {
     try {
       await createStaffNotification({
-        uid: result.staffUid,
+        uid: decisionResult.staffUid,
         type: "STAFF_REQUEST_REJECTED_BY_ADMIN",
         requestId,
         extras: {
-          rewarded: Boolean(result?.rewarded),
-          recommendationMatched: Boolean(result?.matched),
-          noRewardReason: String(result?.reason || ""),
+          rewarded: Boolean(decisionResult?.rewarded),
+          recommendationMatched: Boolean(decisionResult?.matched),
+          noRewardReason: String(decisionResult?.reason || ""),
         },
       });
     } catch (error) {
@@ -720,6 +692,29 @@ export async function adminRejectRequest({ requestId, note = "" }) {
     }
   }
 
+  try {
+    const superAdminUids = await listSuperAdminUids({
+      excludeUids: [auth.currentUser?.uid, latestRequestData?.currentAdminUid].filter(Boolean),
+    });
+    await Promise.all(
+      superAdminUids.map((uid) =>
+        createAdminNotification({
+          uid,
+          type: "REQUEST_REJECTED",
+          requestId,
+          extras: {
+            title: "Request rejected",
+            body: "A request was rejected and completed.",
+          },
+        })
+      )
+    );
+  } catch (error) {
+    console.warn(
+      "Failed to write superadmin request rejected notifications:",
+      error?.message || error
+    );
+  }
   return true;
 }
 
@@ -730,20 +725,5 @@ export async function adminSoftDeleteRequest({ requestId } = {}) {
   if (!commandResult?.ok) {
     throw new Error("Failed to archive request.");
   }
-  return true;
-
-  const reqRef = doc(db, "serviceRequests", requestId);
-  const snap = await getDoc(reqRef);
-  if (!snap.exists()) throw new Error("Request not found");
-  const req = snap.data() || {};
-  assertRequestInActorScope(req, { actorUid: actingAdminUid, roleCtx });
-
-  await updateDoc(reqRef, {
-    deletedByAdmin: true,
-    adminDeletedAt: serverTimestamp(),
-    adminDeletedBy: actingAdminUid || null,
-    updatedAt: serverTimestamp(),
-  });
-
   return true;
 }

@@ -11,6 +11,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 
 import { auth, db } from "../firebase";
+import { notifyRequestStartedWork } from "../services/notificationEventService";
 import { staffStartWork } from "../services/requestcommandservice";
 
 /* ---------- Icons ---------- */
@@ -153,6 +154,9 @@ export default function StaffStartWorkModalScreen() {
       if (!result?.taskUpdated) {
         console.warn("Task doc missing at staff/" + uid + "/tasks/" + rid);
       }
+      notifyRequestStartedWork({ requestId: rid }).catch((error) => {
+        console.warn("Failed to emit start-work notification event:", error?.message || error);
+      });
 
       navigate(`/staff/request/${rid}`, { replace: true });
     } catch (e) {

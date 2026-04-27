@@ -1,6 +1,6 @@
 import { collection, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
-import { invokeRequestAction, invokeRequestCommand } from "./apiService";
+import { invokeRequestAction, invokeRequestCommand, invokeRequestMessage } from "./apiService";
 
 function safeStr(value, max = 600) {
   return String(value || "").trim().slice(0, max);
@@ -165,12 +165,12 @@ async function sendMessageCommandFallback(envelope = {}) {
   }
 
   const now = Date.now();
-  if (normalizedActorRole === "admin") {
+  if (normalizedActorRole === "admin" || request.chatAutoAccept === true) {
     const messageRef = doc(collection(db, "serviceRequests", requestId, "messages"));
     const toUid = toRole === "user" ? ownerUid : staffUid;
-    await setDoc(messageRef, {
+    const documentPayload = {
       requestId,
-      fromRole: "admin",
+      fromRole: normalizedActorRole,
       fromUid: actorUid,
       toRole,
       toUid: toUid || null,
@@ -183,12 +183,20 @@ async function sendMessageCommandFallback(envelope = {}) {
         (type === "bundle" && lower(attachmentMeta?.attachmentKind || "document", 40) === "document")
           ? attachmentMeta
           : null,
-      approvedBy: actorUid,
-      approvedAt: serverTimestamp(),
       createdAt: serverTimestamp(),
       createdAtMs: now,
       needsAssignment: toRole === "staff" && !toUid,
-    });
+    };
+
+    if (normalizedActorRole === "admin") {
+      documentPayload.approvedBy = actorUid;
+      documentPayload.approvedAt = serverTimestamp();
+    } else {
+      documentPayload.moderationBypassed = true;
+      documentPayload.moderationMode = "request_auto_accept";
+    }
+
+    await setDoc(messageRef, documentPayload);
     return {
       ok: true,
       command: "sendMessage",
@@ -272,7 +280,7 @@ function formatSendMessageFallbackError(error) {
   if (!isFirestorePermissionDenied(error)) return error;
 
   const wrapped = new Error(
-    "Chat fallback is blocked by Firestore rules right now. Deploy the latest firestore rules so /pendingMessages writes are allowed."
+    "Chat fallback is blocked by Firestore rules right now. Deploy the latest Firestore rules so fallback chat writes to /pendingMessages and auto-accepted /messages are allowed."
   );
   wrapped.code = "firestore/permission-denied";
   wrapped.cause = error;
@@ -587,16 +595,33 @@ export function sendMessageCommand({
       : pdfMeta && typeof pdfMeta === "object"
       ? pdfMeta
       : null;
-  return executeRequestCommand({
-    command: "sendMessage",
-    requestId,
-    actorRole,
-    payload: {
-      toRole: safeStr(toRole, 40),
-      type: safeStr(type, 20),
-      text: safeStr(text, 4000),
-      ...(normalizedAttachment ? { attachmentMeta: normalizedAttachment, pdfMeta: normalizedAttachment } : {}),
-    },
+  const payload = {
+    requestId: safeStr(requestId, 180),
+    toRole: safeStr(toRole, 40),
+    type: safeStr(type, 20),
+    text: safeStr(text, 4000),
+    actorRole: safeRoleHint(actorRole),
+    ...(normalizedAttachment
+      ? { attachmentMeta: normalizedAttachment, pdfMeta: normalizedAttachment }
+      : {}),
+  };
+
+  return invokeRequestMessage(payload).catch(async (error) => {
+    if (!isInfrastructureUnavailable(error)) {
+      throw formatCommandBackendError(error, "sendMessage");
+    }
+    try {
+      return await sendMessageCommandFallback(
+        buildCommandEnvelope({
+          command: "sendMessage",
+          requestId,
+          actorRole,
+          payload,
+        })
+      );
+    } catch (fallbackError) {
+      throw formatSendMessageFallbackError(fallbackError);
+    }
   });
 }
 

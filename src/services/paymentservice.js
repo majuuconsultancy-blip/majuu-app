@@ -375,6 +375,10 @@ export async function listUnlockAutoRefundEligibleRequests({ requestIds = [] } =
   return Array.isArray(result?.rows) ? result.rows : [];
 }
 
+export async function scanUnlockAutoRefundNotifications({ requestIds = [] } = {}) {
+  return callFinance("scanUnlockAutoRefundNotifications", { requestIds });
+}
+
 export async function releasePartnerPayout(payload = {}) {
   return callFinance("releasePartnerPayout", payload);
 }

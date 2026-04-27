@@ -27,6 +27,7 @@ import {
   subscribePayoutQueue,
   subscribeSettlementHistory,
 } from "../services/financeservice";
+import { scanUnlockAutoRefundNotifications } from "../services/paymentservice";
 import { listPartners } from "../services/partnershipService";
 import { smartBack } from "../utils/navBack";
 
@@ -313,6 +314,34 @@ export default function AdminFinancesScreen() {
     void refreshProviderConfigStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasFinanceAccess]);
+
+  useEffect(() => {
+    if (!hasFinanceAccess || !isSuperAdmin) return undefined;
+
+    let cancelled = false;
+    const runScan = async () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      try {
+        await scanUnlockAutoRefundNotifications();
+      } catch (error) {
+        if (!cancelled) {
+          console.warn(
+            "superadmin unlock auto-refund notification scan failed:",
+            error?.message || error
+          );
+        }
+      }
+    };
+
+    void runScan();
+    const intervalId =
+      typeof window !== "undefined" ? window.setInterval(() => void runScan(), 120000) : 0;
+
+    return () => {
+      cancelled = true;
+      if (intervalId) window.clearInterval(intervalId);
+    };
+  }, [hasFinanceAccess, isSuperAdmin]);
 
   const readyPayoutCount = useMemo(
     () => payoutQueue.filter((row) => row.status === "ready").length,
@@ -651,6 +680,20 @@ export default function AdminFinancesScreen() {
                     value={settingsDraft?.refundControls?.unlockAutoRefundHours ?? 48}
                     onChange={(event) =>
                       updateSettingsDraft("refundControls.unlockAutoRefundHours", event.target.value)
+                    }
+                    inputMode="numeric"
+                    className={inputClass}
+                  />
+                </label>
+                <label className="grid gap-1.5">
+                  <span className={labelClass}>Auto-refund Reminder Hours</span>
+                  <input
+                    value={settingsDraft?.refundControls?.unlockAutoRefundReminderHours ?? 2}
+                    onChange={(event) =>
+                      updateSettingsDraft(
+                        "refundControls.unlockAutoRefundReminderHours",
+                        event.target.value
+                      )
                     }
                     inputMode="numeric"
                     className={inputClass}

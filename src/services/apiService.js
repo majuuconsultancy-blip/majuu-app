@@ -259,6 +259,28 @@ export async function invokeRequestCommand(payload = {}) {
   );
 }
 
+export async function invokeRequestMessage(payload = {}) {
+  return apiRequest(
+    "/api/request-message",
+    {
+      method: "POST",
+      body: payload && typeof payload === "object" ? payload : {},
+    },
+    "Chat backend is not available right now."
+  );
+}
+
+export async function triggerNotificationPush(payload = {}) {
+  return apiRequest(
+    "/api/notification-push",
+    {
+      method: "POST",
+      body: payload && typeof payload === "object" ? payload : {},
+    },
+    "Notification push backend is not available right now."
+  );
+}
+
 export async function invokeRequestAction(action, payload = {}) {
   return apiRequest(
     "/api/request-action",

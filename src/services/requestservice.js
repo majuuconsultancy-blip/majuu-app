@@ -1,10 +1,10 @@
 // requestservice.js (REPLACE with this)
 import { auth, db } from "../firebase";
 import { collection, doc, serverTimestamp, setDoc } from "firebase/firestore";
-import { sendPushToAdmin } from "./pushServerClient";
 import { ANALYTICS_EVENT_TYPES } from "../constants/analyticsEvents";
 import { logAnalyticsEvent } from "./analyticsService";
 import { REQUEST_BACKEND_STATUSES } from "../utils/requestLifecycle";
+import { notifyRequestSubmitted } from "./notificationEventService";
 import { createRequestCommand } from "./requestcommandservice";
 import {
   PARTNER_FILTER_MODES,
@@ -557,7 +557,7 @@ export async function createServiceRequest(payload) {
       eligiblePartnerIds,
       routedAtMs: 0,
       routingReason:
-        initialStatus === "payment_pending" ? "awaiting_unlock_payment" : "awaiting_auto_route",
+        initialStatus === "payment_pending" ? "awaiting_unlock_payment" : "awaiting_route",
       routingStatus: initialRoutingStatus,
       adminAvailabilityAtRouting: "",
       escalationReason: "",
@@ -617,18 +617,12 @@ export async function createServiceRequest(payload) {
 
   if (!skipAdminPush) {
     try {
-      await sendPushToAdmin({
-        title: "New request",
-        body: "A new service request was submitted.",
-        data: {
-          type: "NEW_REQUEST",
-          requestId: createdRequestId,
-          route: `/app/admin/request/${encodeURIComponent(createdRequestId)}`,
-        },
-      });
+      await notifyRequestSubmitted({ requestId: createdRequestId });
     } catch (error) {
-      console.warn("Failed to trigger NEW_REQUEST push:", error?.message || error);
+      console.warn("Failed to fan out NEW_REQUEST notifications:", error?.message || error);
     }
   }
+
+  // ✅ Trigger auto-routing in the background
   return createdRequestId;
 }

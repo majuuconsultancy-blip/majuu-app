@@ -23,6 +23,10 @@ import {
   publishStagedAdminFiles,
   markStaffDraftStaged,
 } from "../services/adminfileservice";
+import {
+  getChatAutoAccept,
+  setChatAutoAccept,
+} from "../services/chatAutomationService";
 import { ArrowLeft, FileText, Check, X, ChevronRight, ChevronDown, Link2, Trash2 } from "lucide-react";
 import AssignStaffPanel from "../components/AssignStaffPanel";
 import AdminRequestChatLauncher from "../components/AdminRequestChatLauncher";
@@ -231,6 +235,9 @@ export default function AdminRequestDetailsScreen() {
   const [overrideErr, setOverrideErr] = useState("");
   const [overrideMsg, setOverrideMsg] = useState("");
 
+  const [chatAutoAccept, setChatAutoAcceptLocal] = useState(false);
+  const [chatAutoAcceptBusy, setChatAutoAcceptBusy] = useState(false);
+
   const [payments, setPayments] = useState([]);
   const [paymentsErr, setPaymentsErr] = useState("");
   const [paymentRejectReasonById, setPaymentRejectReasonById] = useState({});
@@ -299,6 +306,7 @@ export default function AdminRequestDetailsScreen() {
           return;
         }
         setReq(data);
+        setChatAutoAcceptLocal(getChatAutoAccept(data));
 
         const existing = safeStr(
           data?.adminDecisionNote || data?.decisionNote || data?.adminNote || ""
@@ -1112,11 +1120,57 @@ export default function AdminRequestDetailsScreen() {
                   </div>
                 ) : null}
               </div>
-              <span
-                className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${statusPill.cls}`}
-              >
-                {statusPill.label}
-              </span>
+              <div className="flex flex-col items-end gap-2">
+                <span
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${statusPill.cls}`}
+                >
+                  {statusPill.label}
+                </span>
+
+                {/* ✅ Per-request Chat Auto-Accept Toggle */}
+                {(roleCtx?.isSuperAdmin || roleCtx?.uid === req?.currentAdminUid) && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (chatAutoAcceptBusy) return;
+                      setChatAutoAcceptBusy(true);
+                      try {
+                        const nextValue = !chatAutoAccept;
+                        await setChatAutoAccept({
+                          requestId: resolvedRequestId,
+                          enabled: nextValue,
+                        });
+                        setChatAutoAcceptLocal(nextValue);
+                      } catch (error) {
+                        console.error("Chat auto-accept toggle failed:", error);
+                        alert(error?.message || "Failed to toggle chat auto-accept.");
+                      } finally {
+                        setChatAutoAcceptBusy(false);
+                      }
+                    }}
+                    disabled={chatAutoAcceptBusy}
+                    aria-pressed={chatAutoAccept}
+                    className={[
+                      "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold transition active:scale-[0.98] disabled:opacity-60",
+                      chatAutoAccept
+                        ? "border-emerald-300 bg-emerald-50/80 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200"
+                        : "border-zinc-200 bg-white/80 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-400",
+                    ].join(" ")}
+                  >
+                    <span
+                      className={[
+                        "inline-block h-1.5 w-1.5 rounded-full",
+                        chatAutoAccept ? "bg-emerald-500" : "bg-zinc-400",
+                      ].join(" ")}
+                    />
+                    {chatAutoAcceptBusy
+                      ? "Updating..."
+                      : chatAutoAccept
+                      ? "Chat Auto-Accept: ON"
+                      : "Chat Auto-Accept: OFF"}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1258,7 +1312,7 @@ export default function AdminRequestDetailsScreen() {
                 </div>
               </div>
               <div className="mt-2 text-[11px] text-zinc-600 dark:text-zinc-300">
-                Select a partner first. Admin options and auto-routing are constrained to that partner only.
+                Select a partner first. Admin options are constrained to that partner only.
               </div>
               {overrideErr ?(
                 <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs text-rose-700">

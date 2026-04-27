@@ -55,18 +55,6 @@ const page = {
   show: { opacity: 1, y: 0, transition: { duration: 0.22, ease: "easeOut" } },
 };
 
-function shouldHideStaffNotification(item) {
-  const type = String(item?.type || "").trim().toUpperCase();
-  if (!type) return false;
-  return (
-    type === "STAFF_ASSIGNED_REQUEST" ||
-    type === "STAFF_UNASSIGNED_REQUEST" ||
-    type.startsWith("PAYMENT_") ||
-    type.startsWith("REFUND_") ||
-    type.includes("MESSAGE")
-  );
-}
-
 function SelectionMark({ selected = false }) {
   return (
     <span
@@ -96,7 +84,7 @@ export default function NotificationsScreen() {
 
   const backTo = useMemo(() => {
     if (role === "staff") return "/staff/tasks";
-    if (role === "admin" || role === "assignedadmin") return "/app/home";
+    if (role === "admin" || role === "assignedadmin") return "/app/admin";
     return "/app/progress";
   }, [role]);
 
@@ -109,8 +97,7 @@ export default function NotificationsScreen() {
 
   const visibleItems = useMemo(() => {
     const rows = Array.isArray(items) ? items : [];
-    if (role !== "staff") return rows;
-    return rows.filter((item) => !shouldHideStaffNotification(item));
+    return rows;
   }, [items, role]);
   const visibleUnreadCount = useMemo(
     () => visibleItems.filter((item) => !item?.readAt).length,
